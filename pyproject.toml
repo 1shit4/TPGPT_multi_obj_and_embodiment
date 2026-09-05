@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "tpgpt"
+version = "0.1.0"
+description = "Policy transportation via keypoint parameterization and transportation maps"
+requires-python = ">=3.10"
+dependencies = [
+    "numpy>=1.24",
+    "scipy>=1.10",
+    "matplotlib>=3.7",
+    "pyyaml>=6.0",
+    "similaritymeasures>=1.4",
+    "imageio>=2.30",
+]
+
+[project.optional-dependencies]
+sim = ["mujoco>=3.1", "robosuite>=1.5"]
+dev = ["pytest>=7.4", "pytest-cov>=4.1"]
+
+[tool.setuptools.packages.find]
+include = ["tpgpt*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+filterwarnings = ["ignore::DeprecationWarning"]
+markers = [
+    "sim: requires the MuJoCo/robosuite simulator (slower)",
+    "slow: takes more than a few seconds",
+]
