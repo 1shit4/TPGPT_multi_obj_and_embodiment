@@ -119,14 +119,13 @@ def figure_transported_field(
         ax.set_aspect("equal")
         ax.legend(fontsize=8)
 
-    band = transported.position_std
-    axes[1].fill_between(
-        transported.positions[:, 0],
-        transported.positions[:, 1] - 2 * band,
-        transported.positions[:, 1] + 2 * band,
-        color="#ff7f0e", alpha=0.25, label="2 sigma transport uncertainty",
+    # The uncertainty tube is offset along the curve normal. Filling between
+    # y +- band as a function of x is only valid for a monotonic curve; on a
+    # cyclic demonstration it produces spurious crossing lobes.
+    axes[1].add_patch(
+        _uncertainty_tube(transported.positions[:, :2], 2 * transported.position_std)
     )
-    axes[1].legend(fontsize=8)
+    axes[1].legend(fontsize=8, loc="upper left")
     fig.suptitle("Transporting a demonstration (paper Fig. 4)", y=1.0, fontsize=12)
     return _save(fig, path)
 
@@ -210,6 +209,22 @@ def figure_uncertainty_fields(
         y=1.02, fontsize=11,
     )
     return _save(fig, path)
+
+
+def _uncertainty_tube(curve: np.ndarray, half_width: np.ndarray):
+    """Polygon patch of ``curve +- half_width`` offset along the curve normal."""
+    from matplotlib.patches import Polygon
+
+    tangent = np.gradient(curve, axis=0)
+    norm = np.linalg.norm(tangent, axis=1, keepdims=True)
+    tangent = tangent / np.maximum(norm, 1e-12)
+    normal = np.c_[-tangent[:, 1], tangent[:, 0]]
+    offset = normal * np.asarray(half_width)[:, None]
+    ring = np.vstack([curve + offset, (curve - offset)[::-1]])
+    return Polygon(
+        ring, closed=True, facecolor="#ff7f0e", alpha=0.25, edgecolor="none",
+        label="2 sigma transport uncertainty",
+    )
 
 
 def _save(fig, path) -> Path:
