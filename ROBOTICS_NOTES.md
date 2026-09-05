@@ -168,3 +168,89 @@ Rejected: PyBullet (worse contact fidelity), Isaac/Genesis (GPU), raw MuJoCo
 | `R_hat` (Eq. 11) | orthonormal, `det = +1`, equals `A R` for rigid targets | exact |
 | `K_hat` (Sec. III-G) | symmetric, positive definite, eigenvalues preserved | exact |
 | Property (ii) | `det(J) > 0` fraction on curved targets | 100% |
+
+### 2.5 The time belief must be closed-loop, or the policy stalls
+
+Integrating the predicted `time_rate` open loop **does not work**, and the way
+it fails is worth recording because it is easy to reintroduce.
+
+The policy is trained only on the ridge `{(x(s), s)}` where position and phase
+move together. Any lag — Euler integration error, GP smoothing at a corner of
+the path, or the robot's own dynamics — moves the query `(x, t)` off that
+ridge. Off the ridge the **zero-mean velocity prior of Appendix A takes over**,
+the predicted velocity decays towards zero, the lag grows, and the rollout
+stalls. It is a runaway: the very prior that makes the policy safe (don't move
+without evidence) is what kills it.
+
+Measured on a synthetic pick-and-place (120 labels, 20 Hz):
+
+| Lag at step | Commanded speed | Demo speed |
+|---|---|---|
+| 0 mm (step 20) | 0.084 m/s | 0.084 m/s |
+| 9 mm (step 60) | 0.129 m/s | 0.120 m/s |
+| 82 mm (step 80) | **0.0002 m/s** | 0.084 m/s |
+| 228 mm (step 119) | **0.000 m/s** | 0.084 m/s |
+
+The rollout stopped **228 mm short** of the goal having travelled 0.35 m of a
+0.60 m path.
+
+**Fix.** Treat the phase as what the paper calls it — a *belief*. Propagate it
+with the predicted rate (prior), then correct it towards the phase of the
+nearest training label (observation). The nearest-neighbour search runs in the
+**joint** position-phase space under the same standardised metric the kernel
+uses: matching on position alone is ambiguous for exactly the paths that need a
+phase at all, since a pick-and-place revisits the same position twice, and the
+current belief is what breaks the tie.
+
+Gain sweep, same demo (goal is 0.60 m of path away):
+
+| `belief_correction` | steps | endpoint error | max path deviation |
+|---|---|---|---|
+| 0.0 (open loop) | 120 | **0.228 m** | 0.004 m |
+| 0.05 | 600 (cap) | 0.166 m | 0.004 m |
+| 0.1 | 132 | 0.013 m | 0.004 m |
+| **0.2 (default)** | 130 | **0.006 m** | 0.005 m |
+| 0.4 | 132 | 0.006 m | 0.006 m |
+| 1.0 (no feed-forward) | 134 | 0.008 m | 0.006 m |
+
+Anything at or above 0.1 works; 0.2 is the default. `tests/unit/test_policy.py`
+has an explicit regression test that open-loop stalls and closed-loop does not.
+
+### 2.6 Output channels are charted, not regressed raw
+
+Stiffness and damping live on `S_3^+` and orientation on `SO(3)`. Regressing
+their raw entries does not stay on those manifolds — a fitted stiffness can come
+out indefinite, which an impedance controller turns into a **negative-stiffness
+direction**, i.e. an unstable axis that actively pushes the robot away.
+
+- SPD channels are regressed in the **log-Cholesky** chart (`M = L L^T`, log of
+  the diagonal). Every point of the chart maps back to a positive-definite
+  matrix, so interpolation is unconditionally safe.
+- Orientation is regressed in the **continuous 6-D representation** (first two
+  columns of `R`, third recovered by Gram-Schmidt). Quaternions double-cover
+  `SO(3)`, so a regressor trained on them can be pulled to the wrong hemisphere.
+
+All channels share one kernel and one Cholesky factor, per Appendix A; they are
+standardised to unit variance first because m/s, log-stiffness and a unit-interval
+phase cannot share a single amplitude. Velocity keeps a **zero** prior mean
+(Appendix A); every other channel is regressed as a deviation from its label
+mean, so far from the demonstration the robot falls back to the average
+commanded impedance rather than going limp.
+
+### 4.2 Policy refit — validation (Phase 2)
+
+Synthetic pick-and-place with a self-intersecting path (120 labels, 20 Hz):
+
+| Quantity | Result |
+|---|---|
+| Velocity reconstruction on labels | 7.5e-6 m/s |
+| Orientation reconstruction (geodesic) | 1.2e-12 rad |
+| Stiffness reconstruction | 1.3e-3 N/m, min eigenvalue 400.0 |
+| Gripper reconstruction | 7.1e-4 |
+| Velocity far from data | exactly 0 (zero-mean prior) |
+| Stiffness far from data | 543 N/m, still positive definite |
+| Epistemic std, on data -> off data | 7.6e-5 -> 3.9e-2 m/s |
+| Closed-loop rollout endpoint error | 6.2 mm |
+| Closed-loop rollout path deviation | 5.1 mm |
+| Rollout arc length vs demo | 0.602 m vs 0.596 m (+1%) |
+| Attractor identity `K dx = D xdot` | holds to 1e-6 |

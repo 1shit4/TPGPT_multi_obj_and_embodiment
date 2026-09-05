@@ -29,6 +29,7 @@ _ARRAY_FIELDS = (
     "damping",
     "gripper",
     "time_belief",
+    "time_rate",
     "position_std",
     "velocity_std",
 )
@@ -49,6 +50,10 @@ class PolicyLabels:
             paper's label list, but Sec. V states the real-robot policy takes
             position *and* a belief of time as input (ref. [12]); a policy of
             position alone cannot represent a path that revisits a position.
+        time_rate: ``(M,)`` rate of change of the phase, ``d(time_belief)/dt``.
+            Sec. V lists the "time belief update" among the quantities learned
+            as a function of the position-time input, so it is a label, not a
+            constant.
         position_std: ``(M,)`` transport uncertainty on the positions.
         velocity_std: ``(M, 3)`` transport uncertainty on the velocities (Eq. 12).
         metadata: Free-form provenance (control frequency, scene, seed, ...).
@@ -61,6 +66,7 @@ class PolicyLabels:
     damping: np.ndarray | None = None
     gripper: np.ndarray | None = None
     time_belief: np.ndarray | None = None
+    time_rate: np.ndarray | None = None
     position_std: np.ndarray | None = None
     velocity_std: np.ndarray | None = None
     metadata: dict = field(default_factory=dict)
@@ -74,6 +80,7 @@ class PolicyLabels:
             ("damping", (-1, 3, 3)),
             ("gripper", (-1,)),
             ("time_belief", (-1,)),
+            ("time_rate", (-1,)),
             ("position_std", (-1,)),
             ("velocity_std", (-1, 3)),
         ):
@@ -151,8 +158,8 @@ def transport_labels(transport_map, labels: PolicyLabels) -> PolicyLabels:
     * orientations -- Eq. (11) ``R_hat = J_perp R``
     * stiffness / damping -- ``J_perp M J_perp^T`` (Sec. III-G)
 
-    The gripper command and the time belief are scalars attached to the label,
-    not spatial quantities, so they carry over unchanged.
+    The gripper command, the time belief and its rate are scalars attached to
+    the label rather than spatial quantities, so they carry over unchanged.
 
     Args:
         transport_map: A fitted :class:`~tpgpt.transport.maps.TransportMap`.
@@ -202,6 +209,7 @@ def transport_labels(transport_map, labels: PolicyLabels) -> PolicyLabels:
         damping=damping,
         gripper=None if labels.gripper is None else labels.gripper.copy(),
         time_belief=None if labels.time_belief is None else labels.time_belief.copy(),
+        time_rate=None if labels.time_rate is None else labels.time_rate.copy(),
         position_std=pos_std,
         velocity_std=velocity_std,
         metadata=metadata,
