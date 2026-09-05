@@ -1,0 +1,30 @@
+# End-to-end policy transportation on the reshelving task (paper Sec. V-A).
+#
+#   MUJOCO_GL=egl python -m tpgpt.experiments.run_reshelving \
+#       --config configs/reshelving.yaml
+
+experiment:
+  name: reshelving
+  source_seed: 0          # scene the single demonstration is recorded in
+  target_seeds: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+  output_dir: outputs/reshelving
+
+scene:
+  embodiment: panda       # see tpgpt/sim/embodiments.py
+  control_freq: 20        # Hz; also the label timestamp rate
+  keypoint_noise: 0.0     # m; isotropic keypoint detection noise
+
+transport:
+  residual: gp            # gp | svgp | none (none = affine-only ablation)
+  # Kernel priors are derived from the keypoint geometry by default; see
+  # tpgpt/transport/gp.py. Override only with a reason.
+
+policy:
+  phase_weight: 8.0       # discriminative weight on the time-belief input
+  noise_variance: 0.01    # a policy regularises; it must not interpolate
+
+execution:
+  max_steps: 600
+  belief_correction: 0.2
+  lag_tolerance: 0.035    # m of excess arm lag before progress is held back
+  speed_limit_factor: 3.0

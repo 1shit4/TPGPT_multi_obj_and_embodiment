@@ -169,52 +169,70 @@ Rejected: PyBullet (worse contact fidelity), Isaac/Genesis (GPU), raw MuJoCo
 | `K_hat` (Sec. III-G) | symmetric, positive definite, eigenvalues preserved | exact |
 | Property (ii) | `det(J) > 0` fraction on curved targets | 100% |
 
-### 2.5 The time belief must be closed-loop, or the policy stalls
+### 2.5 A policy needs different kernel priors from a transportation map
 
-Integrating the predicted `time_rate` open loop **does not work**, and the way
-it fails is worth recording because it is easy to reintroduce.
+This is the single most consequential finding of the implementation, and it cost
+the most to isolate. The transport map and the refitted policy use the same GP
+code, and giving them the same priors breaks the policy silently.
 
-The policy is trained only on the ridge `{(x(s), s)}` where position and phase
-move together. Any lag — Euler integration error, GP smoothing at a corner of
-the path, or the robot's own dynamics — moves the query `(x, t)` off that
-ridge. Off the ridge the **zero-mean velocity prior of Appendix A takes over**,
-the predicted velocity decays towards zero, the lag grows, and the rollout
-stalls. It is a runaway: the very prior that makes the policy safe (don't move
-without evidence) is what kills it.
+**Length scale.** `geometric_length_scale_bounds` derives its lower bound from
+the *minimum* pairwise distance between training inputs. For a transport map
+that is right: the keypoints are sparse and each must be matched exactly. For a
+policy it is meaningless — on a 200-label, 20 Hz demonstration the labels are
+0.3 mm apart, which measures how finely the trajectory was sampled, not the
+structure of the field. The fitted length scale collapsed to 0.025 (standardised
+units) and the commanded velocity was **exactly zero 2 cm off the path**. The
+policy had no basin of attraction whatsoever, and since the robot's home pose and
+the transported start `phi(x_0)` differ by of order 0.1 m, the arm never moved at
+all. `GPPolicy.LENGTH_SCALE_BOUNDS` is therefore set in standardised input units
+(0.4 to 3.0), independent of label density.
 
-Measured on a synthetic pick-and-place (120 labels, 20 Hz):
+**Likelihood noise.** A transport map must interpolate (property (i)); a policy
+must not. Labels a few millimetres apart along a curve, an order of magnitude
+closer than the kernel length scale, make the Gram matrix near-singular; the
+weights blow up with alternating signs, and the field is well behaved *on* the
+demonstration and explosive just off it.
 
-| Lag at step | Commanded speed | Demo speed |
+| `noise_variance` | cond(K) | max speed within 4 cm of the path |
 |---|---|---|
-| 0 mm (step 20) | 0.084 m/s | 0.084 m/s |
-| 9 mm (step 60) | 0.129 m/s | 0.120 m/s |
-| 82 mm (step 80) | **0.0002 m/s** | 0.084 m/s |
-| 228 mm (step 119) | **0.000 m/s** | 0.084 m/s |
+| 1e-6 | 4.9e9 | **13.4 m/s** |
+| 1e-4 | 4.9e7 | 3.1 m/s |
+| **1e-2 (default)** | 8.8e3 | 0.69 m/s |
 
-The rollout stopped **228 mm short** of the goal having travelled 0.35 m of a
-0.60 m path.
+The demonstration's peak speed is 0.25 m/s. At 1e-6 the arm was flung off the
+path within ten control steps.
 
-**Fix.** Treat the phase as what the paper calls it — a *belief*. Propagate it
-with the predicted rate (prior), then correct it towards the phase of the
-nearest training label (observation). The nearest-neighbour search runs in the
-**joint** position-phase space under the same standardised metric the kernel
-uses: matching on position alone is ambiguous for exactly the paths that need a
-phase at all, since a pick-and-place revisits the same position twice, and the
-current belief is what breaks the tie.
+Regularisation is also what determines whether the rollout completes at all.
+Free rollout of the reshelving policy, endpoint error against a 0.60 m path:
 
-Gain sweep, same demo (goal is 0.60 m of path away):
+| phase weight | noise | belief correction | completes | endpoint error |
+|---|---|---|---|---|
+| 1 | 1e-6 | 0.0 | yes | 0.607 m |
+| 1 | 1e-6 | 0.2 | **no** | 0.618 m |
+| 8 | 1e-6 | 0.0 | yes | 0.464 m |
+| 8 | 1e-6 | 0.2 | **no** | 0.224 m |
+| 1 | 1e-2 | 0.0 | yes | 0.0005 m |
+| 8 | 1e-2 | 0.2 | yes | 0.0098 m |
 
-| `belief_correction` | steps | endpoint error | max path deviation |
-|---|---|---|---|
-| 0.0 (open loop) | 120 | **0.228 m** | 0.004 m |
-| 0.05 | 600 (cap) | 0.166 m | 0.004 m |
-| 0.1 | 132 | 0.013 m | 0.004 m |
-| **0.2 (default)** | 130 | **0.006 m** | 0.005 m |
-| 0.4 | 132 | 0.006 m | 0.006 m |
-| 1.0 (no feed-forward) | 134 | 0.008 m | 0.006 m |
+**Correction to an earlier conclusion.** An earlier round of measurements, taken
+before the priors were fixed, attributed a rollout stall to the time belief
+running open loop and reported that closing it fixed the stall. That was a real
+measurement but the wrong diagnosis: the table above shows the noise term is what
+determines success, and that at 1e-6 the belief correction makes matters *worse*,
+because it keeps re-anchoring the phase to a robot that is not moving. The belief
+correction is retained — it keeps the position and phase of the query consistent,
+and it pairs with the lag gate during execution — but it is a consistency
+mechanism, not a cure for a badly conditioned policy.
 
-Anything at or above 0.1 works; 0.2 is the default. `tests/unit/test_policy.py`
-has an explicit regression test that open-loop stalls and closed-loop does not.
+**Phase weight.** Position and phase are different kinds of input and one
+isotropic length scale cannot serve both. A pick-and-place path passes through
+the hover pose twice, descending to insert and ascending to retreat, at nearly
+the same position but very different phases. With an isotropic kernel the two
+branches blend, the descent and the ascent cancel, and the rollout stalls at the
+hover pose commanding 0.01 m/s. Weighting the phase axis (`PHASE_WEIGHT = 8`)
+separates them while keeping the long positional length scale that provides the
+basin of attraction. Measured on the transported labels, free-rollout endpoint
+error fell from *failure* at weight 1 to 6-8 mm at weight 8.
 
 ### 2.6 Output channels are charted, not regressed raw
 

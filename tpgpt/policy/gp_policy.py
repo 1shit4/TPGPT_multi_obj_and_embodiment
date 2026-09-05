@@ -17,9 +17,8 @@ of position alone cannot represent a path that revisits a position, which every
 pick-and-place does.
 
 The phase is a *belief*, not a clock: it is propagated by the policy's own
-predicted rate and then corrected against where the robot actually is. Running
-it open loop does not work, and fails in a specific and instructive way -- see
-:meth:`GPPolicy.update_time_belief`.
+predicted rate and then reconciled with where the robot actually is, so that a
+lagging robot does not let the phase run away from it.
 """
 
 from __future__ import annotations
@@ -40,6 +39,7 @@ class PolicyPrediction:
 
     velocity: np.ndarray                    # (n, 3)
     velocity_std: np.ndarray                # (n, 3) -- Sigma_f_hat of Eq. (13)
+    reference: np.ndarray | None = None     # (n, 3) regressed attractor position
     orientation: np.ndarray | None = None   # (n, 3, 3)
     stiffness: np.ndarray | None = None     # (n, 3, 3)
     damping: np.ndarray | None = None       # (n, 3, 3)
@@ -78,9 +78,79 @@ class GPPolicy:
     #: Channels that keep a zero prior mean (Appendix A).
     ZERO_MEAN_CHANNELS = ("velocity",)
 
-    def __init__(self, use_time_belief: bool = True, **regressor_kwargs):
+    #: Length-scale bounds in standardised input units.
+    #:
+    #: A policy needs *different* kernel priors from a transportation map, and
+    #: getting this wrong is silent and fatal. The map interpolates sparse
+    #: keypoints that must each be matched exactly, so its length scale should
+    #: track the keypoint spacing. A policy is a **field**: it has to command a
+    #: sensible motion at states the demonstration never visited, because the
+    #: robot starts wherever it starts and the transported labels start
+    #: somewhere else entirely.
+    #:
+    #: Deriving the bounds from the minimum spacing between labels -- which is
+    #: what the geometric heuristic does -- measures how finely the trajectory
+    #: was sampled, not the structure of the field. On a 200-label, 20 Hz
+    #: demonstration the labels are 0.3 mm apart, the fitted length scale
+    #: collapses to 0.025, and the commanded velocity is *exactly zero* 2 cm
+    #: off the path. The policy then has no basin of attraction at all and the
+    #: robot never moves.
+    #:
+    #: Inputs are standardised, so these are in units of input standard
+    #: deviation: the lower bound keeps a basin of roughly a fifth of the
+    #: demonstration's extent.
+    LENGTH_SCALE_BOUNDS = (0.4, 3.0)
+
+    #: Likelihood noise, relative to unit-variance standardised targets.
+    #:
+    #: This is the second place a policy needs different priors from a
+    #: transportation map. The map must interpolate its keypoints exactly
+    #: (property (i) of Sec. III-C), so its noise is numerical jitter. A policy
+    #: must **not** interpolate: a 20 Hz demonstration puts its labels a few
+    #: millimetres apart along a curve, an order of magnitude closer than the
+    #: kernel length scale, so the Gram matrix becomes near-singular (measured
+    #: condition number 5e9), the weights blow up with alternating signs, and
+    #: the field is fine *on* the demonstration but explodes just off it.
+    #:
+    #: Measured on the reshelving demonstration, whose peak speed is 0.25 m/s,
+    #: the largest speed commanded within 4 cm of the path was:
+    #:
+    #: ===============  ==========  ==============
+    #: noise            cond(K)     max speed
+    #: ===============  ==========  ==============
+    #: 1e-6             4.9e9       13.4 m/s
+    #: 1e-4             4.9e7       3.1 m/s
+    #: 1e-2 (default)   8.8e3       0.69 m/s
+    #: ===============  ==========  ==============
+    #:
+    #: At 1e-6 the arm was flung off the path within ten control steps.
+    NOISE_VARIANCE = 1e-2
+
+    #: Extra weight on the phase input, relative to the standardised position.
+    #:
+    #: Position and phase are not the same kind of input and one isotropic
+    #: length scale cannot serve both. A pick-and-place path passes through the
+    #: hover pose **twice** -- once descending to insert, once ascending to
+    #: retreat -- at nearly the same position but very different phases. If the
+    #: kernel cannot separate those two branches it blends them, the descent and
+    #: the ascent cancel, and the rollout stalls at the hover pose with a
+    #: commanded speed of 0.01 m/s.
+    #:
+    #: Weighting the phase axis is equivalent to giving the kernel a shorter
+    #: length scale along it while keeping the long positional length scale that
+    #: provides the basin of attraction.
+    PHASE_WEIGHT = 8.0
+
+    def __init__(
+        self,
+        use_time_belief: bool = True,
+        phase_weight: float = PHASE_WEIGHT,
+        **regressor_kwargs,
+    ):
         self.use_time_belief = use_time_belief
-        regressor_kwargs.setdefault("noise_variance", 1e-6)
+        self.phase_weight = float(phase_weight)
+        regressor_kwargs.setdefault("noise_variance", self.NOISE_VARIANCE)
+        regressor_kwargs.setdefault("length_scale_bounds", self.LENGTH_SCALE_BOUNDS)
         self.regressor_kwargs = regressor_kwargs
         self.gp: GaussianProcessRegressor | None = None
         self._layout: list[tuple[str, int, int]] = []
@@ -112,9 +182,15 @@ class GPPolicy:
 
         Position is in metres and the phase is a unit interval; a single length
         scale over the raw concatenation would be dominated by whichever has the
-        larger spread.
+        larger spread. The phase axis then carries the extra
+        :data:`PHASE_WEIGHT` so the kernel can separate branches of a
+        self-intersecting path.
         """
-        return (Z - self._input_mean) / self._input_scale
+        standardised = (Z - self._input_mean) / self._input_scale
+        if self.use_time_belief:
+            standardised = standardised.copy()
+            standardised[:, -1] *= self.phase_weight
+        return standardised
 
     # ---------------------------------------------------------------- fit
     def fit(self, labels: PolicyLabels) -> "GPPolicy":
@@ -127,7 +203,19 @@ class GPPolicy:
         self._input_mean = Z.mean(axis=0)
         self._input_scale = np.where(Z.std(axis=0) > 1e-9, Z.std(axis=0), 1.0)
 
-        blocks: list[tuple[str, np.ndarray]] = [("velocity", labels.velocities)]
+        # The attractor channel. Sec. V states that the policy learns "the
+        # desired attractor position ... as a function of the current
+        # position-time input", and that absolute reference is what gives the
+        # policy a restoring action. A velocity field alone has none: fitted
+        # from demonstration velocities with a zero-mean prior, at an unvisited
+        # state it blends the velocities of nearby labels, which points *along*
+        # the demonstration and never back towards it. Measured on reshelving,
+        # a velocity-only policy drifted 8 cm off the transported path within 25
+        # control steps and then crawled, never completing the task.
+        blocks: list[tuple[str, np.ndarray]] = [
+            ("velocity", labels.velocities),
+            ("attractor", labels.positions),
+        ]
         if labels.orientations is not None:
             blocks.append(("orientation", rotation_to_6d(labels.orientations)))
         if labels.stiffness is not None:
@@ -172,27 +260,30 @@ class GPPolicy:
         dt: float,
         correction: float = 0.2,
     ) -> float:
-        """Advance the phase and correct it against the observed position.
+        """Advance the phase and reconcile it with the observed position.
 
         Sec. V lists the "time belief update" among the quantities the policy
         learns, and calling it a *belief* rather than a clock is the point: it
-        has to be reconciled with where the robot actually got to.
-
-        Integrating the predicted rate open loop fails badly. Any lag -- from
-        Euler integration, from GP smoothing at a corner, or from the robot's
-        own dynamics -- moves the query ``(x, t)`` off the ridge
-        ``{(x(s), s)}`` that the policy was trained on. There the zero-mean
-        prior of Appendix A takes over, the predicted velocity decays towards
-        zero, the lag grows, and the rollout stalls outright. Measured on a
-        synthetic pick-and-place: a 9 mm lag at 60 steps collapsed the speed
-        from 0.084 m/s to 0.0002 m/s by step 80 and the rollout stopped 23 cm
-        short of the goal.
+        has to be reconciled with where the robot actually got to. Any lag --
+        Euler integration error, GP smoothing at a corner, or the robot's own
+        dynamics -- moves the query ``(x, t)`` off the ridge ``{(x(s), s)}``
+        that the policy was trained on, and the further off that ridge the query
+        drifts, the less the prediction means.
 
         The correction is a nearest-label update in the *joint* position-phase
         space, using the standardised metric the kernel already uses. The joint
         metric matters: matching on position alone is ambiguous for exactly the
         paths that need a phase at all, since a pick-and-place revisits the same
         position twice. The current belief breaks that tie.
+
+        Note:
+            This is a consistency mechanism, not a cure for a badly conditioned
+            policy. Measured on the reshelving demonstration, an
+            under-regularised policy (``noise_variance`` 1e-6) fails to complete
+            the task at *any* correction gain -- and the correction makes it
+            worse, not better, because it keeps re-anchoring the phase to a
+            robot that is not moving. Regularisation is what makes the rollout
+            work; see :data:`NOISE_VARIANCE`.
 
         Args:
             position: ``(3,)`` current measured position.
@@ -246,6 +337,7 @@ class GPPolicy:
 
         return PolicyPrediction(
             velocity=velocity,
+            reference=out.get("attractor"),
             velocity_std=velocity_std,
             orientation=(
                 rotation_from_6d(out["orientation"]) if "orientation" in out else None
@@ -259,27 +351,35 @@ class GPPolicy:
         )
 
     def attractor(self, positions: np.ndarray, time_belief=None) -> np.ndarray:
-        """Impedance attractor that realises the predicted velocity.
+        """Impedance attractor: a regressed reference plus a velocity feed-forward.
 
-        The controller of Sec. V is a Cartesian impedance controller, which is
-        commanded with an attractor rather than a velocity. At steady state a
+        The controller of Sec. V is a Cartesian impedance controller, commanded
+        with an attractor rather than a velocity, so the command has two parts.
+
+        The **reference** is the regressed attractor position of Sec. V. It is
+        an absolute position on the demonstrated path, so it pulls the robot
+        back when it drifts. Without it the policy has no restoring action at
+        all -- see the note in :meth:`fit`.
+
+        The **feed-forward** sets the speed along the path. At steady state a
         commanded offset ``dx`` produces ``K dx`` of force against ``D xdot`` of
-        damping, so tracking ``xdot`` requires
+        damping, so realising ``xdot`` needs ``dx = K^-1 D xdot``. With the
+        transported ``K_hat`` and ``D_hat``, this reproduces the demonstrated
+        speed profile under the demonstrated impedance.
 
-            ``x_desired = x + K^-1 D xdot``.
-
-        With the transported ``K_hat`` and ``D_hat`` this reproduces the
-        demonstrated speed profile under the demonstrated impedance. Falls back
-        to a unit time constant when no stiffness or damping was learned.
+        On the demonstration the reference equals the current position and the
+        command reduces to ``x + K^-1 D xdot``.
         """
         pred = self.predict(positions, time_belief)
         positions = np.atleast_2d(np.asarray(positions, dtype=float))
+        reference = pred.reference if pred.reference is not None else positions
+
         if pred.stiffness is None or pred.damping is None:
-            return positions + pred.velocity
-        offset = np.einsum(
+            return reference + pred.velocity
+        feedforward = np.einsum(
             "nij,njk,nk->ni", np.linalg.inv(pred.stiffness), pred.damping, pred.velocity
         )
-        return positions + offset
+        return reference + feedforward
 
     def _check_fitted(self) -> None:
         if self.gp is None:
