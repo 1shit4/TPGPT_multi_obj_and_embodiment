@@ -444,12 +444,16 @@ physically cannot represent, and it is far larger than the ~25 mm of positional
 tolerance the grasp allows. The four affine-only successes are the scenes where
 the two objects happened to move nearly rigidly together.
 
-For contrast, running the same pipeline with **SV-GPT at M = 12** inducing
-points (out of 18 keypoints) leaves a 5.7 mm keypoint residual and degrades
-placement to 34 mm — the approximation error of the sparse bound showing up
-directly as task error, exactly as Appendix A's caveat implies. Use the exact GP
-when the keypoint set is small; the sparse variant is for the point-cloud regime
-of Sec. V-C.
+**SV-GPT sits between the two.** With M = 12 inducing points against 18
+keypoints, the sparse bound leaves a 7.3 mm keypoint residual and still placed
+the object in 6/6 scenes, but at 13.3 mm median error against the exact GP's
+8.3 mm — significantly worse (p = 0.021 over the same six scenes). The
+approximation error of the variational bound shows up directly as task error,
+exactly as Appendix A's caveat implies. Use the exact GP when the keypoint set is
+small; the sparse variant exists for the 400-point cloud regime of Sec. V-C,
+where exact inference is the thing that does not scale.
+
+Reproduce with `python -m tpgpt.experiments.ablate_residual`.
 
 ### 4.7 Theory figures
 

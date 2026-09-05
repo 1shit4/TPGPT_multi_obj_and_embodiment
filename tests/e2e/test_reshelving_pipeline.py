@@ -175,3 +175,24 @@ class TestExecution:
         assert summary["success_rate"] >= 0.5, summary
         placed = [r.diagnostics["placement_error_xy"] for r in results if r.success]
         assert np.median(placed) < 0.03
+
+
+class TestAblation:
+    def test_removing_the_nonlinear_stage_hurts(self, source):
+        """The residual must earn its place, not merely be present.
+
+        Two objects move independently between scenes, so no single rigid
+        motion can match both; the affine stage alone leaves keypoint residual
+        far larger than the grasp tolerance. Three scenes only -- the full
+        20-scene result is in ROBOTICS_NOTES.md section 4.6.
+        """
+        from tpgpt.experiments.reshelving_pipeline import transport_to_scene
+
+        labels, keypoints = source
+        seeds = (1, 3, 5)
+        full = [transport_to_scene(labels, keypoints, s) for s in seeds]
+        affine = [transport_to_scene(labels, keypoints, s, residual=None) for s in seeds]
+
+        assert max(r.diagnostics["keypoint_residual_max"] for r in full) < 1e-4
+        assert max(r.diagnostics["keypoint_residual_max"] for r in affine) > 0.01
+        assert sum(r.success for r in full) > sum(r.success for r in affine)
