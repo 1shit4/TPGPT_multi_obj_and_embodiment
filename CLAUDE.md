@@ -41,18 +41,43 @@ export MUJOCO_GL=egl
 
 ## Rules for changing code
 
-1. **Run the tests after every change.** Unit suite is under a second; there is
-   no excuse for skipping it. Run the full suite before declaring anything done.
+1. **Run the tests after every change.** The unit suite takes 3 seconds; the
+   full suite ~75 s. Run the full suite before declaring anything done.
 2. **Cite the paper in docstrings.** Every function implementing theory names
    the section or equation it comes from. This is the point of the project.
 3. **Deviations from the paper must be documented** in `ROBOTICS_NOTES.md` with
-   the reason, not silently absorbed into code.
-4. **No wall-clock time in recorded data.** Timestamps come from the step index
-   and the control frequency. (The prototype used `time.time()` around a replay
-   loop and produced velocity labels that were mostly zero.)
-5. **Seed before `env.reset()`**, never after.
-6. Prefer extending an existing module over adding a parallel one; check
-   `tpgpt/transport/` and `tpgpt/utils/` for something reusable first.
+   the measurement that motivated them, not silently absorbed into code.
+4. **Measure before concluding, and correct the record when a measurement
+   supersedes an earlier one.** `ROBOTICS_NOTES.md` §2.5 contains a worked
+   example: an early diagnosis blamed the time belief for a rollout stall, and
+   a later measurement showed the cause was under-regularisation. The note now
+   carries both, marked as a correction.
+5. **No wall-clock time in recorded data.** Timestamps come from the step index
+   and the control frequency.
+6. **Seed before `env.reset()`**, never after.
+7. Prefer extending an existing module over adding a parallel one; check
+   `tpgpt/transport/` and `tpgpt/utils/` first.
+
+## Things that will bite you again
+
+Each of these cost real debugging time. Full detail in `ROBOTICS_NOTES.md`.
+
+- **A policy is not a transportation map.** They share the GP code but need
+  opposite priors: the map interpolates sparse keypoints exactly; the policy
+  must regularise (`noise_variance` 1e-2) and needs a length scale set in
+  standardised units, not from label spacing. Getting this wrong fails
+  *silently* — the policy fits its labels perfectly and commands zero velocity
+  2 cm away.
+- **Labels are the commanded attractor, not the measured pose.** An
+  impedance-controlled arm lags its attractor by 20-45 mm. Recording the
+  measured pose and executing it as an attractor applies that lag twice.
+- **robosuite rescales actions onto `output_max`.** Leaving it at the default of
+  1 divides every commanded torque by the ratio; the impedance law then looks
+  broken when it is only attenuated.
+- **The arm's reachable envelope, not the paper, sets the scene geometry.**
+  End-effector x saturates near 0.24 m in this arena.
+- **Check `free -h` before long runs**, and never accumulate rendered frames in
+  memory — stream them with `FrameWriter`.
 
 ## Scope decisions (agreed 2026-09-05)
 
@@ -87,9 +112,17 @@ and git.
 | Sec. IV metrics | `tpgpt/metrics/` |
 | Figs. 2, 4, 5 | `tpgpt/viz/`, `tpgpt/experiments/` |
 
+## Current state
+
+All of Sec. III, Appendix A, the uncertainty propagation, the policy refit and
+the Sec. V-A reshelving validation are implemented and tested (142 tests).
+End-to-end: one demonstration transported into 20 randomised scenes gives 17/20
+success at 7.6 mm mean placement error. Numbers and their provenance are in
+`ROBOTICS_NOTES.md` §4.
+
 ## History
 
 `git log` starts from the original three-script prototype
 (`affine_transform.py`, `warping_transform.py`, `sim_policy_transport.py`),
-committed verbatim before the rewrite. Its known defects are catalogued in
-`ROBOTICS_NOTES.md` so they are not reintroduced.
+committed verbatim before the rewrite and removed afterwards. Its known defects
+are catalogued in `ROBOTICS_NOTES.md` §1 so they are not reintroduced.
