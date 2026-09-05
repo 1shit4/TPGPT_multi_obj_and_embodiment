@@ -10,10 +10,13 @@ Franzese et al., arXiv:2404.13458v2.
 **Headline result.** A single demonstration, transported into 20 randomised
 reshelving scenes: **17/20 success, 7.6 mm mean placement error** (median 7.9 mm,
 worst 11.7 mm), with keypoints displaced up to **375 mm** between source and
-target and the affine stage leaving up to **84 mm** of residual for the nonlinear
-stage to absorb. The scripted teacher's own placement error is ~10 mm, so the
-transported policy places the object about as accurately as the demonstration it
-came from.
+target. The scripted teacher's own placement error is ~10 mm, so the transported
+policy places the object about as accurately as the demonstration it came from.
+
+**The nonlinear stage is what makes that work.** Ablating `psi` and keeping only
+the affine `gamma` drops success to **4/20** (p = 3.3e-5, Mann-Whitney), because
+the two objects move independently between scenes and no single rigid motion can
+match both — `gamma` alone leaves up to 84 mm of keypoint residual. See §4.6.
 
 ---
 
@@ -419,7 +422,36 @@ That the **transport uncertainty exceeds the epistemic uncertainty** by roughly
 4x is the expected ordering for this task and matches Sec. III-H: there are only
 18 keypoints but 200 policy labels, so the map is the less certain of the two.
 
-### 4.6 Theory figures
+### 4.6 Ablation: does the nonlinear stage earn its place?
+
+The question the prototype could never answer, because its target scene was a
+pure translation that `gamma` solves exactly. Here the two objects move
+independently between source and target, so no single rigid motion can match
+both. Same demonstration, same 20 scenes, same policy and execution — only the
+residual regressor `psi` is removed.
+
+| Transportation map | success | median placement error | on-success median | max keypoint residual |
+|---|---|---|---|---|
+| **full, `gamma + psi`** | **17/20** | **8.0 mm** | 7.9 mm | 2.6e-7 mm |
+| affine only, `gamma` | 4/20 | 335.7 mm | 20.0 mm | **84.0 mm** |
+
+Mann-Whitney U on placement error: the full map beats affine-only at
+**p = 3.3e-5**.
+
+Removing the nonlinear stage costs 65 percentage points of success. The 84 mm
+of keypoint residual it leaves behind is the deformation the affine stage
+physically cannot represent, and it is far larger than the ~25 mm of positional
+tolerance the grasp allows. The four affine-only successes are the scenes where
+the two objects happened to move nearly rigidly together.
+
+For contrast, running the same pipeline with **SV-GPT at M = 12** inducing
+points (out of 18 keypoints) leaves a 5.7 mm keypoint residual and degrades
+placement to 34 mm — the approximation error of the sparse bound showing up
+directly as task error, exactly as Appendix A's caveat implies. Use the exact GP
+when the keypoint set is small; the sparse variant is for the point-cloud regime
+of Sec. V-C.
+
+### 4.7 Theory figures
 
 `python -m tpgpt.experiments.figures` reproduces Figs. 2, 4 and 5. Fig. 5
 confirms the paper's central claim about uncertainty structure: transport

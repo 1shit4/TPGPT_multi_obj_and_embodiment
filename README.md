@@ -12,7 +12,9 @@ orientation, Cartesian stiffness and damping — and a new policy is refitted on
 the transported labels and executed under Cartesian impedance control.
 
 **Result: one demonstration, 20 randomised scenes, 17/20 success at 7.6 mm mean
-placement error**, with keypoints displaced up to 375 mm.
+placement error**, with keypoints displaced up to 375 mm. Ablating the nonlinear
+stage of the map drops that to 4/20 (p = 3.3e-5), so the paper's central
+machinery is doing the work rather than a rigid alignment.
 
 ## Quick start
 
