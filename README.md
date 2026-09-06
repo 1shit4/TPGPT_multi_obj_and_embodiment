@@ -16,6 +16,19 @@ placement error**, with keypoints displaced up to 375 mm. Ablating the nonlinear
 stage of the map drops that to 4/20 (p = 3.3e-5), so the paper's central
 machinery is doing the work rather than a rigid alignment.
 
+## Two stages
+
+**Policy transportation** (validated): one demonstration transported into a new
+scene by fitting a nonlinear map that carries source keypoints onto their target
+counterparts, transporting every policy label through it, and refitting a policy
+on the result.
+
+**Grasping and scene understanding** (in progress): a text prompt resolves to an
+object and a destination, the object is segmented into a point cloud from
+simulated depth cameras, and GraspGen-X generates 6-DoF grasps for whichever
+gripper is fitted. This is the groundwork for transporting a policy to a scene
+where both the object *and* the hand are different.
+
 ## Quick start
 
 ```bash
@@ -26,6 +39,17 @@ $PY -m pytest tests/unit -q                                  # fast, no simulato
 $PY -m pytest tests -q                                       # everything (~75 s)
 $PY -m tpgpt.experiments.run_reshelving --config configs/reshelving.yaml
 $PY -m tpgpt.experiments.figures --out outputs/figures       # paper Figs. 2, 4, 5
+$PY -m tpgpt.experiments.ablate_residual                     # nonlinear-stage ablation
+```
+
+Grasp generation needs an external GraspGen-X server (its dependencies conflict
+with this project's, so it runs in its own conda environment):
+
+```bash
+$PY -m tpgpt.grasp.server                                    # status / how to start
+$PY -m tpgpt.experiments.run_grasp_scene \
+     --prompt "put the milk carton on the top shelf" \
+     --grippers panda,robotiq85,robotiq140
 ```
 
 ## What maps to what
@@ -41,6 +65,9 @@ $PY -m tpgpt.experiments.figures --out outputs/figures       # paper Figs. 2, 4,
 | Sec. III-B step 2 — refitting `g` | `tpgpt/policy/` |
 | Sec. V — scene, keypoints, impedance control, execution | `tpgpt/sim/` |
 | Sec. IV-B — metrics and the Mann-Whitney ranking | `tpgpt/metrics/` |
+| GraspGen-X bridge, gripper registry, frame contract | `tpgpt/grasp/` |
+| Object point clouds and the scene graph | `tpgpt/perception/` |
+| Deterministic prompt parsing (no model, no network) | `tpgpt/language/` |
 | Figs. 2, 4, 5 | `tpgpt/viz/`, `tpgpt/experiments/figures.py` |
 
 ## Scope
@@ -48,9 +75,9 @@ $PY -m tpgpt.experiments.figures --out outputs/figures       # paper Figs. 2, 4,
 Implemented: all of Sec. III, Appendix A, uncertainty propagation, the policy
 refit, and the Sec. V-A reshelving validation.
 
-Deferred (the layout leaves room; see `ROBOTICS_NOTES.md` §5): the Sec. IV
-baseline comparison, and the dressing, surface-cleaning and DINO experiments of
-Sec. V-B to V-D.
+Deferred (see `ROBOTICS_NOTES.md` §6): grasp filtering and selection, keypoint
+extraction for a new-object scene, the Sec. IV baseline comparison, and the
+dressing, surface-cleaning and DINO experiments of Sec. V-B to V-D.
 
 ## Documentation
 

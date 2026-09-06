@@ -472,18 +472,240 @@ fields share one warped mesh.
 
 ---
 
-## 5. Open items
+## 5. Grasp generation and scene understanding
+
+Groundwork for the cross-object, cross-embodiment stage. The reshelving pipeline
+assumes one known object and one known gripper: its demonstration hard-codes a
+top-down pinch with the yaw aligned to a box. Neither assumption survives a
+different object shape or a different hand, so the grasp has to come from the
+object's geometry and the hand's geometry. That is what GraspGen-X provides.
+
+**Scope.** Only the first two stages of the new-scene flow are built: text ->
+object and destination, and object -> ranked grasps per gripper, plus the
+conversion into an end-effector command. Filtering, choosing one grasp, and
+keypoint extraction for the new scene are deliberately deferred pending
+discussion, and section 5.6 is the measured case for why that discussion is
+needed.
+
+### 5.1 Two processes, because one is impossible
+
+GraspGen-X needs Python 3.11 with `diffusers==0.11.1` and
+`huggingface-hub==0.25.2`; TPGPT runs Python 3.10 with MuJoCo and robosuite. The
+pins are mutually exclusive, so they cannot share an interpreter. The model is
+also 1.6 GB and takes 3.3 s to load, which rules out spawning it per call.
+
+It therefore runs as a long-lived ZMQ server in its own conda environment and
+TPGPT talks to it over msgpack. `tpgpt/grasp/client.py` re-implements the wire
+protocol rather than importing `graspgenx.serving.zmq_client`: that module is
+itself torch-free, but importing it executes a package `__init__` that pulls in
+torch. The client needs only `pyzmq`, `msgpack`, `msgpack-numpy` and `numpy`.
+
+Measured on this machine: 4-12 s per inference on CPU, 2.6 GB resident for the
+server, 3.3 s one-off model load.
+
+### 5.2 Nine gripper pairs, spanning every kinematic family
+
+GraspGen-X conditions on a gripper's **swept volume** rather than on trained-in
+weights, so one checkpoint serves any hand whose `config.json` it can read. Nine
+of the hands it ships are also simulated by robosuite:
+
+| short | robosuite | GraspGen-X | family | aperture | TCP depth | closing axis |
+|---|---|---|---|---|---|---|
+| panda | PandaGripper | franka_panda | parallel_2f | 80.0 mm | 103.4 mm | x |
+| robotiq85 | Robotiq85Gripper | robotiq_2f_85 | revolute_2f | 85.0 mm | 136.0 mm | x |
+| robotiq140 | Robotiq140Gripper | robotiq_2f_140 | revolute_2f | 125.0 mm | 195.0 mm | x |
+| rethink | RethinkGripper | sawyer_hand | revolute_2f | 66.0 mm | 110.0 mm | x |
+| xarm | XArm7Gripper | xarm_hand | revolute_2f | 85.0 mm | 136.0 mm | **y** |
+| umi | UMIGripper | franka_umi | parallel_2f | 80.0 mm | 177.0 mm | **y** |
+| robotiq3f | RobotiqThreeFingerGripper | robotiq_3f | revolute_3f | 110.0 mm | 190.0 mm | unmeasured |
+| yumi | YumiRightGripper | abb_yumi | parallel_2f | 50.0 mm | 125.0 mm | unmeasured |
+| inspire | InspireRightHand | inspire_hand | revolute_3f | 80.0 mm | 150.0 mm | unmeasured |
+
+Apertures span 50 to 125 mm and TCP depths 103 to 195 mm. **That near-2x depth
+range is the cross-embodiment problem in one number**: the same contact on the
+same object puts the end effector in a very different place for each hand, so an
+end-effector pose is not portable even when the grasp is.
+
+### 5.3 Three conventions that fail silently
+
+Each of these was measured against known geometry, and each produces
+plausible-looking wrong output when got wrong.
+
+**Segmentation ids are offset by one.** robosuite maps each geom to its
+instance's index and then adds 1, so 0 means background. Using the raw index
+selects the background: the mask covered 55 607 of 65 536 pixels and the
+resulting "object cloud" was 2.5 m across. That does not look like an
+off-by-one, it looks like a broken camera calibration, which is exactly how it
+was first misdiagnosed here.
+
+**Observation images are vertically flipped** relative to the camera matrix.
+Both the mask and the depth must be flipped back together. Getting this wrong
+placed the cloud 28 cm from the object; getting the pixel ordering wrong instead
+(row before column, rather than the `[col*z, row*z, z, 1]` the camera matrix
+expects) moved it 26 cm the other way. With both correct the error is 1.5 to
+3.7 cm per camera, which is the partial view, not the transform.
+
+**Boundary pixels poison the bounding box.** A segmentation mask includes the
+object's edge pixels, whose depth samples land partly on whatever is behind it.
+On a 5 x 5 x 9 cm box the fused extents came out [17.3, 8.8, 9.7] cm; with one
+pixel of mask erosion, [5.8, 6.2, 8.9] cm. Two pixels tightens it further but
+empties the mask for small or distant objects, so one is the default.
+
+Acceptance, measured against each object's true mesh AABB read from MuJoCo:
+
+| object | mesh AABB | fused cloud | error |
+|---|---|---|---|
+| milk | 5.2 x 5.2 x 14.4 cm | 3.6 x 4.4 x 13.3 cm | 1.6 cm |
+| can | 5.0 x 5.0 x 8.0 cm | 4.2 x 4.3 x 7.8 cm | 0.8 cm |
+| cereal | 10.2 x 3.9 x 15.0 cm | 9.8 x 3.5 x 14.4 cm | 0.6 cm |
+| bread | 6.1 x 6.2 x 4.8 cm | 5.0 x 4.9 x 4.2 cm | 1.3 cm |
+
+All four bounding boxes contain the body origin. The residual is the unobserved
+back side, as expected of a partial view.
+
+> A note on method: the first version of this test compared against sizes
+> derived by hand from each object's `horizontal_radius` and offsets, and bread
+> "failed" by 3.1 cm. The mesh is 4.8 cm tall, not the 7.5 cm those numbers
+> imply. The test now reads the AABB from MuJoCo, which is both correct and
+> robust to the objects spawning at random yaw.
+
+### 5.4 The frame contract, measured and then verified in physics
+
+GraspGen-X emits a pose at the **gripper base** with `+Z` approach and `+X`
+closing. robosuite is commanded at the `grip_site`, at the fingertips.
+Converting is two steps:
+
+1. Translate along the approach axis by the hand's own `fingertip` depth.
+2. Rotate about the approach axis so the closing directions agree.
+
+Measured by locating each hand's two opposing finger bodies and expressing their
+separation in the `grip_site` frame: **`grip_site +Z` is the approach axis for
+every gripper tested**, so the entire frame difference is whether the jaws close
+along X or Y. For the symmetric two-finger hands the *sign* is irrelevant; the
+*axis* is not.
+
+Grippers whose convention was not measured -- the two three-finger hands, which
+have no single closing axis, and the Yumi, whose fingers measured 65 degrees off
+any axis -- **refuse conversion rather than defaulting to identity**. A wrong
+rotation about the approach axis produces a pose that still looks entirely
+plausible while closing across the object's long dimension.
+
+**Verified end to end in physics.** A synthesised top-down grasp -- constructed,
+not generated, so the test isolates the conversion from candidate quality --
+converted through the contract and executed with the Cartesian impedance
+controller lifted the object on the first attempt for both the Panda (103 mm TCP
+depth) and the Robotiq 2F-85 (136 mm, opposite closing sign): +16.5 cm and
++14.9 cm respectively, tracking error under 1 cm.
+
+### 5.5 Deterministic language, on purpose
+
+No model, no network, no API key. The same prompt and the same scene always give
+the same entity ids, and a prompt that fails to parse fails because a word is
+missing from `tpgpt/language/vocabulary.py` -- a fix that is a one-line edit
+rather than a re-prompt.
+
+Receptacles are matched **structurally**, not by string comparison. A slot is
+identified by two independent fields, its level and its lateral position, so
+those are resolved separately. Enumerating every phrasing as an alias produced
+400 strings per slot and, worse, made "top shelf" match all three top slots
+equally -- turning a perfectly ordinary instruction into an ambiguity error.
+
+The one place a default is applied is a level named without a slot ("the top
+shelf"), which resolves to the middle slot **and says so in the rationale**.
+Everything else that is ambiguous is refused with the candidates it considered:
+an unknown noun, a pronoun, a slot named without a level, two levels in one
+phrase, or a missing destination.
+
+### 5.6 What the grasps actually look like, and why filtering is the next problem
+
+One cloud per object, 40 candidates per gripper, seed 1:
+
+| object | cloud points | panda best | robotiq85 best | robotiq140 best |
+|---|---|---|---|---|
+| milk | 770 | 0.853 | 0.924 | 0.978 |
+| can | 44 | 0.766 | 0.703 | 0.863 |
+| cereal | 2056 | 0.903 | 0.977 | 0.997 |
+| bread | 180 | 0.628 | 0.798 | 0.831 |
+
+Mean best score rises with aperture: panda 0.788, robotiq85 0.851,
+robotiq140 0.917 -- a bigger jaw finds more feasible grasps, as it should.
+
+**The embodiment effect is visible in the poses.** On the cereal box the best
+grasps differ between the Panda and the two Robotiqs by 17.7 and 22.0 cm, while
+the two Robotiqs -- same kinematic family -- differ by only 4.5 cm. Different
+hands genuinely choose different grasps on identical evidence.
+
+**And here is the case for the deferred filtering stage.** Only 21 to 29 percent
+of candidates approach from above; the majority come from the side or from
+below, where the fingers would strike the table. Executing the top-scoring
+candidates directly, six per object, lifted nothing: the successful ones were
+never in the top six, and two candidates knocked the object over. This is not a
+conversion error -- section 5.4 shows a correct grasp lifts first try. It is
+candidate selection, and it has three identifiable causes worth weighing in that
+discussion:
+
+- **The cloud is one-sided.** `agentview` contributes 1795 of 2056 points on the
+  cereal box, so the generator proposes approaches from the one direction it can
+  see. The sibling project measured a raw candidate median approach elevation of
+  180 degrees and added an explicit visibility filter.
+- **Reachability is not modelled at all.** Nothing in the candidate set knows
+  where the arm is or whether the pose is achievable.
+- **Sparse clouds still produce confident candidates.** The can at seed 1 gave
+  44 points -- a 6.7 cm tall sliver of an 8 cm object -- and still returned 40
+  candidates scored up to 0.863, placed for the object it could see rather than
+  the object that is there.
+
+### 5.7 Scene
+
+`Reshelving` is untouched, so the 17/20 transport result still reproduces. The
+new `TabletopShelf` scene carries several robosuite mesh objects and a
+**staircase** shelf: the upper level sits further away as well as higher, so
+both levels are reachable from directly above, which a conventional stacked
+shelf would not be -- the upper board would roof the lower one. Slot x stays
+under 0.24 m, the reach limit measured for the Panda in this arena.
+
+Objects settle for 60 simulation steps at reset. Without it they drift up to
+2.7 cm after the observation is taken, so every cloud would describe a pose the
+object is no longer in.
+
+
+---
+
+## 6. Open items
+
+**Next, and needs discussion before implementation** (the flow for a new scene
+is: prompt -> object and destination -> grasps -> **filter, choose one** ->
+**keypoints** -> transport -> execute; the two bold stages are open):
+
+- **Grasp filtering and selection.** Section 5.6 is the measured case. At
+  minimum this needs a visibility criterion (the cloud is one-sided, and
+  approaches from the unobserved side dominate), reachability, and collision
+  against the rest of the scene. Whether to filter, re-rank, or fuse more views
+  at source is exactly the design question.
+- **Keypoint extraction for the new scene.** The reshelving keypoints are the
+  eight corners of a box. An arbitrary mesh has no such natural set, and the
+  keypoints must be *paired* between source and target scenes for the
+  transportation map to be defined at all. What plays the role of a corner for
+  a milk carton against a cereal box is the open question.
+
+**Deferred from the transportation work:**
 
 - Sec. IV baselines (Reshaped-KMP, Laplacian Editing, LWT, Ensemble-NN,
   Ensemble Neural Flows, TP-GMM, TP-HMM), Table I, Figs. 6-10 and the
-  Mann-Whitney ranking. `tpgpt/metrics/` already provides everything they need,
-  including the ranking rule.
+  Mann-Whitney ranking. `tpgpt/metrics/` already provides everything they need.
 - Sec. V-B dressing (MuJoCo `flexcomp` verified viable on CPU) and Sec. V-C
-  surface cleaning, which is the task that would most exercise SV-GPT and the
-  stiffness transport together.
+  surface cleaning, which would most exercise SV-GPT and stiffness transport
+  together.
 - Sec. V-D DINO keypoint correspondences.
-- Cross-embodiment transport. `tpgpt/sim/embodiments.py` makes the robot and
-  gripper a config choice and environment construction is smoke-tested across
-  several, but **no cross-embodiment transport result is claimed**.
-- The three step-budget failures in Sec. 4.5 deserve a look; they are execution
-  timeouts, not transport failures.
+- The three step-budget failures in section 4.5; they are execution timeouts,
+  not transport failures.
+
+**Smaller items:**
+
+- Three gripper pairs have unmeasured `grip_site` frames and currently refuse
+  conversion: the two three-finger hands and the Yumi (section 5.4).
+- Only `franka_panda`, `robotiq_2f_85` and `robotiq_2f_140` are loaded on the
+  running GraspGen-X server; the other six pairs need it restarted to load them.
+- `birdview` contributes almost nothing to the fused clouds (8 of 2056 points on
+  the cereal box). The default camera set is worth revisiting alongside the
+  visibility discussion.
