@@ -9,3 +9,9 @@ pyyaml==6.0.3
 similaritymeasures==1.4.0
 imageio==2.37.4
 pytest==9.0.3
+
+# GraspGen-X bridge. The client is deliberately torch-free: GraspGen-X itself
+# runs as a server in a separate Python 3.11 conda environment.
+pyzmq==27.2.0
+msgpack==1.2.2
+msgpack-numpy==0.4.8

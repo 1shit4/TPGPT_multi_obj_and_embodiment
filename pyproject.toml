@@ -16,8 +16,12 @@ dependencies = [
     "imageio>=2.30",
 ]
 
+
 [project.optional-dependencies]
 sim = ["mujoco>=3.1", "robosuite>=1.5"]
+# Client only. GraspGen-X itself runs out of process in its own Python 3.11
+# environment; nothing here pulls in torch. See tpgpt/grasp/client.py.
+graspgen = ["pyzmq>=25", "msgpack>=1.0", "msgpack-numpy>=0.4"]
 dev = ["pytest>=7.4", "pytest-cov>=4.1"]
 
 [tool.setuptools.packages.find]
@@ -29,4 +33,5 @@ filterwarnings = ["ignore::DeprecationWarning"]
 markers = [
     "sim: requires the MuJoCo/robosuite simulator (slower)",
     "slow: takes more than a few seconds",
+    "graspgen: requires the external GraspGen-X server (skipped when unreachable)",
 ]
