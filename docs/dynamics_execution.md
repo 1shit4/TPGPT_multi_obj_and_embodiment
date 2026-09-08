@@ -436,3 +436,39 @@ which always passes a real tool offset; it becomes wrong the moment anyone runs
 the tool-frame ablation. The fix belongs in its own commit, coordinated, because
 the consumer is the parallel session's file and changing the system and the
 ruler together is what §7.26 rule 6 forbids.
+
+---
+
+## 8. Verification status
+
+```bash
+export MUJOCO_GL=egl
+P=/home/ishita/mujoco_env/bin/python
+$P -m pytest tests/unit -q     # 480 passed, 40 s
+$P -m pytest tests -q          # 580 passed, 6 min
+$P -m tpgpt.experiments.sweep_execution --out outputs/dynamics          # quiet
+$P -m tpgpt.experiments.sweep_execution --out outputs/dynamics_loaded --load 0.08
+```
+
+**Unit: 480 passed.** 59 of those are new and cover the gate, the clamp, the
+speed cap, the steering step, the three laws, the composition and the surrogate
+plant. `rollout_policy`'s arithmetic has direct cover for the first time.
+
+**Full suite: 580 passed.** One integration test (`test_graspgen.py::TestServer::
+test_reports_its_loaded_grippers`) failed on the first run and passed on
+re-run — it asserts against the state of the shared GraspGen-X server, which the
+parallel session was using at the time, and it touches none of the files this
+branch changes. Not a defect here, but worth noting as a flaky test whose
+outcome depends on another process.
+
+**Defaults are asserted unchanged**, at the unit level, bitwise: `anchor` at
+`k = 0` equals `integrate`, and an `ExecutionLaw` with explicit defaults equals
+one with none, over hundreds of random draws. The end-to-end proof — three
+reshelving seeds against the baseline commit, compared with `np.array_equal` —
+is queued with the simulator tiers.
+
+**Provenance.** This branch is a `git worktree` at `a89f0e3`, so
+`provenance()` reports it reproducible; the parallel session's uncommitted work
+stays in its own tree. The nine files this branch touches do not overlap the
+three that session is editing, so the merge is clean apart from a possible
+renumbering of `ROBOTICS_NOTES` §7.28 if both sessions added one.
