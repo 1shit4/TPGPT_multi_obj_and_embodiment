@@ -2140,10 +2140,13 @@ tpgpt.grasp.server` reports `loaded grippers`, and that is a record of what has
 been *asked for*, not a whitelist.
 
 **And the server honours `gripper_name` rather than falling back to its
-default.** Worth checking, because `loaded_grippers` did **not** grow after the
-five calls above, which is exactly what a silent fallback to `franka_panda` would
-look like -- and a silent fallback would have made a nine-hand campaign into one
-hand run nine times, which is the same failure as the `build_scene` hardcode.
+default.** Worth checking, because immediately after the five calls above
+`loaded_grippers` still reported only the original three, which is exactly what a
+silent fallback to `franka_panda` would look like -- and a silent fallback would
+have made a nine-hand campaign into one hand run nine times, the same failure as
+the `build_scene` hardcode. (After the nine-hand sweep it reports all nine, so
+that reading was transient rather than a real symptom; the check below was run
+before that was known and stands on its own regardless.)
 
 The test is geometric. A grasp pose is anchored at the gripper *base*, which sits
 `tcp_depth` back from the fingertips along the approach, so a deeper hand's base
@@ -2196,6 +2199,154 @@ measure failed: one sign across a closing sweep, the same fraction at two hands'
 different midpoints, a squeeze reported above 1 rather than clipped, `nan` rather
 than 0.0 for an uncalibrated hand, an unchanged reading under a 90-degree wrist
 roll, and each of the four preconditions catching its own historical bug.
+
+### 7.29 The grasp centre is a good enough representation of a grasp
+
+The grasp cube is centred on the grasp point with a **fixed** 20 mm half extent
+and encodes nothing about the hand -- not the jaw aperture, not the fingertip
+depth, not the finger count. Every keypoint result before this was measured on a
+Panda, so the cross-embodiment claim rested on an untested assumption.
+
+A hand can reach the map through exactly two channels, and both are *inputs* to
+it rather than parameters of it: which grasp GraspGen-X returns for that hand,
+since the planner conditions on its swept volume; and the tool offset the labels
+are expressed in, `contact_offset(hand)`, which spans **24.3 mm (yumi) to
+134.4 mm (inspire)**, a factor of 5.5. So a construction that quietly depended on
+the hand would show `min det(J)`, the aim or the transported orientation moving
+with one of those. That is the test.
+
+All nine registered hands, five objects, four constructions, real cached
+GraspGen-X candidates per hand at mid grasp height, geometry only. 150 cells,
+**134 scored**. `outputs/keypoints_grippers/`.
+
+**Pooled, over every hand and object:**
+
+| construction | n | `min det` med | `min det` min | aim med | orient med | orient max | resid med |
+|---|---|---|---|---|---|---|---|
+| cloud box | 35 | 0.629 | 0.198 | 62.2 mm | 6.10 deg | 38.2 deg | 0.14 um |
+| task-frame cube | 35 | 0.961 | 0.549 | 0.0 mm | 4.14 deg | 39.4 deg | 0.65 um |
+| **grasp-pose cube** | 35 | 0.916 | 0.555 | 0.0 mm | **0.82 deg** | **1.8 deg** | 0.53 um |
+| composed | 29 | 0.456 | 0.102 | 6.8 mm | 1.11 deg | 10.5 deg | **10 864 um** |
+
+`det(J) > 0` holds on every cell of all four. The residual gate of 1e-5 is met by
+35/35 of each of the first three and by **0/29** of the composed variant.
+
+#### The answer: yes, on three independent measurements
+
+**1. The transported orientation is hand-independent and an order of magnitude
+better.** The grasp-pose cube's per-hand median runs **0.5 to 1.6 degrees** across
+all nine hands, worst single cell **1.8 degrees**. The cloud box, on the same
+grasps and objects, runs 5.4 to 14.3 with a worst cell of 38.2. Seven times better
+in the median, twenty times at the tail, and the spread across hands is eight
+times tighter (sd of the nine hand medians: 0.33 deg against 2.75).
+
+**2. Conditioning does not track the tool offset.** Correlating each hand's
+median `min det(J)` against its offset, over the nine hands:
+
+| construction | Pearson r(tool offset, median `min det`) |
+|---|---|
+| cloud box | **-0.616** |
+| grasp-pose cube | **+0.135** |
+
+The cloud box degrades as the hand gets deeper, which is mechanically sensible:
+a deeper hand puts the label path further from the object's centroid, and that
+centroid is where its box is centred. The cube shows essentially nothing across a
+5.5x range. The UMI at 117.2 mm scores 0.889 and the Inspire at 134.4 mm scores
+0.956 against the Panda's 0.693 at 41.1 mm -- the *source* hand is not the best.
+
+**3. The object moves the map more than the hand does.** Taking each hand's
+median across its objects and each object's median across its hands:
+
+| construction | metric | sd of 9 hand medians | sd of 5 object medians | ratio |
+|---|---|---|---|---|
+| cloud box | `min det` | 0.058 | 0.208 | 3.6x |
+| grasp-pose cube | `min det` | 0.077 | 0.152 | 2.0x |
+| cloud box | orient | 2.749 deg | 4.616 deg | 1.7x |
+| grasp-pose cube | orient | **0.332 deg** | **0.465 deg** | 1.4x |
+
+A supporting measurement rather than the main one -- 2.0x is not enormous. The
+decisive numbers are in point 1, where the *absolute* level differs sevenfold and
+not merely the spread.
+
+**Caveat, stated rather than buried.** `r(aperture, median orientation error) =
++0.499` for the grasp-pose cube: a wider jaw correlates with slightly worse
+orientation. The whole correlated range is 0.5 to 1.6 degrees, against a quantity
+the cloud box gets wrong by up to 38, so the effect is real and negligible.
+
+**This is geometry, not execution.** It says the map is well conditioned, exact
+at its keypoints and correctly oriented for every hand. It says nothing about
+whether the arm can follow the resulting path or the hand can hold the object.
+That is Tier 2 and it is not answered here.
+
+#### Composition is dead, and this is what killed it
+
+It **violates property (i)**: median keypoint residual **10 864 um -- 10.9 mm** --
+against 0.14 to 0.65 um for the other three, with **0 of 29 cells** meeting the
+gate all 105 cells of the other three meet. A map that misses its own keypoints by
+a centimetre has no exactness guarantee left to spend, which is the entire reason
+Sec. III-D interpolates them exactly.
+
+It also refuses on 6 of 35 cells, `fit_local_correction` raising because the
+correction exceeds its own 30 mm locality: 35.8 mm (robotiq140/cereal), 38.4
+(rethink), 43.1 (umi), 49.1 (inspire), 72.7 (yumi/cereal), 30.8 (yumi/lemon).
+The guard added in the earlier round is doing exactly its job -- without it those
+would have been silent 30-70 mm deformations. And it loses the aim it existed to
+keep: 6.8 mm median against the plain cube's exact 0.0.
+
+#### A gap this exposed: a cube cannot tell you the object's width
+
+`diagnose.closing_budget` derives the aiming tolerance as
+`(aperture - object width) / 2` from the target keypoints. With a fixed grasp
+cube that cannot work, and the sweep shows it plainly -- width read from the
+keypoints, averaged per object:
+
+| construction | width read from the keypoints |
+|---|---|
+| cloud box | bread 43.6, can 45.2, cereal 46.2, lemon 26.4, milk 60.4 mm |
+| **grasp cube** | **40.0 mm for every object** |
+
+40.0 mm is the cube's own 2 x 20 mm extent. **This is not a defect in the
+construction** -- removing the object's size from the keypoints is exactly what
+kills the volume scaling of 7.22 -- but it means the size cannot be read back out
+of them, and a budget derived from a cube gives a lemon and a milk carton the
+same tolerance.
+
+Fixed by recording `metrics["object_width_closing"]` from the **cloud**, at the
+one point in `pipeline.run` where both the cloud and the chosen grasp are in
+scope. `closing_budget` prefers that and returns `None` for a cube set without
+it, rather than reporting the cube.
+
+A second and more serious defect in the same function was found at the same time:
+it had been taking the extent over **all** of `target_keypoints`, which holds the
+placed block as well as the picked one, so the "width" was the pick-to-place
+distance (239-277 mm) against an aperture of at most 125 mm and the budget
+clamped to **0.0 for every object and every hand**. Zero is a plausible number,
+which makes it worse than `None`: indistinguishable from a genuinely impossible
+grasp, and precisely the failure this function's `None` return was written to
+prevent (7.13). It was invisible because every test fake in `test_diagnose.py`
+carried `.points` and no `.labels`, so there was no placed block to exclude --
+the fake was simpler than the object the function actually receives.
+
+#### Two systematic skips, one of which corrects an earlier reading
+
+| skip | cells | cause |
+|---|---|---|
+| lemon | 8 of 9 hands | GraspGen-X raises `selected index k out of range` on its 17-point cloud, below `MIN_CLOUD_POINTS` of 40 and too few for the planner's top-k. **Hand-independent** |
+| milk | panda and inspire only | every one of 100 candidates lies beyond the 45 deg approach filter, closest 49.8 deg. **Hand-dependent** -- the other seven hands each found a milk grasp inside the filter, because the planner conditions on the hand's swept volume |
+
+The milk had been recorded as failing the filter outright. That was true of the
+one hand it had been measured on.
+
+#### One more thing the rebuilt-per-hand scene revealed
+
+**The same seed does not settle the objects identically across hands.** The
+placement sampler is seeded the same, but the scene's 60 settle steps then run
+with a different gripper attached, and the can comes to rest at
+`[-0.1255, -0.0683, 0.8399]` with a Panda against `[-0.1139, -0.0777, 0.8426]`
+with a Robotiq 2F-140 -- **14.6 mm apart**. Every cross-hand comparison carries
+that difference by construction. It is recorded per row as `object_position`
+rather than assumed away, and the reproducibility precondition is keyed per hand
+so it does not report this as a failure.
 
 ## 8. Open items
 

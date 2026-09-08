@@ -348,6 +348,17 @@ def run(
             return _fail(result, "map_not_a_diffeomorphism",
                          "no surviving grasp produced a valid transportation map")
         result.grasp, sets, executable = chosen
+        # The object's width along **this grasp's own** closing axis, taken from
+        # the cloud. Recorded here because this is the only place both the cloud
+        # and the chosen grasp are in scope, and because ``closing_budget``
+        # cannot get it from the keypoints when they are a fixed grasp cube --
+        # their extent is then the cube's 40.0 mm for every object alike (7.28).
+        #
+        # Not an axis-aligned extent: a 30 x 100 mm box yawed 45 degrees
+        # measures 92 x 92 and reads as ungraspable (7.18).
+        result.metrics["object_width_closing"] = float(
+            np.ptp(cloud.points @ result.grasp.closing)
+        )
         result.alternatives = [g for g in candidates if g is not result.grasp][:5]
         result.metrics["executable_fraction"] = executable
         source_set, target_set = _select_parts(sets[0], sets[1], keypoint_parts)

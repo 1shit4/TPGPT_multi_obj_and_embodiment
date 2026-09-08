@@ -460,6 +460,58 @@ class TestClosingBudget:
         assert closing_budget(result) == 0.0
 
 
+    def test_a_recorded_cloud_width_is_preferred_over_the_keypoints(self):
+        """Where the object's size is actually known.
+
+        With ``box="grasp_cube"`` the keypoints are a fixed cube, so the width
+        read from them is 40.0 mm for a lemon and for a milk carton alike. The
+        cloud knows the difference; the keypoints deliberately do not.
+        """
+        aperture = _aperture_or_skip()
+
+        class Keys:
+            points = np.array([[-0.020, 0, 0], [0.020, 0, 0]])
+            labels = ["pick_nnn", "pick_pnn"]
+
+        result = RunResult(prompt="p", gripper="panda", shelf_variant="c", seed=0)
+        result.grasp, result.target_keypoints = _grasp(), Keys()
+        result.metrics["object_width_closing"] = 0.060
+        # 60 mm from the cloud, not the 40 mm the keypoints would give.
+        assert closing_budget(result) == pytest.approx((aperture - 0.060) / 2)
+
+    def test_a_cube_keypoint_set_with_no_cloud_width_refuses(self):
+        """``None``, not the cube's own 40 mm.
+
+        Reporting the cube would give every object the same budget, which is a
+        plausible number and not a measurement of anything -- the failure this
+        function's ``None`` return exists to prevent.
+        """
+        _aperture_or_skip()
+
+        class Keys:
+            points = np.array([[-0.020, 0, 0], [0.020, 0, 0]])
+            labels = ["pick_nnn", "pick_pnn"]
+            metadata = {"tgt_pick": {"block_kind": "grasp_cube",
+                                     "cube_half_extent": 0.02}}
+
+        result = RunResult(prompt="p", gripper="panda", shelf_variant="c", seed=0)
+        result.grasp, result.target_keypoints = _grasp(), Keys()
+        assert closing_budget(result) is None
+
+    def test_a_fitted_box_keypoint_set_still_measures_from_the_keypoints(self):
+        """The cloud box does know the object's width, so it is used."""
+        aperture = _aperture_or_skip()
+
+        class Keys:
+            points = np.array([[-0.015, 0, 0], [0.015, 0, 0]])
+            labels = ["pick_nnn", "pick_pnn"]
+            metadata = {"tgt_pick": {"block_kind": "cloud"}}
+
+        result = RunResult(prompt="p", gripper="panda", shelf_variant="c", seed=0)
+        result.grasp, result.target_keypoints = _grasp(), Keys()
+        assert closing_budget(result) == pytest.approx((aperture - 0.030) / 2)
+
+
 class TestAttractorDrift:
     """Pointwise deviation of the integrated attractor from its planned path."""
 

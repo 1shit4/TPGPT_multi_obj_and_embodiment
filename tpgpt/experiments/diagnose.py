@@ -789,11 +789,23 @@ def closing_budget(result, fraction: float = CLOSING_BUDGET_FRACTION) -> float |
     axis-aligned bounding box instead is a known trap: a 30 x 100 mm box yawed
     45 degrees measures 92 x 92 and reads as ungraspable (section 7.18).
 
-    Measured on the **pick block alone**. A first version took the extent over
-    all of ``target_keypoints``, which holds the placed block as well, so the
-    "width" was the pick-to-place distance (239-277 mm) and the budget clamped
-    to 0.0 for every object and every hand. See the comment in the body: a zero
-    budget is a plausible number, which makes it worse than no number.
+    The width comes from ``metrics["object_width_closing"]``, recorded from the
+    **cloud** where the object's size is actually known, and falls back to the
+    target keypoints' **pick block alone**.
+
+    Two corrections are behind that, both measured:
+
+    * A first version took the extent over all of ``target_keypoints``, which
+      holds the placed block as well, so the "width" was the pick-to-place
+      distance (239-277 mm) and the budget clamped to 0.0 for every object and
+      every hand. A zero budget is a plausible number, which makes it worse
+      than no number.
+    * With ``box="grasp_cube"`` the box points are a fixed cube on the grasp,
+      so their extent is 40.0 mm for every object -- the cube's own size. That
+      is the construction working as intended: removing the object's size from
+      the keypoints is the whole point of it. But it means the width cannot be
+      read back out of them, so this **returns ``None``** for a cube set with
+      no recorded cloud width rather than reporting the cube.
 
     Returns:
         The budget in metres, or ``None`` when neither the gripper geometry nor
@@ -816,30 +828,73 @@ def closing_budget(result, fraction: float = CLOSING_BUDGET_FRACTION) -> float |
     except Exception:  # pragma: no cover - absent sibling checkout
         return None
 
-    # **The pick block only.** ``scene_keypoints`` emits two blocks -- the
-    # object where it is picked and the same object where it is placed -- and
-    # ``_select_parts`` keeps both, so ``target_keypoints.points`` spans the
-    # whole pick-to-place distance. Projected onto the closing axis that is 239
-    # to 277 mm depending on the object, against an aperture of at most 125 mm,
-    # so ``0.5 * (aperture - width)`` clamped at zero and this function returned
-    # **0.0 for every object and every hand**.
+    # **From the cloud when it is recorded, because the keypoints may not know
+    # the object's size any more.** With ``box="grasp_cube"`` the nine box
+    # points are a *fixed* cube on the grasp -- deliberately, since that is what
+    # removes the object-size volume scaling -- so their extent along the closing
+    # axis is the cube's own 2 x 20 mm for every object alike. Measured across
+    # nine hands and five objects:
     #
-    # A budget of zero says "the hand has no room at all", which is a plausible
-    # number and therefore the worst possible failure: it is not distinguishable
-    # from a genuinely impossible grasp, and it is exactly what the ``None``
-    # return above exists to avoid for the *other* failure mode. The jaws close
-    # at the pick, so the pick block's extent is the width they meet.
-    points = getattr(result.target_keypoints, "points", None)
-    labels = getattr(result.target_keypoints, "labels", None)
-    if points is None or len(points) < 2:
-        return fraction * aperture
-    points = np.asarray(points, dtype=float)
-    if labels is not None and len(labels) == len(points):
-        pick = [i for i, label in enumerate(labels) if label.startswith("pick_")]
-        if len(pick) >= 2:
-            points = points[pick]
-    width = float(np.ptp(points @ result.grasp.closing))
+    # ==========================  ==========================================
+    # construction                width read from the keypoints (mm)
+    # ==========================  ==========================================
+    # cloud box                   bread 43.6, can 45.2, cereal 46.2,
+    #                             lemon 26.4, milk 60.4  -- the real widths
+    # grasp cube                  **40.0 for every object**  -- the cube
+    # ==========================  ==========================================
+    #
+    # So the cube construction erases from the keypoints the very quantity this
+    # function needs, and that is a consequence of the construction working as
+    # intended rather than a defect in it. The width has to come from the cloud.
+    width = None
+    metrics = getattr(result, "metrics", None) or {}
+    recorded = metrics.get("object_width_closing")
+    if recorded is not None and np.isfinite(recorded):
+        width = float(recorded)
+
+    if width is None:
+        # **The pick block only.** ``scene_keypoints`` emits two blocks -- the
+        # object where it is picked and the same object where it is placed --
+        # and ``_select_parts`` keeps both, so ``target_keypoints.points`` spans
+        # the whole pick-to-place distance: 239 to 277 mm on the real objects,
+        # against an aperture of at most 125 mm, so the budget clamped to 0.0
+        # for every object and every hand. Zero is a *plausible* number and
+        # therefore worse than ``None``: indistinguishable from a genuinely
+        # impossible grasp.
+        points = getattr(result.target_keypoints, "points", None)
+        labels = getattr(result.target_keypoints, "labels", None)
+        if points is None or len(points) < 2:
+            return fraction * aperture
+        points = np.asarray(points, dtype=float)
+        if labels is not None and len(labels) == len(points):
+            pick = [i for i, label in enumerate(labels) if label.startswith("pick_")]
+            if len(pick) >= 2:
+                points = points[pick]
+
+        # Refuse if these keypoints are a fixed cube. Their extent is the
+        # cube's, not the object's, and returning it would give the same budget
+        # for a lemon and a milk carton -- a plausible number that is simply
+        # not a measurement of this object.
+        if _is_grasp_cube(result.target_keypoints):
+            return None
+        width = float(np.ptp(points @ result.grasp.closing))
+
     return max(0.5 * (aperture - width), 0.0)
+
+
+def _is_grasp_cube(keypoints) -> bool:
+    """Whether a keypoint set's box block is a fixed cube rather than a fitted box.
+
+    Read from the metadata ``block_kind`` that ``object_keypoints`` records, so
+    it is what the construction *said* it did rather than inferred from the
+    numbers. Any block being a cube is enough: the pick block is the one whose
+    extent would be misread, and both blocks always share a mode.
+    """
+    metadata = getattr(keypoints, "metadata", None) or {}
+    for block in metadata.values():
+        if isinstance(block, dict) and block.get("block_kind") == "grasp_cube":
+            return True
+    return False
 
 
 def attractor_drift(rollout, transported) -> dict:

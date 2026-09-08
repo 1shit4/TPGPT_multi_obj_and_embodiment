@@ -703,15 +703,20 @@ def gripper_sweep(
                         # ungraspable (7.18).
                         keypoints = result.get("target_keypoints")
                         points = getattr(keypoints, "points", None)
-                        labels = getattr(keypoints, "labels", None)
+                        # ``roles``, not ``labels``: ``labels`` is this
+                        # function's own parameter -- the source demonstration --
+                        # and binding it here shadowed it for every later cell.
+                        # The first cell scored and the other 139 raised
+                        # ``'list' object has no attribute 'orientations'``.
+                        roles = getattr(keypoints, "labels", None)
                         # The **pick** block only. The set also holds the placed
                         # block, and the extent over both is the pick-to-place
                         # distance -- 239 to 277 mm, against an aperture of at
                         # most 125 mm, which clamps every budget to zero.
-                        if points is not None and labels is not None:
+                        if points is not None and roles is not None:
                             pick = [
-                                i for i, lab in enumerate(labels)
-                                if lab.startswith("pick_")
+                                i for i, role in enumerate(roles)
+                                if role.startswith("pick_")
                             ]
                             if len(pick) >= 2:
                                 points = np.asarray(points, dtype=float)[pick]

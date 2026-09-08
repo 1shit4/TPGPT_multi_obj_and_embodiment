@@ -94,18 +94,41 @@ REPLAY_VARIANTS = ("0_cloud_box", "2_cube_grasp_pose")
 #: replay would be measuring a construction the pipeline would never reach.
 REPLAY_OBJECTS = ("cereal", "milk", "can", "bread")
 
-#: Grippers replayed. Limited to what the GraspGen-X server currently has
-#: loaded, which is what real candidates can be generated for -- other pairs
-#: need the server restarted with them.
+#: Grippers replayed.
+#:
+#: **Not** limited by what the server has resident: it loads a sampler lazily on
+#: the first request naming a gripper, so any registered pair works and the first
+#: call for a hand costs 25 to 72 s instead of the usual 4 to 12 (7.28). An
+#: earlier version of this note said otherwise and restricted the set to three
+#: hands for no reason.
 #:
 #: The question these answer: the grasp cube is centred on the grasp TCP with a
 #: **fixed** half extent and encodes nothing about the hand -- not the jaw
-#: aperture, not the fingertip depth. If that is a good enough representation,
-#: the map should behave the same across hands whose contact offsets differ by
-#: half again. These three span 41.1 mm (panda), 47.8 mm (robotiq85) and 60.8 mm
-#: (robotiq140). The extremes of the registry -- umi at 117.2 mm and inspire at
-#: 134.4 mm -- are **not** covered and remain the real stress case.
-REPLAY_GRIPPERS = ("panda", "robotiq85", "robotiq140")
+#: aperture, not the fingertip depth, not the finger count. If that is a good
+#: enough representation, the map should behave the same across hands. The
+#: geometry sweep already says it does; this asks whether the plan *executes*.
+#:
+#: Six hands spanning the registry's tool offsets and both kinematic families
+#: that lift anything:
+#:
+#: =========== =========== ========== =====================================
+#: hand        tool offset aperture   why it is here
+#: =========== =========== ========== =====================================
+#: yumi            24.3 mm    50 mm   narrowest jaw; smallest offset
+#: xarm            26.7 mm    85 mm   revolute, 90 deg closing angle
+#: panda           41.1 mm    80 mm   the source hand, and the control
+#: robotiq85       47.8 mm    85 mm   revolute linkage
+#: robotiq140      60.8 mm   125 mm   widest jaw, deepest grip_site (270 mm)
+#: umi            117.2 mm    80 mm   the extreme: 15 mm depth tolerance
+#: =========== =========== ========== =====================================
+#:
+#: ``rethink`` is omitted only to keep the run near 45 minutes; it sits at
+#: 35.1 mm, between the xarm and the panda, and adds no span. ``robotiq3f`` and
+#: ``inspire`` are multi-finger: the 3F lifts a can but its single closing axis
+#: is an approximation (anisotropy 4.3), and the Inspire hand's fingers travel
+#: 0.7 to 6.5 mm against 29 to 90 mm for every other hand, so it does not
+#: actuate and cannot execute any plan (7.28).
+REPLAY_GRIPPERS = ("yumi", "xarm", "panda", "robotiq85", "robotiq140", "umi")
 
 
 def _closure_summary(replay) -> dict:
@@ -262,8 +285,9 @@ def main(
     rows = []
     variants = [v for v in VARIANTS if v.name in REPLAY_VARIANTS]
     print(f"\n{'variant':20}{'hand':11}{'object':8}{'reach':>7}{'trackmm':>9}"
-          f"{'slip':>7}{'held':>6}{'place':>8}{'worst seg':>11}{'ok':>4}")
-    print("-" * 90, flush=True)
+          f"{'slip':>7}{'held':>6}{'clos@lift':>8}{'closMax':>8}{'place':>8}"
+          f"{'worst seg':>11}{'ok':>4}")
+    print("-" * 106, flush=True)
 
     # **A fresh scene per replay.** A replay drives the arm through a whole
     # trajectory and closes the jaws, so it leaves the object displaced and the
@@ -408,6 +432,9 @@ def _replay_line(row: dict) -> str:
         f"{g('reachable_fraction'):7.0%}"
         f"{g('tracking_error_mean') * 1000:9.1f}"
         f"{g('slip_max') * 1000:7.1f}{g('held_steps', 0):6.0f}"
+        # Cross-hand, so "the jaws never shut" is distinguishable from "they
+        # shut and the object came out" while the run is still going (7.28).
+        f"{g('closure_at_lift'):8.2f}{g('closure_max'):8.2f}"
         f"{g('placement_error_xy') * 1000:8.1f}"
         f"{str(row.get('worst_segment', '-')):>11}"
         f"{'  yes' if row.get('success') else '   no':>4}"
@@ -418,5 +445,18 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--out", default="outputs/keypoint_replay")
     parser.add_argument("--slot", default="top_middle")
+    parser.add_argument(
+        "--grippers", default=None,
+        help=(
+            "Comma-separated registry short names. Defaults to the six-hand "
+            "set in REPLAY_GRIPPERS, which spans 24.3 to 117.2 mm of tool "
+            "offset and 50 to 125 mm of aperture."
+        ),
+    )
     args = parser.parse_args()
-    main(args.out, args.slot)
+    main(
+        args.out,
+        args.slot,
+        grippers=tuple(args.grippers.split(",")) if args.grippers
+        else REPLAY_GRIPPERS,
+    )
