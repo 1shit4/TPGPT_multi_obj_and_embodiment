@@ -33,6 +33,7 @@ from tpgpt.experiments.reshelving_pipeline import record_source_placement
 from tpgpt.perception.cameras import object_point_cloud
 from tpgpt.reporting.html import write_manifest
 from tpgpt.sim.keypoints import (
+    CORNER_NAMES,
     GraspFrame,
     ObjectPlacement,
     GRASP_CUBE_HALF_EXTENT,
@@ -46,7 +47,7 @@ from tpgpt.metrics.transport import (
     orientation_transport_error,
     tilt_profile,
 )
-from tpgpt.transport.maps import TransportMap
+from tpgpt.transport.maps import TransportMap, fit_local_correction
 from tpgpt.viz.keypoint_figures import (
     figure_ablation,
     figure_keypoint_scene,
@@ -81,6 +82,13 @@ class KeypointVariant:
     orientation: str = "task"
     cube_half_extent: float = GRASP_CUBE_HALF_EXTENT
     contacts: bool = False
+    #: Fit the jaw contacts as a **second, local stage** composed on top of the
+    #: box map, instead of throwing them into the same map. Determinants
+    #: multiply under composition, so each stage is verifiable on its own, and
+    #: the correction's length scale confines it to the grasp's neighbourhood.
+    compose_contacts: bool = False
+    #: Locality radius of that second stage, in metres.
+    locality: float = 0.03
 
     @property
     def aim_is_pinned(self) -> bool:
@@ -96,16 +104,34 @@ class KeypointVariant:
         return self.box == "grasp_cube"
 
 
-#: The constructions compared. Variant 0 is today's default and the control.
+#: The constructions compared.
+#:
+#: Two are controls and two are the question. The cloud box is kept because it is
+#: today's default and because every claim about the cube is a *contrast* with
+#: it; the task-frame cube is kept because it isolates what the grasp pose adds.
+#: The two that matter are the last two: the cube laid out in the **full grasp
+#: pose**, which is the only construction that transports the grasp's approach
+#: tilt at all, and that same cube with the jaw contacts added as a **composed
+#: local stage** rather than thrown into the same map.
 VARIANTS = (
     KeypointVariant("0_cloud_box"),
-    KeypointVariant("1_cloud_box_contacts", contacts=True),
-    KeypointVariant("2_cube_task", box="grasp_cube"),
-    KeypointVariant("3_cube_grasp_pose", box="grasp_cube", orientation="grasp"),
-    KeypointVariant("4_cube_task_contacts", box="grasp_cube", contacts=True),
+    KeypointVariant("1_cube_task", box="grasp_cube"),
+    KeypointVariant("2_cube_grasp_pose", box="grasp_cube", orientation="grasp"),
     KeypointVariant(
-        "5_cube_grasp_pose_contacts", box="grasp_cube", orientation="grasp", contacts=True
+        "3_cube_grasp_pose_composed",
+        box="grasp_cube",
+        orientation="grasp",
+        contacts=True,
+        compose_contacts=True,
     ),
+)
+
+#: Kept available but not swept: contacts in the *same* map. Measured as folding
+#: the cloud box in 10 cells of 10, and as costing the cube up to 63.8 degrees of
+#: transported orientation, which is what motivated composing them instead.
+SAME_MAP_CONTACT_VARIANTS = (
+    KeypointVariant("x_cloud_box_contacts", contacts=True),
+    KeypointVariant("x_cube_task_contacts", box="grasp_cube", contacts=True),
 )
 
 #: Cube half extents swept to confirm the flat region survives real clouds.
@@ -185,6 +211,7 @@ def target_placement(
     grasp_source: str = "recipe",
     gripper: str = "panda",
     grasp_rank: int = 0,
+    reference_approach: np.ndarray | None = None,
 ) -> tuple[ObjectPlacement, np.ndarray]:
     """Describe an object in the scene and where the task wants it.
 
@@ -205,11 +232,29 @@ def target_placement(
             closing axis, which maps a cube's corners onto themselves, so both
             modes produce the identical map. That coincidence is a useful
             internal control and a measurement dead end.
-        grasp_source: ``"recipe"`` derives the grasp from the cloud with
-            :func:`top_down_grasp`, which always approaches straight down.
-            ``"graspgen"`` takes a real ranked candidate from GraspGen-X, which
-            carries whatever tilt the planner chose -- the realistic case, and
-            the only one that exercises a hand's actual approach.
+        grasp_source: ``"graspgen"`` takes a real candidate from
+            GraspGen-X, filtered by :data:`MAX_APPROACH_MISMATCH_DEG` against
+            ``reference_approach` exactly as ``filter_grasps`` does, and picks
+            the best-aligned. This is the realistic case and the only one that
+            exercises a hand's actual approach.
+
+            ``"recipe"`` (**the default, for backward compatibility only**)
+            derives the grasp from the cloud with :func:`top_down_grasp`, which
+            always approaches straight down. That makes the task frame and the
+            full grasp pose **coincide**, so it cannot tell those two
+            constructions apart -- useful as an internal control, useless as a
+            measurement. It is also the only path that works on a cloud too thin
+            for the planner, which is what
+            ``tests/integration/test_keypoints.py`` relies on when it checks that
+            a sparse cloud is visible as such.
+
+            **Every experiment in this module passes ``"graspgen"`` explicitly.**
+            The default is left on the recipe so that callers testing the
+            *keypoint construction* rather than the grasp source keep working
+            without a running server.
+        reference_approach: The demonstration's own approach direction, from
+            ``pipeline._demonstrated_approach(labels)``. Required for
+            ``"graspgen"``.
         gripper: Registry short name, when ``grasp_source="graspgen"``.
         grasp_rank: Which ranked candidate to take.
 
@@ -224,6 +269,8 @@ def target_placement(
     if grasp_source == "recipe":
         grasp = top_down_grasp(cloud.points, height_fraction=height_fraction)
     elif grasp_source == "graspgen":
+        from tpgpt.experiments.pipeline import _demonstrated_approach
+        from tpgpt.grasp.filters import MAX_APPROACH_MISMATCH_DEG
         from tpgpt.grasp.pipeline import grasps_for_cloud
 
         grasp_set = grasps_for_cloud(cloud, gripper)
@@ -232,7 +279,37 @@ def target_placement(
                 f"GraspGen-X returned no candidate for {instance!r} with "
                 f"{gripper!r}; refusing to substitute a top-down recipe"
             )
-        grasp = GraspFrame.from_grasp(grasp_set.grasps[min(grasp_rank, len(grasp_set) - 1)])
+        # Apply the pipeline's own approach filter. Without it the planner's
+        # top-scoring candidate is routinely 119-174 degrees from the
+        # demonstration's grasp orientation -- very nearly inverted -- and a
+        # construction that transports orientation faithfully then rotates the
+        # world by the same angle, turning the demonstrated lift into a descent.
+        # ``filter_grasps`` rejects those, so measuring without the filter
+        # measures a candidate the pipeline would never execute.
+        if reference_approach is None:
+            raise ValueError(
+                "grasp_source='graspgen' needs a reference_approach to filter "
+                "against; pass _demonstrated_approach(labels)"
+            )
+        reference = np.asarray(reference_approach, dtype=float).reshape(3)
+        angles = np.degrees(
+            np.arccos(
+                np.clip([g.approach @ reference for g in grasp_set.grasps], -1.0, 1.0)
+            )
+        )
+        keep = np.flatnonzero(angles <= MAX_APPROACH_MISMATCH_DEG)
+        if not len(keep):
+            raise RuntimeError(
+                f"every one of {len(grasp_set)} candidates for {instance!r} is "
+                f"beyond the {MAX_APPROACH_MISMATCH_DEG:.0f} deg approach filter "
+                f"(closest {angles.min():.1f} deg); the pipeline would reject "
+                "this object before keypoints are built"
+            )
+        # Best-aligned first, then by rank within that.
+        order = keep[np.argsort(angles[keep])]
+        grasp = GraspFrame.from_grasp(
+            grasp_set.grasps[order[min(grasp_rank, len(order) - 1)]]
+        )
     else:
         raise ValueError(
             f"unknown grasp_source {grasp_source!r}; expected 'recipe' or 'graspgen'"
@@ -298,7 +375,23 @@ def transport(
         orientation=variant.orientation,
         cube_half_extent=variant.cube_half_extent,
     )
-    transport_map = TransportMap().fit(S.points, T.points)
+    if variant.compose_contacts:
+        # Two stages: the box carries the trajectory, the contacts are pinned by
+        # a local correction on top. Determinants multiply, so each stage stays
+        # separately verifiable and the correction's length scale keeps it off
+        # the rest of the path -- neither of which a single map can offer.
+        box_roles = {"center", *CORNER_NAMES}
+        is_box = [lab.split("_", 1)[1] in box_roles for lab in S.labels]
+        is_contact = [lab.split("_", 1)[1].startswith("grasp_") for lab in S.labels]
+        stage1 = TransportMap().fit(S.points[is_box], T.points[is_box])
+        transport_map = fit_local_correction(
+            stage1,
+            S.points[is_contact],
+            T.points[is_contact],
+            locality=variant.locality,
+        )
+    else:
+        transport_map = TransportMap().fit(S.points, T.points)
     warped = transport_map.transport_positions(source_labels.positions)
     warped_rotations = transport_map.transport_orientations(
         source_labels.positions, source_labels.orientations
@@ -353,6 +446,20 @@ def transport(
         "cloud_points": int(len(target.points)),
         # --- the variant, and what it makes measurable ----------------------
         "variant": variant.name,
+        "composed": bool(variant.compose_contacts),
+        "locality": variant.locality if variant.compose_contacts else None,
+        **(
+            {
+                "min_det_stage1": float(
+                    transport_map.stage_reports(source_labels.positions)[0].min_determinant
+                ),
+                "min_det_stage2": float(
+                    transport_map.stage_reports(source_labels.positions)[1].min_determinant
+                ),
+            }
+            if variant.compose_contacts
+            else {}
+        ),
         "box": variant.box,
         "orientation": variant.orientation,
         "cube_half_extent": (
@@ -441,6 +548,7 @@ def summarise(label: str, result: dict) -> dict:
             k: result[k]
             for k in (
                 "variant", "box", "orientation", "cube_half_extent", "contacts",
+                "composed", "locality", "min_det_stage1", "min_det_stage2",
                 "aim_is_pinned", "aim_map", "aim_label", "aim_path_min",
                 "orientation_error_deg", "det_at_grasp", "lift_deviation_deg",
                 "tilt_max", "tilt_median", "tilt_mid_path", "tilt_argmax",
@@ -459,9 +567,10 @@ def tilt_sweep(
     slot: str = "top_middle",
     variants=VARIANTS,
     tilts=TILT_OFFSETS,
-    grasp_source: str = "recipe",
+    grasp_source: str = "graspgen",
     gripper: str = "panda",
     obs=None,
+    reference_approach=None,
 ) -> list[dict]:
     """Every construction against an approach tilted out of the support plane.
 
@@ -481,6 +590,7 @@ def tilt_sweep(
                 target, _ = target_placement(
                     env, name, slot, height_fraction=0.5, obs=obs,
                     tilt_offset_deg=tilt, grasp_source=grasp_source, gripper=gripper,
+                    reference_approach=reference_approach,
                 )
             except (ValueError, RuntimeError) as exc:
                 rows.append({"label": f"{name} tilt={tilt:.0f}", "object": name,
@@ -513,6 +623,8 @@ def variant_sweep(
     cube_sizes=CUBE_SIZES,
     grasp_fractions=(1.0, 0.5),
     obs=None,
+    reference_approach=None,
+    grasp_source: str = "graspgen",
 ) -> dict:
     """Every construction against every object, scored geometrically.
 
@@ -533,7 +645,8 @@ def variant_sweep(
         for fraction in grasp_fractions:
             try:
                 target, _ = target_placement(
-                    env, name, slot, height_fraction=fraction, obs=obs
+                    env, name, slot, height_fraction=fraction, obs=obs,
+                    grasp_source=grasp_source, reference_approach=reference_approach,
                 )
             except ValueError as exc:  # too little cloud to describe the object
                 variant_rows.append(

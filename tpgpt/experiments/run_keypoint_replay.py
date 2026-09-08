@@ -53,7 +53,11 @@ from pathlib import Path
 import numpy as np
 
 from tpgpt.experiments.diagnose import grasp_slip, object_probe
-from tpgpt.experiments.pipeline import SOURCE_GRIPPER, _to_tool_frame
+from tpgpt.experiments.pipeline import (
+    SOURCE_GRIPPER,
+    _demonstrated_approach,
+    _to_tool_frame,
+)
 from tpgpt.experiments.reshelving_pipeline import record_source_placement
 from tpgpt.experiments.run_keypoint_transport import (
     ABLATION_OBJECTS,
@@ -74,7 +78,11 @@ from tpgpt.transport.labels import PolicyLabels
 #: is explicit that end-to-end runs confirm a result rather than find one.
 #: The control plus the two cube orientations is the smallest set that can
 #: separate "the cube helps" from "the grasp pose costs reachability".
-REPLAY_VARIANTS = ("0_cloud_box", "2_cube_task", "3_cube_grasp_pose")
+REPLAY_VARIANTS = (
+    "0_cloud_box",
+    "2_cube_grasp_pose",
+    "3_cube_grasp_pose_composed",
+)
 
 #: Objects replayed. The lemon is excluded: its cloud is 17 points, below the
 #: pipeline's own ``MIN_CLOUD_POINTS`` of 40, and GraspGen-X refuses it -- so a
@@ -172,6 +180,11 @@ def main(
     # much suspicion as a surprising one.
     labels = _to_tool_frame(labels, contact_offset(SOURCE_GRIPPER))
 
+    # Real planner grasps, filtered exactly as ``filter_grasps`` filters them.
+    # A top-down recipe makes the task frame and the full grasp pose coincide,
+    # so it cannot separate the two constructions this tier exists to compare.
+    reference_approach = _demonstrated_approach(labels)
+
     # Position control has to be chosen at construction; assigning it afterwards
     # silently does nothing.
     from robosuite.controllers import load_composite_controller_config
@@ -205,7 +218,8 @@ def main(
             try:
                 obs = env._get_observations()
                 target, _ = target_placement(
-                    env, name, slot, height_fraction=0.5, obs=obs
+                    env, name, slot, height_fraction=0.5, obs=obs,
+                    grasp_source="graspgen", reference_approach=reference_approach,
                 )
                 target.metadata["object_name"] = name
                 # The rebuild is only sound if the seeded scene is reproducible.
