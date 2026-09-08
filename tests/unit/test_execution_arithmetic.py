@@ -318,3 +318,261 @@ def test_the_policy_layer_does_not_import_the_simulator():
     )
     assert out.returncode == 0, out.stderr
     assert out.stdout.strip() == "False", out.stdout
+
+
+# ---------------------------------------------------------------------------
+# The attractor laws and the surrogate-plant bed.
+# ---------------------------------------------------------------------------
+
+from tpgpt.policy.gp_policy import GPPolicy            # noqa: E402
+from tpgpt.policy.rollout import (                     # noqa: E402
+    AnchorSchedule,
+    ExecutionLaw,
+    advance_attractor,
+    advance_step,
+    attractor_step,
+    gate_step,
+    rollout_impedance,
+)
+from tpgpt.transport.labels import PolicyLabels        # noqa: E402
+
+DT = 1.0 / 20.0
+
+
+def straight_line_labels(n=120, speed=0.168):
+    """A constant-speed straight path: the case with a closed-form lag."""
+    x = np.zeros((n, 3))
+    x[:, 0] = np.linspace(0.0, speed * DT * (n - 1), n)
+    return PolicyLabels(
+        positions=x, velocities=np.gradient(x, DT, axis=0),
+        stiffness=np.tile(K_FREE, (n, 1, 1)), damping=np.tile(D_FREE, (n, 1, 1)),
+        time_belief=np.linspace(0, 1, n), time_rate=np.full(n, 1 / (DT * (n - 1))),
+    )
+
+
+class _Prediction:
+    """Minimal stand-in for a PolicyPrediction with one row."""
+
+    def __init__(self, velocity, reference=None, K=K_FREE, D=D_FREE):
+        self.velocity = np.atleast_2d(velocity)
+        self.reference = None if reference is None else np.atleast_2d(reference)
+        self.stiffness, self.damping = np.array([K]), np.array([D])
+
+
+class TestAdvanceAttractor:
+    def test_integrate_matches_the_original_expression(self, rng):
+        for _ in range(200):
+            a, v, gate = rng.normal(size=3) * 0.1, rng.normal(size=3) * 0.2, rng.random()
+            assert np.array_equal(
+                advance_attractor(a, v, DT, gate), a + v * DT * gate
+            )
+
+    def test_a_zero_gain_anchor_is_bitwise_the_integrate_law(self, rng):
+        """The property that protects the validated 17/20 path.
+
+        Every default must reduce to exactly today's behaviour, bit for bit,
+        so a law parameter cannot move the regression by accident.
+        """
+        for _ in range(200):
+            a, v, r, gate = (rng.normal(size=3) * 0.1, rng.normal(size=3) * 0.2,
+                             rng.normal(size=3) * 0.1, rng.random())
+            assert np.array_equal(
+                advance_attractor(a, v, DT, gate, law="anchor", reference=r,
+                                  anchor_gain=0.0),
+                advance_attractor(a, v, DT, gate),
+            )
+
+    def test_reference_is_the_anchor_at_full_gain(self, rng):
+        for _ in range(100):
+            a, v, r = rng.normal(size=3) * 0.1, rng.normal(size=3) * 0.2, rng.normal(size=3)
+            assert np.allclose(
+                advance_attractor(a, v, DT, 1.0, law="reference", reference=r),
+                advance_attractor(a, v, DT, 1.0, law="anchor", reference=r,
+                                  anchor_gain=1.0),
+            )
+
+    def test_reference_at_full_gate_lands_on_the_reference(self):
+        out = advance_attractor(np.zeros(3), np.ones(3), DT, 1.0,
+                                law="reference", reference=np.array([0.5, 0.0, 0.0]))
+        assert np.allclose(out, [0.5, 0.0, 0.0])
+
+    def test_the_result_lies_between_the_integrated_point_and_the_reference(self, rng):
+        """An anchor interpolates; it must never extrapolate past either end."""
+        for _ in range(200):
+            a, v, r = rng.normal(size=3) * 0.1, rng.normal(size=3) * 0.2, rng.normal(size=3) * 0.1
+            gate, k = rng.random(), rng.random()
+            stepped = a + v * DT * gate
+            out = advance_attractor(a, v, DT, gate, law="anchor", reference=r,
+                                    anchor_gain=k, anchor_gated=False)
+            span = np.linalg.norm(r - stepped)
+            assert np.linalg.norm(out - stepped) <= span + 1e-12
+            assert np.linalg.norm(out - r) <= span + 1e-12
+
+    def test_gating_makes_the_anchor_inert_when_the_gate_is_shut(self):
+        """The axis that is easy to leave implicit, and changes what the law means.
+
+        Gated, a shut gate freezes the attractor entirely -- the anchor cannot
+        drag it on while the arm catches up. Ungated, the anchor keeps pulling,
+        which defeats the gate's whole purpose.
+        """
+        a, v, r = np.zeros(3), np.ones(3), np.array([1.0, 0.0, 0.0])
+        gated = advance_attractor(a, v, DT, 0.0, law="anchor", reference=r,
+                                  anchor_gain=0.5, anchor_gated=True)
+        ungated = advance_attractor(a, v, DT, 0.0, law="anchor", reference=r,
+                                    anchor_gain=0.5, anchor_gated=False)
+        assert np.array_equal(gated, a)
+        assert np.linalg.norm(ungated - r) < np.linalg.norm(a - r)
+
+    def test_an_unknown_law_raises(self):
+        with pytest.raises(ValueError, match="unknown attractor law"):
+            advance_attractor(np.zeros(3), np.zeros(3), DT, 1.0, law="teleport")
+
+    def test_a_law_needing_a_reference_refuses_without_one(self):
+        """It must not silently fall back to integrating.
+
+        That is the shape of the by-identity lookup which returned a confident
+        zero for an unmeasured gripper and read as the arm missing its target
+        for weeks (7.13, 7.27).
+        """
+        with pytest.raises(ValueError, match="needs the policy's `reference`"):
+            advance_attractor(np.zeros(3), np.zeros(3), DT, 1.0, law="anchor")
+
+
+class TestAnchorSchedule:
+    def test_it_is_strong_at_rest_and_weak_at_speed(self):
+        s = AnchorSchedule(dwell=0.5, transit=0.05, speed_scale=0.2)
+        assert s.gain(0.0) == pytest.approx(0.5)
+        assert s.gain(1.0) < 0.1
+        assert s.gain(0.0) > s.gain(0.3) > s.gain(1.0)
+
+    def test_it_serialises_for_the_manifest(self):
+        """A callable would serialise as a memory address (7.26 rule 2)."""
+        import json
+
+        json.dumps(AnchorSchedule(dwell=0.5, transit=0.05).to_dict())
+
+    def test_a_constant_gain_still_works(self):
+        law = ExecutionLaw(dt=DT, speed_limit=0.6, max_label_speed=0.2, anchor_gain=0.3)
+        assert law.gain_at(0.0) == 0.3 and law.gain_at(0.2) == 0.3
+
+
+class TestComposition:
+    def test_the_composed_step_equals_its_two_halves(self, rng):
+        """The property that stops the bed and the robot diverging.
+
+        The robot calls the halves, because the infeasibility fallback runs
+        between them; the bed calls the composition. If those disagreed, the
+        sweep would measure something that does not ship, and nothing would
+        fail to say so.
+        """
+        law = ExecutionLaw(dt=DT, speed_limit=0.6, max_label_speed=0.2,
+                           attractor_law="anchor", anchor_gain=0.3)
+        for _ in range(100):
+            pos, att = rng.normal(size=3) * 0.1, rng.normal(size=3) * 0.1
+            pred = _Prediction(rng.normal(size=3) * 0.2, rng.normal(size=3) * 0.1)
+            one = attractor_step(pos, att, pred, law)
+            halves = advance_step(pos, att, gate_step(pos, att, pred, law), law, pred)
+            assert np.array_equal(one.attractor, halves.attractor)
+            assert one.gate == halves.gate and one.max_lag == halves.max_lag
+
+    def test_explicit_defaults_equal_omitted_defaults(self, rng):
+        """Guards the default path against every future edit."""
+        a = ExecutionLaw(dt=DT, speed_limit=0.6, max_label_speed=0.2)
+        b = ExecutionLaw(dt=DT, speed_limit=0.6, max_label_speed=0.2,
+                         attractor_law="integrate", anchor_gain=0.0,
+                         anchor_gated=True, query_at="attractor")
+        for _ in range(100):
+            pos, att = rng.normal(size=3) * 0.1, rng.normal(size=3) * 0.1
+            pred = _Prediction(rng.normal(size=3) * 0.2, rng.normal(size=3) * 0.1)
+            assert np.array_equal(
+                attractor_step(pos, att, pred, a).attractor,
+                attractor_step(pos, att, pred, b).attractor,
+            )
+
+    def test_the_clamp_invariant_holds_for_every_law_and_gain(self, rng):
+        for law_name, gain in (("integrate", 0.0), ("anchor", 0.05), ("anchor", 0.5),
+                               ("anchor", 1.0), ("reference", 0.0)):
+            law = ExecutionLaw(dt=DT, speed_limit=0.6, max_label_speed=0.2,
+                               attractor_law=law_name, anchor_gain=gain)
+            for _ in range(80):
+                pos, att = rng.normal(size=3) * 0.3, rng.normal(size=3) * 0.3
+                pred = _Prediction(rng.normal(size=3) * 0.4, rng.normal(size=3) * 0.3)
+                out = attractor_step(pos, att, pred, law)
+                assert float(np.linalg.norm(out.attractor - pos)) <= out.max_lag + 1e-9
+
+    def test_an_unknown_setting_is_rejected_at_construction(self):
+        with pytest.raises(ValueError, match="unknown attractor law"):
+            ExecutionLaw(dt=DT, speed_limit=1.0, max_label_speed=0.2, attractor_law="nope")
+        with pytest.raises(ValueError, match="unknown query site"):
+            ExecutionLaw(dt=DT, speed_limit=1.0, max_label_speed=0.2, query_at="elsewhere")
+
+
+class TestSurrogatePlant:
+    def test_a_parked_attractor_is_reached_exactly(self):
+        """The 2.7 property: the lag comes from the setpoint *moving*.
+
+        If the bed missed this it would be modelling something other than an
+        impedance controller, and every number from it would be suspect.
+        """
+        A = np.linalg.solve(D_FREE, K_FREE)
+        x, a = np.zeros(3), np.array([0.1, 0.0, 0.0])
+        for _ in range(400):
+            x = x + A @ (a - x) * DT
+        assert np.linalg.norm(x - a) < 1e-9
+
+    def test_the_settled_lag_matches_the_closed_form(self):
+        """Zero-order hold: ``L* = v dt / (1 - (1 - A dt/m)^m)``.
+
+        At ``m = 1`` this is ``K^-1 D v`` -- exactly the ``expected`` term the
+        gate subtracts -- which is why the bed defaults there. Larger ``m``
+        approaches the real plant, whose lag is ~1.28x bigger at this dt.
+        """
+        policy = GPPolicy().fit(straight_line_labels())
+        A = float(np.linalg.solve(D_FREE, K_FREE)[0, 0])
+        speed = 0.168
+        for m in (1, 4, 8):
+            out = rollout_impedance(policy, dt=DT, lag_tolerance=None, substeps=m)
+            predicted = speed * DT / (1 - (1 - A * DT / m) ** m)
+            assert out.lag[-5] == pytest.approx(predicted, rel=0.02), m
+
+    def test_substeps_one_reproduces_the_gates_own_model_of_the_lag(self):
+        policy = GPPolicy().fit(straight_line_labels())
+        out = rollout_impedance(policy, dt=DT, lag_tolerance=None, substeps=1)
+        assert out.lag[-5] == pytest.approx(compliance_norm(K_FREE, D_FREE) * 0.168, rel=0.02)
+
+    def test_it_refuses_to_run_an_unstable_integration(self):
+        """Silently oscillating would make every number downstream meaningless."""
+        policy = GPPolicy().fit(straight_line_labels())
+        with pytest.raises(ValueError, match="unstable"):
+            rollout_impedance(policy, dt=1.0)
+
+    def test_every_law_completes_the_phase_on_a_straight_path(self):
+        policy = GPPolicy().fit(straight_line_labels())
+        for kw in ({}, dict(attractor_law="anchor", anchor_gain=0.2),
+                   dict(attractor_law="reference"),
+                   dict(attractor_law="anchor", anchor_gain=AnchorSchedule(dwell=0.5, transit=0.05)),
+                   dict(query_at="measured", attractor_law="anchor", anchor_gain=0.3)):
+            out = rollout_impedance(policy, dt=DT, **kw)
+            assert out.metadata["terminated_on_phase"], kw
+            assert not out.metadata["budget_exhausted"], kw
+
+    def test_it_reports_no_success_flag(self):
+        """7.27: a scalar proxy invented here would repeat a documented mistake."""
+        out = rollout_impedance(GPPolicy().fit(straight_line_labels()), dt=DT)
+        assert "success" not in out.metadata
+        assert "placement_error" not in out.metadata
+
+    def test_it_names_the_law_that_produced_it(self):
+        out = rollout_impedance(GPPolicy().fit(straight_line_labels()), dt=DT,
+                                attractor_law="anchor", anchor_gain=0.25)
+        assert out.metadata["attractor_law"] == "anchor"
+        assert out.metadata["anchor_gain"] == 0.25
+        assert out.metadata["query_at"] == "attractor"
+
+    def test_it_is_deterministic(self):
+        """The paired comparison design is void without this."""
+        policy = GPPolicy().fit(straight_line_labels())
+        a = rollout_impedance(policy, dt=DT)
+        b = rollout_impedance(policy, dt=DT)
+        assert np.array_equal(a.attractors, b.attractors)
+        assert np.array_equal(a.positions, b.positions)

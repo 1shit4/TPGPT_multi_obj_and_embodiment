@@ -82,12 +82,16 @@ from dataclasses import dataclass, field
 import numpy as np
 
 from tpgpt.policy.rollout import (
-    clamp_attractor,
-    clamp_speed,
+    AnchorSchedule,
+    ExecutionLaw,
+    StallWatchdog,
+    advance_phase,
+    advance_step,
+    belief_position,
     compliance_norm,
-    lag_gate,
+    gate_step,
     phase_epsilon_from,
-    steer_attractor,
+    query_position,
     stiffness_threshold,
 )
 from tpgpt.sim.backend import FrameWriter, observation_frame
@@ -139,6 +143,10 @@ def rollout_policy(
     skip_arrival: float = 0.02,
     score: Callable | None = None,
     probe: Callable | None = None,
+    attractor_law: str = "integrate",
+    anchor_gain: float | AnchorSchedule = 0.0,
+    anchor_gated: bool = True,
+    query_at: str = "attractor",
 ) -> SimRollout:
     """Run a fitted policy on the robot until its phase completes.
 
@@ -274,12 +282,26 @@ def rollout_policy(
     positions, attractors, velocities = [], [], []
     phases, stds, grippers, forces = [], [], [], []
     probes: list[dict] = []
+    # Per-step diagnostics for the execution study. Kept under a `trace`
+    # sub-dict in the metadata, matching the `probe` convention, so a few
+    # hundred floats per run do not inflate every campaign manifest.
+    traces: dict[str, list] = {
+        k: [] for k in
+        ("gate", "behind", "expected", "max_lag", "clamped", "anchor_gain")
+    }
     writer = FrameWriter(video_path, fps=env.control_freq) if video_path else None
     phase = 0.0
     obs = env._get_observations()
 
     speed_limit = speed_limit_factor * float(
         np.linalg.norm(policy.labels.velocities, axis=1).max()
+    )
+    max_label_speed = speed_limit / max(speed_limit_factor, 1e-12)
+    law = ExecutionLaw(
+        dt=dt, speed_limit=speed_limit, max_label_speed=max_label_speed,
+        lag_tolerance=lag_tolerance, attractor_law=attractor_law,
+        anchor_gain=anchor_gain, anchor_gated=anchor_gated, query_at=query_at,
+        skip_arrival=skip_arrival,
     )
     start_position = policy.labels.positions[0]
     start_rotation = (
@@ -302,19 +324,19 @@ def rollout_policy(
             camera,
         )
     attractor = policy.labels.positions[0].copy()
-    blocked_for, stalled = 0, False
+    stalled = False
     relax_orientation, skip_index = False, None
     relaxed_steps, skipped_steps, skips = 0, 0, 0
-    # Infinite, so the first stall window is always read as "still catching up"
-    # and spends one more window measuring before forgiving any lag as sag.
-    static_sag, rebaselines, blocked_lag = 0.0, 0, float("inf")
-    blocked_phase = 0.0
     # What the clock would gain over the patience window with the gate fully
     # open, scaled down: anything slower than this fraction of nominal is a
     # crawl, not progress. Derived from the demonstration's own pace so it
     # scales with how long the task is rather than being a magic number.
-    phase_epsilon = phase_epsilon_from(
-        policy.labels, dt, stall_patience, min_phase_progress
+    watchdog = StallWatchdog(
+        stall_patience=stall_patience, sag_epsilon=sag_epsilon,
+        max_sag_rebaselines=max_sag_rebaselines,
+        phase_epsilon=phase_epsilon_from(
+            policy.labels, dt, stall_patience, min_phase_progress
+        ),
     )
     # Compliance is the inverse of stiffness, so a *large* value here means the
     # teacher was being soft. The midpoint of the demonstration's own range
@@ -327,14 +349,14 @@ def rollout_policy(
         # policy and the keypoints are both expressed in.
         position, hand_rotation = tool_state()
         query_phase = np.array([phase]) if policy.use_time_belief else None
-        # The dynamical system is integrated at the attractor, not at the
-        # measured position: that is what keeps the query on the manifold the
-        # policy was fitted on.
-        prediction = policy.predict(attractor[None], query_phase)
-
-        # A local rather than a mutation of the prediction: every read below
-        # relied on the in-place update to see the clamped value.
-        velocity = clamp_speed(prediction.velocity[0], speed_limit)
+        # By default the field is integrated at the attractor rather than at
+        # the measured position, which is what keeps the query on the manifold
+        # the policy was fitted on. ``query_at="measured"`` closes the loop
+        # through physics instead; see the module docstring for the measured
+        # cost of doing that without a restoring term.
+        prediction = policy.predict(
+            query_position(attractor, position, law.query_at)[None], query_phase
+        )
 
         # Lag gate: hold progress while the arm is behind its attractor, so the
         # gripper never acts on a pose the robot has not reached.
@@ -346,14 +368,10 @@ def rollout_policy(
             prediction.orientation[0] if prediction.orientation is not None else None
         )
 
-        # Hoisted: the same three arguments were solved three times per step.
-        compliance = compliance_norm(prediction.stiffness[0], prediction.damping[0])
-        expected = (
-            compliance * float(np.linalg.norm(velocity)) if lag_tolerance else 0.0
+        decision = gate_step(
+            position, attractor, prediction, law, static_sag=watchdog.static_sag
         )
-        gate, behind = lag_gate(
-            position, attractor, expected, static_sag, lag_tolerance
-        )
+        velocity, gate = decision.velocity, decision.gate
         # --- infeasible-pose fallback ------------------------------------
         # Only consulted while the gate is shut, so a run that is tracking
         # normally never pays for it.
@@ -366,15 +384,17 @@ def rollout_policy(
             if relax_orientation:
                 relaxed_steps += 1
 
+        steer_to = (
+            np.asarray(policy.labels.positions[skip_index], dtype=float)
+            if skip_index is not None else None
+        )
+        step_out = advance_step(
+            position, attractor, decision, law, prediction,
+            static_sag=watchdog.static_sag, steer_to=steer_to,
+        )
+        attractor = step_out.attractor
         if skip_index is not None:
-            # Steer to the next pose the arm can hold rather than integrating a
-            # field into somewhere it cannot go. Capped at the demonstrated
-            # speed so the detour is a motion, not a jump.
-            target = np.asarray(policy.labels.positions[skip_index], dtype=float)
-            attractor, arrived = steer_attractor(
-                attractor, target, speed_limit, dt, skip_arrival
-            )
-            if arrived:
+            if step_out.skip_arrived:
                 # Arrived: hand the clock over so the gripper schedule matches
                 # where the arm now is, and resume the policy.
                 if policy.labels.time_belief is not None:
@@ -383,35 +403,17 @@ def rollout_policy(
                 skips += 1
             else:
                 skipped_steps += 1
-        else:
-            attractor = attractor + velocity * dt * gate
-        # Keep the attractor within reach of the arm, so a blocked or lagging
-        # robot builds a bounded interaction force instead of an unbounded one.
-        #
-        # The clamp and the gate must agree on what "too far" means, and for a
-        # long time they did not. The clamp allowed ``speed_limit * compliance``
-        # -- computed from the *fastest* label -- while the gate shut at
-        # ``compliance * current_speed + tolerance``. Whenever
-        # ``compliance * (speed_limit - speed) > tolerance`` the clamp parked
-        # the attractor beyond the gate's own reopening threshold, and the two
-        # locked: the gate shut, the frozen attractor was dragged along behind
-        # the arm by the clamp instead of being caught up to, and the lag never
-        # shrank. Measured on a cereal-box run, the phase sat at 0.18 for 112 of
-        # 361 steps with the arm 50-61 mm behind against a 35 mm tolerance --
-        # the clamp's own 58 mm, held exactly.
-        #
-        # Taking the smaller of the two limits makes the deadlock unreachable:
-        # the attractor can never be further away than the distance at which
-        # the arm is allowed to catch up.
-        attractor, max_lag, clamped = clamp_attractor(
-            attractor, position, compliance, speed_limit,
-            expected, static_sag, lag_tolerance,
-        )
+        traces["gate"].append(gate)
+        traces["behind"].append(decision.behind)
+        traces["expected"].append(decision.expected)
+        traces["max_lag"].append(step_out.max_lag)
+        traces["clamped"].append(float(step_out.clamped))
+        traces["anchor_gain"].append(step_out.anchor_gain)
         # Firm about orientation where it matters -- reaching for the object and
         # setting it down -- and compliant while merely carrying it. The
         # demonstration's own translational stiffness says which is which: it
         # rises for the grasp and the insertion.
-        firm = compliance
+        firm = decision.compliance
         carrying = gripper_command > 0 and firm > 0.0 and firm >= stiff_threshold
         rotational_gain = (
             rotational_stiffness * transit_rotational_scale
@@ -450,10 +452,10 @@ def rollout_policy(
         if writer is not None:
             writer.append(observation_frame(obs, camera))
 
-        if gate > 0.0:
-            phase = policy.update_time_belief(
-                attractor, phase, dt * gate, correction=belief_correction * gate
-            )
+        phase = advance_phase(
+            policy, belief_position(attractor, position, law.query_at),
+            phase, dt, gate, belief_correction,
+        )
 
         # Progress is measured on the **phase**, not on the gate being exactly
         # zero, and the difference is not academic. A gate held at 0.05 by a
@@ -465,26 +467,9 @@ def rollout_policy(
         # the phase never reached the segment that opens the fingers. All three
         # were reported as a stalled policy, which blamed the transport for a
         # gate that was doing its job too well.
-        if lag_tolerance:
-            blocked_for += 1
-            if phase - blocked_phase >= phase_epsilon:
-                blocked_for, blocked_phase, blocked_lag = 0, phase, behind
-            elif blocked_for >= stall_patience:
-                improved = float(blocked_lag - behind)
-                if improved >= sag_epsilon:
-                    # Still closing the gap. The gate is holding because the arm
-                    # is genuinely behind and catching up, which is exactly what
-                    # it is for -- keep waiting.
-                    blocked_for, blocked_lag = 0, behind
-                elif rebaselines < max_sag_rebaselines:
-                    # Not catching up: this offset is the load the arm cannot
-                    # pull out of a finite stiffness, so stop counting it.
-                    static_sag = max(0.0, behind - expected)
-                    rebaselines += 1
-                    blocked_for, blocked_phase = 0, phase
-                else:
-                    stalled = True
-                    break
+        if lag_tolerance and watchdog.update(phase, decision.behind, decision.expected):
+            stalled = True
+            break
         if phase >= stop_time_belief:
             break
 
@@ -508,7 +493,7 @@ def rollout_policy(
             "approach_gap": approach_gap,
             "approach_steps": int(approach_steps),
             "speed_limit": speed_limit,
-            "attractor_integrated": True,
+            "attractor_integrated": attractor_law == "integrate",
             "tool_offset": offset.tolist(),
             "infeasible_fallback": bool(infeasible_fallback),
             "orientation_relaxed_steps": int(relaxed_steps),
@@ -520,10 +505,12 @@ def rollout_policy(
             "blocked_after_steps": len(positions) if stalled else None,
             "final_lag": float(np.linalg.norm(positions[-1] - attractors[-1])),
             "stall_patience": int(stall_patience),
-            "phase_epsilon": float(phase_epsilon),
+            "phase_epsilon": float(watchdog.phase_epsilon),
             "final_phase": float(phase),
-            "static_sag": float(static_sag),
-            "sag_rebaselines": int(rebaselines),
+            "static_sag": float(watchdog.static_sag),
+            "sag_rebaselines": int(watchdog.rebaselines),
+            **law.to_dict(),
+            "trace": {k: np.array(v) for k, v in traces.items()},
             "placement_error_xy": float(np.linalg.norm(offset[:2])),
             "placement_error": float(np.linalg.norm(offset)),
             "video": str(writer.path) if writer and writer.n_frames else None,
