@@ -320,15 +320,27 @@ so they can be built and tested separately. Full detail in `ROBOTICS_NOTES.md`
   passes to the grasp, the minimum `det(J)`, and the keypoint residual. Runs in
   milliseconds per variant from a cached cloud and a cached grasp, so hundreds
   of designs can be swept offline. This is where the largest known error lives.
-- ~~**Thread B — policy execution.**~~ **Settled: change nothing.** §7.28 and
-  `docs/dynamics_execution.md`. Five attractor laws and two query sites over 43
-  paired warps: **not one is significantly better than the shipped
-  integrator**, every alternative is significantly *worse* where the map is well
-  conditioned, and querying at the measured pose costs 8-27 mm. The dwell creep
-  that looked like the one clear defect is a measurement artefact — 0.00 mm on
-  the closing axis that decides the grasp. `prediction.reference` is now read
-  and measured; it loses. `velocity_desired` remains deliberately unpassed
-  (§2.7: that lag is transport-invariant and correct).
+- ~~**Thread B — policy execution.**~~ **Measured; `V` stays the default.**
+  §7.28 and `docs/dynamics_execution.md`. Five attractor laws x two query sites
+  x 43 paired warps, run twice — once on a freely-tracking arm and once under a
+  load that shuts the lag gate on 42% of steps instead of 2.5%.
+
+  **Query at the attractor, not the measured pose** — settled, decisively, in
+  both conditions (8-27 mm penalty undisturbed, 11-61 mm loaded, `p <= 0.03`).
+  `prediction.reference` is now read and measured; it does not rescue the
+  measured-pose query.
+
+  **The law is conditional.** Undisturbed, every anchor is significantly *worse*
+  than the shipped integrator. With the gate engaged they are significantly
+  *better*, by 1.3-1.5 mm — which is below the 4.8 mm practical margin, so the
+  switch now exists (`attractor_law`, `anchor_gain`, `query_at`, defaults
+  unchanged and asserted bitwise identical) without the default moving.
+  `anchor_gated` is measured and immaterial.
+
+  The dwell creep that looked like the one clear defect is a measurement
+  artefact: 0.00 mm on the closing axis that decides the grasp.
+  `velocity_desired` remains deliberately unpassed (§2.7: that lag is
+  transport-invariant and correct).
 
   Two simulator tiers remain queued behind the parallel session's MuJoCo runs:
   identity transport against the recorded arm trace, and the 20-scene gate,

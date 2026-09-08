@@ -224,3 +224,64 @@ def figure_lag_model(path, tau: float = 0.0962, dt: float = 0.05,
         fontsize=11, y=1.0,
     )
     return _save(fig, path)
+
+
+def figure_quiet_vs_loaded(quiet: list[dict], loaded: list[dict], path,
+                           title: str = "") -> Path:
+    """Why the law answer depends on whether the arm is being held back.
+
+    Each panel is one conditioning bin. Bars are the **paired** difference in
+    attractor drift against the shipped law, median over the warps in that bin:
+    **below zero means better than what ships, above means worse.** Blue is the
+    undisturbed arm, orange is the same arm under a 0.08 m/s load it cannot
+    overcome — which shuts the lag gate on 42% of steps instead of 2.5%.
+
+    The reference-only laws are omitted; they lose by 3–60 mm in both conditions
+    and would flatten the scale. The dashed line is 4.8 mm, the demonstration's
+    own precision at the end of its dwell, and it is the reason the conclusion
+    is "have the switch" rather than "flip the default": every bar that changes
+    sign does so well inside that band.
+    """
+    import numpy as np
+
+    bins = [(0.6, 9.9, "well conditioned"), (0.35, 0.6, "moderate"),
+            (0.0, 0.35, "aggressive")]
+    shown = [law for law in dict.fromkeys(r["law"] for r in quiet)
+             if law.startswith("VR-a") or law.startswith("VR-sched")]
+    key = "drift_attractor_vs_planned_max"
+
+    def paired(rows, law, lo, hi):
+        ok = [r for r in rows if not r.get("failed") and r.get("case") != "identity"]
+        base = {r["case"]: r[key] for r in ok if r["law"] == "V"}
+        vals = {r["case"]: r[key] for r in ok if r["law"] == law}
+        d = [vals[c] - base[c] for c in base
+             if c in vals and any(lo <= r["min_det"] < hi
+                                  for r in ok if r["case"] == c)]
+        return float(np.median(d)) if d else np.nan
+
+    fig, axes = plt.subplots(1, 3, figsize=(13, 4.2), sharey=True)
+    x = np.arange(len(shown))
+    for ax, (lo, hi, name) in zip(axes, bins):
+        ax.bar(x - 0.2, [paired(quiet, law, lo, hi) for law in shown], 0.4,
+               label="undisturbed (gate shut 2.5%)", color=BASELINE_COLOUR)
+        ax.bar(x + 0.2, [paired(loaded, law, lo, hi) for law in shown], 0.4,
+               label="loaded (gate shut 42%)", color="#ff7f0e")
+        ax.axhline(0.0, color="#333333", lw=1.0)
+        for s in (+DWELL_PRECISION_MM, -DWELL_PRECISION_MM):
+            ax.axhline(s, ls="--", lw=0.8, color=MUTED)
+        ax.set_title(name, fontsize=10)
+        ax.set_xticks(x)
+        ax.set_xticklabels(shown, rotation=30, ha="right", fontsize=7)
+        ax.grid(axis="y", alpha=0.25)
+    axes[0].set_ylabel("paired drift difference vs the shipped law (mm)\n"
+                       "below 0 = better", fontsize=8)
+    axes[0].legend(fontsize=7, loc="lower left")
+    axes[2].annotate("+-4.8 mm: the demonstration's own precision",
+                     xy=(0.02, 0.93), xycoords="axes fraction", fontsize=7,
+                     color=MUTED)
+    fig.suptitle(
+        title or "The anchor loses when the arm tracks freely and wins when the "
+                 "lag gate engages -- by less than the demonstration's own precision",
+        fontsize=11, y=1.0,
+    )
+    return _save(fig, path)

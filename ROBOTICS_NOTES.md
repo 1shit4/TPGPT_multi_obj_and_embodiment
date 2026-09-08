@@ -1968,7 +1968,7 @@ negative, that a point mid-segment is on the path, that a late trajectory shows
 no drift, that a deep error does not pollute the closing axis, and that an
 untracked source file is fatal to reproducibility.
 
-### 7.28 The attractor law: the shipped one is the right one
+### 7.28 The attractor law: the query site is settled, the law is conditional
 
 > **Numbering note.** A parallel session is appending to this file too; if both
 > added a 7.28 the merge should renumber, not merge, the two.
@@ -1989,8 +1989,16 @@ all (`R`). Each queried at the attractor (`-a`) or at the measured arm pose
 (`-m`). 43 warps x 8 laws, paired -- every law on every warp -- plus identity
 transport. Zero failures; every law completed the phase every time.
 
-**The answer is: change nothing.** Paired Wilcoxon against `V` on attractor
-drift, positive meaning worse:
+**The answer is conditional, and the condition is whether the lag gate is
+engaged.** That distinction is the whole result, and it nearly went unmeasured:
+on an undisturbed surrogate arm the gate engages on **2.5%** of steps and the
+clamp on none, so the first sweep measured the anchor laws with the two
+mechanisms they interact with essentially switched off. Repeating everything
+with a 0.08 m/s load the arm cannot overcome shuts the gate on **42%** of steps
+and reverses the ranking.
+
+**Undisturbed** -- paired Wilcoxon against `V` on attractor drift, positive
+meaning worse:
 
 | law | well conditioned (n=23) | moderate (n=14) | aggressive (n=6) |
 |---|---|---|---|
@@ -2004,6 +2012,36 @@ drift, positive meaning worse:
 well behaved every alternative is significantly *worse*: the reference is a
 smoothed version of a path the integrator is already following well, so pulling
 toward it fights the feed-forward.
+
+**Loaded**, same 43 warps, gate shut on 42% of steps -- negative meaning
+*better* than the shipped law:
+
+| law | well conditioned (n=23) | moderate (n=14) | aggressive (n=6) |
+|---|---|---|---|
+| `VR-a k=0.20` | **-1.32 mm, p=0.0007** | **-1.33, p=0.035** | -0.70, p=0.094 |
+| `VR-sched` | **-1.48 mm, p=0.0027** | **-1.34, p=0.025** | -1.09, p=0.094 |
+| `R-a` | **+3.61, p<0.0001 worse** | **+3.78, p=0.0004 worse** | **+5.03, p=0.031 worse** |
+| `R-m` | **+41.60, p<0.0001 worse** | **+34.95, p=0.0001 worse** | **+56.70, p=0.031 worse** |
+
+The mechanism is what the anchor was designed for: a shut gate shrinks the
+integrator's increment toward nothing, so a law with no restoring term has
+nothing left to correct with, while the anchor still holds an absolute statement
+of where the hand should be. Undisturbed, that pull solves a problem that does
+not exist and fights the feed-forward instead.
+
+**`V` stays the default anyway.** 1.3-1.5 mm is below the practical margin: the
+demonstration's own residual at the end of its dwell is 4.8 mm, and the
+re-measurement spread of the validated placement error is +-2.3 mm. This is a
+statistically solid effect smaller than the noise the end-to-end result is
+quoted with -- a reason to have the switch, not to flip the default. Under load
+the shipped law's own arm error doubles (5.3 -> 11.4 mm), which is the honest
+size of the regime difference.
+
+**The query-site conclusion is unchanged and strengthened**: querying at the
+measured pose costs 11-61 mm under load against 8-27 mm undisturbed. Under load
+the arm sits further onto the flat part of the zero-mean prior, so the penalty
+grows exactly as the mechanism predicts. **Gating the anchor remains immaterial**
+even at 42% gate closure: -1.48 against -1.49 mm. That axis is closed.
 
 **Querying at the measured pose is decisively wrong**, and the comparison is
 clean because the only difference between `R-a`/`R-m` and between

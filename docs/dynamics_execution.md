@@ -45,21 +45,23 @@ So: **five candidate laws, two query sites, and the question of which to ship.**
 
 ## 2. The answer, up front
 
-**Keep the shipped law. Keep querying at the attractor.** Both alternatives are
-measurably worse, and one of them is worse by an order of magnitude.
+**Keep querying at the attractor — that one is settled.** The law question is
+**conditional**, and which way it goes depends on whether the arm is tracking
+freely or being held back.
 
 | | verdict | evidence |
 |---|---|---|
-| **Query at the attractor vs. the measured pose** | **attractor**, decisively | querying at the measured pose is 8–48 mm worse in every conditioning regime, `p ≤ 0.03` throughout |
-| **V (integrate) vs. VR (anchor) vs. R (reference)** | **V**, the shipped law | every alternative is significantly *worse* where the map is well-behaved; none is significantly better anywhere |
-| **Should the anchor be gated?** | immaterial | with the gate shut on >50% of steps, gating changes the final lag by <0.2 mm |
+| **Query at the attractor vs. the measured pose** | **attractor**, decisively, in both conditions | 8–48 mm worse undisturbed, 11–61 mm worse under load, `p ≤ 0.03` throughout |
+| **V (integrate) vs. VR (anchor) vs. R (reference)** | **conditional** | undisturbed, V wins and every anchor is significantly worse. With the lag gate engaged, the anchors *beat* V by 1.3–1.5 mm, `p ≤ 0.035`. Reference-only loses badly in both |
+| **Which to ship** | **V stays the default** | the anchor's advantage appears only under sustained load and is 1.3–1.5 mm — below the 4.8 mm practical margin. The switch now exists for a robot that needs it |
+| **Should the anchor be gated?** | immaterial | with the gate shut on 42% of steps, gating changes the result by <0.15 mm |
 | **Is the dwell creep a defect?** | **no** | 0.00 mm on the axis that decides the grasp; it was a measurement artefact |
 
-That is a negative result, and it is worth stating plainly: **the execution
-layer was already right.** The work's value is that this is now *known* rather
-than assumed, that the machinery to re-decide it exists when the keypoint work
-changes the conditions, and that `rollout_policy` has direct tests for the first
-time in its life.
+**A correction to an earlier draft of this document.** It concluded "keep the
+shipped law, change nothing", on the undisturbed sweep alone — while noting that
+the disturbed condition was the remaining place a difference could hide. It did
+hide there, and §5.6 is that result. The revised claim is narrower and
+conditional, which is what the data supports.
 
 It also **overturns a claim I made earlier in this project's planning**, from a
 prototype with one sample per condition. That prototype suggested a
@@ -344,6 +346,93 @@ demonstration's own labels, no map at all — the shipped law's arm error is
 **5.32 mm**, against a demonstration whose own placement error is about 10 mm.
 The executor reproduces the demonstration to better than the demonstration's own
 precision. There is not much room left to win.
+
+> **Everything in §5.2–5.5 is the *undisturbed* condition**, where the lag gate
+> engages on 2.5% of steps. That is the nominal case, and it is the right
+> default to judge on — but it means the anchor was measured with the mechanism
+> it interacts with almost switched off. §5.6 repeats the whole sweep with the
+> gate engaged, and the law ranking there is different.
+
+
+### 5.6 The disturbed condition, where the answer changes
+
+Everything above ran on an arm that tracks well. That turned out to matter, and
+it is the reason this section exists: on the undisturbed bed the **lag gate
+engages on only 2.5% of steps and the clamp on none**, so the two mechanisms an
+anchor law most interacts with were essentially switched off. A study that
+stopped there would have measured the laws with the interesting part disabled.
+
+So the whole sweep was repeated with a constant 0.08 m/s downward load the arm
+cannot overcome — gravity on a held object, or a push. This is fault injection
+in the bed, not a different plant:
+
+| | gate shut, median | gate shut, max | clamp fired, max |
+|---|---|---|---|
+| undisturbed | 2.5% | 24.1% | 2.0% |
+| **loaded** | **42.3%** | **63.4%** | 1.4% |
+
+It is a genuinely harder regime. The shipped law's own numbers roughly double:
+
+| conditioning bin | drift, quiet | drift, loaded | arm error, quiet | arm error, loaded |
+|---|---|---|---|---|
+| well conditioned | 3.93 | **6.48** | 5.34 | **11.36** |
+| moderate | 3.77 | **5.81** | 4.67 | **10.92** |
+| aggressive | 4.42 | **5.20** | 6.05 | **10.84** |
+
+Still no failures: 0 of 352 runs errored, none exhausted its step budget, and
+298 of 352 completed the phase. 54 ended with the watchdog declaring the arm
+stuck, which is the correct answer for an arm being dragged down by a load it
+cannot fight.
+
+**And the law ranking flips.** Paired Wilcoxon against V on drift, negative
+meaning *better than the shipped law*:
+
+| law | well conditioned (n=23) | moderate (n=14) | aggressive (n=6) |
+|---|---|---|---|
+| VR-a k=0.20 | **−1.32 mm, p=0.0007 better** | **−1.33, p=0.035 better** | −0.70, p=0.094 |
+| VR-a k=0.50 | +0.20, p=0.69 | −0.07, p=0.95 | +0.69, p=0.031 worse |
+| **VR-sched** | **−1.48 mm, p=0.0027 better** | **−1.34, p=0.025 better** | −1.09, p=0.094 |
+| VR-sched ungated | **−1.49 mm, p=0.0013 better** | **−1.23, p=0.025 better** | −1.13, p=0.094 |
+| VR-m k=0.50 | **+31.46, p<0.0001 worse** | **+11.38, p=0.0001 worse** | **+60.56, p=0.031 worse** |
+| R-a | **+3.61, p<0.0001 worse** | **+3.78, p=0.0004 worse** | **+5.03, p=0.031 worse** |
+| R-m | **+41.60, p<0.0001 worse** | **+34.95, p=0.0001 worse** | **+56.70, p=0.031 worse** |
+
+**What this means, and what it does not.** The mechanism is exactly what the
+anchor was designed for: when the gate throttles progress the integrator's
+increment shrinks toward nothing, so a law with no restoring term has nothing
+left to correct with, while the anchor still has an absolute statement of where
+the hand should be. Undisturbed, that restoring pull is a solution to a problem
+that does not exist and it fights the feed-forward instead. Under load it earns
+its place.
+
+But **1.3–1.5 mm is below the practical margin.** The demonstration's own
+residual at the end of its dwell — the tightest precision anchor in this project
+— is 4.8 mm, and the re-measurement spread of the validated placement error is
+±2.3 mm. So this is a statistically solid effect that is smaller than the noise
+the end-to-end result is quoted with. It is a reason to *have* the switch, not a
+reason to flip the default.
+
+**The query-site conclusion is unchanged and strengthened.** Querying at the
+measured pose costs 11–61 mm under load, worse than the 8–27 mm undisturbed.
+Under load the arm is further from the labels, further onto the flat part of the
+zero-mean prior, so the penalty grows exactly as the mechanism predicts.
+
+**Gating remains immaterial**: −1.48 against −1.49 mm, and −1.34 against −1.23.
+Even with the gate shut on 42% of steps, whether the anchor is throttled with it
+makes no measurable difference. That axis can be closed.
+
+![Quiet against loaded](figures/fig_quiet_vs_loaded.png)
+
+*Figure 4. Each panel is one conditioning bin. Bars are the **paired** median
+difference in attractor drift against the shipped law: **below zero means better
+than what ships, above means worse.** Blue is the undisturbed arm (gate shut on
+2.5% of steps), orange the same arm under a load it cannot overcome (42%). Every
+blue bar is above the line and almost every orange one below it — that sign flip
+is the result. The dashed lines are ±4.8 mm, the demonstration's own precision at
+the end of its dwell, and every bar sits well inside them, which is why the
+conclusion is "have the switch" rather than "change the default". The
+reference-only laws are omitted: they lose by 3–60 mm in both conditions and
+would flatten the scale.*
 
 ---
 
