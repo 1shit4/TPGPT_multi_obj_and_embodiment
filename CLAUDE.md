@@ -320,12 +320,19 @@ so they can be built and tested separately. Full detail in `ROBOTICS_NOTES.md`
   passes to the grasp, the minimum `det(J)`, and the keypoint residual. Runs in
   milliseconds per variant from a cached cloud and a cached grasp, so hundreds
   of designs can be swept offline. This is where the largest known error lives.
-- **Thread B — policy execution.** Needs the simulator but **not** the
-  keypoints: test it against a fixed reference path, such as the untransported
-  demonstration replayed in the source scene, where the ground truth is known.
-  Two capabilities already exist unused (`prediction.reference`,
-  `GPPolicy.attractor()`) and one control input is never passed
-  (`velocity_desired`); see the bite-list above and §2.7-2.8.
+- ~~**Thread B — policy execution.**~~ **Settled: change nothing.** §7.28 and
+  `docs/dynamics_execution.md`. Five attractor laws and two query sites over 43
+  paired warps: **not one is significantly better than the shipped
+  integrator**, every alternative is significantly *worse* where the map is well
+  conditioned, and querying at the measured pose costs 8-27 mm. The dwell creep
+  that looked like the one clear defect is a measurement artefact — 0.00 mm on
+  the closing axis that decides the grasp. `prediction.reference` is now read
+  and measured; it loses. `velocity_desired` remains deliberately unpassed
+  (§2.7: that lag is transport-invariant and correct).
+
+  Two simulator tiers remain queued behind the parallel session's MuJoCo runs:
+  identity transport against the recorded arm trace, and the 20-scene gate,
+  plus the end-to-end byte-identity check of the refactor.
 
 **The instrument and the provenance recording are done** (§7.26-7.27). Both
 threads can now be measured without repeating the mistake that cost the last

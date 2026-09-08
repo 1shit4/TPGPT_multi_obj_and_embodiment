@@ -1968,6 +1968,141 @@ negative, that a point mid-segment is on the path, that a late trajectory shows
 no drift, that a deep error does not pollute the closing axis, and that an
 untracked source file is fatal to reproducibility.
 
+### 7.28 The attractor law: the shipped one is the right one
+
+> **Numbering note.** A parallel session is appending to this file too; if both
+> added a 7.28 the merge should renumber, not merge, the two.
+
+Executing a transported policy means moving an **attractor** -- the far end of
+an invisible spring whose near end is bolted to the gripper -- and the shipped
+rule is dead reckoning, `a += v*dt*gate`. Two things about it look wrong, and
+both turn out not to be.
+
+**The full study, with figures and the method, is `docs/dynamics_execution.md`.**
+This section records the decisions and the numbers that support them.
+
+**What was compared.** Five laws crossed with two query sites: the shipped
+integrator (`V`); anchoring a fraction `k` of the way toward the policy's
+regressed `reference` channel each step, at constant and speed-scheduled gains
+(`VR`); and setting the attractor to `reference` outright, with no integrator at
+all (`R`). Each queried at the attractor (`-a`) or at the measured arm pose
+(`-m`). 43 warps x 8 laws, paired -- every law on every warp -- plus identity
+transport. Zero failures; every law completed the phase every time.
+
+**The answer is: change nothing.** Paired Wilcoxon against `V` on attractor
+drift, positive meaning worse:
+
+| law | well conditioned (n=23) | moderate (n=14) | aggressive (n=6) |
+|---|---|---|---|
+| `VR-a k=0.20` | **+0.95 mm, p=0.0002** | +0.33, p=0.46 | -0.38, p=0.69 |
+| `VR-sched` | **+0.96 mm, p=0.0001** | +0.38, p=0.50 | -0.49, p=0.44 |
+| `VR-m k=0.50` | **+10.93 mm, p<0.0001** | **+10.62, p=0.0001** | **+8.33, p=0.03** |
+| `R-a` | **+7.41 mm, p<0.0001** | **+5.84, p=0.0001** | **+3.84, p=0.03** |
+| `R-m` | **+21.15 mm, p<0.0001** | **+19.44, p=0.0001** | **+48.50, p=0.03** |
+
+**Not one cell is significantly better than the shipped law.** Where the map is
+well behaved every alternative is significantly *worse*: the reference is a
+smoothed version of a path the integrator is already following well, so pulling
+toward it fights the feed-forward.
+
+**Querying at the measured pose is decisively wrong**, and the comparison is
+clean because the only difference between `R-a`/`R-m` and between
+`VR-a k=0.50`/`VR-m k=0.50` is the query site. It costs 8-27 mm. The reason is
+the zero-mean prior of Appendix A: away from the labels the velocity channel
+returns *no motion at all*, and an arm legitimately trailing by 24 mm is exactly
+such a state. Note the `reference` channel does **not** rescue it -- `VR-m` has a
+restoring term and is still 10 mm worse than its attractor-queried twin. This is
+the first direct measurement behind the claim `tpgpt/sim/rollout.py`'s docstring
+has been making since it was written.
+
+**The reference-only laws carry a tail**: `R-m` reaches 72 mm and `R-a` 53 mm in
+the aggressive bin. The mechanism is understood rather than mysterious. Setting
+an absolute position means the *clamp* -- which projects the attractor onto a
+sphere around the arm -- becomes the dominant term, and "reference position,
+then projected near the measurement" is arithmetically close to the mode 2.8
+records as failing at 0.29 m/s from a 24 mm deviation.
+
+**A retraction of my own, from the planning for this work.** A prototype with
+one sample per condition suggested a speed-scheduled anchor cut drift 40% on
+aggressive warps and should be the headline. At 43 warps with a paired test the
+effect is 0.49 mm at p=0.44, on n=6 which is the floor below which Wilcoxon
+cannot reach significance at all. It was noise, and it is exactly the kind of
+n=1 result 7.26 rule 4 exists to stop being built on.
+
+#### The dwell creep was a measurement artefact
+
+The demonstration dwells 15 steps at the grasp with the labels commanding zero
+velocity. The fitted policy commands 0.006-0.041 m/s there instead, because a GP
+smooths a sharp stop-and-go, and integrating that moves the attractor **11.4 mm
+during a window where it should stand still** -- at the moment the jaws close. I
+reported that twice as the one clear defect in the executor.
+
+11.4 mm is **path length**. The **net displacement is 4.64 mm**, and split into
+the hand's own axes by `reach_axes`:
+
+| axis | tolerance | measured |
+|---|---|---|
+| closing -- decides whether the object is between the fingers | ~15 mm | **0.00 mm** |
+| approach -- decides how high up the object is gripped | 120-135 mm (7.2) | 4.64 mm |
+
+Every millimetre is on the forgiving axis. The release dwell, measured here for
+the first time, behaves identically: 3.47 mm net, 0.00 mm closing.
+
+The instrument that caught this is the one built in 7.27 for precisely this
+error -- a scalar that mixes a millimetre budget with a 130 mm one -- and it
+caught its own author making it. Note also that the anchor laws *reduce* the net
+displacement (4.64 -> 1.3-3.3 mm) while *raising* the closing-axis component
+(0.00 -> 0.09-0.68 mm): they improve the number that does not matter and worsen
+the one that does.
+
+#### The lag gate's model of the lag is 1.28x optimistic
+
+Derived while validating the surrogate plant, and it is a property of the
+**shipped** system. The gate subtracts `expected = ||K^-1 D|| v` before deciding
+the arm is behind. But the attractor is held fixed for a whole control step -- a
+zero-order hold, since the robot holds one action while MuJoCo integrates
+internally -- so the settled lag is
+
+    L* = v dt / (1 - (1 - A dt/m)^m),   A = D^-1 K
+
+which is `||K^-1 D|| v` at `m=1` and rises to `v dt / (1 - exp(-dt/tau))` in the
+fine limit. **The real plant is the fine limit.** At `dt = 50 ms` and
+`tau = 96 ms` the ratio is **1.28**, so the gate carries a standing excess of
+about 4.6 mm at full demonstrated speed -- an eighth of its 35 mm tolerance --
+before anything has gone wrong. Not urgent, but worth knowing before anyone
+tunes `lag_tolerance` again.
+
+#### What was built, and what it costs
+
+- The gate, the clamp, the speed cap, the steering step and the two
+  label-derived scalars moved verbatim into `tpgpt/policy/rollout.py`, which
+  imports only numpy. `tpgpt/sim/rollout.py` calls them. The point is that a
+  test bed can now call *the same code the robot runs*: writing the gate and the
+  clamp a second time is how an instrument stops matching its system, and two of
+  the three bugs ever recorded against these expressions were in the
+  *interaction* between them (7.14, 7.16).
+- `rollout_impedance` replaces MuJoCo with the arm's own first-order equation at
+  ~2 ms per control step against 25-40 s per real run. It reports **no success
+  flag** -- inventing one would be 7.27's mistake on purpose.
+- Fault injection (`load`, `blocked_steps`), because an undisturbed surrogate arm
+  tracks so well that the gate fires on 2% of steps and the clamp on none, and a
+  bed that cannot make them fire cannot study a law that interacts with them.
+- **`rollout_policy` has direct tests for the first time.** It was previously
+  exercised only through a four-minute end-to-end campaign. Each test inlines a
+  verbatim transcription of the pre-extraction arithmetic and asserts exact
+  equality, so a helper cannot drift from the behaviour the validated 17/20 was
+  measured under.
+
+#### What this cannot decide
+
+The bed has no contact, no inverse kinematics and no orientation task, so it
+cannot see grasping, the roughly quarter of a trajectory that is unreachable at
+its commanded orientation (7.25), or anything about task outcome. **It ranks
+hypotheses; it does not confirm them.** Two simulator tiers are specified and
+queued in `docs/dynamics_execution.md`: identity transport against the recorded
+arm trace, and the 20-scene reshelving gate. The byte-identity check of the
+refactor against the baseline commit is queued with them.
+
 ## 8. Open items
 
 > **Read 7.26 first.** Every end-to-end campaign has been deleted, so the items
