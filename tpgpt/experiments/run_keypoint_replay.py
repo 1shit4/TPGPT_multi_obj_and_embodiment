@@ -140,6 +140,35 @@ def _closure_summary(replay) -> dict:
     squeezing an object looks like -- so ``closure_max > 1`` is positive
     evidence of a grasp and is deliberately not clipped away.
 
+    **Read ``closure_at_lift``, not ``closure_max``, for whether the object was
+    in the jaws.** ``closure_at_lift`` is the reading at the first commanded
+    close, where the jaws have just taken hold: a low value means something is
+    holding them apart, a high one means they have travelled further because
+    there is less between them. ``closure_max`` runs over the *whole* replay,
+    which includes the jaws shutting on air after the object is released, so a
+    ``closure_max`` of 1.00 is **not** evidence of a failed grasp. Measured on
+    one hand, which is what makes the point:
+
+    ========================  =========  ==========  ======  ========  ======
+    variant, object           shut@lift  closure max held    place mm  ok
+    ========================  =========  ==========  ======  ========  ======
+    cloud box, cereal              0.63    **1.00**       0     232.0  no
+    grasp-pose cube, cereal        0.42        0.62     110      34.5  yes
+    cloud box, can                 0.39    **1.00**      82      29.6  **yes**
+    ========================  =========  ==========  ======  ========  ======
+
+    The first and third rows share a ``closure_max`` of 1.00 and differ in
+    outcome entirely; their ``closure_at_lift`` of 0.63 against 0.39 is what
+    separates them, and it separates them the right way round -- the failing
+    grasp let the jaws travel *further*, because less of the object was between
+    them.
+
+    ``held_steps`` remains the direct measure of contact. What closure adds is
+    **why** a hand held nothing: jaws that never moved, against jaws that shut
+    fully on empty air. That distinction is what the joint-position reading
+    could not make on any hand, and it is why a Robotiq 2F-140 closing hard was
+    read as its jaws flying open (7.28).
+
     Returns ``nan`` for an uncalibrated hand rather than a plausible zero,
     which would read as "wide open throughout" and look identical to a hand
     that never closed.
@@ -285,9 +314,9 @@ def main(
     rows = []
     variants = [v for v in VARIANTS if v.name in REPLAY_VARIANTS]
     print(f"\n{'variant':20}{'hand':11}{'object':8}{'reach':>7}{'trackmm':>9}"
-          f"{'slip':>7}{'held':>6}{'clos@lift':>8}{'closMax':>8}{'place':>8}"
+          f"{'slip':>7}{'held':>6}{'shut@lift':>10}{'shutMax':>8}{'place':>8}"
           f"{'worst seg':>11}{'ok':>4}")
-    print("-" * 106, flush=True)
+    print("-" * 108, flush=True)
 
     # **A fresh scene per replay.** A replay drives the arm through a whole
     # trajectory and closes the jaws, so it leaves the object displaced and the
@@ -434,7 +463,7 @@ def _replay_line(row: dict) -> str:
         f"{g('slip_max') * 1000:7.1f}{g('held_steps', 0):6.0f}"
         # Cross-hand, so "the jaws never shut" is distinguishable from "they
         # shut and the object came out" while the run is still going (7.28).
-        f"{g('closure_at_lift'):8.2f}{g('closure_max'):8.2f}"
+        f"{g('closure_at_lift'):10.2f}{g('closure_max'):8.2f}"
         f"{g('placement_error_xy') * 1000:8.1f}"
         f"{str(row.get('worst_segment', '-')):>11}"
         f"{'  yes' if row.get('success') else '   no':>4}"

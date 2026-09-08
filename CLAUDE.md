@@ -337,9 +337,23 @@ inside out.
 
 What §7.22 also shows, and what was missed at the time: **the box misses the
 grasp point by about 53 mm, and the contact keypoints hit it to about 5 mm.**
-The default trades ten-fold aim accuracy for a well-conditioned map. Both
-requirements are legitimate and no keypoint set on the current menu satisfies
-both. This is the largest open design question — see §8, thread A.
+The default trades ten-fold aim accuracy for a well-conditioned map.
+
+**That trade is now resolved in geometry, and the default should change.** A
+fixed 20 mm cube centred on the grasp, oriented by the full grasp pose, gets
+*both*: the aim is exact by construction (the cube's centre **is** the grasp
+point and `phi` interpolates keypoints exactly) and the map stays well
+conditioned (`min det` median 0.916 against the cloud box's 0.629 over the same
+134 cells). Measured across **all nine hands** in §7.29, it is also the only
+construction whose transported orientation does not depend on the hand: per-hand
+median 0.5-1.6 degrees against the cloud box's 5.4-14.3, and
+`r(tool offset, min det)` of +0.135 against -0.616, over a 5.5x range of tool
+offset. Composition on top of it is dead — median keypoint residual **10.9 mm**,
+violating property (i) on 29 of 29 cells.
+
+**What is not resolved is execution.** All of the above is geometry. Tier 2
+physics across six hands is the open item, and until it runs the default in
+`object_keypoints` stays `box="cloud"`; flipping it is its own commit.
 
 **Grasping, filtering and end-to-end physics (built end to end; reliability
 unmeasured).** Text prompt -> object and shelf -> cloud -> ranked 6-DoF grasps

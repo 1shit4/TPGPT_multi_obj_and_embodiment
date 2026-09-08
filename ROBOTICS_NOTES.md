@@ -2098,6 +2098,16 @@ which is the recurring lesson of 7.13.
 *something* moved on a hand already known to work, but its docstring now states
 all three defects and says not to threshold it.
 
+**The blast radius was checked and is small.** Nothing in `tpgpt/` ever
+thresholded the `jaw` channel or compared it across hands: a grep for reads of it
+finds only `reach_axes["jaw"]`, which is the lateral *reach* axis
+(`approach x closing`) and an unrelated quantity that happens to share the word.
+So the defect never reached a stage attribution, a filter or a success criterion
+-- it reached exactly one place, a human reading the trace, and produced one
+wrong diagnosis there. That is worth stating because "the instrument was wrong"
+and "every number downstream of it is wrong" are very different claims, and only
+the first one is true here.
+
 Two incidental fixes came out of the same reading:
 
 - **`measure_frames.main` overwrote `gripper_frames.json` wholesale.**
@@ -2332,10 +2342,30 @@ the fake was simpler than the object the function actually receives.
 | skip | cells | cause |
 |---|---|---|
 | lemon | 8 of 9 hands | GraspGen-X raises `selected index k out of range` on its 17-point cloud, below `MIN_CLOUD_POINTS` of 40 and too few for the planner's top-k. **Hand-independent** |
-| milk | panda and inspire only | every one of 100 candidates lies beyond the 45 deg approach filter, closest 49.8 deg. **Hand-dependent** -- the other seven hands each found a milk grasp inside the filter, because the planner conditions on the hand's swept volume |
+| milk | panda and inspire only | every one of 100 candidates lies beyond the 45 deg approach filter, closest 49.8 deg. **Hand-dependent and scene-dependent** -- see below |
 
 The milk had been recorded as failing the filter outright. That was true of the
-one hand it had been measured on.
+one hand it had been measured on. But the correction needs a correction of its
+own, found while running Tier 2.
+
+**The rejection is not a property of the milk.** Within this sweep seven of nine
+hands found a milk grasp inside the filter and two did not, which reads as a
+hand effect -- the planner conditions on each hand's swept volume. Then the Tier
+2 replay, on a **Panda**, picked and placed the milk at 14.8 mm: the same hand
+this sweep recorded as having no admissible candidate.
+
+The difference is the scene. Tier 1 builds a **five-object** scene
+(`ABLATION_OBJECTS`, with the lemon); Tier 2 builds a **four-object** one
+(`REPLAY_OBJECTS`, without it). The placement sampler is seeded identically, but
+a different object set lays the scene out differently, so the milk presents a
+different cloud and the planner draws from a different candidate set.
+
+So: **whether an object survives the approach filter depends on the hand and on
+what else is in the scene.** Neither table alone licenses "the milk cannot be
+grasped", and any claim about an object failing a filter must name the scene it
+was measured in. This is the 7.21 lesson again -- an isolation study is only as
+good as the settings held fixed around it -- arriving through a door nobody was
+watching, since the object *set* had not been thought of as a setting at all.
 
 #### One more thing the rebuilt-per-hand scene revealed
 
