@@ -297,7 +297,7 @@ class TestStiffnessThreshold:
         soft = compliance_norm(K[0], D[0])       # free space: soft, high compliance
         assert firm < threshold < soft
 
-    def test_labels_without_stiffness_give_zero(self):
+    def test_labels_without_stiffness_give_zero(self, line_policy):
         assert stiffness_threshold(_Labels()) == 0.0
 
 
@@ -337,6 +337,18 @@ from tpgpt.policy.rollout import (                     # noqa: E402
 from tpgpt.transport.labels import PolicyLabels        # noqa: E402
 
 DT = 1.0 / 20.0
+
+
+@pytest.fixture(scope="module")
+def line_policy():
+    """One fitted policy for the module.
+
+    Fitting a GP is the expensive part of these tests -- refitting identical
+    labels twenty times took two minutes, against a suite the project documents
+    as a ten-second fast path. The policy is never mutated by a rollout, so
+    sharing it is safe.
+    """
+    return GPPolicy().fit(straight_line_labels())
 
 
 def straight_line_labels(n=120, speed=0.168):
@@ -520,14 +532,14 @@ class TestSurrogatePlant:
             x = x + A @ (a - x) * DT
         assert np.linalg.norm(x - a) < 1e-9
 
-    def test_the_settled_lag_matches_the_closed_form(self):
+    def test_the_settled_lag_matches_the_closed_form(self, line_policy):
         """Zero-order hold: ``L* = v dt / (1 - (1 - A dt/m)^m)``.
 
         At ``m = 1`` this is ``K^-1 D v`` -- exactly the ``expected`` term the
         gate subtracts -- which is why the bed defaults there. Larger ``m``
         approaches the real plant, whose lag is ~1.28x bigger at this dt.
         """
-        policy = GPPolicy().fit(straight_line_labels())
+        policy = line_policy
         A = float(np.linalg.solve(D_FREE, K_FREE)[0, 0])
         speed = 0.168
         for m in (1, 4, 8):
@@ -535,19 +547,19 @@ class TestSurrogatePlant:
             predicted = speed * DT / (1 - (1 - A * DT / m) ** m)
             assert out.lag[-5] == pytest.approx(predicted, rel=0.02), m
 
-    def test_substeps_one_reproduces_the_gates_own_model_of_the_lag(self):
-        policy = GPPolicy().fit(straight_line_labels())
+    def test_substeps_one_reproduces_the_gates_own_model_of_the_lag(self, line_policy):
+        policy = line_policy
         out = rollout_impedance(policy, dt=DT, lag_tolerance=None, substeps=1)
         assert out.lag[-5] == pytest.approx(compliance_norm(K_FREE, D_FREE) * 0.168, rel=0.02)
 
-    def test_it_refuses_to_run_an_unstable_integration(self):
+    def test_it_refuses_to_run_an_unstable_integration(self, line_policy):
         """Silently oscillating would make every number downstream meaningless."""
-        policy = GPPolicy().fit(straight_line_labels())
+        policy = line_policy
         with pytest.raises(ValueError, match="unstable"):
             rollout_impedance(policy, dt=1.0)
 
-    def test_every_law_completes_the_phase_on_a_straight_path(self):
-        policy = GPPolicy().fit(straight_line_labels())
+    def test_every_law_completes_the_phase_on_a_straight_path(self, line_policy):
+        policy = line_policy
         for kw in ({}, dict(attractor_law="anchor", anchor_gain=0.2),
                    dict(attractor_law="reference"),
                    dict(attractor_law="anchor", anchor_gain=AnchorSchedule(dwell=0.5, transit=0.05)),
@@ -556,23 +568,98 @@ class TestSurrogatePlant:
             assert out.metadata["terminated_on_phase"], kw
             assert not out.metadata["budget_exhausted"], kw
 
-    def test_it_reports_no_success_flag(self):
+    def test_it_reports_no_success_flag(self, line_policy):
         """7.27: a scalar proxy invented here would repeat a documented mistake."""
-        out = rollout_impedance(GPPolicy().fit(straight_line_labels()), dt=DT)
+        out = rollout_impedance(line_policy, dt=DT)
         assert "success" not in out.metadata
         assert "placement_error" not in out.metadata
 
-    def test_it_names_the_law_that_produced_it(self):
-        out = rollout_impedance(GPPolicy().fit(straight_line_labels()), dt=DT,
+    def test_it_names_the_law_that_produced_it(self, line_policy):
+        out = rollout_impedance(line_policy, dt=DT,
                                 attractor_law="anchor", anchor_gain=0.25)
         assert out.metadata["attractor_law"] == "anchor"
         assert out.metadata["anchor_gain"] == 0.25
         assert out.metadata["query_at"] == "attractor"
 
-    def test_it_is_deterministic(self):
+    def test_it_is_deterministic(self, line_policy):
         """The paired comparison design is void without this."""
-        policy = GPPolicy().fit(straight_line_labels())
+        policy = line_policy
         a = rollout_impedance(policy, dt=DT)
         b = rollout_impedance(policy, dt=DT)
         assert np.array_equal(a.attractors, b.attractors)
         assert np.array_equal(a.positions, b.positions)
+
+
+class TestFaultInjection:
+    """Making the gate and the clamp actually fire, without a robot.
+
+    An undisturbed surrogate arm tracks so well that the lag gate engages on
+    about 2% of steps and the clamp on none. Since the interesting question
+    about a new attractor law is precisely how it interacts with those two --
+    the anchor pulls the attractor toward the reference while the clamp pulls
+    it toward the arm, and that class of disagreement deadlocked a run for 112
+    of 361 steps (7.14) -- a bed that cannot make them fire cannot answer it.
+    """
+
+    def test_a_load_the_arm_cannot_overcome_shuts_the_gate(self, line_policy):
+        """How large a load is needed depends on the commanded speed.
+
+        The gate compares the lag against ``||K^-1 D|| v``, so a *fast* path
+        has a large allowance and tolerates a big disturbance, while a dwell
+        allows nothing. On this constant-speed straight line a 0.08 m/s load is
+        absorbed entirely; the real demonstration, which has two dwells and
+        several slow segments, has its gate shut on 42% of steps by the same
+        load. That is the mechanism working as designed, not a threshold to
+        tune, and it is why the sweep runs both a quiet and a loaded condition.
+        """
+        policy = line_policy
+        quiet = rollout_impedance(policy, dt=DT)
+        loaded = rollout_impedance(policy, dt=DT, load=np.array([0.0, 0.0, -0.20]))
+        assert quiet.metadata["gate_shut_fraction"] < 0.10
+        assert loaded.metadata["gate_shut_fraction"] > 0.50
+
+    def test_a_blocked_arm_drives_the_clamp_and_the_sag_baseline(self, line_policy):
+        """The clamp exists to bound the force on an arm that cannot move."""
+        out = rollout_impedance(line_policy, dt=DT, blocked_steps=(30, 80))
+        assert out.metadata["clamped_fraction"] > 0.0
+        assert out.metadata["sag_rebaselines"] >= 1
+
+    def test_a_blocked_arm_never_leaves_its_attractor_beyond_the_clamp_radius(self, line_policy):
+        """The 7.14 deadlock would show up here if a law reintroduced it."""
+        for kw in ({}, dict(attractor_law="anchor", anchor_gain=0.5),
+                   dict(attractor_law="reference")):
+            out = rollout_impedance(line_policy, dt=DT, blocked_steps=(30, 80), **kw)
+            # Every recorded lag must respect the clamp's own bound, which is at
+            # most expected + sag + tolerance.
+            speeds = np.linalg.norm(out.velocities, axis=1)
+            tau = compliance_norm(K_FREE, D_FREE)
+            bound = tau * speeds + out.metadata["static_sag"] + 0.035 + 1e-9
+            assert (out.lag <= bound).all(), kw
+
+    def test_the_arm_does_not_move_while_blocked(self, line_policy):
+        out = rollout_impedance(line_policy, dt=DT, blocked_steps=(30, 60))
+        moved = np.linalg.norm(np.diff(out.positions[31:60], axis=0), axis=1)
+        assert moved.max() < 1e-12
+
+    def test_gating_the_anchor_changes_little_even_when_the_gate_is_shut(self, line_policy):
+        """Measured rather than assumed, because it looked like it should matter.
+
+        Gated, the anchor goes inert when the arm is behind; ungated it keeps
+        pulling. With a load shutting the gate on 40% of steps the two differ by
+        a fraction of a millimetre, so the axis is real, measurable, and
+        immaterial on this bed -- which is worth recording so nobody re-opens it.
+        """
+        policy = line_policy
+        load = np.array([0.0, 0.0, -0.20])
+        gated = rollout_impedance(policy, dt=DT, load=load, attractor_law="anchor",
+                                  anchor_gain=0.5, anchor_gated=True)
+        ungated = rollout_impedance(policy, dt=DT, load=load, attractor_law="anchor",
+                                    anchor_gain=0.5, anchor_gated=False)
+        assert gated.metadata["gate_shut_fraction"] > 0.50
+        assert abs(gated.metadata["final_lag"] - ungated.metadata["final_lag"]) < 0.002
+
+    def test_the_disturbance_is_recorded(self, line_policy):
+        """A run that does not name its conditions is not a result (7.26)."""
+        out = rollout_impedance(line_policy, dt=DT, load=np.array([0.0, 0.0, -0.05]))
+        assert out.metadata["load"] == [0.0, 0.0, -0.05]
+        assert out.metadata["blocked_steps"] is None

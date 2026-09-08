@@ -788,6 +788,8 @@ def rollout_impedance(
     max_sag_rebaselines: int = 3,
     min_phase_progress: float = 0.25,
     substeps: int = 1,
+    load: np.ndarray | None = None,
+    blocked_steps: tuple[int, int] | None = None,
 ) -> "Rollout":
     """Run the real execution logic against an analytic arm instead of MuJoCo.
 
@@ -858,6 +860,19 @@ def rollout_impedance(
             puts the arm before handing over.
         substeps: Euler sub-intervals per control step. Raise to check that a
             result does not depend on the integration transient.
+        load: A constant ``(3,)`` velocity the arm cannot overcome -- gravity on
+            a held object, or a push. Without something like this the surrogate
+            arm tracks almost perfectly, the lag never exceeds what the physics
+            predicts, and **the gate and the clamp are barely exercised**: on
+            the undisturbed bed they engage on 2% and 0% of steps respectively.
+            Since the whole reason the anchor law is interesting is how it
+            interacts with those two, a bed that cannot make them fire cannot
+            answer the question. This is how to make them fire without a robot.
+        blocked_steps: ``(first, last)`` control steps over which the arm does
+            not move at all, whatever it is commanded -- an obstruction. This
+            drives the stall watchdog and the sag re-baselining, and it is the
+            configuration in which the 7.14 clamp/gate deadlock would appear if
+            a new law reintroduced it.
 
     Returns:
         A :class:`Rollout` whose ``attractors``, ``gate`` and ``lag`` channels
@@ -936,8 +951,15 @@ def rollout_impedance(
             grippers.append(float(prediction.gripper[0]))
 
         attractor = step_out.attractor
-        for _ in range(substeps):
-            x = x + A @ (attractor - x) * (dt / substeps)
+        held = (
+            blocked_steps is not None
+            and blocked_steps[0] <= len(positions) - 1 <= blocked_steps[1]
+        )
+        if not held:
+            for _ in range(substeps):
+                x = x + A @ (attractor - x) * (dt / substeps)
+                if load is not None:
+                    x = x + np.asarray(load, dtype=float) * (dt / substeps)
 
         phase = advance_phase(
             policy, belief_position(attractor, x, law.query_at),
@@ -988,6 +1010,9 @@ def rollout_impedance(
             "sag_rebaselines": int(watchdog.rebaselines),
             "phase_epsilon": float(watchdog.phase_epsilon),
             "stall_patience": int(stall_patience),
+            "gate_shut_fraction": float(np.mean(np.array(gates) < 1.0)) if gates else 0.0,
+            "load": None if load is None else np.asarray(load).tolist(),
+            "blocked_steps": blocked_steps,
             **law.to_dict(),
         },
     )
