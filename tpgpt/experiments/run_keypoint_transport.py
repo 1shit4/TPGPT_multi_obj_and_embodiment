@@ -111,14 +111,35 @@ VARIANTS = (
 #: Cube half extents swept to confirm the flat region survives real clouds.
 CUBE_SIZES = (0.005, 0.01, 0.02, 0.03, 0.06)
 
+#: Approach tilts swept, in degrees out of the support plane.
+#:
+#: The axis that separates the two corner orientations. ``task_frame`` is
+#: invariant to it by construction, so at 0 degrees the task-frame cube and the
+#: grasp-pose cube produce the *identical* map -- a designed internal control,
+#: and a measurement dead end. Everything interesting is at the other values.
+TILT_OFFSETS = (0.0, 15.0, 30.0, 45.0)
+
 #: robosuite's TableArena puts the table's *top* surface at ``table_offset``;
 #: the thickness hangs below it. ``env.table_top`` adds half the thickness on
 #: top of that and so reads about 23 mm above where objects actually rest.
 TABLE_SURFACE_IS_OFFSET = True
 
 
-def build_scene(objects=ABLATION_OBJECTS, seed: int = 0, camera_size: int = 256):
-    """A tabletop-shelf scene with depth and instance segmentation enabled."""
+def build_scene(
+    objects=ABLATION_OBJECTS,
+    seed: int = 0,
+    camera_size: int = 256,
+    controller_config: dict | None = None,
+):
+    """A tabletop-shelf scene with depth and instance segmentation enabled.
+
+    Args:
+        controller_config: Composite controller config. Must be supplied **at
+            construction** -- assigning one afterwards does nothing. Passing the
+            position-control config from
+            :func:`~tpgpt.sim.replay.make_position_controller_config` is what
+            makes the scene replayable.
+    """
     from tpgpt.sim.scenes.tabletop_shelf import TabletopShelf
 
     env = TabletopShelf(
@@ -130,6 +151,7 @@ def build_scene(objects=ABLATION_OBJECTS, seed: int = 0, camera_size: int = 256)
         camera_heights=camera_size,
         camera_widths=camera_size,
         camera_depths=True,
+        controller_configs=controller_config,
         camera_segmentations="instance",
         control_freq=20,
         seed=seed,
@@ -159,22 +181,70 @@ def target_placement(
     yaw_offset_deg: float = 0.0,
     height_fraction: float = 0.5,
     obs: dict | None = None,
+    tilt_offset_deg: float = 0.0,
+    grasp_source: str = "recipe",
+    gripper: str = "panda",
+    grasp_rank: int = 0,
 ) -> tuple[ObjectPlacement, np.ndarray]:
     """Describe an object in the scene and where the task wants it.
 
     Args:
         yaw_offset_deg: Rotate the grasp's closing axis away from the cloud's
-            natural narrow direction. This is the ablation knob that matters:
-            the keypoint box is built in a frame derived from the closing axis,
-            so the closing *direction* changes the keypoints while the grasp's
-            height and tilt do not.
+            natural narrow direction. The keypoint box is built in a frame
+            derived from the closing axis, so the closing *direction* changes the
+            keypoints while the grasp's height does not.
+        tilt_offset_deg: Tilt the grasp's **approach** out of the plane, about
+            its own closing axis.
+
+            This is the axis that separates the two corner orientations, and
+            without it they cannot be told apart. ``task_frame`` projects the
+            closing axis perpendicular to the support normal and keeps that
+            normal as its third column, so it is *invariant* to this rotation by
+            construction -- while the full grasp pose is not. With a purely
+            top-down grasp the two frames differ only by a half turn about the
+            closing axis, which maps a cube's corners onto themselves, so both
+            modes produce the identical map. That coincidence is a useful
+            internal control and a measurement dead end.
+        grasp_source: ``"recipe"`` derives the grasp from the cloud with
+            :func:`top_down_grasp`, which always approaches straight down.
+            ``"graspgen"`` takes a real ranked candidate from GraspGen-X, which
+            carries whatever tilt the planner chose -- the realistic case, and
+            the only one that exercises a hand's actual approach.
+        gripper: Registry short name, when ``grasp_source="graspgen"``.
+        grasp_rank: Which ranked candidate to take.
+
+    Raises:
+        RuntimeError: if ``grasp_source="graspgen"`` and the server returns
+            nothing. Deliberately not a silent fall back to the recipe: a run
+            that quietly measured a top-down grasp while reporting a planned one
+            would be worse than no run.
     """
     cloud = object_point_cloud(env, instance, obs=obs)
     support = table_surface(env)
-    grasp = top_down_grasp(cloud.points, height_fraction=height_fraction)
+    if grasp_source == "recipe":
+        grasp = top_down_grasp(cloud.points, height_fraction=height_fraction)
+    elif grasp_source == "graspgen":
+        from tpgpt.grasp.pipeline import grasps_for_cloud
+
+        grasp_set = grasps_for_cloud(cloud, gripper)
+        if not len(grasp_set):
+            raise RuntimeError(
+                f"GraspGen-X returned no candidate for {instance!r} with "
+                f"{gripper!r}; refusing to substitute a top-down recipe"
+            )
+        grasp = GraspFrame.from_grasp(grasp_set.grasps[min(grasp_rank, len(grasp_set) - 1)])
+    else:
+        raise ValueError(
+            f"unknown grasp_source {grasp_source!r}; expected 'recipe' or 'graspgen'"
+        )
     if yaw_offset_deg:
         rotation = rotate_about([0.0, 0.0, 1.0], np.radians(yaw_offset_deg))
         grasp = GraspFrame(grasp.tcp, grasp.approach, rotation @ grasp.closing)
+    if tilt_offset_deg:
+        # About the grasp's own closing axis, so the closing direction -- and
+        # therefore the task frame -- is untouched and only the approach moves.
+        rotation = rotate_about(grasp.closing, np.radians(tilt_offset_deg))
+        grasp = GraspFrame(grasp.tcp, rotation @ grasp.approach, grasp.closing)
 
     destination = env.slot_poses()[slot]
     placement = ObjectPlacement(
@@ -381,6 +451,58 @@ def summarise(label: str, result: dict) -> dict:
     }
 
 
+def tilt_sweep(
+    labels,
+    source_placement,
+    env,
+    objects=ABLATION_OBJECTS,
+    slot: str = "top_middle",
+    variants=VARIANTS,
+    tilts=TILT_OFFSETS,
+    grasp_source: str = "recipe",
+    gripper: str = "panda",
+    obs=None,
+) -> list[dict]:
+    """Every construction against an approach tilted out of the support plane.
+
+    This is the only axis on which the two corner orientations differ, so it is
+    the only place variants 3 and 5 can be evaluated at all. Held fixed: one
+    source demonstration, one scene, one slot, the target grasp at mid height.
+    Varied: the construction, the object, and the approach tilt.
+
+    With ``grasp_source="graspgen"`` the base grasp is a real ranked candidate
+    rather than a top-down recipe, so the tilt is applied on top of whatever the
+    planner already chose.
+    """
+    rows = []
+    for name in objects:
+        for tilt in tilts:
+            try:
+                target, _ = target_placement(
+                    env, name, slot, height_fraction=0.5, obs=obs,
+                    tilt_offset_deg=tilt, grasp_source=grasp_source, gripper=gripper,
+                )
+            except (ValueError, RuntimeError) as exc:
+                rows.append({"label": f"{name} tilt={tilt:.0f}", "object": name,
+                             "tilt_offset_deg": tilt, "grasp_source": grasp_source,
+                             "skipped": str(exc)})
+                continue
+            for variant in variants:
+                label = f"{variant.name} {name} tilt={tilt:.0f}"
+                try:
+                    row = summarise(
+                        label,
+                        transport(labels, source_placement, target, variant=variant),
+                    )
+                except Exception as exc:
+                    row = {"label": label, "variant": variant.name,
+                           "failed": f"{type(exc).__name__}: {exc}"}
+                row.update(object=name, tilt_offset_deg=tilt, grasp_source=grasp_source)
+                rows.append(row)
+                print("  " + _variant_line(row))
+    return rows
+
+
 def variant_sweep(
     labels,
     source_placement,
@@ -550,6 +672,25 @@ def main(out_dir: str | Path = "outputs/keypoints", slot: str = "top_middle") ->
         report["variants"] = sweep["variants"]
         report["cube_sizes"] = sweep["cube_sizes"]
 
+        # The tilt axis, which is the only one that separates the two corner
+        # orientations. Run twice: on the top-down recipe, where the tilt is the
+        # only source of out-of-plane approach, and on real GraspGen-X
+        # candidates, which carry their own.
+        print("\napproach tilted out of plane, recipe grasps")
+        report["tilt_recipe"] = tilt_sweep(
+            labels, source_placement, env, objects=ABLATION_OBJECTS, slot=slot,
+            obs=obs, grasp_source="recipe",
+        )
+        print("\napproach tilted out of plane, real GraspGen-X grasps")
+        try:
+            report["tilt_graspgen"] = tilt_sweep(
+                labels, source_placement, env, objects=ABLATION_OBJECTS, slot=slot,
+                obs=obs, grasp_source="graspgen",
+            )
+        except Exception as exc:  # the server is optional; say so rather than skip silently
+            print(f"  GraspGen-X unavailable: {type(exc).__name__}: {exc}")
+            report["tilt_graspgen"] = [{"unavailable": f"{type(exc).__name__}: {exc}"}]
+
         # --- figures --------------------------------------------------------
         target, result = first
         paths = [
@@ -610,6 +751,8 @@ def main(out_dir: str | Path = "outputs/keypoints", slot: str = "top_middle") ->
                     "variant": [v.name for v in VARIANTS],
                     "object": list(ABLATION_OBJECTS),
                     "grasp_fraction": [1.0, 0.5],
+                    "tilt_offset_deg": list(TILT_OFFSETS),
+                    "grasp_source": ["recipe", "graspgen"],
                     "cube_half_extent_m": list(CUBE_SIZES),
                 },
                 "fixed": {
@@ -631,11 +774,18 @@ def main(out_dir: str | Path = "outputs/keypoints", slot: str = "top_middle") ->
                     "orientation error, the determinant and the clearance."
                 ),
             },
-            rows=report["variants"] + report["cube_sizes"],
+            rows=(
+                report["variants"] + report["cube_sizes"]
+                + report["tilt_recipe"] + report["tilt_graspgen"]
+            ),
             report="fig_variants.png",
         )
         (out_dir / "rows.json").write_text(
-            json.dumps(report["variants"] + report["cube_sizes"], indent=2, default=float)
+            json.dumps(
+                report["variants"] + report["cube_sizes"]
+                + report["tilt_recipe"] + report["tilt_graspgen"],
+                indent=2, default=float,
+            )
         )
         print("\nwrote:")
         for path in [*paths, out_dir / "report.json", manifest, out_dir / "rows.json"]:

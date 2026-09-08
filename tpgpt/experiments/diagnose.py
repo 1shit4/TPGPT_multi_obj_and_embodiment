@@ -610,6 +610,56 @@ def attractor_drift(rollout, transported) -> dict:
     }
 
 
+def grasp_slip(rollout, positions=None) -> dict:
+    """How far the object moved *relative to the hand* while it was held.
+
+    A grasp that holds is one where the object-to-fingertip vector stays put.
+    Once the jaws close the attachment is meant to be rigid -- ``carry_transform``
+    assumes exactly that when it derives the placed pose from the trajectory --
+    so any drift in that vector is the object sliding, rolling or being squeezed
+    out.
+
+    This matters for a tilted grasp in particular: a hand rotated away from the
+    demonstration's holds the object against a different component of gravity,
+    and whether that still holds is a physics question no amount of map geometry
+    can answer.
+
+    Measured against the vector at **first contact** rather than against the
+    commanded pose, so it is drift in the grasp and not tracking error.
+
+    Args:
+        rollout: Anything carrying ``metadata["probe"]`` with ``object_x/y/z``
+            and ``held`` channels -- a :class:`~tpgpt.sim.rollout.SimRollout` or
+            a :class:`~tpgpt.sim.replay.ReplayResult`.
+        positions: ``(N, 3)`` measured hand positions. Defaults to
+            ``rollout.positions``.
+
+    Returns:
+        ``{"slip_max", "slip_final", "slip_at_step", "held_steps"}`` in metres,
+        or ``{}`` when the trace or the contact channel is missing -- never a
+        plausible-looking zero, which is the recurring lesson of 7.13.
+    """
+    trace = (getattr(rollout, "metadata", None) or {}).get("probe") or {}
+    if not {"object_x", "object_y", "object_z", "held"} <= set(trace):
+        return {}
+    hand = np.asarray(positions if positions is not None else rollout.positions, dtype=float)
+    obj = np.column_stack([trace["object_x"], trace["object_y"], trace["object_z"]])
+    held = np.asarray(trace["held"]).astype(bool)
+    n = min(len(hand), len(obj), len(held))
+    hand, obj, held = hand[:n], obj[:n], held[:n]
+    if not held.any():
+        return {"slip_max": float("nan"), "slip_final": float("nan"),
+                "slip_at_step": None, "held_steps": 0}
+    grip = obj[held] - hand[held]
+    drift = np.linalg.norm(grip - grip[0], axis=1)
+    return {
+        "slip_max": float(drift.max()),
+        "slip_final": float(drift[-1]),
+        "slip_at_step": int(np.flatnonzero(held)[int(drift.argmax())]),
+        "held_steps": int(held.sum()),
+    }
+
+
 def _hand_contact(result, position: np.ndarray, rotation=None) -> np.ndarray:
     """The point between the fingertips, given a recorded end-effector position.
 
