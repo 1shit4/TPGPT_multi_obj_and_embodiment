@@ -81,6 +81,15 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
+from tpgpt.policy.rollout import (
+    clamp_attractor,
+    clamp_speed,
+    compliance_norm,
+    lag_gate,
+    phase_epsilon_from,
+    steer_attractor,
+    stiffness_threshold,
+)
 from tpgpt.sim.backend import FrameWriter, observation_frame
 from tpgpt.sim.controllers.cartesian_impedance import CartesianImpedanceController
 
@@ -304,25 +313,14 @@ def rollout_policy(
     # open, scaled down: anything slower than this fraction of nominal is a
     # crawl, not progress. Derived from the demonstration's own pace so it
     # scales with how long the task is rather than being a magic number.
-    nominal_rate = (
-        float(np.mean(policy.labels.time_rate))
-        if policy.labels.time_rate is not None and len(policy.labels.time_rate)
-        else 1.0 / max(len(policy.labels.positions), 1) / dt
-    )
-    phase_epsilon = max(
-        1e-6, min_phase_progress * nominal_rate * dt * stall_patience
+    phase_epsilon = phase_epsilon_from(
+        policy.labels, dt, stall_patience, min_phase_progress
     )
     # Compliance is the inverse of stiffness, so a *large* value here means the
     # teacher was being soft. The midpoint of the demonstration's own range
     # separates its free-space segments from its grasp and insertion ones
     # without hard-coding a number.
-    label_compliance = np.array([
-        _compliance_norm(K, D)
-        for K, D in zip(policy.labels.stiffness, policy.labels.damping)
-    ]) if policy.labels.stiffness is not None else np.zeros(1)
-    stiff_threshold = float(
-        0.5 * (label_compliance.min() + label_compliance.max())
-    )
+    stiff_threshold = stiffness_threshold(policy.labels)
 
     for step in range(max_steps):
         # In tool-offset mode this is the fingertip, which is the frame the
@@ -334,9 +332,9 @@ def rollout_policy(
         # policy was fitted on.
         prediction = policy.predict(attractor[None], query_phase)
 
-        speed = float(np.linalg.norm(prediction.velocity[0]))
-        if speed > speed_limit:
-            prediction.velocity[0] *= speed_limit / speed
+        # A local rather than a mutation of the prediction: every read below
+        # relied on the in-place update to see the clamped value.
+        velocity = clamp_speed(prediction.velocity[0], speed_limit)
 
         # Lag gate: hold progress while the arm is behind its attractor, so the
         # gripper never acts on a pose the robot has not reached.
@@ -348,14 +346,14 @@ def rollout_policy(
             prediction.orientation[0] if prediction.orientation is not None else None
         )
 
-        gate, expected = 1.0, 0.0
-        if lag_tolerance:
-            behind = float(np.linalg.norm(position - attractor))
-            expected = _compliance_norm(
-                prediction.stiffness[0], prediction.damping[0]
-            ) * float(np.linalg.norm(prediction.velocity[0]))
-            excess = behind - expected - static_sag
-            gate = float(np.clip(1.0 - excess / lag_tolerance, 0.0, 1.0))
+        # Hoisted: the same three arguments were solved three times per step.
+        compliance = compliance_norm(prediction.stiffness[0], prediction.damping[0])
+        expected = (
+            compliance * float(np.linalg.norm(velocity)) if lag_tolerance else 0.0
+        )
+        gate, behind = lag_gate(
+            position, attractor, expected, static_sag, lag_tolerance
+        )
         # --- infeasible-pose fallback ------------------------------------
         # Only consulted while the gate is shut, so a run that is tracking
         # normally never pays for it.
@@ -373,9 +371,10 @@ def rollout_policy(
             # field into somewhere it cannot go. Capped at the demonstrated
             # speed so the detour is a motion, not a jump.
             target = np.asarray(policy.labels.positions[skip_index], dtype=float)
-            direction = target - attractor
-            distance = float(np.linalg.norm(direction))
-            if distance <= skip_arrival:
+            attractor, arrived = steer_attractor(
+                attractor, target, speed_limit, dt, skip_arrival
+            )
+            if arrived:
                 # Arrived: hand the clock over so the gripper schedule matches
                 # where the arm now is, and resume the policy.
                 if policy.labels.time_belief is not None:
@@ -383,12 +382,9 @@ def rollout_policy(
                 skip_index = None
                 skips += 1
             else:
-                attractor = attractor + direction / distance * min(
-                    speed_limit * dt, distance
-                )
                 skipped_steps += 1
         else:
-            attractor = attractor + prediction.velocity[0] * dt * gate
+            attractor = attractor + velocity * dt * gate
         # Keep the attractor within reach of the arm, so a blocked or lagging
         # robot builds a bounded interaction force instead of an unbounded one.
         #
@@ -407,19 +403,15 @@ def rollout_policy(
         # Taking the smaller of the two limits makes the deadlock unreachable:
         # the attractor can never be further away than the distance at which
         # the arm is allowed to catch up.
-        lag = attractor - position
-        compliance = _compliance_norm(prediction.stiffness[0], prediction.damping[0])
-        max_lag = speed_limit * compliance
-        if lag_tolerance:
-            max_lag = min(max_lag, expected + static_sag + lag_tolerance)
-        lag_norm = float(np.linalg.norm(lag))
-        if lag_norm > max_lag:
-            attractor = position + lag * (max_lag / lag_norm)
+        attractor, max_lag, clamped = clamp_attractor(
+            attractor, position, compliance, speed_limit,
+            expected, static_sag, lag_tolerance,
+        )
         # Firm about orientation where it matters -- reaching for the object and
         # setting it down -- and compliant while merely carrying it. The
         # demonstration's own translational stiffness says which is which: it
         # rises for the grasp and the insertion.
-        firm = _compliance_norm(prediction.stiffness[0], prediction.damping[0])
+        firm = compliance
         carrying = gripper_command > 0 and firm > 0.0 and firm >= stiff_threshold
         rotational_gain = (
             rotational_stiffness * transit_rotational_scale
@@ -448,7 +440,7 @@ def rollout_policy(
 
         positions.append(position.copy())
         attractors.append(attractor.copy())
-        velocities.append(prediction.velocity[0].copy())
+        velocities.append(velocity.copy())
         phases.append(phase)
         stds.append(prediction.velocity_std[0].copy())
         grippers.append(gripper_command)
@@ -606,13 +598,10 @@ def _next_feasible(env, policy, phase, offset, tolerance, lookahead: int = 40, s
     return None
 
 
-def _compliance_norm(stiffness: np.ndarray, damping: np.ndarray) -> float:
-    """Largest attractor offset per unit of commanded speed, ``||K^-1 D||``.
-
-    Multiplying by a speed limit turns it into a displacement limit, so the
-    clamp scales correctly with whatever stiffness the policy commanded.
-    """
-    return float(np.linalg.norm(np.linalg.solve(stiffness, damping), ord=2))
+#: Kept as an alias for one commit: the parallel keypoint session's working
+#: copies may still reference the private name, and a rename would surface as an
+#: ImportError in *their* tree rather than here.
+_compliance_norm = compliance_norm
 
 
 def _approach(
