@@ -394,6 +394,72 @@ class TestClosingBudget:
         assert closing_budget(result) == 0.0
 
 
+    def test_the_placed_block_is_excluded_from_the_width(self):
+        """The bug this test exists for, and why the old fakes missed it.
+
+        ``scene_keypoints`` emits **two** blocks -- the object where it is picked
+        and the same object where it is placed -- and ``_select_parts`` keeps
+        both, so ``target_keypoints.points`` spans the whole pick-to-place
+        distance. Projected onto the closing axis that is 239 to 277 mm on the
+        real objects, against an aperture of at most 125 mm, so the budget
+        clamped to **0.0 for every object and every hand**.
+
+        Zero is a *plausible* number, which makes it worse than ``None``: it is
+        indistinguishable from a genuinely impossible grasp, and it is the same
+        class of failure the ``None`` return above exists to prevent.
+
+        It was invisible because every fake in this file carried ``points`` and
+        no ``labels`` -- simpler than the object the function actually receives.
+        So this fake carries both.
+        """
+        aperture = _aperture_or_skip()
+
+        class Keys:
+            #: A 20 mm-wide object picked at the origin and placed 355 mm away,
+            #: the real pick-to-place distance in this scene.
+            points = np.array([
+                [-0.010, 0, 0], [0.010, 0, 0],          # pick block
+                [0.345, 0, 0], [0.365, 0, 0],           # placed block
+            ])
+            labels = ["pick_nnn", "pick_pnn", "place_nnn", "place_pnn"]
+
+        result = RunResult(prompt="p", gripper="panda", shelf_variant="c", seed=0)
+        result.grasp, result.target_keypoints = _grasp(), Keys()
+        # The object is 20 mm wide, not 375 mm.
+        assert closing_budget(result) == pytest.approx((aperture - 0.020) / 2)
+
+    def test_without_labels_it_still_measures_something(self):
+        """Back-compatible: a set with no labels is used whole.
+
+        There is no way to tell which points are the pick block without them,
+        and refusing would turn every caller that passes a bare array into a
+        ``None``. The pick-only path is taken when the labels are there.
+        """
+        aperture = _aperture_or_skip()
+
+        class Keys:
+            points = np.array([[-0.010, 0, 0], [0.010, 0, 0]])
+
+        result = RunResult(prompt="p", gripper="panda", shelf_variant="c", seed=0)
+        result.grasp, result.target_keypoints = _grasp(), Keys()
+        assert closing_budget(result) == pytest.approx((aperture - 0.020) / 2)
+
+    def test_a_single_pick_point_falls_back_to_the_whole_set(self):
+        """One point has no extent, so the filter must not be applied."""
+        aperture = _aperture_or_skip()
+
+        class Keys:
+            points = np.array([[-0.010, 0, 0], [0.010, 0, 0], [0.345, 0, 0]])
+            labels = ["pick_center", "place_nnn", "place_pnn"]
+
+        result = RunResult(prompt="p", gripper="panda", shelf_variant="c", seed=0)
+        result.grasp, result.target_keypoints = _grasp(), Keys()
+        # Falls back to the full extent, which is 355 mm and yields no budget --
+        # a wrong answer, but a *visible* one, and the alternative is inventing
+        # a width from a single point.
+        assert closing_budget(result) == 0.0
+
+
 class TestAttractorDrift:
     """Pointwise deviation of the integrated attractor from its planned path."""
 

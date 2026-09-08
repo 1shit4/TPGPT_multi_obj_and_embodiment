@@ -701,7 +701,20 @@ def gripper_sweep(
                         # closing axis, not an axis-aligned extent -- a 30 x 100
                         # mm box yawed 45 degrees measures 92 x 92 and reads as
                         # ungraspable (7.18).
-                        points = getattr(result.get("target_keypoints"), "points", None)
+                        keypoints = result.get("target_keypoints")
+                        points = getattr(keypoints, "points", None)
+                        labels = getattr(keypoints, "labels", None)
+                        # The **pick** block only. The set also holds the placed
+                        # block, and the extent over both is the pick-to-place
+                        # distance -- 239 to 277 mm, against an aperture of at
+                        # most 125 mm, which clamps every budget to zero.
+                        if points is not None and labels is not None:
+                            pick = [
+                                i for i, lab in enumerate(labels)
+                                if lab.startswith("pick_")
+                            ]
+                            if len(pick) >= 2:
+                                points = np.asarray(points, dtype=float)[pick]
                         width = (
                             float(np.ptp(
                                 np.asarray(points, dtype=float) @ target.grasp.closing

@@ -789,6 +789,12 @@ def closing_budget(result, fraction: float = CLOSING_BUDGET_FRACTION) -> float |
     axis-aligned bounding box instead is a known trap: a 30 x 100 mm box yawed
     45 degrees measures 92 x 92 and reads as ungraspable (section 7.18).
 
+    Measured on the **pick block alone**. A first version took the extent over
+    all of ``target_keypoints``, which holds the placed block as well, so the
+    "width" was the pick-to-place distance (239-277 mm) and the budget clamped
+    to 0.0 for every object and every hand. See the comment in the body: a zero
+    budget is a plausible number, which makes it worse than no number.
+
     Returns:
         The budget in metres, or ``None`` when neither the gripper geometry nor
         the keypoints are available -- never a plausible-looking default. A
@@ -810,10 +816,29 @@ def closing_budget(result, fraction: float = CLOSING_BUDGET_FRACTION) -> float |
     except Exception:  # pragma: no cover - absent sibling checkout
         return None
 
+    # **The pick block only.** ``scene_keypoints`` emits two blocks -- the
+    # object where it is picked and the same object where it is placed -- and
+    # ``_select_parts`` keeps both, so ``target_keypoints.points`` spans the
+    # whole pick-to-place distance. Projected onto the closing axis that is 239
+    # to 277 mm depending on the object, against an aperture of at most 125 mm,
+    # so ``0.5 * (aperture - width)`` clamped at zero and this function returned
+    # **0.0 for every object and every hand**.
+    #
+    # A budget of zero says "the hand has no room at all", which is a plausible
+    # number and therefore the worst possible failure: it is not distinguishable
+    # from a genuinely impossible grasp, and it is exactly what the ``None``
+    # return above exists to avoid for the *other* failure mode. The jaws close
+    # at the pick, so the pick block's extent is the width they meet.
     points = getattr(result.target_keypoints, "points", None)
+    labels = getattr(result.target_keypoints, "labels", None)
     if points is None or len(points) < 2:
         return fraction * aperture
-    width = float(np.ptp(np.asarray(points, dtype=float) @ result.grasp.closing))
+    points = np.asarray(points, dtype=float)
+    if labels is not None and len(labels) == len(points):
+        pick = [i for i, label in enumerate(labels) if label.startswith("pick_")]
+        if len(pick) >= 2:
+            points = points[pick]
+    width = float(np.ptp(points @ result.grasp.closing))
     return max(0.5 * (aperture - width), 0.0)
 
 
