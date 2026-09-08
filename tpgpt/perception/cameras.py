@@ -25,7 +25,18 @@ from scipy import ndimage
 
 #: Cameras used when none are named. Three viewpoints roughly halve the
 #: unobserved back side of an object compared with a single view.
-DEFAULT_CAMERAS = ("agentview", "frontview", "birdview")
+#:
+#: Not ``agentview`` or ``frontview``, though both were used until the shelf
+#: became solid geometry. Both sit on the far side of the shelf from the table,
+#: so they now look straight into its back panel, and object clouds went from
+#: 1433 points to zero. The shelf had always been there -- it lived in the
+#: collision group, which robosuite does not render, so depth passed through it
+#: and the occlusion was invisible. ``workspace`` is placed for this scene
+#: specifically; the other two are stock cameras with a clear line to the table.
+#:
+#: Cameras absent from an environment are skipped, so this stays valid for the
+#: reshelving scene, which has none of them.
+DEFAULT_CAMERAS = ("workspace", "sideview", "birdview")
 
 #: Erosion applied to the instance mask, in pixels.
 #:
@@ -222,3 +233,76 @@ def object_point_cloud(
         camera_positions=positions,
         points_per_camera=per_camera,
     )
+
+
+#: Instances never included in a scene cloud: the robot itself, and the
+#: visual-only slot markers, which have ``contype=0`` and cannot collide with
+#: anything. Leaving the markers in would make every shelf slot look blocked.
+NON_OBSTACLE_PREFIXES = ("Panda", "Sawyer", "UR5e", "Kinova", "IIWA", "XArm", "Yumi")
+NON_OBSTACLE_SUBSTRINGS = ("Mount", "Gripper", "Hand", "slot_")
+
+
+def is_obstacle(instance: str) -> bool:
+    """Whether an instance is something the hand could collide with."""
+    return not (
+        instance.startswith(NON_OBSTACLE_PREFIXES)
+        or any(s in instance for s in NON_OBSTACLE_SUBSTRINGS)
+    )
+
+
+def scene_point_cloud(
+    env,
+    exclude: tuple[str, ...] = (),
+    cameras: tuple[str, ...] | None = None,
+    obs: dict | None = None,
+    max_points: int = MAX_CLOUD_POINTS,
+    max_depth: float = 3.0,
+    rng: np.random.Generator | None = None,
+) -> np.ndarray:
+    """Everything the gripper must avoid, in world coordinates.
+
+    Built from the **full** depth image rather than from segmented instances,
+    because the table is arena geometry and carries no instance id at all: a
+    segmentation-driven cloud would leave out the one surface every top-down
+    grasp has to clear.
+
+    Args:
+        exclude: Instance names to drop -- the object being grasped, above all.
+            The hand closes around it, so leaving it in makes every grasp
+            collide with the thing it is meant to pick up.
+
+    Returns:
+        ``(N, 3)`` world-frame points, capped at ``max_points``.
+    """
+    from robosuite.utils import camera_utils
+
+    rng = rng if rng is not None else np.random.default_rng(0)
+    obs = obs if obs is not None else env._get_observations()
+    available = {k[: -len("_image")] for k in obs if k.endswith("_image")} or set()
+    cameras = cameras or tuple(c for c in DEFAULT_CAMERAS if c in available) or DEFAULT_CAMERAS
+
+    drop_ids = {
+        instance_segmentation_id(env, name)
+        for name in instance_names(env)
+        if name in exclude or not is_obstacle(name)
+    }
+
+    clouds = []
+    for camera in cameras:
+        depth = obs.get(f"{camera}_depth")
+        segmentation = obs.get(f"{camera}_segmentation_instance")
+        if depth is None or segmentation is None:
+            continue
+        metric = camera_utils.get_real_depth_map(env.sim, depth)[..., 0]
+        ids = np.asarray(segmentation)[..., 0]
+        mask = (~np.isin(ids, list(drop_ids))) & (metric > 0.0) & (metric < max_depth)
+        if not mask.any():
+            continue
+        clouds.append(unproject(env, camera, mask, metric, *mask.shape))
+
+    if not clouds:
+        return np.empty((0, 3))
+    points = np.vstack(clouds)
+    if len(points) > max_points:
+        points = points[rng.choice(len(points), max_points, replace=False)]
+    return points

@@ -671,22 +671,1425 @@ object is no longer in.
 
 ---
 
-## 6. Open items
+## 6. Grasp-aligned keypoint extraction
 
-**Next, and needs discussion before implementation** (the flow for a new scene
-is: prompt -> object and destination -> grasps -> **filter, choose one** ->
-**keypoints** -> transport -> execute; the two bold stages are open):
+The last undesigned stage of the cross-object pipeline. The reshelving keypoints
+are two boxes of known size read out of the simulator (`product_main` and
+`goal_marker`, the latter a box of exactly `PRODUCT_HALF_SIZE` at the goal, so
+the existing scheme is already "the object where it starts" plus "the object
+where it ends"). Neither survives a change of object: an arbitrary mesh has no
+known extent and no task-meaningful body frame, and the new scene has no goal
+marker, so the placed configuration has to be computed rather than read.
 
+### 6.1 The construction
+
+Keypoints are defined by **role**, not by geometry, which is what supplies the
+elementwise pairing Sec. III-A assumes without having to match anything:
+
+* **Task frame** (`task_frame`), columns `(c, a, n)`: `n` is the support
+  normal, `c` the grasp's closing axis projected into the support plane, and
+  `a = n x c`. It is defined identically for a carton, a can and a lemon, and
+  for every gripper, because every grasp has a closing direction and every
+  resting object has a support normal. Principal axes were rejected: they are
+  shape dependent and their signs flip arbitrarily on near-symmetric objects.
+* **A box fitted to the object's own cloud in that frame**, its lower face
+  snapped to the support plane. Centre plus eight corners: nine keypoints per
+  configuration, matching Sec. V-A's cube but measured rather than assumed.
+* **Four configurations**: source object at pick and at place, target object at
+  pick and at place. 18 paired keypoints in all.
+
+The source's placed configuration is *derived, not observed*. Once the jaws
+close the object is rigidly attached, so its motion is the hand's motion:
+`T_obj(release) = T_eef(release) . T_eef(grasp)^-1` read straight off the
+labels (`carry_transform`). This is exact, needs no second image, and is
+consistent with the labels -- unlike an observation at release, which sees an
+object half occluded by the gripper holding it.
+
+The target's placed configuration is inherited **relative to the receptacle**:
+lateral offset within the slot from the demonstration, orientation from
+`placement_rotation`, height from the destination surface. No transform between
+the source and target *objects* is fitted anywhere. A carton and a lemon are not
+related by one, so fitting it would inject an arbitrary rotation into `phi`.
+The recipe is shared; the geometry is not.
+
+### 6.2 Acceptance: the validated result is a special case
+
+Running the Sec. V-A campaign through the general extractor instead of the two
+known bodies:
+
+| Keypoints | Success | Median placement error | Failing seeds |
+|---|---|---|---|
+| Two known boxes (the validated scheme) | 17/20 | 8.0 mm | 8, 11, 16 |
+| Grasp-aligned box from the cloud | **17/20** | **8.0 mm** | **8, 11, 16** |
+
+Not merely the same rate -- the *same three seeds*, which are the step-budget
+timeouts of section 4.5. Feeding the extractor a synthetic cloud sampled from
+the product's known geometry isolates the keypoint construction from
+perception, which has its own acceptance tests.
+
+### 6.3 Transporting onto objects the demonstration never saw
+
+One reshelving demonstration (a 5 x 5 x 9 cm box) transported onto five
+tabletop objects, described only by segmented point clouds, onto a different
+shelf. Scored geometrically: `demo.py` and `rollout.py` are still specific to
+reshelving, so executing here would mean changing the two modules the 17/20
+depends on.
+
+| Object | Cloud pts | Fitted box (cm) | Grasp err | Release err | Jaw err | det(J)>0 |
+|---|---|---|---|---|---|---|
+| cereal | 1495 | 2.7 x 9.7 x 15.4 | 1.5 mm | 0.6 mm | 0.7 deg | 100% |
+| milk | 396 | 4.2 x 4.2 x 14.2 | 1.6 mm | 0.2 mm | 1.1 deg | 100% |
+| can | 505 | 4.5 x 4.2 x 8.5 | 1.3 mm | 0.5 mm | 1.8 deg | 100% |
+| bread | 215 | 3.7 x 4.6 x 4.8 | 2.0 mm | 0.6 mm | 0.8 deg | 100% |
+| lemon | 12 | 0.5 x 1.3 x 3.7 | 2.0 mm | 0.5 mm | 5.0 deg | 100% |
+
+"Grasp err" is the distance from `phi(demonstration grasp point)` to the
+materially corresponding point on the target object; "jaw err" the angle
+between the transported gripper's closing axis and the target grasp's. Release
+clearance matched its intended value to within 0.7 mm on every object.
+
+**Rotating the grasp's closing axis barely matters.** Sweeping the target
+grasp's closing direction over a full 90 degrees moved the grasp error only
+from 1.5 to 2.3 mm and the jaw error stayed under 1.6 degrees. The recipe is
+self-consistent under that rotation because the same frame convention builds
+both boxes.
+
+### 6.4 Contact keypoints, and why they are off by default
+
+> **Reinstated, and this section is now the primary record.** It was once
+> marked superseded by 7.11; 7.11 is withdrawn and 7.22 carries the
+> confirmation. The conclusion below -- that the grasp contacts belong off by
+> default -- is supported by two independent measurements that agree: the
+> grasp-height table in this section, and the determinant collapse in 7.22
+> (adding contacts to the box drops `min det(J)` from ~0.68 to 0.0074 and folds
+> five maps in six).
+>
+> Both of those are **geometry**, computed from the fitted map with no physics
+> involved, which is why they survived the deletion of the end-to-end campaigns
+> in 7.26 when almost nothing else did. What 7.11 had against this section was a
+> pose-alignment figure that scored the map at a single point, plus success
+> rates measured while the gripper was shut the whole time (7.12). Neither could
+> see a folded map.
+>
+> **What this section does not settle** is whether contacts should be off
+> *forever*. They are off because interpolating them *exactly, alongside the box*
+> folds the map. 7.22 measures the aim cost of leaving them out at about 53 mm,
+> which is large. Section 8 carries the design question that follows.
+
+
+The natural extension -- adding the two jaw contacts and the support contact,
+found by intersecting the grasp plane with the cloud -- was built, measured, and
+**turned off by default**. It is kept behind `include_contacts` because it is
+the ablation for the claim below.
+
+Contact keypoints pin *where along the object the jaws sit*. The box corners
+simultaneously pin the object's shape. Whenever the target grasp sits at a
+different height on its object than the source grasp did, those two demands
+contradict each other, and because Sec. III-D interpolates every keypoint
+**exactly**, the map satisfies both by folding space in between:
+
+| Target grasp height | Grasp err, cereal | Release clearance (want 154 mm) | min det(J), real cloud | min det(J), synthetic |
+|---|---|---|---|---|
+| top (matches the source) | 2.1 mm | 157 mm | +0.51 | +1.04 |
+| three-quarter height | 38.8 mm | 122 mm | +0.38 | +0.44 |
+| mid-height | 43.4 mm | 90 mm | +0.07 | **-0.07 (folded)** |
+
+The box keypoints are unaffected at every grasp height -- 1.5 mm and
+`min det(J)` +0.67 throughout -- because nothing in them depends on where the
+grasp sits.
+
+The fold itself only appeared on the synthetic scene, where the objects differ
+more sharply; on the real clouds the same mismatch drove `det(J)` to within 0.07
+of folding while costing 64 mm of release clearance. Degrading towards a fold is
+enough: the map is already unusable well before the determinant changes sign.
+
+**The conclusion is architectural.** The grasp's position along the object does
+not belong in the warp. It is already handled where it should be: a grasp
+converts to an end-effector target through the frame contract in
+`tpgpt/grasp/grasps.py`, verified in physics in section 5.5. What the warp needs
+from the grasp is only its *orientation*, and it has that from the task frame.
+
+### 6.5 Failures that every diagnostic called healthy
+
+Four bugs during this work produced keypoint sets that were geometrically
+plausible, fitted maps with micrometre residuals and 100% positive Jacobian
+determinants, and were wrong. None would have been caught by the map's own
+diagnostics; all showed up only as a rotated or misplaced gripper.
+
+- **Sampling a single cloud point as a jaw contact.** Taking the point nearest a
+  percentile along the closing axis leaves its other two coordinates at whatever
+  that sample happened to be. On the reshelving box the two contacts landed at
+  unrelated lateral offsets, tilting the contact axis 12.8 degrees in the source
+  scene against 1.3 degrees in the target. Eq. 11 turns that straight into
+  gripper yaw: 14 degrees of it, enough to catch the jaws on the box corners.
+  Fixed by building the contact from robust statistics -- the closing coordinate
+  measured, the other two taken from the box and the grasp.
+- **The support contact as a footprint centroid.** Same class of error: a thin
+  band of a randomly sampled cloud is an unstable statistic, and it moved 3.3 mm
+  between two extractions of the same box. `phi` interpolates exactly, so that
+  inconsistency becomes a local deformation planted directly under the object.
+  Cost 2 of 20 episodes. Fixed by using the box's own lateral centre.
+- **Inheriting the carried rotation instead of the placed orientation.** The
+  demonstration turns its object by `-theta_source` to square it with the shelf.
+  Copying that *amount* onto a target starting at a different yaw leaves it
+  skewed by the difference -- measured at 8 degrees of residual gripper yaw.
+  Both rotations are about the support normal and therefore commute, so
+  conjugating through the task frames (the first attempt) is a no-op. What must
+  be inherited is the placed orientation *relative to the receptacle*, exactly
+  as the placed position already is.
+- **Two different heights for the same object.** The pick box is snapped to the
+  support plane; the placed box was positioned from the raw cloud, whose lowest
+  points are truncated. The same cereal box measured 15.4 cm at the pick and
+  14.7 cm at the place.
+
+### 6.6 Measured limits
+
+- **`env.table_top` is not where objects rest.** robosuite's `TableArena` puts
+  the table's *top* surface at `table_offset` and hangs the thickness below it;
+  the property adds half the thickness on top, so it reads 23 mm above the
+  plane objects actually sit on. Snapping a box to it shortens the box, moves
+  the grasp keypoints down the object, and makes the transported gripper close
+  above the product. This is scene furniture rather than a transport bug, so it
+  is documented rather than changed -- the shelf and goal heights in both scenes
+  are derived from the same property and are consistent with each other.
+- **The support snap is doing real work.** The fused cloud's lowest point stood
+  **0.5 to 24.5 mm** above the table across the five objects. Mask erosion trims
+  a pixel from every silhouette boundary, including the line where the object
+  meets the surface. Note that dropping only an object's *bottom face* does not
+  reproduce this -- the side faces still reach the contact line. Truncation, not
+  the invisibility of one face, is what the snap defends against.
+- **A 12-point cloud produces a confident, wrong box -- and `min det(J)` is the
+  one diagnostic that notices.** The lemon's fused cloud had 12 points and
+  yielded a box 0.5 x 1.3 cm across a fruit roughly 5 cm wide. Keypoint residual
+  (0.08 um), `fraction_positive` (100%) and grasp error (2.0 mm) all stayed
+  green, because they measure the map's self-consistency rather than whether the
+  box describes the object. The *minimum* determinant does not:
+
+  | Object | Cloud pts | min det(J) |
+  |---|---|---|
+  | milk / can / cereal | 396-1495 | 0.67-0.69 |
+  | bread | 215 | 0.35 |
+  | lemon | 12 | **0.008** |
+
+  A box collapsed in one direction compresses space by the same factor, so
+  `min det(J)` degrades smoothly with how badly the object is observed. It is
+  worth watching alongside `fraction_positive`, which stays at 100% throughout
+  and says nothing. This is the same failure mode as section 5.6, where 44
+  points still produced 40 confidently scored grasps, and it is an argument for
+  the visibility criterion that the filtering discussion has to settle.
+- **The trajectory between the two keypoint clusters is unconstrained.** `phi`
+  is a static warp, not an object tracker: pick and place are pinned exactly and
+  the lift between them is smooth interpolation. Nothing in the keypoint set
+  knows about a shelf edge that needs clearing.
+
+---
+
+## 7. Grasp selection, real shelves, and the end-to-end pipeline
+
+### 7.1 The frame contract was much worse than a single letter
+
+The contract had been "GraspGen-X emits +Z approach and +X closing; robosuite's
+``grip_site`` is the same basis up to whether the jaws close along X or Y". That
+held for six parallel jaws and refused everything else. Measuring nine hands by
+**actuating them** -- driving each fully open then fully closed and taking the
+principal direction of the finger displacements -- showed all three parts of it
+are false somewhere:
+
+| Hand | closing angle | anisotropy | `grip_site` vs config depth | note |
+|---|---|---|---|---|
+| panda | 0.0 deg | 7e11 | -6 mm | |
+| robotiq85 | 0.0 deg | 553 | +9 mm | |
+| robotiq140 | 0.0 deg | 1292 | **+75 mm** | long fingers |
+| rethink | 0.0 deg | 1e12 | -1 mm | |
+| xarm | -90.0 deg | 37609 | +11 mm | |
+| umi | -90.0 deg | 732277 | **-177 mm** | site at the base; fingers along **-Z** |
+| robotiq3f | 0.2 deg | **4.3** | -40 mm | three fingers, 2+1 |
+| yumi | 0.0 deg | 5e8 | -28 mm | |
+| inspire | 7.4 deg | **6.3** | **-150 mm** | site at the base; approach along **-Y** |
+
+Two naming-based attempts failed before this one. robosuite's
+``important_geoms`` lists geom names that do not exist in the compiled model for
+some grippers -- the XArm's pads are ``gripper0_right_left_finger_pad_1``
+against a listed ``gripper0_finger1_pad_collision`` -- and the Yumi's lists are
+empty entirely. Taking the separation between named pad groups put the UMI's
+fingers **3.17 m** apart. Motion needs no names and no special case for three
+fingers or five.
+
+The earlier note that "the Yumi's fingers measured 65 degrees off any axis" was
+wrong; it came from the naming-based attempt. The Yumi is a plain 0-degree jaw.
+
+**Anisotropy is worth keeping.** Every parallel jaw scores 553 or above; both
+multi-finger hands score under 7. Nothing lands between, so "does one closing
+axis describe this hand" is a measurement rather than a judgement.
+
+The contract is now a full 3x3 alignment plus a 3-vector contact offset, because
+neither an angle nor a depth can express a frame that is flipped end for end
+(UMI) or whose contact sits 100 mm off the approach axis (Inspire).
+
+### 7.2 The contact depth had to be calibrated, not derived
+
+Three geometric definitions of "where the hand holds an object" were tried --
+the config's fingertip depth, robosuite's base-to-``grip_site`` offset, and the
+centroid of the closed fingers. **Each worked for six hands and failed three**,
+and not the same three. Long finger links drag a centroid backwards, a flipped
+frame inverts the sign, and an anthropomorphic thumb opposes from the side.
+
+So the depth is calibrated: sweep it, execute a real grasp at each value, and
+keep the middle of the widest band that lifts. That also measures how much depth
+error each hand tolerates, which varies far more than expected:
+
+| Hand | calibrated offset | working band |
+|---|---|---|
+| panda | +37.5 mm | 120 mm |
+| robotiq85 / 140 / rethink / xarm | +30.0 mm | 135 mm |
+| yumi | -7.5 mm | 60 mm |
+| robotiq3f | +22.5 mm | 30 mm |
+| umi | +30.0 mm | **15 mm** |
+| inspire | none | **0 mm** |
+
+A hand with a 135 mm band absorbs a 2 cm perception error without noticing; the
+UMI does not. That number belongs in any claim about robustness.
+
+### 7.3 A hand that converts perfectly and grasps nothing
+
+The Inspire five-finger hand measures cleanly, converts cleanly, and lifted
+**0.0 cm across 24 combinations** of object, grasp yaw and contact offset, at
+every depth in the sweep. Five fingers driven by one open/close command do not
+pinch a can from above.
+
+``MEASURED_PAIRS`` (nine) and ``VERIFIED_PAIRS`` (eight) are therefore separate.
+Measuring a hand's frame says where to send it; it does not say the hand can do
+the job. Collapsing the two would have let a hand that cannot execute a grasp
+join a campaign and surface later as a transport failure.
+
+Related fix: the impedance controller emitted **one** gripper command
+regardless of the hand. The UMI takes two and the Inspire hand six, and
+robosuite pads a short action with zeros, so the fingers half-closed and the
+object slid out -- silently.
+
+### 7.4 The filter funnel
+
+Seven filters, numpy and scipy only. Ported from the sibling project: visibility
+against the viewing ray, target containment tested at the **fingertips** (its
+measured lesson: testing the base rejected 52 of 58 valid grasps on a cup), and
+scene collision with ``min_hits`` counting **distinct scene points** so one
+depth flyer cannot veto a grasp. New here: jaw width measured along each
+candidate's own closing axis at its own grasp height, duplicate suppression,
+kinematic reachability, and demonstration consistency.
+
+Every stage falls back to passing its input through and raising a flag rather
+than returning an empty set, so a hard scene answers "here is the least bad
+grasp and here is what is wrong with it" instead of "no grasp exists".
+
+On a live cereal box, 1.6 s for the whole funnel:
+
+```
+generated       100 ->  100
+visibility      100 ->   86   approaches within 100 deg of a camera's view
+demonstrated     86 ->   17   approaches within 45 deg of the demonstrated one
+on target        17 ->   17
+jaw width        17 ->   17
+collision        17 ->   17   hand and approach clear of the rest of the scene
+reachable        17 ->   11   the arm can reach the grasp *and* the placement
+distinct         11 ->    8
+```
+
+### 7.5 Reachability is the filter that matters, and the tolerance is not free
+
+Before the demonstration filter existed, reachability cut **50 candidates to 8**
+-- by far the largest single reduction, and the filter the sibling project
+explicitly lacks. It is real damped-least-squares IK on MuJoCo's own site
+Jacobian, checked at four poses: pre-grasp, grasp, place and retreat. A grasp
+that can be reached but whose *placement* cannot is worthless, and nothing
+geometric can see that.
+
+Its tolerance had to be **loosened to 15 mm**. At 5 mm it rejected every
+candidate for the top shelf, where IK converges to 4-8 mm because the arm is
+near its workspace boundary -- while the impedance controller itself only tracks
+to about 20 mm. A reachability test stricter than the controller rejects poses
+the robot would in fact have reached.
+
+### 7.6 Two things that had always been wrong and were invisible
+
+**The shelf was in the collision group.** robosuite does not draw group 0, so
+the shelf was physically present, collided correctly, and appeared in no render
+ever made of this scene. It also let **depth pass straight through it**.
+
+Making it visible immediately broke perception: ``agentview`` and ``frontview``
+sit on the far side of the shelf from the table, so object clouds went from
+**1433 points to zero**. They had been seeing through a wall. A ``workspace``
+camera was added with a clear line past the shelf, and the stock ``sideview``
+picked up the rest.
+
+**The source keypoint frame used the wrong axis.** It took the product's *y*
+axis as the closing direction, while the Panda's jaws close along the commanded
+frame's *x*. The reshelving product is square in cross-section -- 25 by 25 mm --
+so both choices fit the same box and the validated result never noticed. Off
+that scene it decides which of the *target* object's axes the jaws map onto, and
+90 degrees out put an 80 mm hand across a cereal box's 96 mm face while a
+correctly chosen candidate closed across its 39 mm one.
+
+### 7.7 A latent 180-degree ambiguity that cost 17/20 -> 5/20
+
+The keypoint frame's sign was pinned by a world-axis test (``c . y >= 0``).
+That is deterministic but arbitrary, and it depends on the **object's own yaw**,
+so a source and a target standing at different yaws can flip independently.
+Flipping ``c`` also flips ``a``, turning the frame 180 degrees about ``n`` and
+permuting every corner label -- which plants a half turn in the middle of the
+map that nothing downstream can see. Keypoint residual stays at micrometres and
+``det(J)`` stays positive.
+
+It stayed hidden for as long as the closing axis was taken from the product's
+``y`` axis: over reshelving's +-47 degree yaw range that test never fired.
+Correcting the axis to the one the jaws actually close along made it fire about
+half the time, and the campaign fell to **5/20, every failure a stall**.
+
+The fix is to sign the target frame against the *source* frame rather than
+against the world, which is the choice that minimises the rotation between them.
+The campaign recovered to **16/20 at 11.2 mm** (against 17/20 at 8.0 mm before
+the axis correction). The remaining seed is not yet accounted for.
+
+### 7.8 The lag gate could deadlock, and did
+
+Every end-to-end run stalled at 600 steps having moved nothing. The cause was
+not the transport:
+
+The rollout advances its attractor only once the arm has caught up, so the
+gripper cannot act on a pose the robot has not reached. The allowance is
+``compliance * speed`` -- the lag expected *while moving*, which vanishes as the
+arm slows. But an impedance-controlled arm carrying an object settles at a
+**constant** offset: a load needs force, and a finite stiffness only produces
+force when stretched. Measured with a Panda holding a can: **46 mm of sag
+against a 35 mm tolerance**, at zero contact force, with the target pose
+verified reachable.
+
+That is a deadlock, not a delay. The gate shuts, the attractor freezes, the arm
+has nowhere new to go, so the offset never shrinks and the gate never reopens.
+The scripted demonstration never hit it because its attractor advances on a
+timer regardless of how far behind the arm is.
+
+Three changes:
+
+- **The gate now recognises sag.** An offset that has stopped shrinking over 40
+  steps is treated as load the arm cannot pull out of a finite stiffness, and
+  subtracted, up to three times per run.
+- **A watchdog.** If that does not help, the run stops immediately and reports
+  ``arm_could_not_hold_the_pose`` instead of burning 600 steps and blaming the
+  policy. Failing runs now end in 40-380 steps.
+- **Orientation is compliant in transit.** The teacher is soft through free
+  space and firm at the grasp and the insertion; that profile was transported
+  for translation and ignored for rotation, which was pinned at a fixed gain
+  the whole way. It now follows the demonstration's own stiffness profile.
+
+Plus grasp selection by executability: rather than checking four poses, each
+surviving candidate's *whole warped path* is scored by how much of it the arm
+can follow with its commanded orientation, and the best is taken.
+
+**The reshelving campaign went from 16/20 to 17/20 at 8.4 mm**, restoring the
+validated baseline -- the sag had been costing a seed there too.
+
+### 7.9 Two workspaces, and why the difference matters
+
+The **reachable** workspace is every point the hand can be put; the
+**dexterous** workspace is every point it can be put while holding a given
+orientation. For a task built on top-down grasps only the second matters, and
+they are far apart. Measured on a vertical slice through the Panda's workspace:
+**99% reachable, 78% dexterous**.
+
+All six shelf slots are usable, with at least 16 cm of headroom above each. So
+the shelf is not the constraint. A *tall object* is: placing a 15.3 cm cereal
+box on the top shelf puts the hand about 31 cm above the slot, past the measured
+headroom.
+
+This is why "reachable" is not a useful filter on its own, and why a run that
+fails here must not be reported as a stalled policy: it is a property of the arm
+and the object, not of the transport.
+
+### 7.10 Where the end-to-end pipeline stands  *(withdrawn)*
+
+> **Withdrawn -- see 7.26.** This was a status snapshot of the end-to-end
+> pipeline, and it already carried one withdrawn result of its own. Status
+> snapshots go stale the moment the code moves, and this one described a
+> pipeline three rounds of changes ago. The current state lives in
+> `CLAUDE.md`, which is rewritten rather than appended to.
+
+
+### 7.11 The grasp contacts are load-bearing, and section 6.4 was wrong  *(withdrawn)*
+
+> **Withdrawn -- see 7.26.** Every number in this section was withdrawn while
+> it was still being written -- the success rates by 7.12 (every rollout ran
+> with the gripper shut, so the outcomes measured nothing), and the conclusion
+> by 7.22. It argued that section 6.4 was wrong about contact keypoints; 6.4
+> is now reinstated. Nothing here is load-bearing and keeping the argument
+> invites someone to re-derive it.
+
+
+### 7.12 Every rollout ran with the gripper shut
+
+The end-to-end runs were failing for a reason that had nothing to do with
+keypoints, transport, or the arm: **the gripper closed at step 0 and never
+opened**, with the hand still 122 to 152 mm from the object. It carried a shut
+hand along the whole trajectory, touched nothing (0 N throughout), and reported
+having placed the object in the wrong place.
+
+The cause was mine. Dropping the demonstration's leading approach segment with
+``labels[25:]`` sliced every array including the time belief, so the trimmed
+labels began at a phase of **0.126**. The rollout starts its clock at **0.0**.
+That query sits outside the range the policy was fitted on, and a GP
+extrapolates -- the gripper channel extrapolated past ``-1`` to closed.
+
+``PolicyLabels.__getitem__`` now renormalises the time belief to run 0 to 1 over
+the slice. A slice of a demonstration is a demonstration in its own right.
+
+A second bug in the same area: the stall watchdog aborted when the arm *was*
+still closing the gap, which is precisely when it should keep waiting. It now
+resets its counter while the lag is shrinking and only intervenes when it is
+not.
+
+**What this invalidates.** Every end-to-end success rate recorded before this
+point, including the seven-way keypoint ablation of 7.22. Any run reported as
+"placed in the wrong place" with the object unmoved was a run whose hand was
+never open. The pose-alignment measurements are unaffected -- they come from the
+transportation map, not from executing anything.
+
+With both fixed, and the same nine tasks: objects are now **carried**, by 92 to
+482 mm, where before they sat still. One run reaches 17 mm from its slot. One of
+nine completes. Failures are now genuine manipulation failures rather than an
+artefact.
+
+Reshelving is unaffected throughout: **17/20 at 8.4 mm**, and 337 tests pass.
+
+### 7.13 Naming the stage that failed, instead of the step it stopped at
+
+The outcomes above -- `policy_stalled`, `placed_in_the_wrong_place` -- name where
+a run *stopped*, and that is almost never where it went wrong. A hand that
+closed on empty air and a hand that gripped correctly and set the object down
+20 cm off both finish with the object away from its slot, and the placement
+error is identical evidence for two problems with nothing in common. Every
+success rate reported before this point was therefore a number without a cause
+attached.
+
+`tpgpt/experiments/diagnose.py` replays a run against a per-step trace of the
+**object**, not just the arm -- its position, the jaw opening, and whether any
+gripper geom is actually in contact with it -- and splits the run into the seven
+things a pick-and-place has to do in order: approach, reach, grasp, lift, carry,
+place, settle. The first cross is the fault; everything after it is a
+consequence.
+
+It changed the reading of the same runs immediately. Of five tasks, the outcome
+field said three different things; the stage attribution said the hand was
+arriving in the right place (11-42 mm) and then **failing to hold what it closed
+on** -- 6 or 7 contact steps out of 300-400, and 2-4 mm of lift.
+
+Two diagnostics were themselves lying, both by returning a plausible number
+rather than an error:
+
+- **`contact_offset("panda")` returned zero.** The lookup behind it matches by
+  object *identity*, so a hand named by its registry key -- the way hands travel
+  through most of this codebase -- fell through to "never measured" and got a
+  zero offset back. Zero is a perfectly plausible offset, so the resulting
+  41 mm frame error read as the arm missing its target. Both `contact_offset`
+  and `alignment_rotation` now accept either form.
+- **`contact_force` read 0 N through a rollout that was visibly carrying a
+  cereal box.** `cfrc_ext` is filled by `mj_rnePostConstraint`, which `mj_step`
+  runs only when something in the model asks for it; with no such sensor
+  declared the array simply stays at zero. It is now computed explicitly.
+
+### 7.14 The attractor clamp and the lag gate disagreed about "too far"
+
+Section 7.8 diagnosed a deadlock and treated it with sag re-baselining, a
+watchdog and compliant transit rotation. Those helped, but they were treating a
+symptom: the deadlock is **structural**, and it is guaranteed whenever the
+demonstration is fast enough.
+
+Two mechanisms bound how far the attractor may sit ahead of the arm, and they
+were computed from different speeds:
+
+- the **clamp** allowed `speed_limit * compliance`, and `speed_limit` is
+  `3 x` the *fastest label in the demonstration*;
+- the **gate** shut at `compliance * current_speed + tolerance`.
+
+So whenever `compliance * (speed_limit - current_speed) > tolerance`, the clamp
+parked the attractor beyond the distance at which the gate would reopen. From
+there the two lock together: the gate shuts, and the frozen attractor is
+*dragged along behind the arm by the clamp* rather than being caught up to, so
+the lag never shrinks. With `K = 350`, `D = 33.7` and a 0.2 m/s demonstration
+the clamp's limit is 58 mm against a 35 mm tolerance -- and the measured lag
+during a deadlock was 50-61 mm, the clamp's own number, held exactly.
+
+Measured on one cereal-box run: the phase sat at **0.18 for 112 of 361 steps**.
+
+> **The four-task sweep over `lag_tolerance` that was here is withdrawn
+> (7.26)** -- it was an end-to-end measurement on campaigns that cannot be
+> reproduced. What it does not affect is the deadlock itself, which is
+> arithmetic rather than a measurement: with `K = 350` and `D = 33.7` the two
+> limits are 58 mm and 35 mm, they cannot both be satisfied, and no experiment
+> is needed to see that. The fix -- taking the smaller of the two -- makes the
+> deadlocked state unreachable by construction, and is covered by unit tests.
+>
+> The sweep did carry one qualitative observation worth re-testing later: with
+> the tolerance opened wide enough that the deadlock disappeared entirely,
+> success got *worse* rather than better, and a different failure took its place
+> -- which suggests the gate is doing real work rather than merely being in the
+> way. Treat that as a hypothesis, not a result.
+
+The failure that appeared when the gate was opened too far was `approach`, the
+gripper acting before the arm has arrived, which is precisely what the gate
+exists to prevent.
+
+So the fix is not a bigger tolerance, which only trades one failure for the
+other. The clamp now takes the **smaller** of the two limits, so the attractor
+can never be further away than the distance at which the arm is allowed to catch
+up: the gate stays tight at 35 mm and the deadlock becomes unreachable by
+construction.
+
+Worth noting what the change does *not* touch. At full speed the two limits
+nearly coincide -- 54 mm against the old 58 mm -- so fast free-space segments run
+as before. It binds only where the commanded speed goes to zero, which is the
+dwell at the grasp and at the insertion, and which is exactly where the deadlock
+was.
+
+### 7.15 GraspGen-X is unseeded, so an unrepeated run measures nothing
+
+The default planner is a **diffusion** model sampled from noise, and neither the
+client nor the server exposes a seed. Two runs of the same scene get different
+candidate sets, and the difference decides the task: the same cereal box on the
+same seed was picked up on one run and missed on the next.
+
+This invalidates any comparison drawn from single runs -- a two-run-per-cell
+keypoint ablation compares two random draws at least as much as it compares the
+two keypoint sets. `tpgpt/grasp/cache.py` keys candidates by the cloud they were
+asked for, so the same scene asks the same question and gets the same answer;
+a difference between two runs is then a difference in what actually changed. It
+also removes 4-12 s of inference from every run.
+
+The quantum in the key is a normalisation, not a tolerance -- rounding has bin
+boundaries -- and a miss costs an inference, never a wrong answer.
+
+### 7.16 The funnel, and the run that does everything right and is scored a failure
+
+With the clamp fixed and the stages instrumented, fifteen runs across five
+objects -- one hand, one slot, three seeds each -- give the first honest account
+of where the pipeline loses tasks:
+
+| stage | got past it | |
+|---|---|---|
+| approach | 13/14 | reached the start of the transported motion |
+| reach | 10/14 | the hand arrived where the grasp was planned |
+| grasp | 9/14 | the jaws closed on the object |
+| lift | 6/14 | the object came off the table |
+| carry | 5/14 | it stayed in the hand |
+| place | 4/14 | it was let go over the right shelf |
+| settle | 1/14 | it ended up resting in the slot |
+
+(One of the fifteen produced no valid map and never reached the robot.)
+
+Three losses at `reach`, three at `lift`, three at `settle`. The last three are
+the interesting ones, because all three are **the same object doing everything
+right**: the can was gripped, lifted 400-417 mm, carried for 100% of the transit
+and delivered to within **5, 11 and 30 mm** of its slot -- and then scored a
+failure, because the run hit its step budget while still holding the object in
+the air. The clock never reached the segment that opens the fingers.
+
+The cause is a gap in the watchdog of 7.8, not in the transport. That watchdog
+tested the gate for being **exactly zero**. A gate held at 0.05 by a constant
+sag is not zero, so the test never fired -- while the clock advanced at a
+twentieth of nominal. The run neither deadlocks nor arrives; it crawls, and
+burns the budget doing it. All three were reported as `policy_stalled`, which
+blames the transport for a gate doing its job too well.
+
+Progress is now measured on the **phase** rather than on the gate, against a
+threshold derived from the demonstration's own pace (a quarter of nominal over
+the patience window), so a crawl is detected exactly as a deadlock is.
+
+> **The end-to-end numbers that were here are withdrawn (7.26).** They reported
+> a fifteen-run before/after and a threshold at which reach error starts costing
+> grips -- the latter being the same claim as the withdrawn 7.19, restated. Both
+> came from campaigns that cannot be reproduced.
+>
+> The *bug* is not in doubt and does not rest on them. It is a logic error you
+> can read directly: the watchdog tested the gate for being exactly zero, and a
+> gate held slightly open by a constant sag is never exactly zero. The
+> arithmetic is enough on its own -- a gate sitting at 0.05 advances the clock at
+> one twentieth of nominal, so a run neither deadlocks nor arrives, and burns
+> its entire step budget crawling. `tests/unit/` covers the corrected logic.
+
+The fix is to measure progress on the **phase** against a threshold derived from
+the demonstration's own pace, which is what the code now does. That makes a crawl
+detectable by exactly the same mechanism as a deadlock, instead of being
+invisible to it.
+
+### 7.17 The report overlays were drawing every keypoint at the wrong height
+
+A third silent one, and it had been making the reports actively misleading
+rather than merely incomplete: the pick keypoints rendered on a red can sitting
+next to the cereal box they were meant to describe.
+
+robosuite stores observation images bottom-up while the camera matrix assumes a
+top-down raster. `perception.cameras` handles this by flipping the depth and
+mask buffers **before** unprojecting -- which means the matrix's row convention
+is the flipped, human-readable one already. The overlay flipped the picture for
+display, correctly, and then flipped the projected rows as well.
+
+It stayed hidden because a vertical flip leaves the **columns** untouched. Every
+keypoint landed on the right part of the scene left-to-right and merely at the
+wrong height, which reads as a keypoint that has drifted -- a plausible thing
+for a keypoint to do -- rather than as a projection that is wrong.
+
+The test that settles it is a round trip, and it deliberately involves no object
+shape: each object's cloud came from that camera's own depth buffer, so
+projecting those points back must land them inside that object's mask.
+
+| | unflipped | flipped |
+|---|---|---|
+| cereal | 94% | 41% |
+| can | 88% | 63% |
+| milk | 100% | 0% |
+
+The first attempt at this test compared a projected body origin against a mask
+centroid, and it was worthless: the centroid of a tall carton's *visible*
+surface is nowhere near its body centre, so it reported an error of 62 px where
+the projection was right. That confound is why the round trip is the test kept
+in `tests/integration/test_overlay_projection.py`.
+
+### 7.18 How much of each object the cameras actually get
+
+Measured at reset, with the shelf variant `cubby` and all five objects on the
+table:
+
+| object | true extent (mm) | cloud points | cloud extent (mm) |
+|---|---|---|---|
+| cereal | 30 x 100 x 150 | 975 | 90 x 83 x 144 |
+| milk | 40 x 40 x 158 | 345 | 47 x 49 x 125 |
+| can | 50 x 50 x 81 | 255 | 40 x 46 x 73 |
+| bread | 40 x 48 x 49 | 81 | 37 x 34 x 40 |
+| lemon | 40 x 40 x 69 | **17** | 10 x 19 x 22 |
+
+Two things to take from this, and one trap.
+
+**The trap first.** The cereal's cloud spans 90 x 83 mm horizontally against a
+true 30 x 100, and it is tempting to read that as an object too wide for an
+80 mm Panda jaw to close on -- which would make the task impossible rather than
+hard, and would be a serious thing to conclude. It is wrong: the box is yawed
+about 45 degrees, so its *axis-aligned* extent is the diagonal. A 30 x 100 box
+at 45 degrees has a 92 x 92 mm footprint, which is what was measured. The
+keypoint extractor fits an oriented box in the grasp frame, so it is not fooled
+by this; a reader comparing cloud extents to apertures would be.
+
+Checked properly against the geometry, every hand can close on every object
+except **yumi on the can** -- a 50 mm jaw and a 50 mm can, with no margin.
+
+**Observation falls off a cliff with size**, and the count drops 975 -> 345 ->
+255 -> 81 -> 17 as the object shrinks. The 17 is the worst case, from this
+five-object scene; the three-object campaign scene gives the lemon 61 to 91.
+
+Cloud size matters at the extreme: `MIN_CLOUD_POINTS` is 40, and the 17-point
+lemon is below it, so that object is rejected before anything else happens.
+
+> **What this section must not be used for.** Two attempts were made here to
+> read a *task success rate* off the cloud sizes above -- first claiming that
+> success followed observation quality, then that it followed the object's
+> similarity in height to the demonstrated one. Both rested on end-to-end
+> campaigns that are no longer reproducible (7.26), and the two readings
+> contradicted each other on the same objects, which is on its own enough to
+> distrust both.
+>
+> The measurement above is worth keeping because it is *not* one of those: it
+> is a direct observation of what the cameras return at reset, repeatable in
+> seconds, and independent of anything downstream. Treat it as a fact about
+> perception and nothing more. Whether cloud size predicts success is an open
+> question, and answering it needs the point count recorded alongside a
+> stage-attributed outcome in a campaign whose code is committed.
+
+### 7.19 How close the hand gets is the whole story, and tracking is not why  *(withdrawn)*
+
+> **Withdrawn -- see 7.26.** This concluded that the distance from the
+> fingertips to the planned grasp at the moment the jaws close is the whole
+> remaining problem, and that it separates success from failure cleanly at
+> about 25 mm. It was measured on the `contacts` keypoint family that 7.22
+> later retired, on campaigns that are no longer reproducible, and the clean
+> separation does not survive either change. The framing also outlived its
+> evidence: 7.20, 7.23 and 7.25 all took 'reach error is the bottleneck' as
+> settled and reasoned from it.
+
+
+### 7.20 The map is fitted at the fingertips and applied at the wrist
+
+The keypoints are anchored at the point where the hand **holds** the object --
+the source block at `position + R @ contact_offset`, the target block at
+`GraspFrame.from_grasp`'s `tcp_position`. The demonstration, however, is
+recorded at `grip_site`, the wrist. Those are a hand-specific lever arm apart:
+41 mm on a Panda, 61 mm on a 2F-140, 117 mm on a UMI.
+
+A transportation map interpolates its keypoints *exactly* and says nothing about
+anywhere else. Warping the wrist path therefore gives up the one guarantee the
+keypoints provide, over precisely the distance that matters, at precisely the
+moment it matters.
+
+**Why this is a correction and not a tuning.** The "end-effector" whose
+trajectory the paper transports is the tool point -- the place the hand actually
+holds the object. This project had been transporting the flange. Those are
+different points on a rigid body, and a map that is exact only at its keypoints
+cannot be applied at one of them after being fitted at the other.
+
+The argument stands on the geometry alone and does not need a success rate to
+support it: the keypoints are built at the contact point, so the contact point
+is the only place the map makes a promise about.
+
+> **The size of the improvement is not recorded here on purpose.** It was
+> measured on eight end-to-end runs, and those campaigns are no longer
+> reproducible (7.26). Re-measuring it is cheap and does not need the
+> simulator -- warp the wrist path and the fingertip path through the same map
+> and compare each one's closest approach to the chosen grasp. That is pure
+> geometry, deterministic, and takes milliseconds per case.
+
+**A retraction.** This hypothesis was raised early, tested, and recorded as
+disproved -- the two columns came out identical. That test ran while
+`contact_offset("panda")` was silently returning **zeros** (7.13), so it
+compared a quantity with itself. The lesson is not about frames: a diagnostic
+that reports "no difference" deserves the same suspicion as one that reports a
+surprising difference, and the cheapest guard is to assert the instrument reads
+non-zero before trusting a null result.
+
+Implemented as an optional `tool_offset` on `rollout_policy`, defaulting to
+zero. At zero it is byte-identical to the previous behaviour, which is what the
+reshelving campaign runs and which still gives **17/20 at 9.1 mm on seeds
+8, 11, 16** after the change.
+
+### 7.21 What the destination costs: the mirrored side, not the lower shelf  *(withdrawn)*
+
+> **Withdrawn -- see 7.26.** An isolation study over six destinations. It had
+> already been rewritten once after its first version turned out to be an
+> artefact of the keypoint set held fixed around it, and the rewrite rests on
+> campaigns that are no longer reproducible. Twice-burned on the same
+> question.
+
+
+### 7.22 The keypoint ablation, run properly: the box alone, and why
+
+> **How much of this survives, and why.** This is the only end-to-end campaign
+> in the project that was internally controlled: seven keypoint combinations,
+> two objects, three seeds each, 42 runs, all in **one process against one code
+> state**, with the grasp cache pinning the candidate pool so the comparison is
+> of keypoints rather than of draws from an unseeded diffusion model. Every
+> other campaign has been deleted (7.26); this one is kept because everything
+> varied inside it is genuinely comparable.
+>
+> It still has one defect it cannot be cured of: the code that produced it was
+> never committed, so the run cannot be reproduced exactly. Split the table by
+> what would need re-running to check it:
+>
+> * **`min det(J)`, `map folded` and `aim` are geometry.** They are computed
+>   from the fitted map and the transported labels, with no physics anywhere.
+>   Re-deriving them needs a cached point cloud and a cached grasp, takes
+>   milliseconds, and is deterministic. Trust these.
+> * **`success` is physics.** It needs the full rollout, and it is the column
+>   that cannot be reproduced. Treat it as a hypothesis.
+
+| keypoints | pts/block | **aim** (geometry) | min det(J) | map folded | success (physics) |
+|---|---|---|---|---|---|
+| **box** | 9 | 53 mm | 0.53 - 0.79 | 0/6 | 4/6 |
+| box + support | 10 | 60 mm | 0.55 - 0.88 | 0/6 | 3/6 |
+| contacts + support | 5 | **7.7 mm** | 0.27 - 0.52 | 0/6 | 2/6 |
+| contacts | 4 | **5.2 mm** | 0.18 - 0.70 | 0/6 | 0/6 |
+| support | 1 | - | degenerate | - | 0/6 |
+| box + contacts | 13 | **4.5 mm** | **0.0074** | **5/6** | 0/6 |
+| box + contacts + support | 14 | **6.0 mm** | **0.0066** | **5/6** | 0/6 |
+
+**"Aim" is how close the transported plan ever passes to the chosen grasp
+point** -- measured on the warped trajectory before the robot moves, so it says
+whether the plan is even pointed at the right place. This column was not in the
+original version of this table, and leaving it out hid the most important thing
+in the experiment.
+
+**Adding the contacts improves the aim tenfold, from 53 mm to about 5 mm.** The
+contact keypoint pins the map at the grasp, which is exactly what it is for and
+exactly what the box cannot do -- no box corner is anywhere near where the
+fingers close. That result is geometry and it is not in doubt.
+
+**And aim runs the opposite way to success.** The two sets that aim best succeed
+never; the two that aim worst succeed most. Whatever decides these runs, it is
+not how accurately the plan is pointed at the grasp, and any future work that
+optimises aim alone should expect to convert nothing. There are two distinct
+mechanisms behind that, and they are worth separating.
+
+**Adding the jaw contacts to the box collapses the map.** `min det(J)` falls a
+hundredfold and five of six maps are rejected as non-diffeomorphic. The value is
+identical to four decimal places across runs, so this is a deterministic
+geometric consequence and not a sampling accident.
+
+The cause is redundancy, and it is worth stating precisely because the contacts
+are perfectly good on their own -- `contacts + support` yields a valid map and
+succeeds twice. The contacts sit **inside the box's own convex hull**,
+centimetres from corners that already pin the warp. A map required to
+interpolate both exactly must bend sharply over that short distance, and that is
+exactly where the determinant goes to zero.
+
+**There is a number attached to that, and it is the useful part.** Suppose the
+map has to move one point by a distance `d` relative to another point a distance
+`L` away that must not move. Getting from one to the other over that gap needs a
+deformation gradient of roughly `d / L`. The Jacobian determinant passes through
+zero -- the map folds, space turns inside out -- when that ratio approaches the
+smallest singular value of the map's undistorted part, which is about **0.8**
+here (a healthy `det(J)` of 0.53 in three dimensions means singular values
+averaging 0.53^(1/3) = 0.81).
+
+Put the measured numbers in. The box map is already about **53 mm** wrong at
+the grasp point, which is `d` -- that is what the aim column says. The contacts
+sit "centimetres" inside the box hull, so `L` is roughly **20 to 40 mm**. That
+gives `d / L` between **1.3 and 2.7**, against a folding threshold near 0.8.
+
+**The two constraints disagree by more than the distance available to reconcile
+them.** That is why `min det(J)` lands on 0.0074 identically to four decimal
+places -- it is not a sampling accident or a tuning failure, it is geometry with
+no room left in it. The same arithmetic run backwards gives the design rule for
+anything built to fix this: a correction that pins the contact needs at least
+`L > 1.25 x d`, about **66 mm** of clear space to blend out over.
+
+**The second mechanism, which is separate and easier to miss.** Contacts
+*alone* do **not** fold -- `min det(J)` is 0.18, no map is rejected -- and the
+aim is 5.2 mm, near-perfect. And they still succeed 0 of 6. So the contacts fail
+even when the map is valid and the plan is pointed correctly, which means bad
+aim was never the whole story.
+
+A `det(J)` of 0.18 against the box's 0.53 means the map is compressing volume
+about **fivefold** somewhere along the path. Four or five keypoints simply do
+not constrain a three-dimensional warp: the map is pinned where the contacts are
+and free to deform violently everywhere else. The box's nine points are worse at
+the grasp and far better everywhere else. So the real trade is **local precision
+against global conditioning**, not "contacts good" against "contacts bad", and
+any design that wants both has to supply both -- see section 8.
+
+The same redundancy explains why the dedicated support point earns nothing:
+`fit_aligned_box` **snaps the box's lower face to the support plane**, so the
+four bottom corners already *are* contact points on the surface the object rests
+on. The guarantee that the object meets the shelf rather than being dropped onto
+it or driven into it is supplied by the box, four times over. Adding a fifth
+coincident constraint adds no information.
+
+4/6 against 3/6 is one run and not separable at this sample size, and it is in
+the column that cannot be reproduced anyway. **The box is the default because of
+its `det(J)`, not because of its success rate** -- it is the only set that both
+yields a valid map every time and keeps the map well conditioned away from the
+keypoints.
+
+**This restores section 6.4, and section 7.11, which had overturned it, is
+withdrawn.** 6.4 concluded the contact keypoints should be off by default. It
+was overturned on two pieces of evidence that were both bad: a *geometric*
+pose-alignment measurement which never executed anything and so could not see a
+folded map, and end-to-end success rates measured while the gripper was shut the
+whole time (7.12). Both favoured the contacts; neither was capable of detecting
+the failure that actually matters.
+
+The general lesson is about which measurement is allowed to settle a design
+question. Pose alignment is a property of the map at one point; the determinant
+is a property of the map everywhere. Only the second can see `det(J)` collapse
+between two keypoints, and only the second was ever going to answer this. Note
+that this cuts both ways now: the aim column added above is *also* a property of
+the map at one place, and on its own it would have picked the contacts.
+
+---
+
+### 7.23 The walls are free; the roof is not  *(withdrawn)*
+
+> **Withdrawn -- see 7.26.** An isolation study over shelf geometry, resting
+> on campaigns that are no longer reproducible. Its one structural claim --
+> that a shelf with a roof cannot be solved from a top-down demonstration,
+> because the approach direction is wrong by construction -- is geometry
+> rather than measurement, and is kept as an open item in section 8.
+
+
+### 7.24 The UMI failure is the hand's, not the tool-frame change  *(withdrawn)*
+
+> **Withdrawn -- see 7.26.** An A/B on one gripper, resting on campaigns that
+> are no longer reproducible. The observation worth keeping is structural and
+> is now an open item in section 8: the UMI's contact offset is the only one
+> in the registry with a large lateral component, `[0.0, -0.035, -0.112]`,
+> where every parallel jaw is almost purely along the approach axis.
+
+
+### 7.25 Kinematic infeasibility, and what the robot did about it before
+
+**What it was doing: nothing.** The Cartesian impedance controller has no
+inverse kinematics. It turns a pose error into a force,
+`f = K(x_d - x) + D(v_d - v)`, and applies `J^T f`. Against a pose that does not
+exist for this arm -- the right point with a hand angle the elbow cannot produce
+-- it pulls forever, settling about **38 mm** away with a standing error no
+stiffness removes. The arm does not stop, does not skip, does not re-plan.
+
+The consequence is that infeasibility never looked like infeasibility. The lag
+gate saw the residual error, shut, and the run was reported as a stall -- so a
+kinematic limit arrived wearing the costume of a control failure, which is
+exactly the confusion 7.13 was built to end.
+
+Measured by replaying a warped path pose by pose under position control:
+**about a quarter of a trajectory is unreachable with its commanded
+orientation**, and on those poses the tracking error is 38 mm against 13 mm on
+the feasible ones. Position control is not the fix; the poses do not exist.
+
+Infeasibility *was* handled in one place -- grasp selection scores each
+candidate by `executable_fraction` and keeps the best of eight, trying both
+frame signs. But it selects among candidates and never modifies a trajectory:
+no re-timing, no relaxing an orientation that does not matter, no use of the
+arm's redundancy.
+
+**Three changes.**
+
+*The filter now checks corridors rather than endpoints.* `by_reachability` went
+from four poses to twelve: five down the approach corridor onto the object, two
+on the lift after closing, five down the corridor onto the shelf and back out.
+A candidate can be reachable at the standoff and at the grasp while the descent
+between them is not, and a hand that cannot hold its angle 4 cm above an object
+never reaches the object.
+
+*The selector now scores the trajectory it executes.* `executable_fraction` was
+being called on the **wrist-frame** labels while execution transports the
+**tool-frame** ones -- a mismatch introduced with 7.20, displacing the scored
+path from the run path by the hand's contact depth: 41 mm on a Panda, **117 mm
+on the UMI**, which fails at `approach` in every campaign. It also now samples
+densely around the grasp and the release. Density itself turned out not to
+matter -- 14 uniform samples give the same answer as 200, to within a few points
+-- but *location* does: a uniform sweep spends its budget on free-space transit,
+where the hand can give up a few degrees and lose nothing, while the two moments
+that decide the task are a handful of labels wide.
+
+*A runtime fallback, in two tiers, consulted only while the gate is already
+shut* -- so a healthy run pays nothing, confirmed at 0 relaxations and 0 skips
+on a clean can-to-shelf run:
+
+1. **Relax the orientation** when the position is reachable and only the hand
+   angle is not. This is the common case and nearly free: the demonstration is
+   already compliant in transit, so a few degrees of wrist angle in free space
+   costs nothing.
+2. **Skip to the next feasible pose** when the position itself is out of reach.
+   The attractor is steered to the next label the arm can hold, capped at the
+   demonstrated speed so the detour is a motion rather than a jump, and the
+   **phase** hands over on arrival so the gripper schedule stays in step with
+   where the hand actually is.
+
+When nothing ahead is reachable either, the run carries on and the watchdog ends
+it -- the honest outcome, since the rest of the path is not executable.
+
+Reshelving after the change: **17/20 at 9.9 mm, seeds 8, 11, 16** -- the same
+three, so the validated path is intact.
+
+**The gating costs nothing when it is not needed**, which is the one claim here
+that does not depend on a success rate: the fallback is consulted only while the
+lag gate is already partly shut, so a run that is tracking normally never enters
+either tier. Instrumented on a clean can-to-shelf run, that is 0 relaxations and
+0 skips.
+
+> **The end-to-end A/B that accompanied this is withdrawn (7.26).** It compared
+> stage-by-stage counts with the fallback off and on over fifteen tasks, and
+> concluded the change converted nothing. That may well be right, but the
+> campaigns behind it are not reproducible and the sample was fifteen runs, on
+> which a one-run difference is noise. What survives is the part below, which
+> was measured by replaying poses under position control rather than by scoring
+> outcomes.
+
+**What the replay measurement showed, and it does not need a campaign.** Two
+tiers were built. Tier 1 relaxes the orientation when the position is reachable
+and only the wrist angle is not. Tier 2 skips ahead to the next reachable pose
+when the position itself is out of reach. Instrumenting the runs showed tier 1
+firing often and **tier 2 never firing at all**.
+
+That is worth keeping because it is a clean confirmation of the diagnosis rather
+than a measure of the outcome: infeasibility in this task is *always*
+orientation-only and never position. The arm can always get its hand to the
+right point; what it sometimes cannot do is get the hand there at the commanded
+angle. The skip-ahead path is correct code that has never yet been needed, and
+should be treated as untested in practice.
+
+> A bug worth recording because the unit tests could not have caught it: the
+> fallback read the commanded rotation before it was assigned, and the loop had
+> been ordered so that nothing else did. It crashed the first regression run.
+> The rotation and gripper readout now sit immediately after the prediction they
+> come from. Running the regression, not the suite, is what found it.
+
+### 7.26 Why the end-to-end campaigns were deleted, and what replaces them
+
+On 2026-09-07 every end-to-end campaign in `outputs/` was deleted -- 254 MB
+across `outputs/campaigns/` (five campaigns, 97 runs) and
+`outputs/campaigns_contacts/` (three campaigns, 43 runs), plus the
+`outputs/index.html` that indexed them. Sections 7.10, 7.11, 7.19, 7.21, 7.23
+and 7.24 were withdrawn with them, and the numbers were stripped out of 7.18,
+7.20, 7.22 and 7.25. This section records why, because the reasoning is more
+valuable than any of the numbers were.
+
+**The problem is not that the numbers were noisy. It is that the code that
+produced them no longer exists.**
+
+#### The timeline
+
+Reconstructed from file modification times and `git log`:
+
+| time | what happened |
+|---|---|
+| 00:15 - 00:27 | the three `campaigns_contacts` runs |
+| **00:29** | **`diagnose.py` modified** -- the measuring instrument itself |
+| 00:40 | `keypoints` campaign, 42 runs |
+| 00:58 | `grippers` campaign |
+| 01:03 | `slots` campaign |
+| **01:09** | **`run_experiments.py` modified** -- the harness that writes the results |
+| 01:14 | `shelves` campaign |
+| **11:39 - 11:41** | **`pipeline.py`, `filters.py`, `rollout.py` modified** -- grasp filtering and execution |
+| 12:00 | `objects` campaign |
+
+Three separate rounds of code changes landed *between* campaign runs. One of
+them changed the instrument that measures the error. One changed the execution
+path itself. So the eight campaigns are not one experiment with a variable
+changed -- they are eight experiments run against at least four different
+systems, and every comparison across them is meaningless.
+
+#### The part that cannot be repaired
+
+Four of the five files involved -- `pipeline.py`, `filters.py`,
+`run_experiments.py`, `diagnose.py` -- were **untracked**. They had never been
+committed, not once, in any version. `rollout.py` was tracked but modified since
+its last commit. The manifests recorded a title, a description, run counts and a
+timestamp: no git SHA, no settings, no keypoint set, no tolerances.
+
+There is therefore no commit anyone could check out to reproduce any campaign in
+this project, and no record of which code produced which table. That is not
+"noisy data" -- noisy data can be re-measured and averaged. This is data that
+cannot be attributed to a system, which makes it not evidence at all.
+
+#### What it cost
+
+Three findings in these notes were published and then had to be retracted, and
+all three failed the same way: **the conclusion outlived the settings it was
+measured under, and nothing in the note said what those settings were.**
+
+* **7.11** overturned 6.4 using success rates from rollouts whose gripper never
+  opened (7.12). Every number in it was withdrawn while it was still being
+  written.
+* **7.21** was rewritten in full after its first version turned out to be an
+  artefact of the keypoint set that happened to be selected at the time.
+* **7.19** measured a clean success/failure split at about 25 mm on the
+  `contacts` keypoints. 7.22 then changed the default keypoints, the split
+  stopped existing, and nobody re-measured -- so 7.20, 7.23 and 7.25 all went on
+  reasoning from "reach error is the bottleneck" as though it were settled.
+
+The through-line is that the system and the measurement were changed in the same
+sitting, with no record of which was which. Tests meant to find bugs generated
+three wrong conclusions instead, and each wrong conclusion then motivated
+further work.
+
+#### What survived, and why
+
+Everything kept in `outputs/` after the deletion is one of three things:
+
+* **Geometry.** Keypoint residuals, `min det(J)`, how close a transported plan
+  passes to a grasp -- all computed from a fitted map with no physics anywhere.
+  Deterministic, re-derivable in milliseconds from a cached cloud and a cached
+  grasp. `outputs/keypoints/report.json` is this.
+* **Calibration.** The measured gripper frame contract
+  (`outputs/keypoints/calibration.log`, `inspire_probe.log`), which backs 5.4
+  and 7.2. These are measurements of the hardware description, not of a run.
+* **The validated Sec. V-A result.** `outputs/reshelving/`, the 20-scene
+  regression at 17/20, plus `outputs/ablation/` and `outputs/figures/`. This one
+  is genuinely re-runnable: fixed seeds, no diffusion model in the loop, and it
+  has been re-measured repeatedly across code changes at 17/20 with the same
+  three failing seeds each time.
+
+`outputs/grasp_cache/` is also kept, and it is kept for a different reason: it
+is an *input*, not a result. GraspGen-X is an unseeded diffusion model (7.15),
+so the cache is the only thing making any grasp comparison repeatable at all.
+Deleting it would make future experiments incomparable with each other, not just
+with the past.
+
+Section 7.22 is the one end-to-end campaign kept in the notes, because it was
+internally controlled: all seven variants in one process against one code state,
+with the cache pinning the candidate pool. Its geometry columns are trustworthy;
+its success column is a hypothesis.
+
+#### The rules now in force
+
+1. **Commit before running a campaign.** A campaign launched from a dirty or
+   untracked working tree is not evidence. The runner should refuse, or stamp
+   the output `DIRTY` so it can never be mistaken for a result.
+2. **Every manifest records its own provenance**: git SHA, `git diff --stat` if
+   dirty, the complete settings dictionary, the keypoint set, every tolerance.
+   A campaign that cannot name the code that produced it is deleted on sight.
+3. **The instrument is versioned separately from the system.** If
+   `diagnose.py` changes, every campaign measured with the old version is stale
+   and must be marked so, not silently compared against.
+4. **Prefer geometry to physics.** Anything answerable from the fitted map --
+   aim, determinant, residual, curvature -- should be answered that way:
+   milliseconds instead of 25 seconds, deterministic instead of stochastic, and
+   with no rollout in between to confound it. Reserve end-to-end runs for
+   confirming a result, never for finding one.
+5. **Say what a table means.** Every campaign gets a paragraph stating what was
+   varied, what was held fixed, what threshold defines each column, and what
+   result would confirm or refute the claim. The deleted `index.html` had
+   columns named `approach / reach / grasp / lift` and nowhere said what any of
+   them measured or what number would count as good.
+6. **Change one thing at a time, and never the ruler and the system together.**
+
+#### How those rules are enforced, rather than merely written down
+
+Rules in a notes file get forgotten, which is how this happened in the first
+place. All six are now mechanical.
+
+**`tpgpt/reporting/provenance.py` (new).** `provenance()` returns the commit,
+the branch, the tracked files modified since it, `git diff --stat`, the
+installed versions of the packages that change what a run does, and -- the field
+that matters -- **`untracked_code`**, every file under `tpgpt/` or `tests/` that
+git has never seen.
+
+That last one is the whole lesson. A plain "is the tree dirty" check would have
+declared the deleted campaigns **clean**, because the four files that made them
+unidentifiable had never been committed: an untracked file appears in no diff,
+so a diff-based check cannot see it. `reproducible` is therefore true only when
+there is a commit, nothing is modified, *and* nothing is untracked.
+
+Nothing in the module raises. Git missing, not a repository, a repository in a
+state git refuses to answer about -- all of them return "unknown", never
+"clean". An absent measurement that reports a passing value is the same failure
+as the zeroed `contact_offset` of 7.13, and it is guarded against here by
+construction.
+
+**Every manifest carries it, by default.** `write_manifest` records provenance
+unless a caller explicitly opts out, because the failure being guarded against
+is *forgetting*, and an opt-in guard against forgetting does not work.
+
+**The index says so, loudly.** Each campaign card now opens with a green
+"Reproducible at `<sha>`" line or a red **"Not reproducible"** one that names
+the specific reason and the specific files, ending "treat these numbers as a
+scratch experiment, not as evidence". Previously a reader saw a title and a
+timestamp, so eight campaigns produced by four different states of the code
+looked identical and directly comparable. They were not.
+
+**The runner checks before it spends the time.** `run_experiments.main` calls
+`warn_if_unreproducible()` at the *start*, so a dirty tree costs one line of
+output immediately rather than a deleted directory hours later.
+`--require-clean` turns the warning into a refusal.
+
+**A campaign now records what it *was*, not only how it went.** The `settings`
+field used to hold `{runs, succeeded, stages}` -- outcomes, with nothing saying
+what produced them. It now holds `varied` (the campaign's own axis, derived from
+the settings that actually ran) and `fixed` (everything held constant), plus the
+scene objects, the default keypoint set and the step budget. Outcomes moved to a
+separate `results` field, and every stage threshold is written into
+`thresholds`, so a reader never has to find `REACH_TOLERANCE` in the source to
+know what a column meant.
+
+The `varied`/`fixed` split is aimed squarely at how 7.21 went wrong. Run against
+the current campaign definitions, `shelves` reports
+`varied: {seed, shelf_variant, slot}` -- which makes it visible on the index
+card, without reading any code, that the shelf study also varies the
+destination and therefore cannot separate the two.
+
+### 7.27 The reach error was measured with the wrong ruler
+
+The number every end-to-end conclusion rested on was
+``||fingertips - planned grasp||`` at the step the jaws were told to close: one
+straight-line distance in world coordinates, scored against a single tolerance
+of 45 mm.
+
+**It cannot work, and the reason is that a hand is not isotropic.** A gripper
+has three axes and being wrong along them means three unrelated things:
+
+| axis | what it means | how much is survivable |
+|---|---|---|
+| **closing** | across the jaws, along the line the fingers travel | the room left inside the open jaws: ``(aperture - object width) / 2``, so **15 mm** for a 50 mm can in an 80 mm Panda jaw |
+| **approach** | along the direction the hand advances | **120-135 mm** on the parallel jaws, and only 15 mm on the UMI (7.2) |
+| **jaw** | along the fingers, ``approach x closing`` | on anything symmetric about the closing axis -- a can, a bottle -- nearly free |
+
+A straight-line distance adds those in quadrature, so it mixes a budget of
+millimetres with one of 130 mm. A run 60 mm deep and perfectly centred scores
+*identically* to one 60 mm off-centre. The first grips the object slightly high
+and usually works; the second closes on air. No single threshold can separate
+them, because the quantity being thresholded has already thrown away the
+distinction.
+
+**The evidence that it was broken, before the campaigns were deleted.** Two
+things, either of which should have been enough:
+
+* On the runs that survive in 7.22, the scalar rated the **better** keypoint
+  configuration **worse**. The box keypoints score about 53 mm and the contact
+  keypoints about 5 mm, and it is the box that is the defensible default.
+* Roughly two thirds of the *successful* runs were scored as failing the
+  ``reach`` stage. A proxy that fires on a majority of successes is not a strict
+  proxy, it is a broken one.
+
+#### What replaces it
+
+``diagnose.reach_axes`` splits the error into the grasp's own frame and returns
+each component separately, plus the **sign** along the approach axis -- stopping
+short and driving past are different faults and it is worth not discarding
+which.
+
+``diagnose.closing_budget`` computes the tolerance rather than assuming one:
+``(aperture - width) / 2``, with the width measured **along that grasp's own
+closing axis** from the target keypoints. Measuring it from an axis-aligned
+bounding box instead is the trap in 7.18 -- a 30 x 100 mm box yawed 45 degrees
+measures 92 x 92 and reads as ungraspable. Where the geometry cannot be
+determined it returns ``None``, never a plausible-looking default.
+
+The ``reach`` stage now passes or fails on the closing component against that
+budget, and falls back to the old scalar only when the grasp frame is unknown,
+saying so in its text. The scalar is still recorded, because a metric that
+silently changes meaning between two campaigns is its own problem.
+
+> A real bug the tests caught while being written: ``gripper_geometry`` accepts
+> only the GraspGen-X name (``franka_panda``), so passing the registry key
+> (``panda``) raised, was swallowed, and the budget silently disappeared. That
+> is the by-identity lookup of 7.13 for the third time in this project. It now
+> resolves through ``resolve_pair`` first.
+
+#### And the drift measure was not a drift measure
+
+``attractor_drift`` replaces a quantity that could not have been right. The old
+one compared *how close the attractor came to the grasp* against *how close the
+transported plan came to the grasp*, and called the difference drift. It is a
+difference of two separately minimised distances: the two minima need not occur
+at the same moment, it goes negative whenever the attractor happens to cut a
+corner closer than the plan, and it is dominated by whichever curve was sampled
+more finely. It routinely came out negative, which should have been the tell.
+
+The replacement measures the two curves against each other, pointwise: for every
+attractor sample, the distance to the nearest point on the transported path,
+using ``metrics.curves.point_to_curve_distance``. Distance to the **polyline**,
+not to the nearest vertex -- vertex distance over-reports by up to half the
+vertex spacing, which on a 200-label 20 Hz demonstration is millimetres, the
+same size as the thing being measured.
+
+Timing is deliberately excluded: a trajectory that retraces the path exactly but
+arrives late has strayed nowhere. "Off the path" and "late" are different faults
+with different fixes, and mixing them is what made the earlier numbers
+unreadable. ``drift_frechet`` is reported alongside for the order-preserving
+view, and the whole thing returns ``{}`` rather than zeros when either curve is
+missing, so "not measured" stays distinguishable from "measured as zero".
+
+41 unit tests cover the three instruments and the provenance recorder, asserting
+the specific properties the old measures failed: that deviation cannot be
+negative, that a point mid-segment is on the path, that a late trajectory shows
+no drift, that a deep error does not pollute the closing axis, and that an
+untracked source file is fatal to reproducibility.
+
+## 8. Open items
+
+> **Read 7.26 first.** Every end-to-end campaign has been deleted, so the items
+> below are stated as *design questions with a proposed measurement*, not as
+> conclusions with a number. Nothing here should acquire a number until the
+> provenance rules at the end of 7.26 are in force.
+
+**The two open threads, and they are independent of each other.** The interface
+between them is a single object -- the transported label set. The keypoints and
+the map *produce* it; the policy and the rollout *consume* it. Neither needs the
+other to be correct, which means they can be built and tested separately and
+should be.
+
+**Thread A -- keypoints and the map. Pure geometry, no simulator needed.**
+
+The trade measured in 7.22 is local precision against global conditioning. The
+box keypoints keep the map well conditioned everywhere (`min det(J)` ~ 0.53) and
+miss the grasp by about 53 mm. The contact keypoints hit the grasp to about
+5 mm and leave the map either folded (with the box) or compressing volume
+fivefold (without it). Both requirements are legitimate; no keypoint set on the
+current menu satisfies both.
+
+The arithmetic in 7.22 says why, and bounds any fix: reconciling a
+`d` = 53 mm disagreement needs `L` > ~66 mm of space to blend over, and the
+contacts currently sit 20-40 mm from the box corners they contradict. Options,
+cheapest first, all of them answerable offline from a cached cloud and a cached
+grasp in milliseconds per variant:
+
+- **Correct the trajectory, not the map.** Post-adjust the transported labels so
+  the path passes through the known target grasp pose, decaying over ~7 cm.
+  Not a map, so there is no determinant to fold. Directly analogous to
+  `carry_transform`, which already derives the placed pose outside the map.
+  This is the right *first* experiment because it isolates the question 7.22
+  leaves open -- does better aim convert to success at all? -- before anything
+  is paid for it.
+- **Delete the box corners that conflict.** 7.22's own diagnosis is that the
+  contacts are redundant with corners centimetres away. If they are redundant,
+  drop the corner and keep the contact rather than interpolating both. Raises
+  `L`, preserves exact interpolation.
+- **Partial interpolation.** Regularise the map's own GP so it fits keypoints in
+  a least-squares sense instead of exactly. Regularisation is the standard cure
+  for this ill-conditioning. Costs property (i) of Sec. III-C, but as a
+  continuous knob: a valid map aiming at 10 mm may beat a folded one aiming at
+  5 mm.
+- **A localised correction term.** The map is already `phi = gamma + psi . gamma`
+  ([maps.py](tpgpt/transport/maps.py)). Add a third, compactly-supported term
+  centred on the grasp contact. Because the support is compact, its influence
+  mid-trajectory is exactly zero rather than merely small, and the no-folding
+  condition is closed-form -- check it and shrink the correction until it passes,
+  instead of fitting a map and discovering afterwards that it folded.
+- **Blending two whole maps** (contacts-fitted and box-fitted) is the same idea
+  with a weaker guarantee: the Jacobian picks up a rank-1 term that can only be
+  checked by sampling. If it is done, the blend weight must be a function of
+  **position**, not phase -- a phase-dependent weight is not a spatial map, and
+  then `J(x)` is undefined, which breaks the velocity, orientation, stiffness
+  and uncertainty transports of Eqs. 9-13 that all depend on it.
+
+Also unresolved and symmetric: **nothing pins the map at the placement end
+either.** If precision at the grasp matters, precision at the insertion matters
+equally.
+
+**Thread B -- policy execution. Needs the simulator, but not the keypoints.**
+
+Testable against a *fixed* reference path -- the untransported demonstration
+replayed in the source scene, where the ground truth is known exactly -- so it
+is completely decoupled from thread A. Open questions, with the analysis behind
+them in 2.7 and 2.8:
+
+- The rollout integrates `prediction.velocity` and **never reads
+  `prediction.reference`**, the regressed attractor-position channel that
+  [gp_policy.py](tpgpt/policy/gp_policy.py) already fits on the transported
+  label positions. That channel is the paper's own Sec. V formulation and the
+  only restoring term the policy has -- the velocity field, having a zero-mean
+  prior, points *along* the demonstration and never back toward it.
+- `GPPolicy.attractor()` returns `reference + K^-1 D velocity` and is called
+  only from a unit test. The `K^-1 D velocity` term is lag compensation and is
+  correct **only against measured-pose labels**; against this project's
+  attractor labels (2.7) it would land the arm `K^-1 D v` ~ 24 mm *ahead* of
+  where the demonstrating arm was. Use `reference` alone, or change the labels.
+- The controller accepts `velocity_desired` and nothing ever passes it, which is
+  the entire reason a steady-state lag exists (2.8). Whether to cancel the lag
+  or keep it is a real design choice, not an oversight -- see 2.7 for why the
+  lag transports correctly on its own and may be the desired behaviour.
+
+**Instrumentation, which blocks both threads.** The reach error is currently a
+scalar 3-D distance to one planned grasp point. Only the component along the
+gripper's **closing axis** decides whether the object ends up between the jaws;
+the approach axis tolerates 120-135 mm on a parallel jaw (7.2). Decompose it by
+axis before running anything. Attractor-versus-plan drift needs a pointwise or
+Fréchet measure -- `frechet_distance` in
+[metrics/curves.py](tpgpt/metrics/curves.py) already exists and is unused --
+rather than the difference of two separately-minimised distances.
+
+**Also open:**
+
+- **A front-approach demonstration** for a shelf with a roof. A top-down teach
+  cannot solve one by construction: the approach direction is wrong, and no
+  amount of warping fixes a direction the demonstration never contained. This is
+  geometry, not a measured failure, which is why it survives the withdrawal of
+  7.23.
+- **The UMI hand.** Its contact offset `[0.0, -0.035, -0.112]` is the only one
+  in the registry with a large *lateral* component; every parallel jaw is almost
+  purely along the approach axis. 7.2 also measured it tolerating only 15 mm of
+  depth error against 120-135 mm for the parallel jaws. Both are properties of
+  the hand, independent of any campaign, and both are worth checking before
+  anything else about that gripper.
 - **Grasp filtering and selection.** Section 5.6 is the measured case. At
   minimum this needs a visibility criterion (the cloud is one-sided, and
   approaches from the unobserved side dominate), reachability, and collision
   against the rest of the scene. Whether to filter, re-rank, or fuse more views
-  at source is exactly the design question.
-- **Keypoint extraction for the new scene.** The reshelving keypoints are the
-  eight corners of a box. An arbitrary mesh has no such natural set, and the
-  keypoints must be *paired* between source and target scenes for the
-  transportation map to be defined at all. What plays the role of a corner for
-  a milk carton against a cereal box is the open question.
+  at source is the design question.
+- ~~**Keypoint extraction for the new scene.**~~ Done; see section 6.
+
+**Deferred, and why:**
+
+- **Physics execution in `TabletopShelf`.** Section 6.3 is scored
+  geometrically. Executing there needs `reshelving_waypoints` generalised into
+  a grasp-and-place-pose builder and `rollout_policy`'s success readout made
+  scene-agnostic -- it currently reads `env.product_position`,
+  `env.goal_position` and `env._check_success()`. `TabletopShelf` already
+  provides `is_object_in_slot` and `slot_poses` for it. Kept separate so a
+  keypoint failure and a physics failure cannot be confused for one another.
 
 **Deferred from the transportation work:**
 

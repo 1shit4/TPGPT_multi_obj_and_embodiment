@@ -1,0 +1,698 @@
+"""Which stage of a run actually failed, and by how much.
+
+An end-to-end outcome such as ``placed_in_the_wrong_place`` names where the run
+*stopped*, not where it *went wrong*, and the two are rarely the same stage. A
+hand that closed on empty air and a hand that gripped the object correctly and
+set it down 20 cm off both finish with the object away from its slot, and the
+placement error is identical evidence for two problems with nothing in common.
+
+So a run is replayed against its own recorded trace and split into the physical
+stages a pick-and-place has, each with a pass/fail and a measured margin:
+
+``approach``   the arm reached the start of the transported path.
+``reach``      the hand arrived at the chosen grasp pose before the jaws moved.
+``grasp``      the jaws closed *on the object* rather than on air or on a wall.
+``lift``       the object came off its support.
+``carry``      it stayed in the hand for the transit.
+``place``      it was released over the destination.
+``settle``     it ended up resting in the slot.
+
+The first stage that fails is the one to fix; everything after it is a
+consequence. Reporting the last stage instead is what makes a campaign look like
+a transport problem when it is a grasping problem.
+
+Stage thresholds are measured quantities, not preferences -- see the constants.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+
+import numpy as np
+
+#: The hand must be within this of the commanded grasp point when the jaws move.
+#:
+#: The impedance controller's own steady-state lag is 20-45 mm (``ROBOTICS_NOTES``
+#: section 2), so anything under that is the controller behaving normally. Above
+#: it the jaws are closing somewhere the arm was never asked to be.
+#:
+#: **This scalar is kept for continuity, and it is the weaker of the two tests.**
+#: It is a straight-line distance in world coordinates, so it adds up errors
+#: along three axes that have wildly different consequences -- see
+#: :func:`reach_axes`. Prefer ``reach_closing`` where a grasp and a gripper are
+#: known. Section 7.26.
+REACH_TOLERANCE = 0.045
+
+#: Fraction of the jaw aperture allowed as closing-axis error when the object's
+#: own width cannot be measured.
+#:
+#: With the width known the budget is exact -- ``(aperture - width) / 2``, the
+#: room actually left on each side. Without it, no budget is exact and this is a
+#: deliberately loose stand-in: half the half-aperture. It is documented rather
+#: than tuned, because a threshold nobody can derive is how a metric stops
+#: meaning anything.
+CLOSING_BUDGET_FRACTION = 0.25
+
+#: A rise of this much means the object left its support rather than being
+#: nudged. Objects here are 45-153 mm tall; the table is flat, so a genuine lift
+#: clears it by more than the couple of millimetres of settling jitter.
+LIFT_HEIGHT = 0.02
+
+#: Held for at least this fraction of the steps between closing and opening.
+CARRY_FRACTION = 0.6
+
+#: Released within this of the slot centre, measured laterally.
+PLACE_TOLERANCE = 0.06
+
+STAGES = ("approach", "reach", "grasp", "lift", "carry", "place", "settle")
+
+#: One plain sentence per stage, for the report.
+STAGE_TEXT = {
+    "approach": "the arm reached the start of the transported motion",
+    "reach": "the hand arrived where the grasp was planned",
+    "grasp": "the jaws closed on the object",
+    "lift": "the object came off the table",
+    "carry": "the object stayed in the hand while it was carried",
+    "place": "the object was let go above the right shelf",
+    "settle": "the object ended up resting in the slot",
+}
+
+
+@dataclass
+class Stage:
+    name: str
+    ok: bool
+    detail: str
+    value: float | None = None
+
+    def __str__(self) -> str:
+        return f"{'ok  ' if self.ok else 'FAIL'} {self.name:<9} {self.detail}"
+
+
+@dataclass
+class Diagnosis:
+    """Stage-by-stage account of one execution.
+
+    The stages are diagnostic *proxies* with measured thresholds; the task
+    outcome is ground truth. When the two disagree -- a run that put the object
+    in its slot while the hand arrived further from the planned grasp than
+    :data:`REACH_TOLERANCE` allows, because it gripped a different part of the
+    object and that worked -- the outcome wins. Otherwise a campaign's funnel
+    reports fewer runs reaching the last stage than it reports succeeding, which
+    is not a subtlety a reader should have to resolve.
+    """
+
+    stages: list[Stage] = field(default_factory=list)
+    measurements: dict = field(default_factory=dict)
+    succeeded: bool = False
+
+    @property
+    def first_failure(self) -> Stage | None:
+        if self.succeeded:
+            return None
+        return next((s for s in self.stages if not s.ok), None)
+
+    @property
+    def proxy_misfires(self) -> list[str]:
+        """Stages whose threshold said "failed" on a run that nonetheless worked.
+
+        Kept rather than hidden: a proxy that fires on a success is a proxy
+        whose threshold is worth revisiting.
+        """
+        if not self.succeeded:
+            return []
+        return [s.name for s in self.stages if not s.ok]
+
+    @property
+    def blame(self) -> str:
+        failure = self.first_failure
+        return failure.name if failure is not None else "success"
+
+    @property
+    def reached_stage(self) -> int:
+        """How many stages completed before the first failure."""
+        return sum(1 for s in self.stages if s.ok) if self.first_failure else len(self.stages)
+
+    def summary_of_misfires(self) -> str:
+        names = self.proxy_misfires
+        if not names:
+            return ""
+        return (
+            "the task succeeded although "
+            + ", ".join(names) + " read as failed; the threshold is a proxy"
+        )
+
+    def summary(self) -> str:
+        failure = self.first_failure
+        if failure is None:
+            return "every stage completed"
+        return f"failed at '{failure.name}': {failure.detail}"
+
+
+def object_probe(env, object_name: str):
+    """A ``probe`` for :func:`~tpgpt.sim.rollout.rollout_policy`.
+
+    Records what the *object* is doing, which is the half of the story the
+    end-effector trace cannot tell. Kept to scalars and one 3-vector so a
+    thousand-step rollout costs a few tens of kilobytes.
+    """
+    from tpgpt.grasp.grippers import resolve_pair  # noqa: F401  (kept for symmetry)
+
+    def probe(env_) -> dict:
+        position = env_.object_position(object_name)
+        record = {
+            "object_x": float(position[0]),
+            "object_y": float(position[1]),
+            "object_z": float(position[2]),
+            "jaw": float(_jaw_opening(env_)),
+            "held": float(_gripper_touches(env_, object_name)),
+        }
+        # The hand's *measured* orientation. Where the fingertips are is the
+        # wrist plus a hand-specific offset rotated into the world, so using the
+        # planned rotation instead of the real one mis-states the fingertip
+        # position by up to twice the offset times the angular error -- 14 mm
+        # for a Panda 20 degrees off. That is the same size as the effect being
+        # measured.
+        rotation = _eef_rotation(env_)
+        for i in range(3):
+            for j in range(3):
+                record[f"eef_R{i}{j}"] = float(rotation[i, j])
+        return record
+
+    return probe
+
+
+def _eef_rotation(env) -> np.ndarray:
+    """World rotation of the arm's ``grip_site``."""
+    try:
+        site = env.robots[0].gripper
+        site = site["right"] if isinstance(site, dict) else site
+        name = f"{site.naming_prefix}grip_site"
+        index = env.sim.model.site_name2id(name)
+        return np.array(env.sim.data.site_xmat[index]).reshape(3, 3)
+    except Exception:  # pragma: no cover - embodiment without that site
+        return np.eye(3)
+
+
+def _jaw_opening(env) -> float:
+    """Sum of the gripper's finger joint positions.
+
+    Not a width in metres -- hands differ -- but a monotone stand-in for one,
+    which is all that is needed to see the jaws move.
+    """
+    try:
+        gripper = env.robots[0].gripper
+        gripper = gripper["right"] if isinstance(gripper, dict) else gripper
+        ids = [env.sim.model.joint_name2id(j) for j in gripper.joints]
+        return float(np.sum(np.abs(env.sim.data.qpos[[
+            env.sim.model.jnt_qposadr[i] for i in ids
+        ]])))
+    except Exception:  # pragma: no cover - embodiment without named joints
+        return float("nan")
+
+
+def _gripper_touches(env, object_name: str) -> bool:
+    """Whether any gripper geom is in contact with the object.
+
+    Contact is the only honest test of a grasp. Proximity is not: a hand can sit
+    a centimetre from an object all the way through a carry, which is exactly
+    what a failed grasp looks like from the end-effector trace alone.
+    """
+    try:
+        gripper = env.robots[0].gripper
+        gripper = gripper["right"] if isinstance(gripper, dict) else gripper
+        body = env.object_body_ids[object_name]
+        object_geoms = {
+            i for i in range(env.sim.model.ngeom)
+            if env.sim.model.geom_bodyid[i] == body
+        }
+        gripper_geoms = {
+            env.sim.model.geom_name2id(g)
+            for g in gripper.contact_geoms
+            if g in env.sim.model.geom_names
+        }
+        data = env.sim.data
+        for i in range(data.ncon):
+            contact = data.contact[i]
+            pair = {contact.geom1, contact.geom2}
+            if pair & object_geoms and pair & gripper_geoms:
+                return True
+        return False
+    except Exception:  # pragma: no cover
+        return False
+
+
+def diagnose(result, env, grasp_point: np.ndarray | None = None) -> Diagnosis:
+    """Attribute one run to the stage that failed.
+
+    Args:
+        result: A finished :class:`~tpgpt.experiments.pipeline.RunResult`.
+        env: The environment it ran in, for the slot pose.
+        grasp_point: Where the jaws were meant to close, in world coordinates.
+            Defaults to the chosen grasp's own contact point.
+    """
+    diagnosis = Diagnosis()
+    rollout = result.rollout
+    diagnosis.succeeded = bool(rollout is not None and rollout.success)
+    if rollout is None:
+        diagnosis.stages.append(
+            Stage("approach", False, "the run never reached the robot")
+        )
+        return diagnosis
+
+    trace = rollout.metadata.get("probe") or {}
+    if not trace:
+        diagnosis.stages.append(
+            Stage("approach", False, "no object trace was recorded")
+        )
+        return diagnosis
+
+    # How the *clock* fared, which the stage list cannot show. A run can do
+    # every physical step correctly and still be scored a failure because its
+    # phase never reached 1.0 and the gripper therefore never opened -- measured
+    # on three can runs that delivered the object to within 5-30 mm of the slot
+    # and were reported as stalls.
+    phases = np.asarray(rollout.time_belief)
+    diagnosis.measurements["final_phase"] = float(phases[-1])
+    diagnosis.measurements["frozen_steps"] = int(np.sum(np.diff(phases) <= 1e-9))
+    diagnosis.measurements["steps"] = int(len(phases))
+
+    z = np.asarray(trace["object_z"])
+    held = np.asarray(trace["held"]).astype(bool)
+    xy = np.column_stack([trace["object_x"], trace["object_y"]])
+    command = np.asarray(rollout.gripper)
+    eef = np.asarray(rollout.positions)
+
+    # --- approach: did the arm arrive where the policy starts? ---------------
+    gap = float(rollout.metadata.get("approach_gap", 0.0))
+    start_error = float(np.linalg.norm(eef[0] - result.transported[0])) \
+        if result.transported is not None else float("nan")
+    diagnosis.stages.append(Stage(
+        "approach", start_error <= 0.08,
+        f"started {start_error * 1000:.0f} mm from the transported start "
+        f"(it had {gap * 1000:.0f} mm to travel)",
+        start_error,
+    ))
+
+    # --- reach: where was the hand when the jaws were told to close? ---------
+    closing = np.flatnonzero(command > 0)
+    if not len(closing):
+        diagnosis.stages.append(Stage(
+            "reach", False, "the gripper was never commanded to close"
+        ))
+        diagnosis.measurements["close_step"] = None
+        return _pad(diagnosis)
+    close_step = int(closing[0])
+    diagnosis.measurements["close_step"] = close_step
+    diagnosis.measurements["close_phase"] = float(rollout.time_belief[close_step])
+
+    if grasp_point is None and result.grasp is not None:
+        from tpgpt.grasp.grasps import contact_offset, grasp_to_eef_pose
+
+        position, rotation = grasp_to_eef_pose(result.grasp, result.gripper)
+        grasp_point = position + rotation @ contact_offset(result.gripper)
+    measured = _measured_rotations(trace)
+    if grasp_point is not None:
+        # The hand's own contact point, not its site, is what has to arrive.
+        offset = _hand_contact(
+            result, eef[close_step],
+            measured[close_step] if measured is not None else None,
+        )
+        reach_error = float(np.linalg.norm(offset - np.asarray(grasp_point)))
+    else:
+        reach_error = float(np.linalg.norm(eef[close_step, :2] - xy[close_step]))
+    diagnosis.measurements["reach_error"] = reach_error
+
+    # Separate the two things a reach error can be. The *attractor* is what the
+    # policy commanded; the *position* is where the arm got to. If the commanded
+    # point is on the object and the arm is not, that is the controller lagging
+    # and the fix is in the rollout. If the commanded point is itself off the
+    # object, the transported motion is aimed wrong and the fix is in the map --
+    # and no amount of tuning the arm will help.
+    if grasp_point is not None:
+        attractors = np.asarray(rollout.attractors)
+        commanded = float(np.linalg.norm(
+            _hand_contact(
+                result, attractors[close_step],
+                measured[close_step] if measured is not None else None,
+            ) - np.asarray(grasp_point)
+        ))
+        diagnosis.measurements["commanded_error"] = commanded
+        diagnosis.measurements["lag_at_close"] = float(
+            np.linalg.norm(eef[close_step] - attractors[close_step])
+        )
+        # And the timing question: does the commanded path ever pass through the
+        # grasp point, just not at the step the jaws were told to shut? A path
+        # that comes within a few millimetres at some other step is a schedule
+        # problem, not an aiming one.
+        along = np.linalg.norm(
+            np.array([
+                _hand_contact(
+                    result, a, measured[i] if measured is not None else None
+                )
+                for i, a in enumerate(attractors)
+            ])
+            - np.asarray(grasp_point), axis=1,
+        )
+        diagnosis.measurements["closest_commanded"] = float(along.min())
+        diagnosis.measurements["closest_commanded_step"] = int(along.argmin())
+        if result.transported is not None:
+            planned = np.linalg.norm(
+                np.array([_hand_contact(result, p) for p in result.transported])
+                - np.asarray(grasp_point), axis=1,
+            )
+            diagnosis.measurements["closest_transported"] = float(planned.min())
+        cause = (
+            "the arm did not get there" if commanded <= REACH_TOLERANCE
+            else "the motion was aimed there wrongly"
+        )
+    else:
+        cause = ""
+
+    # --- reach, split into the axes that mean different things ---------------
+    # The scalar above is kept, but the verdict comes from the closing axis
+    # wherever the grasp frame is known: that is the only direction in which
+    # being wrong loses the object outright. See reach_axes.
+    axes, budget = None, None
+    if grasp_point is not None and result.grasp is not None:
+        axes = reach_axes(result.grasp, offset - np.asarray(grasp_point))
+        budget = closing_budget(result)
+        diagnosis.measurements.update(
+            reach_closing=axes["closing"],
+            reach_approach=axes["approach"],
+            reach_signed_approach=axes["signed_approach"],
+            reach_jaw=axes["jaw"],
+            closing_budget=budget,
+        )
+
+    if axes is not None and budget is not None:
+        reach_ok = axes["closing"] <= budget
+        detail = (
+            f"the jaws closed {axes['closing'] * 1000:.0f} mm off the closing "
+            f"axis against a {budget * 1000:.0f} mm budget "
+            f"({axes['signed_approach'] * 1000:+.0f} mm along the approach, "
+            f"{axes['jaw'] * 1000:.0f} mm along the fingers), at step "
+            f"{close_step}"
+        )
+        value = axes["closing"]
+    else:
+        reach_ok = reach_error <= REACH_TOLERANCE
+        detail = (
+            f"the jaws closed {reach_error * 1000:.0f} mm from the planned "
+            f"grasp point, at step {close_step} (straight-line distance; the "
+            f"grasp frame was not available to split it by axis)"
+        )
+        value = reach_error
+    diagnosis.stages.append(Stage(
+        "reach", reach_ok, detail + (f" ({cause})" if cause else ""), value,
+    ))
+
+    # How far the integrated attractor strayed from the path it was meant to
+    # follow -- pointwise, so it cannot come out negative. See attractor_drift.
+    diagnosis.measurements.update(attractor_drift(rollout, result.transported))
+
+    # --- grasp: did anything touch the object? -------------------------------
+    contact_steps = int(held.sum())
+    diagnosis.measurements["contact_steps"] = contact_steps
+    first_contact = int(np.flatnonzero(held)[0]) if contact_steps else None
+    diagnosis.stages.append(Stage(
+        "grasp", contact_steps > 0,
+        f"the hand was in contact with the object on {contact_steps} of "
+        f"{len(held)} steps"
+        + (f", from step {first_contact}" if first_contact is not None else
+           " -- it closed on nothing"),
+        float(contact_steps),
+    ))
+
+    # --- lift: did the object leave the table? -------------------------------
+    rise = float(z.max() - z[0])
+    diagnosis.measurements["lift_height"] = rise
+    diagnosis.stages.append(Stage(
+        "lift", rise >= LIFT_HEIGHT,
+        f"the object rose {rise * 1000:.0f} mm above where it started",
+        rise,
+    ))
+
+    # --- carry: was it held for the transit? ---------------------------------
+    opening = np.flatnonzero(command[close_step:] < 0)
+    release_step = int(close_step + opening[0]) if len(opening) else len(command) - 1
+    diagnosis.measurements["release_step"] = release_step
+    window = slice(close_step, max(release_step, close_step + 1))
+    span = max(1, window.stop - window.start)
+    carried = float(held[window].sum()) / span
+    diagnosis.measurements["carry_fraction"] = carried
+    diagnosis.stages.append(Stage(
+        "carry", carried >= CARRY_FRACTION,
+        f"it was in the hand for {carried:.0%} of the carry "
+        f"(steps {close_step} to {release_step})",
+        carried,
+    ))
+
+    # --- place: was it let go over the destination? --------------------------
+    target = env.slot_poses()[result.slot]
+    at_release = float(np.linalg.norm(xy[min(release_step, len(xy) - 1)] - target[:2]))
+    diagnosis.measurements["release_error_xy"] = at_release
+    diagnosis.stages.append(Stage(
+        "place", at_release <= PLACE_TOLERANCE,
+        f"it was let go {at_release * 1000:.0f} mm from the middle of the slot",
+        at_release,
+    ))
+
+    # --- settle: is it actually in the slot? ---------------------------------
+    final = float(np.linalg.norm(xy[-1] - target[:2]))
+    height_error = float(z[-1] - target[2])
+    diagnosis.measurements["final_error_xy"] = final
+    diagnosis.stages.append(Stage(
+        "settle", bool(rollout.success),
+        f"it came to rest {final * 1000:.0f} mm from the slot centre and "
+        f"{height_error * 1000:+.0f} mm from its height",
+        final,
+    ))
+    return diagnosis
+
+
+
+def reach_axes(grasp, error: np.ndarray) -> dict:
+    """Split a reach error into the gripper's own three axes.
+
+    **Why the scalar distance was the wrong instrument.** A grasp is not
+    isotropic, and the three directions a hand can be wrong in have almost
+    nothing to do with each other:
+
+    * **closing** -- along the line the jaws travel. This is the one that
+      decides the task. The object has to end up *between* the fingers, and once
+      the error exceeds the room left inside the open jaws there is no partial
+      credit: the hand closes on air. Budget is millimetres to a few
+      centimetres.
+    * **approach** -- along the direction the hand advances. Being short or deep
+      along this axis mostly changes *where up the object* it is gripped, which
+      it often tolerates. Section 7.2 measured 120-135 mm of tolerance here for
+      the parallel jaws (and only 15 mm for the UMI, which is unusual in this as
+      in much else).
+    * **jaw** -- the remaining lateral direction, ``approach x closing``, along
+      the length of the fingers. On a body with any symmetry about the closing
+      axis -- a can, a bottle -- sliding along this is nearly free.
+
+    Adding these three in quadrature, which is what a straight-line distance
+    does, mixes a millimetre-scale budget with a 130 mm one. A run 60 mm deep
+    and perfectly centred scores identically to one 60 mm off-centre, and the
+    first succeeds while the second cannot. Measured on the campaigns since
+    deleted, this scalar rated the *better* keypoint configuration worse
+    (section 7.26), which is the clearest possible sign of a broken metric.
+
+    Args:
+        grasp: The chosen :class:`~tpgpt.grasp.grasps.Grasp6D`, whose ``closing``
+            and ``approach`` properties define the frame.
+        error: ``(3,)`` world-frame vector from the intended grasp point to
+            where the hand actually was.
+
+    Returns:
+        Unsigned magnitude along each axis, plus ``signed_approach``, which is
+        positive when the hand stopped **short** of the object and negative when
+        it drove past. Short and deep fail in different ways and it is worth not
+        throwing the sign away.
+    """
+    error = np.asarray(error, dtype=float).reshape(3)
+    closing = np.asarray(grasp.closing, dtype=float)
+    approach = np.asarray(grasp.approach, dtype=float)
+    jaw = np.cross(approach, closing)
+    norm = np.linalg.norm(jaw)
+    jaw = jaw / norm if norm > 1e-12 else np.zeros(3)
+    along = float(error @ approach)
+    return {
+        "closing": abs(float(error @ closing)),
+        "approach": abs(along),
+        "signed_approach": -along,
+        "jaw": abs(float(error @ jaw)),
+    }
+
+
+def closing_budget(result, fraction: float = CLOSING_BUDGET_FRACTION) -> float | None:
+    """How far off the closing axis the hand may be and still capture the object.
+
+    An open jaw of aperture ``a`` closing on an object of width ``w`` leaves
+    ``(a - w) / 2`` of room on each side. That is the budget, and it is exact:
+    beyond it the object is outside one finger before the jaws start moving.
+
+    The object's width is measured **along this grasp's own closing axis**, from
+    the target keypoints -- which are a box fitted to the object's cloud, so
+    their extent along that axis is the width the jaws actually meet. Taking an
+    axis-aligned bounding box instead is a known trap: a 30 x 100 mm box yawed
+    45 degrees measures 92 x 92 and reads as ungraspable (section 7.18).
+
+    Returns:
+        The budget in metres, or ``None`` when neither the gripper geometry nor
+        the keypoints are available -- never a plausible-looking default. A
+        missing measurement that returns a number is how a 41 mm frame error
+        read as the arm missing its target for weeks (section 7.13).
+    """
+    if result.grasp is None or not result.gripper:
+        return None
+    try:
+        from tpgpt.grasp.grippers import gripper_geometry, resolve_pair
+
+        # Resolve through the registry rather than looking the hand up by
+        # identity. ``gripper_geometry`` wants the GraspGen-X name, so a
+        # registry key such as ``"panda"`` raises and the budget silently
+        # disappears. That is the shape of the bug in section 7.13, where a
+        # by-identity lookup turned an unmeasured hand into a confident zero.
+        name = resolve_pair(result.grasp.gripper).graspgen
+        aperture = float(gripper_geometry(name).aperture)
+    except Exception:  # pragma: no cover - absent sibling checkout
+        return None
+
+    points = getattr(result.target_keypoints, "points", None)
+    if points is None or len(points) < 2:
+        return fraction * aperture
+    width = float(np.ptp(np.asarray(points, dtype=float) @ result.grasp.closing))
+    return max(0.5 * (aperture - width), 0.0)
+
+
+def attractor_drift(rollout, transported) -> dict:
+    """How far the integrated attractor strayed from the path it should follow.
+
+    The rollout advances ``attractor += velocity * dt * gate`` and never
+    consults the transported labels again, so nothing prevents the integral from
+    wandering. This measures whether it did.
+
+    **Measured pointwise against the path, not as the difference of two
+    minima.** The earlier diagnostic compared how close the attractor came to
+    the grasp against how close the *plan* came to the grasp, and called the
+    difference drift. That is not a drift measurement: the two minima can occur
+    at different moments, it goes negative whenever the attractor happens to cut
+    a corner closer, and it is dominated by whichever curve was sampled more
+    finely. Numbers derived that way are withdrawn (section 7.26).
+
+    Returns two complementary quantities, because "off the path" and "late" are
+    different faults with different fixes:
+
+    * ``deviation`` -- distance to the nearest point on the transported path,
+      ignoring timing. This is integration drift proper, and a fix belongs in
+      policy execution.
+    * ``frechet`` -- order-preserving curve distance, which does not let the two
+      curves be matched out of sequence.
+
+    Returns ``{}`` when either curve is missing, so a caller can tell "not
+    measured" from "measured as zero".
+    """
+    from tpgpt.metrics.curves import frechet_distance, path_deviation
+
+    attractors = np.asarray(getattr(rollout, "attractors", []), dtype=float)
+    path = np.asarray(transported, dtype=float) if transported is not None else None
+    if path is None or attractors.ndim != 2 or len(attractors) == 0 or len(path) == 0:
+        return {}
+    stats = path_deviation(attractors, path)
+    return {
+        "drift_max": stats["max"],
+        "drift_median": stats["median"],
+        "drift_at_step": stats["argmax"],
+        "drift_frechet": frechet_distance(attractors, path),
+    }
+
+
+def _hand_contact(result, position: np.ndarray, rotation=None) -> np.ndarray:
+    """The point between the fingertips, given a recorded end-effector position.
+
+    A grasp pose is at the gripper base; the jaws close a hand-specific depth
+    further along. Comparing the wrist site to the grasp point instead reports
+    the fingertip depth -- 103 to 195 mm across the registry -- as a reach error.
+
+    **Whether the offset has to be added at all depends on the frame the rollout
+    ran in.** With a ``tool_offset`` the rollout already records fingertip
+    positions, and adding the offset a second time puts the measurement 41 mm
+    out -- enough that three runs which delivered their object into the slot
+    were reported as having failed to reach it, in the same table that reported
+    them successful. The rollout says which frame it used, so this asks.
+
+    Args:
+        rotation: The hand's orientation at that instant. Falls back to the
+            planned grasp rotation, which is only right where the hand is
+            already holding the planned pose.
+    """
+    from tpgpt.grasp.grasps import contact_offset, grasp_to_eef_pose
+
+    if result.grasp is None or _already_at_the_tool(result):
+        return np.asarray(position)
+    if rotation is None:
+        _, rotation = grasp_to_eef_pose(result.grasp, result.gripper)
+    return np.asarray(position) + np.asarray(rotation) @ contact_offset(
+        result.gripper
+    )
+
+
+def _already_at_the_tool(result) -> bool:
+    """Whether the rollout recorded fingertip positions rather than wrist ones."""
+    rollout = getattr(result, "rollout", None)
+    offset = (rollout.metadata.get("tool_offset") if rollout is not None else None)
+    return offset is not None and float(np.linalg.norm(offset)) > 1e-9
+
+
+def _measured_rotations(trace: dict):
+    """``(N, 3, 3)`` hand rotations from a probe trace, or ``None`` if absent."""
+    if "eef_R00" not in trace:
+        return None
+    return np.stack(
+        [np.asarray(trace[f"eef_R{i}{j}"]) for i in range(3) for j in range(3)],
+        axis=-1,
+    ).reshape(-1, 3, 3)
+
+
+def _pad(diagnosis: Diagnosis) -> Diagnosis:
+    """Mark the stages after a fatal one as not reached, rather than omitting.
+
+    An absent stage in a table reads as "passed"; "not reached" is the truth and
+    the difference matters when the rows are counted up across a campaign.
+    """
+    done = {s.name for s in diagnosis.stages}
+    for name in STAGES:
+        if name not in done:
+            diagnosis.stages.append(Stage(name, False, "not reached"))
+    return diagnosis
+
+
+def tally(diagnoses: list[Diagnosis]) -> dict:
+    """How many runs got past each stage. The headline of a campaign.
+
+    A run that succeeded counts as having passed every stage, whatever the
+    proxies said, so the funnel can never report fewer runs finishing than
+    succeeded.
+    """
+    counts = {name: 0 for name in STAGES}
+    for diagnosis in diagnoses:
+        if diagnosis.succeeded:
+            for name in STAGES:
+                counts[name] += 1
+            continue
+        for stage in diagnosis.stages:
+            if stage.ok:
+                counts[stage.name] += 1
+            else:
+                break
+    return counts
+
+
+def tally_text(counts: dict, total: int) -> str:
+    lines = [f"{'stage':<10}{'passed':>8}  what it means"]
+    for name in STAGES:
+        lines.append(f"{name:<10}{counts[name]:>4}/{total:<3}  {STAGE_TEXT[name]}")
+    return "\n".join(lines)

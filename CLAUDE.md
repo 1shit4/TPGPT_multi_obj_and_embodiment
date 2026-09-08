@@ -61,10 +61,29 @@ python -m tpgpt.grasp.server                    # status, and how to start it
 - Headless physics costs ~160 control-steps/s and ~800 MB RSS; add ~250 MB for
   offscreen rendering.
 
+## How to report back, and how to write anything down
+
+**Write in layman's language, keeping every technical term, number and file
+reference.** One explanation, not two: do **not** append a separate
+"plain-language summary" at the end. The main text is the accessible one.
+
+- Define a term the first time it appears — "the attractor (the point the spring
+  is anchored to, which the arm chases)" rather than "the attractor".
+- Show the arithmetic behind any claim that rests on it, not just the result.
+- Explain the mechanism step by step rather than stating a conclusion and moving
+  on. A paragraph of mechanism beats a sentence of result.
+
+The same applies to everything written into a file the user reads —
+`ROBOTICS_NOTES.md`, this file, generated reports, campaign indexes. For every
+table, say what was varied, what was held fixed, and what conclusion it supports.
+For every number, say how it was measured and with what instrument. For every
+conclusion, say what would make it false. Notes that carry only conclusions are
+how three findings in `ROBOTICS_NOTES.md` ended up wrong (§7.26).
+
 ## Rules for changing code
 
-1. **Run the tests after every change.** The unit suite takes 3 seconds; the
-   full suite ~75 s. Run the full suite before declaring anything done.
+1. **Run the tests after every change.** The unit suite takes ~10 s; the
+   full suite ~4 min. Run the full suite before declaring anything done.
 2. **Cite the paper in docstrings.** Every function implementing theory names
    the section or equation it comes from. This is the point of the project.
 3. **Deviations from the paper must be documented** in `ROBOTICS_NOTES.md` with
@@ -112,6 +131,98 @@ Each of these cost real debugging time. Full detail in `ROBOTICS_NOTES.md`.
   refuse conversion deliberately.
 - **Point clouds sent to GraspGen-X must be capped** (8192 points). Its outlier
   removal is `torch.cdist(X, X)` and a large cloud OOM-kills the server.
+- **`env.table_top` is not the plane objects rest on.** robosuite's `TableArena`
+  puts the *top* surface at `table_offset` and hangs the thickness below it, so
+  the property reads 23 mm high. Both scenes derive their shelf heights from it
+  consistently, so it is left alone; use `table_offset[2]` for the table
+  surface and `slot_poses()` for a shelf board, which is exact.
+- **A keypoint built from a thin band of a point cloud is unstable.** Any
+  statistic taken over a slice -- a percentile's neighbour, a band centroid --
+  moves several millimetres between two samplings of the same object. `phi`
+  interpolates keypoints *exactly*, so that wander is not averaged away: it
+  becomes a local deformation, and Eq. 11 turns it into gripper rotation. Two
+  such bugs cost 14 degrees of yaw and 2 of 20 episodes. Measure only the one
+  coordinate that needs measuring; take the rest from the fitted box.
+- **`det(J) > 0` fraction is a weak diagnostic; the *minimum* determinant is
+  the useful one.** An under-observed object gives a collapsed box, a perfect
+  keypoint residual and 100% positive determinants, with `min det(J)` at 0.008
+  against 0.67 for a well-observed one.
+- **The grasp's *position* along an object must not enter the keypoints.** It
+  contradicts the shape keypoints and folds the map. Only the grasp's
+  *orientation* belongs there, via the task frame. Detail in
+  `ROBOTICS_NOTES.md` section 6.4.
+- **The attractor clamp and the lag gate must agree on "too far".** They were
+  computed from different speeds -- the clamp from the demonstration's fastest
+  label, the gate from the current one -- so the clamp parked the attractor
+  beyond the gate's own reopening threshold and then dragged it along behind the
+  arm. Neither could resolve; one run froze for 112 of 361 steps. `§7.14`.
+- **Measure progress on the phase, not on the gate being zero.** A gate held at
+  0.05 by a constant sag is not zero and advances the clock at a twentieth of
+  nominal: three runs delivered the object to within 5-30 mm of its slot and
+  were scored failures because the clock never reached the segment that opens
+  the fingers. `§7.16`.
+- **`contact_offset` and `alignment_rotation` look a hand up by identity.**
+  They now accept a registry key too; before, a string fell through to "never
+  measured" and returned a *zero* offset -- a plausible number, so a 41 mm frame
+  error read as the arm missing its target. Zero means unmeasured, never
+  "no offset".
+- **Do not flip rows when projecting world points onto a camera image.**
+  `perception.cameras` flips the depth and mask buffers *before* unprojecting,
+  so the camera matrix's rows are already the display-orientation ones. Flipping
+  again in the overlay leaves the columns correct and only the height wrong,
+  which reads as a keypoint that has drifted rather than a broken projection.
+  `§7.17`.
+- **GraspGen-X's planner is an unseeded diffusion model.** The same scene gets a
+  different candidate set every call, and it decides the task. Anything
+  comparative must go through `tpgpt.grasp.cache`, or it is comparing random
+  draws. `§7.15`.
+- **A cloud's axis-aligned extent is not the object's size.** A 30 x 100 mm box
+  yawed 45 degrees measures 92 x 92. Comparing that to a jaw aperture says a
+  perfectly graspable object is impossible. `§7.18`.
+- **Small objects are barely seen at 256x256.** Cloud size runs 975 points for
+  the cereal down to **17** for the lemon, against a `MIN_CLOUD_POINTS` of 40,
+  so the smallest objects are rejected outright. That much is a direct
+  observation and is solid. Whether cloud size *predicts task success* is
+  **not** established — two opposite conclusions were drawn from the same data
+  and both are withdrawn. `§7.18`, `§7.26`.
+- **Attribute a failure to a stage, not to the outcome.** `policy_stalled` and
+  `placed_in_the_wrong_place` name where a run *stopped*. Use
+  `tpgpt.experiments.diagnose`, which watches the object and reports the first
+  of approach/reach/grasp/lift/carry/place/settle that failed.
+- **Transport the fingertip path, not the wrist path.** The keypoints are
+  anchored where the hand holds the object; the demonstration is recorded at
+  `grip_site`, 41-117 mm away depending on the hand. A map is exact only at its
+  keypoints, so warping the wrist spends that guarantee on the wrong point. The
+  argument is geometric and does not need a success rate; the size of the
+  improvement was measured on withdrawn campaigns and is not currently known.
+  `§7.20`.
+- **A null result from a diagnostic deserves as much suspicion as a surprising
+  one.** The frame problem above was tested early and recorded as *disproved*,
+  because the instrument (`contact_offset`) was returning zeros and the test was
+  comparing a quantity with itself. Assert the instrument reads something
+  non-zero before believing "no difference".
+- **Never change the system and the measurement in the same sitting.** Three
+  findings in `ROBOTICS_NOTES.md` had to be retracted for exactly this, and
+  254 MB of campaign results had to be deleted because the code that produced
+  them was never committed and cannot be identified. Commit before running a
+  campaign; record the git SHA and the full settings in the manifest. `§7.26`.
+- **Prefer a geometric measurement to an end-to-end one.** Aim, `det(J)`,
+  keypoint residual and path curvature are all computable from the fitted map
+  with no physics: milliseconds instead of 25 seconds, deterministic instead of
+  stochastic, and with no rollout in between to confound the answer. Use
+  end-to-end runs to *confirm* a result, never to find one. `§7.26`.
+- **The impedance lag is a velocity-tracking property, not a settling error.**
+  With a parked setpoint this controller settles to zero error. It lags only
+  because the setpoint keeps *moving* and `velocity_desired` is never passed, so
+  the damper fights absolute velocity rather than velocity error and the spring
+  must stay stretched by `K^-1 D v` (~24 mm at 0.25 m/s) to supply the force.
+  Before "fixing" it, read `§2.7`: the lag is transport-invariant here and lands
+  the arm where the demonstrating arm actually was, so it may be correct.
+- **Two capabilities exist in the policy and are never used at runtime.**
+  `prediction.reference` — the regressed attractor position, the paper's own
+  Sec. V formulation and the policy's only restoring term — is fitted and never
+  read by `rollout_policy`. `GPPolicy.attractor()` is called only from a unit
+  test. Check whether a proposed fix is already implemented before writing it.
 
 ## Scope decisions (agreed 2026-09-05)
 
@@ -140,6 +251,7 @@ and git.
 | App. A (SV-GPT, inducing points) | `tpgpt/transport/svgp.py` |
 | Sec. III-D/F/G, Eqs. 2, 9, 10, 11 (`phi`, labels) | `tpgpt/transport/maps.py` |
 | Sec. III-A (label set) | `tpgpt/transport/labels.py` |
+| Sec. III-A (keypoint extraction) | `tpgpt/sim/keypoints.py` |
 | Sec. III-H, Eqs. 12, 13 | `tpgpt/transport/uncertainty.py` |
 | Sec. III-B step 2 (refit `g`) | `tpgpt/policy/` |
 | Sec. V (simulation, keypoints, impedance control) | `tpgpt/sim/` |
@@ -148,30 +260,106 @@ and git.
 | Object clouds and the scene graph | `tpgpt/perception/` |
 | Deterministic prompt parsing | `tpgpt/language/` |
 | Figs. 2, 4, 5 | `tpgpt/viz/`, `tpgpt/experiments/` |
+| Stage attribution and the reach/drift instruments | `tpgpt/experiments/diagnose.py` |
+| What code produced a result | `tpgpt/reporting/provenance.py` |
 
 ## Current state
 
-**Transportation (done).** All of Sec. III, Appendix A, uncertainty propagation,
-the policy refit and the Sec. V-A reshelving validation. One demonstration
-transported into 20 randomised scenes: 17/20 success at 7.6 mm mean placement
-error; 4/20 without the nonlinear stage (p = 3.3e-5). See `ROBOTICS_NOTES.md` §4.
+> **A large correction landed on 2026-09-07.** Every end-to-end campaign was
+> deleted and six sections of `ROBOTICS_NOTES.md` were withdrawn, because the
+> code that produced them was never committed and cannot be identified. Read
+> `ROBOTICS_NOTES.md` §7.26 before trusting any number about end-to-end
+> behaviour, and before running a new campaign. What follows distinguishes
+> carefully between what is measured, what is geometry, and what is open.
 
-**Grasping and scene understanding (in progress).** Text prompt -> object and
-destination -> object point cloud -> ranked 6-DoF grasps per gripper ->
-end-effector target. Nine gripper pairs registered, six with measured frames.
-See `ROBOTICS_NOTES.md` §5.
+**Transportation (done, and validated).** All of Sec. III, Appendix A,
+uncertainty propagation, the policy refit and the Sec. V-A reshelving
+validation. One demonstration transported into 20 randomised scenes:
+**17/20 at 9.1 mm**, failing on seeds 8, 11, 16; 4/20 without the nonlinear
+stage (p = 3.3e-5).
 
-226 tests: 173 offline, 53 requiring the simulator, 10 gated on the grasp server.
+This is the regression gate — run it after any change to the map, the policy or
+the rollout. It survived the deletion above because it is genuinely repeatable:
+fixed seeds, no diffusion model in the loop, and it has been re-measured across
+several rounds of code change at 17/20 with the same three failing seeds every
+time.
 
-**Next, and blocked on discussion** — do not implement these without agreeing the
-design first:
+**Keypoint extraction (built; the default is defensible, the trade is not
+resolved).** A box fitted to the object's own point cloud in a frame built from
+the grasp and the support surface. The **box alone** is the default, on two
+independent *geometric* measurements that agree (§6.4 and §7.22): adding the jaw
+contacts collapses `min det(J)` from ~0.68 to 0.0074 and folds five maps in six,
+because the contacts sit centimetres inside the box's own convex hull and the
+map cannot satisfy both constraints without bending sharply enough to turn
+inside out.
 
-1. **Grasp filtering and selection.** Measured motivation in §5.6: only ~25% of
-   candidates approach from above, and executing the top-scoring ones lifts
-   nothing. Needs visibility, reachability and collision criteria.
-2. **Keypoint extraction for the new scene.** An arbitrary mesh has no natural
-   corner set, and keypoints must be *paired* between source and target for the
-   transportation map to exist at all.
+What §7.22 also shows, and what was missed at the time: **the box misses the
+grasp point by about 53 mm, and the contact keypoints hit it to about 5 mm.**
+The default trades ten-fold aim accuracy for a well-conditioned map. Both
+requirements are legitimate and no keypoint set on the current menu satisfies
+both. This is the largest open design question — see §8, thread A.
+
+**Grasping, filtering and end-to-end physics (built end to end; reliability
+unmeasured).** Text prompt -> object and shelf -> cloud -> ranked 6-DoF grasps
+-> seven filters -> keypoints -> transport -> policy -> execute -> scored, with
+per-run HTML reports. Nine gripper pairs registered, eight verified in physics.
+
+**There is currently no trustworthy end-to-end success rate**, and there should
+not be one until the provenance rules of §7.26 are in force. Everything that
+used to be quoted here — per-campaign success counts, which stage is the
+bottleneck, what predicts success — came from the deleted campaigns.
+
+**Two threads are open, and they are independent of each other.** The interface
+between them is the transported label set: keypoints and the map *produce* it,
+the policy and the rollout *consume* it. Neither needs the other to be correct,
+so they can be built and tested separately. Full detail in `ROBOTICS_NOTES.md`
+§8; the short version:
+
+- **Thread A — keypoints and the map.** Answerable as **pure geometry**, no
+  simulator: fit the map, transport the labels, and measure how close the plan
+  passes to the grasp, the minimum `det(J)`, and the keypoint residual. Runs in
+  milliseconds per variant from a cached cloud and a cached grasp, so hundreds
+  of designs can be swept offline. This is where the largest known error lives.
+- **Thread B — policy execution.** Needs the simulator but **not** the
+  keypoints: test it against a fixed reference path, such as the untransported
+  demonstration replayed in the source scene, where the ground truth is known.
+  Two capabilities already exist unused (`prediction.reference`,
+  `GPPolicy.attractor()`) and one control input is never passed
+  (`velocity_desired`); see the bite-list above and §2.7-2.8.
+
+**The instrument and the provenance recording are done** (§7.26-7.27). Both
+threads can now be measured without repeating the mistake that cost the last
+set of campaigns:
+
+- `diagnose.reach_axes` splits the reach error into the grasp's own **closing /
+  approach / jaw** axes instead of one straight-line distance. The old scalar
+  mixed a millimetre-scale budget with a 130 mm one, and it rated the *better*
+  keypoint configuration worse. `diagnose.closing_budget` derives the tolerance
+  as `(aperture − object width) / 2` from the target keypoints rather than
+  assuming one, and returns `None` — never a plausible default — when it cannot.
+- `diagnose.attractor_drift` measures drift **pointwise** against the
+  transported path via `metrics.curves.path_deviation`, so it cannot come out
+  negative. The measure it replaces was a difference of two separately
+  minimised distances and routinely did.
+- `reporting.provenance` records the commit, the modified files, the
+  **untracked** code files and the package versions into every manifest
+  automatically. Untracked files are what actually made the old campaigns
+  unidentifiable, and a plain dirty-check does not see them. The index shows a
+  red "Not reproducible" banner naming the reason; `run_experiments
+  --require-clean` refuses to start.
+- Campaign manifests now record `settings.varied` and `settings.fixed`
+  separately from `results`, plus every stage threshold, so a table says what it
+  measured without anyone reading the source.
+
+**Also open:** a front-approach demonstration for a shelf with a roof, which a
+top-down teach cannot solve by construction; and the `umi` hand, whose contact
+offset is the only one in the registry with a large lateral component
+(`[0.0, -0.035, -0.112]`) and which §7.2 measured as tolerating only 15 mm of
+depth error against 120-135 mm for the parallel jaws.
+
+423 tests pass (10 skipped, needing the grasp server) in ~4 min; the unit
+suite alone is ~330 tests in ~10 s. The suite was unaffected by the campaign
+deletion: it tests mechanisms, not campaign outcomes.
 
 ## History
 

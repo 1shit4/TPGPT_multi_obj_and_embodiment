@@ -44,16 +44,41 @@ class TaskSpec:
     pick_phrase: str = ""
     place_phrase: str = ""
     rationale: list[str] = field(default_factory=list)
+    #: Choices the parser made that the prompt did not state, in plain words.
+    #:
+    #: "Put the milk on the top shelf" names a shelf but not which slot of it,
+    #: which is a perfectly natural instruction. Picking a slot is reasonable;
+    #: doing it silently is not, because the run then places the object
+    #: somewhere the prompt never asked for and nothing says so.
+    assumptions: list[str] = field(default_factory=list)
     candidates: dict = field(default_factory=dict)
     error: str | None = None
 
     def describe(self) -> str:
         if not self.ok:
             return f"parse failed: {self.error}"
-        return (
+        line = (
             f"move {self.object_id} ({self.object_label}) "
             f"-> {self.destination_id} ({self.destination_label})"
         )
+        if self.assumptions:
+            line += f"  [assumed: {'; '.join(self.assumptions)}]"
+        return line
+
+    def require_complete(self) -> None:
+        """Raise unless both an object and a destination were resolved.
+
+        The end-to-end pipeline calls this before touching the simulator. A run
+        started from a half-parsed prompt fails much later, somewhere that looks
+        like a grasping or transport problem.
+        """
+        if not self.ok:
+            raise ValueError(f"cannot act on {self.prompt!r}: {self.error}")
+        if not self.object_id or not self.destination_id:
+            raise ValueError(
+                f"{self.prompt!r} parsed without "
+                f"{'an object' if not self.object_id else 'a destination'}"
+            )
 
 
 def normalise(text: str) -> str:
@@ -131,7 +156,9 @@ def resolve_object(phrase: str, scene: SceneGraph) -> tuple[SceneEntity | None, 
     return chosen, scores, f"matched {phrase!r} to {chosen.label} via {names[chosen.entity_id]!r}"
 
 
-def resolve_receptacle(phrase: str, scene: SceneGraph) -> tuple[SceneEntity | None, dict, str]:
+def resolve_receptacle(
+    phrase: str, scene: SceneGraph
+) -> tuple[SceneEntity | None, dict, str, list[str]]:
     """Match a phrase against the scene's receptacles, structurally.
 
     A slot is identified by two independent fields -- its level and its lateral
@@ -140,11 +167,11 @@ def resolve_receptacle(phrase: str, scene: SceneGraph) -> tuple[SceneEntity | No
     """
     tokens = set(content_tokens(phrase))
     if not tokens:
-        return None, {}, "no destination words in the prompt"
+        return None, {}, "no destination words in the prompt", []
 
     receptacles = scene.receptacles
     if not receptacles:
-        return None, {}, "the scene has no receptacles"
+        return None, {}, "the scene has no receptacles", []
 
     levels = {e.metadata.get("level") for e in receptacles}
     laterals = {e.metadata.get("lateral") for e in receptacles}
@@ -167,28 +194,29 @@ def resolve_receptacle(phrase: str, scene: SceneGraph) -> tuple[SceneEntity | No
     }
 
     if len(level_hits) > 1:
-        return None, detail, f"{phrase!r} names more than one level: {sorted(level_hits)}"
+        return None, detail, f"{phrase!r} names more than one level: {sorted(level_hits)}", []
     if len(lateral_hits) > 1:
-        return None, detail, f"{phrase!r} names more than one slot: {sorted(lateral_hits)}"
+        return None, detail, f"{phrase!r} names more than one slot: {sorted(lateral_hits)}", []
     if not level_hits and not lateral_hits:
-        return None, detail, f"no shelf level or slot named in {phrase!r}"
-
-    notes = []
+        return None, detail, f"no shelf level or slot named in {phrase!r}", []
     if not level_hits:
-        return None, detail, f"{phrase!r} names a slot but not which level"
+        return None, detail, f"{phrase!r} names a slot but not which level", []
     level = level_hits.pop()
 
+    assumptions = []
     if lateral_hits:
         lateral = lateral_hits.pop()
     else:
         lateral = DEFAULT_LATERAL
-        notes.append(f"no slot named, defaulting to {DEFAULT_LATERAL!r}")
+        assumptions.append(
+            f"the prompt named the {level} shelf but not which slot, so the "
+            f"{DEFAULT_LATERAL} one was used"
+        )
 
     for entity in receptacles:
         if entity.metadata.get("level") == level and entity.metadata.get("lateral") == lateral:
-            note = f"matched {phrase!r} to {entity.label}"
-            return entity, detail, "; ".join([note, *notes])
-    return None, detail, f"the scene has no {level} shelf {lateral} slot"
+            return entity, detail, f"matched {phrase!r} to {entity.label}", assumptions
+    return None, detail, f"the scene has no {level} shelf {lateral} slot", []
 
 
 def parse_task(prompt: str, scene: SceneGraph) -> TaskSpec:
@@ -221,9 +249,12 @@ def parse_task(prompt: str, scene: SceneGraph) -> TaskSpec:
         spec.rationale.append(spec.error)
         return spec
 
-    destination, receptacle_detail, receptacle_note = resolve_receptacle(place_phrase, scene)
+    destination, receptacle_detail, receptacle_note, assumptions = resolve_receptacle(
+        place_phrase, scene
+    )
     spec.candidates["receptacles"] = receptacle_detail
     spec.rationale.append(receptacle_note)
+    spec.assumptions.extend(assumptions)
     if destination is None:
         spec.error = receptacle_note
         return spec

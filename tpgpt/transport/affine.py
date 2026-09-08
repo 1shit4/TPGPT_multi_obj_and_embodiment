@@ -129,3 +129,62 @@ class AffineMap:
             f"AffineMap(d={self.A.shape[0]}, rank_deficient={self.rank_deficient}, "
             f"det={np.linalg.det(self.A):.6f})"
         )
+
+
+class IdentityAffine(AffineMap):
+    """``gamma = identity``: an affine stage that deliberately does nothing.
+
+    Used as the affine component of a **second, local** transportation stage, so
+    that the whole of that stage's warp lives in its nonlinear residual and can
+    therefore be localised by the residual's own length scale.
+
+    **Why this has to exist rather than being a default nobody sets.** With a
+    real :class:`AffineMap`, a second stage fitted only on a handful of jaw
+    contacts absorbs their common displacement into ``A`` and ``T_bar`` -- and
+    the affine part acts *globally*. Measured on a 12 mm correction at four
+    contacts, the "local" stage moved points **12 mm at 80 cm away**, identically
+    to the contacts themselves, and the residual's length scale made no
+    difference at all because the residual had nothing left to fit:
+
+    ===================  ==============  ===============
+    psi_2 length scale   at the grasp    80 cm away
+    ===================  ==============  ===============
+    30 mm (plain affine)      12.00 mm         12.00 mm
+    120 mm (plain affine)     12.00 mm         12.00 mm
+    30 mm (identity)          15.49 mm          0.00 mm
+    60 mm (identity)          13.30 mm          0.00 mm
+    120 mm (identity)         12.36 mm          0.00 mm
+    ===================  ==============  ===============
+
+    With the affine stage suppressed the residual's ``length_scale`` *is* the
+    locality radius, which is the property a local correction needs. Note also
+    that too short a length scale overshoots at the contacts (15.49 mm delivered
+    for a 12 mm request), because the kernel rings between four points spaced
+    29 mm apart; 60-120 mm is the usable band for that spacing.
+
+    Subclasses :class:`AffineMap` so ``predict``, ``jacobian``, ``inverse`` and
+    the fitted-state check are inherited and provably consistent:
+    ``(X - 0) @ I + 0`` is exactly ``X`` in floating point.
+    """
+
+    def fit(self, S: np.ndarray, T: np.ndarray) -> "IdentityAffine":
+        """Ignore the keypoints and install the identity.
+
+        ``S`` and ``T`` are accepted so the signature matches
+        :meth:`AffineMap.fit`; only ``S``'s dimensionality is read.
+        """
+        S = np.atleast_2d(np.asarray(S, dtype=float))
+        T = np.atleast_2d(np.asarray(T, dtype=float))
+        if S.shape != T.shape:
+            raise ValueError(f"source {S.shape} and target {T.shape} must match")
+        d = S.shape[1]
+        self.A = np.eye(d)
+        self.source_mean = np.zeros(d)
+        self.target_mean = np.zeros(d)
+        self.rank_deficient = False
+        self.singular_values = np.ones(d)
+        return self
+
+    def __repr__(self) -> str:  # pragma: no cover - debugging aid
+        d = "unfitted" if self.A is None else f"d={self.A.shape[0]}"
+        return f"IdentityAffine({d})"

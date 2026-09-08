@@ -1,6 +1,6 @@
 """Policy transportation: the map ``phi`` and the labels it carries (paper Sec. III)."""
 
-from tpgpt.transport.affine import AffineMap
+from tpgpt.transport.affine import AffineMap, IdentityAffine
 from tpgpt.transport.gp import GaussianProcessRegressor, KernelHyperparameters
 from tpgpt.transport.labels import PolicyLabels, transport_labels
 from tpgpt.transport.maps import DiffeomorphismReport, TransportMap
@@ -13,6 +13,7 @@ from tpgpt.transport.uncertainty import (
 
 __all__ = [
     "AffineMap",
+    "IdentityAffine",
     "DiffeomorphismReport",
     "GaussianProcessRegressor",
     "KernelHyperparameters",

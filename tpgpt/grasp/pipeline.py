@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import numpy as np
 
+from tpgpt.grasp.cache import cache_key, load, store
 from tpgpt.grasp.client import GraspGenClient
 from tpgpt.grasp.grasps import GraspSet, build_grasp_set
 from tpgpt.grasp.grippers import resolve_pair
@@ -28,6 +29,8 @@ def grasps_for_cloud(
     num_grasps: int = 200,
     topk: int = 100,
     planner: str = "diffusion",
+    cache_dir=None,
+    use_cache: bool = True,
 ) -> GraspSet:
     """Ask the server for grasps on an already-extracted cloud.
 
@@ -38,6 +41,12 @@ def grasps_for_cloud(
         num_grasps: Samples drawn before ranking.
         topk: Cap on returned candidates.
         planner: ``"diffusion"`` or ``"graspmoe"``.
+        cache_dir: Where to keep cached candidate sets; see
+            :mod:`tpgpt.grasp.cache`. Defaults to ``outputs/grasp_cache``.
+        use_cache: Set ``False`` to force a fresh draw. The default planner is a
+            diffusion model with no seed, so without the cache the same scene
+            gets a different candidate set every time and no experiment can be
+            repeated.
     """
     pair = resolve_pair(gripper)
     if len(cloud) == 0:
@@ -46,19 +55,29 @@ def grasps_for_cloud(
             metadata={"reason": "object not visible in any camera"},
         )
 
-    owned = client is None
-    client = client or GraspGenClient()
-    try:
-        poses, scores = client.infer(
-            cloud.points,
-            gripper_name=pair.graspgen,
-            num_grasps=num_grasps,
-            topk_num_grasps=topk,
-            planner=planner,
-        )
-    finally:
-        if owned:
-            client.close()
+    key = cache_key(
+        cloud.points, pair.graspgen,
+        planner=planner, num_grasps=num_grasps, topk=topk,
+    )
+    cached = load(key, cache_dir) if use_cache else None
+    if cached is not None:
+        poses, scores = cached
+    else:
+        owned = client is None
+        client = client or GraspGenClient()
+        try:
+            poses, scores = client.infer(
+                cloud.points,
+                gripper_name=pair.graspgen,
+                num_grasps=num_grasps,
+                topk_num_grasps=topk,
+                planner=planner,
+            )
+        finally:
+            if owned:
+                client.close()
+        if use_cache:
+            store(key, poses, scores, cache_dir)
 
     return build_grasp_set(
         poses, scores, pair.graspgen, cloud.instance, len(cloud),
@@ -67,6 +86,8 @@ def grasps_for_cloud(
             "num_grasps": num_grasps,
             "cameras": list(cloud.cameras),
             "cloud_extent": np.round(cloud.extent, 4).tolist(),
+            "grasp_cache_key": key,
+            "from_cache": cached is not None,
         },
     )
 

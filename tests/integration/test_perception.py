@@ -11,7 +11,13 @@ import pytest
 
 pytestmark = pytest.mark.sim
 
-CAMERAS = ("agentview", "frontview", "birdview")
+#: The cameras that can actually see this scene.
+#:
+#: ``agentview`` and ``frontview`` sit on the far side of the shelf from the
+#: table. That was harmless while the shelf lived in the unrendered collision
+#: group -- depth passed straight through it -- and stopped being harmless the
+#: moment the shelf was drawn: every object cloud from those two went to zero.
+CAMERAS = ("workspace", "sideview", "birdview")
 
 
 def mesh_extent(env, name):
@@ -66,6 +72,17 @@ def env():
 class TestScene:
     def test_spawns_the_requested_objects(self, env):
         assert set(env.object_names) == {"milk", "can", "cereal", "bread"}
+
+    def test_a_repeated_object_is_refused_with_a_useful_message(self):
+        """Two of the same object is two MuJoCo bodies with one name. Left to
+        the XML compiler it surfaces as "repeated name 'can_main' in body",
+        which is true and says nothing about the caller that asked twice."""
+        import pytest
+
+        from tpgpt.sim.scenes.tabletop_shelf import TabletopShelf
+
+        with pytest.raises(ValueError, match="more than once"):
+            TabletopShelf(robots="Panda", objects=("can", "milk", "can"))
 
     def test_exposes_six_named_slots_on_two_levels(self, env):
         slots = env.slot_poses()
@@ -221,7 +238,7 @@ class TestObjectClouds:
         plain = TabletopShelf(
             robots="Panda", controller_configs=config, control_freq=20, seed=0,
             has_renderer=False, has_offscreen_renderer=True, use_camera_obs=True,
-            camera_names=["agentview"], camera_heights=64, camera_widths=64,
+            camera_names=["workspace"], camera_heights=64, camera_widths=64,
         )
         plain.reset()
         try:

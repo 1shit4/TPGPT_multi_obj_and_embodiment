@@ -25,11 +25,17 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
-from tpgpt.grasp.grippers import GripperPair, gripper_geometry, resolve_pair
+from tpgpt.grasp.grippers import (
+    GripperPair,
+    gripper_frame,
+    gripper_geometry,
+    resolve_pair,
+)
 
-#: Rotation about the approach axis mapping GraspGen-X's ``+X`` closing
-#: direction onto a ``grip_site`` whose jaws close along Y.
-_ROT_Z_90 = np.array([[0.0, -1.0, 0.0], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]])
+def _rotation_about_z(degrees: float) -> np.ndarray:
+    """Rotation about the approach axis by ``degrees``."""
+    c, s = np.cos(np.radians(degrees)), np.sin(np.radians(degrees))
+    return np.array([[c, -s, 0.0], [s, c, 0.0], [0.0, 0.0, 1.0]])
 
 
 @dataclass
@@ -151,8 +157,19 @@ def build_grasp_set(
     )
 
 
-def alignment_rotation(pair: GripperPair) -> np.ndarray:
+def alignment_rotation(pair: GripperPair | str) -> np.ndarray:
     """Rotation taking the GraspGen-X grasp frame to robosuite's ``grip_site``.
+
+    GraspGen-X emits ``+Z`` = approach and ``+X`` = closing, and the approach
+    axis is ``grip_site +Z`` for every gripper measured, so the whole frame
+    difference is one rotation about the approach axis by the hand's measured
+    ``closing_angle``.
+
+    This used to be a choice between identity and 90 degrees, which was enough
+    for parallel jaws aligned to an axis and refused everything else. Measuring
+    an angle instead is what admits the three-finger, five-finger and off-axis
+    hands: the Inspire hand's fingers travel 7.4 degrees off ``+X``, which
+    neither of the two old options could express.
 
     Raises:
         ValueError: if the pair's frame convention has not been measured. This
@@ -161,15 +178,74 @@ def alignment_rotation(pair: GripperPair) -> np.ndarray:
             and it fails silently -- the pose still looks plausible. Guessing an
             identity here would be worse than refusing.
     """
+    pair = _as_pair(pair)
     if not pair.frame_verified:
         raise ValueError(
             f"the grip_site frame convention for {pair.robosuite} has not been "
             "measured, so a grasp cannot be converted into an end-effector "
-            "command for it. Measure its closing axis and set closing_axis in "
-            "tpgpt/grasp/grippers.py. "
-            f"Verified grippers: see VERIFIED_PAIRS."
+            "command for it. Measure it with "
+            "tpgpt.grasp.grippers.measure_closing_angle and set closing_angle "
+            f"in tpgpt/grasp/grippers.py. Verified grippers: see VERIFIED_PAIRS."
         )
-    return np.eye(3) if pair.closing_axis == "x" else _ROT_Z_90
+    frame = gripper_frame(_short_name(pair))
+    if frame is not None:
+        return np.asarray(frame["alignment"], dtype=float)
+    return _rotation_about_z(pair.closing_angle)
+
+
+def _short_name(pair: GripperPair) -> str:
+    """Registry key for a pair, for looking up its measured frame."""
+    from tpgpt.grasp.grippers import GRIPPER_PAIRS
+
+    return next((k for k, v in GRIPPER_PAIRS.items() if v is pair), "")
+
+
+def _as_pair(gripper) -> GripperPair:
+    """Accept either a registry key or the pair itself.
+
+    Named hands travel through this codebase as strings far more often than as
+    objects, and the lookup below is by *identity*, so a string used to fall
+    through to "this hand has never been measured" and return a zero offset.
+    That is silent and wrong in the worst way: a zero contact offset is a
+    perfectly plausible number, so the resulting 41 mm error looked like the
+    arm missing rather than like a lookup that never happened.
+    """
+    return gripper if isinstance(gripper, GripperPair) else resolve_pair(gripper)
+
+
+def contact_offset(pair: GripperPair | str) -> np.ndarray:
+    """Where a grasped object sits, in ``grip_site`` coordinates.
+
+    Starts from the geometric measurement -- the centroid of the distal third
+    of the fingers once closed -- and applies the depth **calibrated in
+    physics**, because geometry alone could not settle it. Three different
+    geometric definitions were tried across the nine hands and each worked for
+    six and failed three: long finger links, a flipped frame and an
+    anthropomorphic thumb do not share one rule. So the depth is found by
+    sweeping it and keeping the middle of the widest band that actually lifts
+    the reference object.
+
+    That sweep also measures how forgiving each hand is, and they differ far
+    more than expected: the parallel jaws tolerate 120 to 135 mm of depth error,
+    the UMI only 15 mm.
+
+    Zero when the gripper has not been measured at all, which reduces to
+    commanding ``grip_site`` straight to the grasp's contact point.
+
+    Args:
+        pair: A :class:`GripperPair` or its registry key.
+    """
+    pair = _as_pair(pair)
+    frame = gripper_frame(_short_name(pair))
+    if frame is None:
+        return np.zeros(3)
+    offset = np.asarray(frame["contact_offset"], dtype=float)
+    depth = frame.get("calibrated_depth")
+    if depth is not None:
+        # An extra push of ``depth`` along the approach is the same as moving
+        # the contact back along it in grip_site coordinates.
+        offset = offset - float(depth) * np.asarray(frame["approach_in_site"], dtype=float)
+    return offset
 
 
 def grasp_to_eef_pose(grasp: Grasp6D, gripper: str | GripperPair | None = None):
@@ -187,9 +263,16 @@ def grasp_to_eef_pose(grasp: Grasp6D, gripper: str | GripperPair | None = None):
         :meth:`~tpgpt.sim.controllers.cartesian_impedance.CartesianImpedanceController.action`.
     """
     pair = gripper if isinstance(gripper, GripperPair) else resolve_pair(gripper or grasp.gripper)
-    depth = gripper_geometry(pair.graspgen).tcp_depth
-    position = grasp.position + grasp.approach * depth
     rotation = grasp.rotation @ alignment_rotation(pair)
+
+    # Where the object should end up: the grasp's own contact point, from
+    # GraspGen-X's fingertip depth in its own frame.
+    contact = grasp.position + grasp.approach * gripper_geometry(pair.graspgen).tcp_depth
+    # Then back out to wherever this hand's grip_site has to be for the object
+    # to land there. The offset is a full 3-vector, not a depth: on the Inspire
+    # hand the contact sits 100 mm off the approach axis, because the thumb
+    # opposes the fingers from one side.
+    position = contact - rotation @ contact_offset(pair)
     return position, rotation
 
 

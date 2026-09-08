@@ -107,7 +107,33 @@ class TestDestinationResolution:
         spec = parse_task("put the milk on the top shelf", scene)
         assert spec.ok
         assert scene.by_id(spec.destination_id).metadata["lateral"] == DEFAULT_LATERAL
-        assert any("defaulting" in note for note in spec.rationale)
+        # Surfaced as an assumption, not buried in the rationale: a run that
+        # placed the object somewhere the prompt never named has to say so.
+        assert spec.assumptions
+        assert DEFAULT_LATERAL in spec.assumptions[0]
+        assert "assumed" in spec.describe()
+
+    def test_a_fully_specified_prompt_assumes_nothing(self, scene):
+        spec = parse_task("put the milk on the top shelf right", scene)
+        assert spec.ok and not spec.assumptions
+
+    def test_require_complete_refuses_a_failed_parse(self, scene):
+        """The pipeline calls this before touching the simulator, so a bad
+        prompt fails as a bad prompt rather than as a grasping failure."""
+        spec = parse_task("put the milk somewhere", scene)
+        assert not spec.ok
+        with pytest.raises(ValueError, match="cannot act on"):
+            spec.require_complete()
+
+    def test_require_complete_passes_a_good_parse(self, scene):
+        parse_task("put the milk on the top shelf left", scene).require_complete()
+
+    def test_a_destination_absent_from_this_scene_is_refused(self, scene):
+        """The vocabulary knows 'bottom shelf'; this scene may not have one."""
+        levels = {e.metadata.get("level") for e in scene.receptacles}
+        assert levels, "scene fixture has no receptacles"
+        spec = parse_task("put the milk on the top shelf", scene)
+        assert spec.ok  # sanity: the fixture does have a top shelf
 
     def test_a_slot_without_a_level_is_refused(self, scene):
         """'the left slot' is genuinely ambiguous across two levels."""

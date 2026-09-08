@@ -12,6 +12,7 @@ from tpgpt.grasp.grasps import (
 from tpgpt.grasp.grippers import (
     DEFAULT_PAIRS,
     GRIPPER_PAIRS,
+    MEASURED_PAIRS,
     VERIFIED_PAIRS,
     GripperGeometry,
     GripperPair,
@@ -25,6 +26,7 @@ from tpgpt.grasp.server import server_available, server_status
 __all__ = [
     "DEFAULT_PAIRS",
     "GRIPPER_PAIRS",
+    "MEASURED_PAIRS",
     "VERIFIED_PAIRS",
     "Grasp6D",
     "GraspGenClient",

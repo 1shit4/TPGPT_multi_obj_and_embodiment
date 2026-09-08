@@ -86,3 +86,68 @@ def compare_trajectories(rollout: np.ndarray, reference: np.ndarray) -> dict:
     if _as_curve(rollout).shape[1] == 2:
         metrics["area"] = area_between_curves(rollout, reference)
     return metrics
+
+
+def point_to_curve_distance(points: np.ndarray, curve: np.ndarray) -> np.ndarray:
+    """Distance from each point to the nearest place on a polyline.
+
+    The distance is to the **polyline**, not to its vertices: each segment is
+    treated as a line segment and the query point is projected onto it, clamped
+    to the segment's ends. Measuring to vertices instead over-reports by up to
+    half the vertex spacing, which on a 200-label demonstration sampled at 20 Hz
+    is a few millimetres -- the same size as the quantity being measured.
+
+    Args:
+        points: ``(n, d)`` query points.
+        curve: ``(m, d)`` polyline vertices, in order.
+
+    Returns:
+        ``(n,)`` distances.
+    """
+    P = _as_curve(points)
+    C = _as_curve(curve)
+    if C.shape[0] == 1:
+        return np.linalg.norm(P - C[0], axis=1)
+
+    a, b = C[:-1], C[1:]                       # (m-1, d) segment ends
+    ab = b - a
+    denom = np.einsum("md,md->m", ab, ab)
+    denom = np.where(denom > 1e-18, denom, 1.0)
+
+    delta = P[:, None, :] - a[None, :, :]      # (n, m-1, d)
+    t = np.clip(np.einsum("nmd,md->nm", delta, ab) / denom, 0.0, 1.0)
+    closest = a[None, :, :] + t[:, :, None] * ab[None, :, :]
+    return np.linalg.norm(P[:, None, :] - closest, axis=2).min(axis=1)
+
+
+def path_deviation(points: np.ndarray, curve: np.ndarray) -> dict:
+    """How far a sampled trajectory strays from a reference path.
+
+    **This is the measurement to use for integration drift.** The natural
+    temptation -- comparing how close each curve gets to some third point, such
+    as the grasp -- is not a drift measurement at all: it is the difference of
+    two separately minimised distances, it can come out negative, and the two
+    minima need not occur at the same moment. This compares the curves to each
+    other, pointwise, and cannot go negative.
+
+    Timing is deliberately excluded. A trajectory that follows the reference
+    path exactly but arrives late has zero deviation here, which is correct --
+    that is a schedule problem, and mixing it in is what made the earlier
+    numbers unreadable. Pair this with a phase-aware measure when the question
+    is *when* rather than *where*.
+
+    Args:
+        points: ``(n, d)`` sampled trajectory, e.g. the integrated attractor.
+        curve: ``(m, d)`` reference path, e.g. the transported labels.
+
+    Returns:
+        ``max``, ``median`` and ``mean`` deviation, and ``argmax``, the index of
+        the sample that strayed furthest.
+    """
+    d = point_to_curve_distance(points, curve)
+    return {
+        "max": float(d.max()),
+        "median": float(np.median(d)),
+        "mean": float(d.mean()),
+        "argmax": int(d.argmax()),
+    }

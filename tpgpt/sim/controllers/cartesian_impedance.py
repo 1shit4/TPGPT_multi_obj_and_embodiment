@@ -108,6 +108,14 @@ class CartesianImpedanceController:
         site_id = site_ids[arm] if isinstance(site_ids, dict) else site_ids
         self.eef_site = env.sim.model.site_id2name(site_id)
 
+        # How many values this hand's action takes. One for a parallel jaw, but
+        # two for the UMI and six for the Inspire hand, and emitting a single
+        # value for those silently truncates the action: robosuite pads the rest
+        # with zeros, so the fingers half-close and the object drops.
+        gripper = self.robot.gripper
+        gripper = gripper[arm] if isinstance(gripper, dict) else gripper
+        self.gripper_dof = int(getattr(gripper, "dof", 1) or 1)
+
         # Normalise by the controller's own output range, so the action we send
         # is rescaled back to exactly the torque we computed. The controller
         # then clips to the model's actuator limits on our behalf.
@@ -240,10 +248,17 @@ class CartesianImpedanceController:
         gripper: float = -1.0,
         **kwargs,
     ) -> np.ndarray:
-        """Full environment action: normalised arm torques plus the gripper."""
+        """Full environment action: normalised arm torques plus the gripper.
+
+        ``gripper`` is a single open/close command in ``[-1, 1]``, broadcast
+        across however many actuators the hand has. A multi-finger hand closes
+        every joint together, which is the power grasp its geometry is built
+        for; independent finger control is not something a transported policy
+        has any way to specify.
+        """
         torque = self.compute_torque(position_desired, stiffness, damping, **kwargs)
         normalised = np.clip(torque / self.torque_scale, -1.0, 1.0)
-        return np.concatenate([normalised, [float(gripper)]])
+        return np.concatenate([normalised, np.full(self.gripper_dof, float(gripper))])
 
 
 def _as_matrix(value: float | np.ndarray) -> np.ndarray:

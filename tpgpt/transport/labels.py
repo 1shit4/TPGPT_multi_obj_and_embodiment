@@ -105,14 +105,47 @@ class PolicyLabels:
             raise ValueError(f"positions must be (M, 3), got {self.positions.shape}")
 
     def __getitem__(self, idx) -> "PolicyLabels":
-        """Index or slice every present label family consistently."""
+        """Index or slice every present label family consistently.
+
+        The time belief is **renormalised** to run from 0 to 1 over the slice.
+        A slice of a demonstration is a demonstration in its own right, and the
+        policy that consumes it is queried starting from a phase of zero.
+
+        Leaving the original values in place is not a cosmetic difference. It
+        puts the query outside the range the policy was fitted on, where a GP
+        extrapolates: dropping a demonstration's first 25 steps left the labels
+        starting at a phase of 0.126, the rollout asked for 0.0, and the
+        **gripper channel extrapolated to closed**. Every rollout then ran its
+        whole trajectory with the jaws already shut, touched nothing, and
+        reported having placed the object in the wrong place.
+        """
         if isinstance(idx, (int, np.integer)):
             idx = slice(idx, idx + 1)
         kwargs = {
             name: (v[idx] if (v := getattr(self, name)) is not None else None)
             for name in _ARRAY_FIELDS
         }
+        phase = kwargs.get("time_belief")
+        if phase is not None and len(phase) > 1:
+            span = float(phase[-1] - phase[0])
+            if span > 1e-9:
+                kwargs["time_belief"] = (phase - phase[0]) / span
         return PolicyLabels(metadata=dict(self.metadata), **kwargs)
+
+    def replace(self, **changes) -> "PolicyLabels":
+        """A copy with some label families substituted.
+
+        Used for changes of reference frame, where one family is recomputed and
+        every other has to travel with it untouched. Rebuilding the object field
+        by field instead is how a family quietly gets dropped.
+        """
+        unknown = set(changes) - set(_ARRAY_FIELDS) - {"metadata"}
+        if unknown:
+            raise ValueError(f"unknown label families {sorted(unknown)}")
+        kwargs = {name: getattr(self, name) for name in _ARRAY_FIELDS}
+        kwargs["metadata"] = dict(self.metadata)
+        kwargs.update(changes)
+        return PolicyLabels(**kwargs)
 
     @property
     def present(self) -> tuple[str, ...]:

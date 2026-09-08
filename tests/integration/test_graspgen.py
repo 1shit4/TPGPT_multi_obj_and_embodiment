@@ -21,7 +21,9 @@ pytestmark = [
     ),
 ]
 
-CAMERAS = ("agentview", "frontview", "birdview")
+#: Cameras with a clear line to the table. Not ``agentview``/``frontview``:
+#: both sit behind the shelf, which became solid geometry and now blocks them.
+CAMERAS = ("workspace", "sideview", "birdview")
 #: Grippers the running server has loaded.
 GRIPPERS = ("panda", "robotiq85", "robotiq140")
 
@@ -138,31 +140,46 @@ class TestGeneration:
 
 
 class TestEndEffectorConversion:
-    def test_conversion_puts_the_tcp_where_the_fingers_close(self, generated, env):
-        """Risk-2 acceptance: the converted end-effector position must be the
-        fingertip frame, i.e. on the object, not the gripper base which stands
-        off by 103-195 mm depending on the hand."""
-        from tpgpt.grasp.grasps import grasp_to_eef_pose
-        from tpgpt.grasp.grippers import gripper_geometry
+    def test_conversion_puts_the_held_object_on_the_grasp_contact(self, generated, env):
+        """The contract's one equation, on generated rather than synthetic poses.
+
+        The commanded ``grip_site`` is not itself the contact point -- where the
+        site sits relative to the fingers differs by up to 177 mm across hands --
+        so what must hold is that the *held object* lands on the grasp's own
+        contact point.
+        """
+        from tpgpt.grasp.grasps import contact_offset, grasp_to_eef_pose
+        from tpgpt.grasp.grippers import gripper_geometry, resolve_pair
 
         cloud, sets = generated
         for name, grasp_set in sets.items():
             grasp = grasp_set.best
-            position, _ = grasp_to_eef_pose(grasp, name)
-            depth = gripper_geometry(grasp_set.gripper).tcp_depth
-            assert np.isclose(np.linalg.norm(position - grasp.position), depth, atol=1e-9)
-            # The TCP should sit near the observed surface, the base should not.
-            assert np.linalg.norm(position - cloud.centroid) < np.linalg.norm(
+            pair = resolve_pair(name)
+            position, rotation = grasp_to_eef_pose(grasp, name)
+            held = position + rotation @ contact_offset(pair)
+            wanted = grasp.position + grasp.approach * gripper_geometry(
+                grasp_set.gripper
+            ).tcp_depth
+            # Exact across the plane; the depth is deliberately calibrated.
+            assert np.linalg.norm((held - wanted)[:2]) < 1e-6, name
+            # The contact should sit nearer the object than the gripper base.
+            assert np.linalg.norm(held - cloud.centroid) < np.linalg.norm(
                 grasp.position - cloud.centroid
             ), name
 
-    def test_the_approach_axis_survives_the_rotation(self, generated):
-        """The alignment rotation is about the approach axis, so it must leave
-        that axis untouched -- only the closing direction changes."""
+    def test_the_commanded_rotation_is_a_proper_rotation(self, generated):
+        """For most hands the alignment is a spin about the approach axis, so
+        that axis survives. Not for all: the UMI's fingers lie along its own
+        ``grip_site -Z``, so its alignment turns the frame end for end. What
+        holds for every hand is that the result is a proper rotation and that
+        the hand's own approach direction ends up along the grasp's."""
         from tpgpt.grasp.grasps import grasp_to_eef_pose
+        from tpgpt.grasp.grippers import gripper_frame, resolve_pair
 
         _, sets = generated
         for name, grasp_set in sets.items():
             grasp = grasp_set.best
             _, rotation = grasp_to_eef_pose(grasp, name)
-            assert np.allclose(rotation[:, 2], grasp.approach, atol=1e-9), name
+            assert np.isclose(np.linalg.det(rotation), 1.0), name
+            approach_local = np.asarray(gripper_frame(name)["approach_in_site"])
+            assert np.allclose(rotation @ approach_local, grasp.approach, atol=1e-6), name

@@ -58,6 +58,63 @@ def _stiffness_matrices(k: float, damping_ratio: float = 0.9):
     return K, D
 
 
+def pick_place_waypoints(
+    grasp_position: np.ndarray,
+    grasp_rotation: np.ndarray,
+    place_position: np.ndarray,
+    place_rotation: np.ndarray,
+    grasp_approach: np.ndarray = (0.0, 0.0, -1.0),
+    place_approach: np.ndarray | None = None,
+    hover_height: float = 0.16,
+    free_stiffness: float = 350.0,
+    insertion_stiffness: float = 900.0,
+) -> list[Waypoint]:
+    """A pick-and-place plan driven by a grasp and a placement, not by a scene.
+
+    Two things about this plan are substantive rather than incidental.
+
+    **The gripper pose follows the grasp.** The plan takes an end-effector pose
+    at each end rather than an object position and a hard-coded top-down offset,
+    which is what lets a generated grasp on an arbitrary object drive it, and
+    what lets the hand come in horizontally for a shelf that has a roof on it.
+
+    **The stiffness profile is part of the demonstration**, not a controller
+    setting: the teacher is compliant while moving through free space and stiff
+    while grasping and inserting. Sec. III-G is what makes that profile
+    transportable, and it is only observable because the controller accepts a
+    full stiffness matrix.
+
+    Args:
+        grasp_approach: Direction the hand advances along at the pick. The
+            standoff is taken back along this, so a horizontal approach backs
+            off sideways rather than lifting straight up.
+        place_approach: Same for the placement. Defaults to ``grasp_approach``.
+    """
+    grasp_position = np.asarray(grasp_position, dtype=float)
+    place_position = np.asarray(place_position, dtype=float)
+    grasp_approach = np.asarray(grasp_approach, dtype=float)
+    grasp_approach = grasp_approach / np.linalg.norm(grasp_approach)
+    place_approach = (
+        grasp_approach if place_approach is None
+        else np.asarray(place_approach, dtype=float)
+        / np.linalg.norm(np.asarray(place_approach, dtype=float))
+    )
+
+    above_object = grasp_position - grasp_approach * hover_height
+    above_goal = place_position - place_approach * hover_height
+
+    return [
+        Waypoint(above_object, -1.0, free_stiffness, 25, "approach", grasp_rotation),
+        Waypoint(grasp_position, -1.0, free_stiffness, 25, "descend", grasp_rotation),
+        Waypoint(grasp_position, 1.0, insertion_stiffness, 15, "grasp", grasp_rotation),
+        Waypoint(above_object, 1.0, free_stiffness, 25, "lift", grasp_rotation),
+        Waypoint(above_goal, 1.0, free_stiffness, 40, "transfer", place_rotation),
+        Waypoint(place_position, 1.0, insertion_stiffness, 30, "insert", place_rotation),
+        Waypoint(place_position, -1.0, insertion_stiffness, 15, "release", place_rotation),
+        Waypoint(above_goal, -1.0, free_stiffness, 25, "retreat", place_rotation),
+    ]
+
+
 def reshelving_waypoints(
     product_position: np.ndarray,
     goal_position: np.ndarray,
@@ -66,43 +123,28 @@ def reshelving_waypoints(
     free_stiffness: float = 350.0,
     insertion_stiffness: float = 900.0,
 ) -> list[Waypoint]:
-    """Scripted pick-and-place plan for the reshelving task.
+    """Scripted plan for the reshelving task (paper Sec. V-A).
 
-    Two things about this plan are substantive rather than incidental.
-
-    **The grasp yaw follows the product.** Object yaw is randomised over 94.6 deg
-    (Table II) and the box diagonal barely clears the gripper opening, so a
-    fixed-yaw top-down grasp collides with the box corners and simply fails. The
-    demonstration is therefore genuinely ``SE(3)``-dependent, which is what makes
-    transporting the orientation labels (Eq. 11) meaningful rather than
+    A thin call into :func:`pick_place_waypoints` with a top-down grasp whose
+    yaw follows the product. Object yaw is randomised over 94.6 deg (Table II)
+    and the box diagonal barely clears the gripper opening, so a fixed-yaw
+    top-down grasp collides with the box corners and simply fails. The
+    demonstration is therefore genuinely ``SE(3)``-dependent, which is what
+    makes transporting the orientation labels (Eq. 11) meaningful rather than
     decorative.
-
-    **The stiffness profile is part of the demonstration**, not a controller
-    setting: the teacher is compliant while moving through free space and stiff
-    while grasping and inserting. Sec. III-G is what makes that profile
-    transportable, and it is only observable because the controller accepts a
-    full stiffness matrix.
     """
     product = np.asarray(product_position, dtype=float)
     goal = np.asarray(goal_position, dtype=float)
-    grasp_rotation = top_down_orientation(product_yaw)
-    place_rotation = top_down_orientation(0.0)
-
-    grasp = product + np.array([0.0, 0.0, GRASP_HEIGHT_OFFSET])
-    above_product = grasp + np.array([0.0, 0.0, hover_height])
-    above_goal = goal + np.array([0.0, 0.0, hover_height])
-    place = goal + np.array([0.0, 0.0, GRASP_HEIGHT_OFFSET])
-
-    return [
-        Waypoint(above_product, -1.0, free_stiffness, 25, "approach", grasp_rotation),
-        Waypoint(grasp, -1.0, free_stiffness, 25, "descend", grasp_rotation),
-        Waypoint(grasp, 1.0, insertion_stiffness, 15, "grasp", grasp_rotation),
-        Waypoint(above_product, 1.0, free_stiffness, 25, "lift", grasp_rotation),
-        Waypoint(above_goal, 1.0, free_stiffness, 40, "transfer", place_rotation),
-        Waypoint(place, 1.0, insertion_stiffness, 30, "insert", place_rotation),
-        Waypoint(place, -1.0, insertion_stiffness, 15, "release", place_rotation),
-        Waypoint(above_goal, -1.0, free_stiffness, 25, "retreat", place_rotation),
-    ]
+    offset = np.array([0.0, 0.0, GRASP_HEIGHT_OFFSET])
+    return pick_place_waypoints(
+        product + offset,
+        top_down_orientation(product_yaw),
+        goal + offset,
+        top_down_orientation(0.0),
+        hover_height=hover_height,
+        free_stiffness=free_stiffness,
+        insertion_stiffness=insertion_stiffness,
+    )
 
 
 def record_demonstration(

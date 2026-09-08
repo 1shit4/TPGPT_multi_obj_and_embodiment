@@ -18,6 +18,7 @@ from tpgpt.grasp.grasps import (
 from tpgpt.grasp.grippers import (
     GRIPPER_PAIRS,
     VERIFIED_PAIRS,
+    GripperPair,
     gripper_config_path,
     gripper_geometry,
     resolve_pair,
@@ -77,36 +78,130 @@ class TestGripperRegistry:
 
 
 class TestFrameContract:
-    def test_verified_grippers_are_the_ones_with_a_closing_axis(self):
-        assert set(VERIFIED_PAIRS) == {
-            k for k, v in GRIPPER_PAIRS.items() if v.closing_axis is not None
-        }
+    def test_every_gripper_frame_is_measured(self):
+        from tpgpt.grasp.grippers import MEASURED_PAIRS
+
+        assert set(MEASURED_PAIRS) == set(GRIPPER_PAIRS)
+
+    def test_verified_means_it_lifts_not_merely_that_it_converts(self):
+        """The Inspire hand converts cleanly and lifts nothing.
+
+        Keeping the two lists separate is what stops a hand that cannot execute
+        a grasp from silently joining a campaign and looking like a transport
+        failure.
+        """
         assert "panda" in VERIFIED_PAIRS
+        assert "inspire" in GRIPPER_PAIRS
+        assert "inspire" not in VERIFIED_PAIRS
+        assert len(VERIFIED_PAIRS) == 8
 
-    def test_x_closing_grippers_need_no_rotation(self):
-        """Measured: grip_site +Z is the approach axis for every gripper, and
-        the Panda's jaws close along grip_site +X -- the same basis GraspGen-X
-        emits."""
-        assert np.allclose(alignment_rotation(GRIPPER_PAIRS["panda"]), np.eye(3))
+    def test_an_axis_aligned_gripper_keeps_its_approach_and_closing_axes(self):
+        """The Panda's jaws close along grip_site X with Z the approach -- the
+        same basis GraspGen-X emits.
 
-    def test_y_closing_grippers_rotate_about_the_approach_axis(self):
+        Its measured alignment is a half turn about the approach axis rather
+        than the identity, because the sign of a jaw axis is arbitrary: a
+        parallel gripper closing along +X and along -X is the same grasp, and
+        the measurement has no reason to prefer one. So the invariant is that
+        the approach axis survives and the closing axis stays in the plane, not
+        that the matrix is the identity.
+        """
+        rotation = alignment_rotation(GRIPPER_PAIRS["panda"])
+        assert np.allclose(rotation @ [0, 0, 1.0], [0, 0, 1.0], atol=1e-3)
+        assert abs((rotation @ [1.0, 0, 0])[2]) < 1e-3
+        assert abs(abs((rotation @ [1.0, 0, 0])[0]) - 1.0) < 1e-3
+
+    def test_off_axis_grippers_rotate_about_the_approach_axis(self):
         rotation = alignment_rotation(GRIPPER_PAIRS["xarm"])
         assert not np.allclose(rotation, np.eye(3))
-        # A rotation about Z: the approach axis must be untouched.
-        assert np.allclose(rotation @ np.array([0, 0, 1.0]), [0, 0, 1.0])
+        # The XArm closes along Y, so its alignment is a quarter turn about the
+        # approach axis and leaves that axis alone.
+        assert np.allclose(rotation @ np.array([0, 0, 1.0]), [0, 0, 1.0], atol=1e-3)
+        assert np.allclose(np.linalg.det(rotation), 1.0)
+
+    def test_a_flipped_gripper_reverses_its_approach_axis(self):
+        """The UMI's fingers lie along grip_site -Z, so its alignment must turn
+        the frame end for end. A rotation purely about Z could not, which is
+        why the contract stopped being an angle and became a full basis."""
+        rotation = alignment_rotation(GRIPPER_PAIRS["umi"])
+        assert (rotation @ np.array([0, 0, 1.0]))[2] < -0.9
         assert np.allclose(np.linalg.det(rotation), 1.0)
 
     def test_unverified_grippers_refuse_rather_than_guess(self):
         """A wrong rotation about the approach axis fails silently -- the pose
-        still looks plausible while closing across the wrong dimension."""
-        with pytest.raises(ValueError, match="has not been measured"):
-            alignment_rotation(GRIPPER_PAIRS["inspire"])
+        still looks plausible while closing across the wrong dimension.
 
-    def test_conversion_translates_by_the_gripper_tcp_depth(self):
-        grasp = _identity_grasp()
-        position, _ = grasp_to_eef_pose(grasp)
-        depth = gripper_geometry("franka_panda").tcp_depth
-        assert np.allclose(position, grasp.position + grasp.approach * depth)
+        Every gripper in the registry is now measured, so this uses an
+        explicitly unmeasured pair. The guard still has to hold: it is what
+        stops a newly added hand from silently defaulting to identity.
+        """
+        unmeasured = GripperPair("SomeNewHand", "some_new_hand", ("Panda",), None)
+        assert not unmeasured.frame_verified
+        with pytest.raises(ValueError, match="has not been measured"):
+            alignment_rotation(unmeasured)
+
+    def test_every_registered_gripper_can_be_converted(self):
+        """Nine hands, three kinematic families, no refusals."""
+        for short, pair in GRIPPER_PAIRS.items():
+            rotation = alignment_rotation(pair)
+            assert np.allclose(rotation.T @ rotation, np.eye(3), atol=1e-9), short
+            assert np.isclose(np.linalg.det(rotation), 1.0), short
+
+    def test_multi_finger_hands_are_flagged_as_such(self):
+        """One closing axis is an approximation for a hand, not a description.
+
+        The measurement reports how well it holds: every parallel jaw scores
+        553 or above, every multi-finger hand under 7.
+        """
+        assert not GRIPPER_PAIRS["robotiq3f"].single_axis
+        assert not GRIPPER_PAIRS["inspire"].single_axis
+        assert GRIPPER_PAIRS["panda"].single_axis
+        assert GRIPPER_PAIRS["yumi"].single_axis
+
+    def test_conversion_puts_the_object_at_the_grasp_contact_point(self):
+        """The invariant the whole contract exists to hold.
+
+        Wherever ``grip_site`` ends up, the point where *this hand* holds an
+        object has to land on the grasp's own contact point. That is one
+        equation, and it is the same one for a Panda, a three-finger Robotiq
+        and a hand whose site sits at its wrist.
+        """
+        from tpgpt.grasp.grasps import contact_offset
+
+        for short, pair in GRIPPER_PAIRS.items():
+            grasp = _identity_grasp()
+            grasp.gripper = pair.graspgen
+            position, rotation = grasp_to_eef_pose(grasp, short)
+            held = position + rotation @ contact_offset(pair)
+            wanted = grasp.position + grasp.approach * gripper_geometry(
+                pair.graspgen
+            ).tcp_depth
+            assert np.allclose(held, wanted, atol=1e-9), short
+
+    def test_a_hand_can_be_named_by_its_registry_key(self):
+        """Passing the string ``"panda"`` must mean the same as passing the pair.
+
+        The lookup behind these is by object *identity*, so a string used to
+        fall through to "never measured" and return a zero offset -- a
+        perfectly plausible number, which made a 41 mm frame error read as the
+        arm missing its target.
+        """
+        from tpgpt.grasp.grasps import alignment_rotation, contact_offset
+
+        for short, pair in GRIPPER_PAIRS.items():
+            assert np.allclose(contact_offset(short), contact_offset(pair)), short
+            if pair.frame_verified:
+                assert np.allclose(
+                    alignment_rotation(short), alignment_rotation(pair)
+                ), short
+
+    def test_a_measured_hand_never_reports_a_zero_offset(self):
+        """Zero means "not measured". Every verified hand has a real number."""
+        from tpgpt.grasp.grasps import contact_offset
+
+        for short, pair in GRIPPER_PAIRS.items():
+            if pair.frame_verified:
+                assert np.linalg.norm(contact_offset(short)) > 1e-4, short
 
     def test_the_same_grasp_needs_a_different_eef_pose_per_gripper(self):
         """The crux of cross-embodiment transport: TCP depth varies nearly 2x,

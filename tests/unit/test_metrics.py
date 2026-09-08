@@ -10,6 +10,8 @@ from tpgpt.metrics import (
     final_approach_angle,
     final_position_error,
     frechet_distance,
+    path_deviation,
+    point_to_curve_distance,
     rank_methods,
 )
 
@@ -96,3 +98,68 @@ class TestRanking:
         assert len(result.wins) == 1
         winner, loser, p = result.wins[0]
         assert (winner, loser) == ("a", "b") and p < 0.05
+
+
+class TestPathDeviation:
+    """Measuring how far a trajectory strays from a reference path.
+
+    This is the instrument for integration drift, replacing a comparison of two
+    separately minimised distances that could come out negative
+    (``ROBOTICS_NOTES`` section 7.26). The properties below are the ones that
+    made the old measure unusable, tested directly.
+    """
+
+    def _line(self, n=50):
+        return np.stack([np.linspace(0, 1, n), np.zeros(n), np.zeros(n)], axis=1)
+
+    def test_a_point_on_the_path_is_at_zero_distance(self):
+        curve = self._line()
+        assert point_to_curve_distance(curve[10][None], curve)[0] == pytest.approx(0.0)
+
+    def test_distance_is_to_the_segment_not_to_the_nearest_vertex(self):
+        """The failure mode this replaces: over-reporting by the vertex spacing.
+
+        A point exactly halfway along a coarse segment is *on* the path. Scoring
+        it against the nearest vertex would call it half the spacing away --
+        millimetres on a 20 Hz demonstration, which is the size of the quantity
+        being measured.
+        """
+        coarse = np.array([[0.0, 0, 0], [1.0, 0, 0]])
+        midpoint = np.array([[0.5, 0.0, 0.0]])
+        assert point_to_curve_distance(midpoint, coarse)[0] == pytest.approx(0.0)
+
+    def test_deviation_is_never_negative(self):
+        """The whole point. A difference of two minima could be, and was."""
+        rng = np.random.default_rng(0)
+        curve = self._line()
+        points = curve[::5] + rng.normal(scale=0.01, size=(10, 3))
+        assert (point_to_curve_distance(points, curve) >= 0).all()
+
+    def test_a_perpendicular_offset_is_reported_at_its_true_size(self):
+        curve = self._line()
+        off = np.array([[0.5, 0.02, 0.0]])
+        assert point_to_curve_distance(off, curve)[0] == pytest.approx(0.02, abs=1e-9)
+
+    def test_arriving_late_on_the_same_path_is_not_drift(self):
+        """Timing is deliberately excluded: 'off the path' and 'late' differ.
+
+        A trajectory that retraces the reference exactly but only gets halfway
+        has strayed nowhere. Mixing the two is what made the earlier numbers
+        unreadable, so the separation is asserted rather than assumed.
+        """
+        curve = self._line()
+        slow = curve[: len(curve) // 2]
+        assert path_deviation(slow, curve)["max"] == pytest.approx(0.0, abs=1e-12)
+
+    def test_it_reports_where_the_worst_excursion_was(self):
+        curve = self._line()
+        points = curve.copy()
+        points[30, 1] = 0.05
+        stats = path_deviation(points, curve)
+        assert stats["argmax"] == 30
+        assert stats["max"] == pytest.approx(0.05)
+
+    def test_a_single_point_reference_still_works(self):
+        """A degenerate path must not raise; it has no segments to project onto."""
+        d = point_to_curve_distance(np.array([[1.0, 0, 0]]), np.array([[0.0, 0, 0]]))
+        assert d[0] == pytest.approx(1.0)

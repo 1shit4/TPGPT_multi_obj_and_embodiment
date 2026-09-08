@@ -109,3 +109,42 @@ def test_source_labels_are_not_mutated(labels, rigid_keypoints):
     before = labels.positions.copy()
     transport_labels(TransportMap().fit(S, T), labels)
     assert np.array_equal(labels.positions, before)
+
+class TestReplace:
+    """A frame change recomputes one family and must carry the rest untouched."""
+
+    def make(self):
+        return PolicyLabels(
+            positions=np.zeros((4, 3)),
+            velocities=np.ones((4, 3)),
+            orientations=np.tile(np.eye(3), (4, 1, 1)),
+            stiffness=np.tile(np.eye(3) * 300.0, (4, 1, 1)),
+            damping=np.tile(np.eye(3) * 30.0, (4, 1, 1)),
+            gripper=np.array([-1.0, -1.0, 1.0, 1.0]),
+            time_belief=np.linspace(0, 1, 4),
+            metadata={"scene": "source"},
+        )
+
+    def test_the_named_family_changes(self):
+        replaced = self.make().replace(positions=np.ones((4, 3)))
+        assert np.allclose(replaced.positions, 1.0)
+
+    def test_every_other_family_survives(self):
+        """The failure this guards against is silent: a dropped gripper channel
+        gives a policy that never closes its fingers."""
+        original = self.make()
+        replaced = original.replace(positions=np.ones((4, 3)))
+        for name in original.present:
+            if name == "positions":
+                continue
+            assert np.allclose(getattr(replaced, name), getattr(original, name)), name
+
+    def test_metadata_is_copied_not_shared(self):
+        original = self.make()
+        replaced = original.replace(positions=np.ones((4, 3)))
+        replaced.metadata["scene"] = "target"
+        assert original.metadata["scene"] == "source"
+
+    def test_an_unknown_family_is_refused(self):
+        with pytest.raises(ValueError, match="unknown label families"):
+            self.make().replace(postions=np.ones((4, 3)))
