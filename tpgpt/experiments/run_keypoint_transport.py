@@ -674,11 +674,19 @@ def gripper_sweep(
                         grasp_source="graspgen",
                         reference_approach=reference_approach, gripper=hand,
                     )
-                except ValueError as exc:
+                # Both, and deliberately. ``ValueError`` is "too little cloud
+                # to describe the object"; ``RuntimeError`` is "every candidate
+                # is beyond the approach filter", which is what the milk does --
+                # its closest of 100 is 49.8 deg against a 45 deg limit. Both
+                # are the pipeline legitimately refusing an object, and both
+                # have to be recorded as a skipped cell rather than aborting the
+                # sweep: eight hands would otherwise be lost to one object.
+                except (ValueError, RuntimeError) as exc:
                     rows.append({
                         "label": f"{hand} {name}", "gripper": hand,
                         "object": name, "skipped": str(exc),
                     })
+                    print(f"  {hand:<11}{name:<8} skipped: {str(exc)[:70]}", flush=True)
                     continue
                 for variant in variants:
                     label = f"{variant.name} {hand} {name}"
@@ -687,12 +695,20 @@ def gripper_sweep(
                             labels, source_placement, target, variant=variant
                         )
                         row = summarise(label, result)
-                        width = float(
-                            np.ptp(
-                                np.asarray(result["target_keypoints"], dtype=float)
-                                @ target.grasp.closing
-                            )
-                        ) if "target_keypoints" in result else float("nan")
+                        # ``.points``: ``target_keypoints`` is a KeypointSet,
+                        # and ``np.asarray`` on one yields an object array whose
+                        # float() raises. Measured along the grasp's **own**
+                        # closing axis, not an axis-aligned extent -- a 30 x 100
+                        # mm box yawed 45 degrees measures 92 x 92 and reads as
+                        # ungraspable (7.18).
+                        points = getattr(result.get("target_keypoints"), "points", None)
+                        width = (
+                            float(np.ptp(
+                                np.asarray(points, dtype=float) @ target.grasp.closing
+                            ))
+                            if points is not None and len(points) >= 2
+                            else float("nan")
+                        )
                         row["object_width_mm"] = width * 1000
                         row["closing_budget_mm"] = (
                             max(0.5 * (aperture - width), 0.0) * 1000
@@ -722,11 +738,11 @@ def gripper_sweep(
 def _gripper_line(row: dict) -> str:
     if "failed" in row or "skipped" in row:
         note = row.get("failed") or row.get("skipped")
-        return (f"{row.get('variant', '-'):20}{row.get('gripper', '?'):11}"
+        return (f"{row.get('variant', '-'):27}{row.get('gripper', '?'):11}"
                 f"{row.get('object', '?'):8} {note[:52]}")
     g = lambda k, d=float("nan"): row.get(k, d)
     return (
-        f"{row['variant']:20}{row['gripper']:11}{row['object']:8}"
+        f"{row['variant']:27}{row['gripper']:11}{row['object']:8}"
         f"{g('min_det'):9.3f}{g('aim_map') * 1000:9.1f}"
         f"{g('orientation_error_deg'):8.1f}{g('tilt_mid_path'):8.1f}"
         f"{g('keypoint_residual') * 1000:9.4f}"
@@ -736,7 +752,7 @@ def _gripper_line(row: dict) -> str:
 
 
 GRIPPER_HEADER = (
-    f"{'variant':20}{'hand':11}{'object':8}{'minDet':>9}{'aimmm':>9}"
+    f"{'variant':27}{'hand':11}{'object':8}{'minDet':>9}{'aimmm':>9}"
     f"{'orient':>8}{'tiltMid':>8}{'residmm':>9}{'apermm':>8}{'widthmm':>8}"
     f"{'budgetmm':>9}{'tcpmm':>8}"
 )
