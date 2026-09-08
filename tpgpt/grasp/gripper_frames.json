@@ -2,26 +2,26 @@
   "inspire": {
     "alignment": [
       [
-        0.9955460529225121,
-        -0.07741456504278953,
-        -0.05380559106303608
+        0.9942800251765848,
+        -0.03970209906998852,
+        0.0991512726306976
       ],
       [
-        0.07059110351342456,
-        0.2338136340982774,
-        0.9697154637389847
+        -0.08667220773236876,
+        0.24254489609577054,
+        0.9662607835282818
       ],
       [
-        -0.06248962005936616,
-        -0.9691945984316012,
-        0.2382370201203908
+        -0.062411216473060534,
+        -0.969327455872023,
+        0.2377164768185497
       ]
     ],
-    "anisotropy": 3.152883594120809,
+    "anisotropy": 2.909379259716413,
     "approach_in_site": [
-      -0.06248962005936616,
-      -0.9691945984316012,
-      0.2382370201203908
+      -0.062411216473060534,
+      -0.969327455872023,
+      0.2377164768185497
     ],
     "calibrated_depth": null,
     "calibration_samples": [
@@ -78,39 +78,76 @@
         0.00010653549989581013
       ]
     ],
-    "closing_angle_deg": -4.446424094415221,
+    "closing_angle_deg": -2.286634366233315,
+    "closing_in_site": [
+      0.9942800251765848,
+      -0.03970209906998852,
+      0.0991512726306976
+    ],
     "contact_offset": [
-      -0.000766500917142514,
-      -0.13397451063217433,
-      0.010288927722557984
+      -0.0007608158482007368,
+      -0.13399917880034487,
+      0.010247124271523586
     ],
     "depth_band": 0.0,
+    "finger_geoms": [
+      "gripper0_right_r_palm_vis",
+      "gripper0_right_r_palm_col",
+      "gripper0_right_r_thumb_proximal_vis",
+      "gripper0_right_r_thumb_proximal_col",
+      "gripper0_right_r_thumb_proximal_2_vis",
+      "gripper0_right_r_thumb_proximal_2_col",
+      "gripper0_right_r_thumb_middle_vis",
+      "gripper0_right_r_thumb_middle_col",
+      "gripper0_right_r_thumb_distal_vis",
+      "gripper0_right_r_thumb_distal_col",
+      "gripper0_right_r_index_proximal_vis",
+      "gripper0_right_r_index_proximal_col",
+      "gripper0_right_r_index_distal_vis",
+      "gripper0_right_r_index_distal_col",
+      "gripper0_right_r_middle_proximal_vis",
+      "gripper0_right_r_middle_proximal_col",
+      "gripper0_right_r_middle_distal_vis",
+      "gripper0_right_r_middle_distal_col",
+      "gripper0_right_r_ring_proximal_vis",
+      "gripper0_right_r_ring_proximal_col",
+      "gripper0_right_r_ring_distal_vis",
+      "gripper0_right_r_ring_distal_col",
+      "gripper0_right_r_pinky_proximal_vis",
+      "gripper0_right_r_pinky_proximal_col",
+      "gripper0_right_r_pinky_distal_vis",
+      "gripper0_right_r_pinky_distal_col"
+    ],
+    "finger_travel_mm": 6.494822369667808,
     "n_moving_geoms": 26,
-    "robosuite": "InspireRightHand"
+    "plus_one_closes": true,
+    "robosuite": "InspireRightHand",
+    "spread_closed": 0.06506154746358424,
+    "spread_open": 0.07155636983325205
   },
   "panda": {
     "alignment": [
       [
-        -0.999999999961762,
-        6.689849744832072e-14,
-        8.745053708731956e-06
+        -0.9999999999942537,
+        6.026929513176575e-14,
+        3.3900938382821474e-06
       ],
       [
-        -6.689849749637664e-14,
+        -6.026929403999248e-14,
         -1.0,
-        -5.2026965124660155e-18
+        3.221502570359671e-16
       ],
       [
-        8.745053708731956e-06,
-        -5.7877274659063585e-18,
-        0.999999999961762
+        3.390093838282147e-06,
+        3.2194593847175325e-16,
+        0.9999999999942536
       ]
     ],
-    "anisotropy": 95968806198.44691,
+    "anisotropy": 95968847599.59337,
     "approach_in_site": [
-      8.745053708731956e-06,
-      -5.7877274659063585e-18,
-      0.999999999961762
+      3.390093838282147e-06,
+      3.2194593847175325e-16,
+      0.9999999999942536
     ],
     "calibrated_depth": 0.037500000000000006,
     "calibration_samples": [
@@ -167,39 +204,56 @@
         0.0749390833265614
       ]
     ],
-    "closing_angle_deg": -3.808509063674137e-12,
+    "closing_angle_deg": -3.410605131648481e-12,
+    "closing_in_site": [
+      -0.9999999999942537,
+      6.026929513176575e-14,
+      3.3900938382821474e-06
+    ],
     "contact_offset": [
-      7.186137330819631e-07,
-      -3.888845967568418e-18,
-      -0.0036000000000000025
+      2.785766754173115e-07,
+      2.7326512904152662e-17,
+      -0.003600000000000046
     ],
     "depth_band": 0.12,
+    "finger_geoms": [
+      "gripper0_right_finger1_visual",
+      "gripper0_right_finger1_collision",
+      "gripper0_right_finger1_pad_collision",
+      "gripper0_right_finger2_visual",
+      "gripper0_right_finger2_collision",
+      "gripper0_right_finger2_pad_collision"
+    ],
+    "finger_travel_mm": 78.35823594064202,
     "n_moving_geoms": 6,
-    "robosuite": "PandaGripper"
+    "plus_one_closes": true,
+    "robosuite": "PandaGripper",
+    "spread_closed": 0.025631610193823942,
+    "spread_open": 0.10398984613446596
   },
   "rethink": {
     "alignment": [
       [
-        -0.9999999999999676,
-        4.683562708569024e-11,
-        -2.547782427108766e-07
+        -0.9999999999999987,
+        9.47396358798293e-12,
+        -5.201729821701532e-08
       ],
       [
-        -4.6835627085654894e-11,
+        -9.473963587990513e-12,
         -1.0,
-        -1.4472827813063728e-16
+        1.4555948753021277e-16
       ],
       [
-        -2.547782427108766e-07,
-        -1.3279557936548749e-16,
-        0.9999999999999676
+        -5.201729821701532e-08,
+        1.460522975194662e-16,
+        0.9999999999999987
       ]
     ],
-    "anisotropy": 72385834193.01941,
+    "anisotropy": 79891726549.91156,
     "approach_in_site": [
-      -2.547782427108766e-07,
-      -1.3279557936548749e-16,
-      0.9999999999999676
+      -5.201729821701532e-08,
+      1.460522975194662e-16,
+      0.9999999999999987
     ],
     "calibrated_depth": 0.030000000000000002,
     "calibration_samples": [
@@ -256,39 +310,62 @@
         0.08262304181416724
       ]
     ],
-    "closing_angle_deg": -2.6834641175810248e-09,
+    "closing_angle_deg": -5.427978067018557e-10,
+    "closing_in_site": [
+      -0.9999999999999987,
+      9.47396358798293e-12,
+      -5.201729821701532e-08
+    ],
     "contact_offset": [
-      -2.1822353744061867e-08,
-      1.2111134564128566e-17,
-      -0.0050971833114410075
+      -4.455403532221958e-09,
+      -8.490123062884704e-18,
+      -0.0050971833114409355
     ],
     "depth_band": 0.135,
+    "finger_geoms": [
+      "gripper0_right_l_finger",
+      "gripper0_right_l_finger_g0",
+      "gripper0_right_l_finger_g1",
+      "gripper0_right_l_fingertip_g0_vis",
+      "gripper0_right_l_fingertip_g0",
+      "gripper0_right_l_fingerpad_g0",
+      "gripper0_right_r_finger",
+      "gripper0_right_r_finger_g0",
+      "gripper0_right_r_finger_g1",
+      "gripper0_right_r_fingertip_g0_vis",
+      "gripper0_right_r_fingertip_g0",
+      "gripper0_right_r_fingerpad_g0"
+    ],
+    "finger_travel_mm": 46.125509828550335,
     "n_moving_geoms": 12,
-    "robosuite": "RethinkGripper"
+    "plus_one_closes": true,
+    "robosuite": "RethinkGripper",
+    "spread_closed": 0.030826721850325995,
+    "spread_open": 0.07695223167887633
   },
   "robotiq140": {
     "alignment": [
       [
-        0.9999921348512578,
-        -0.0007828097792016843,
-        -0.0038881157999125617
+        0.9999920893877148,
+        -0.0007842780032449241,
+        -0.0038994961221064848
       ],
       [
-        0.0007828159280353643,
-        0.9999996935995628,
-        5.9597820324597806e-08
+        0.0007842841769107723,
+        0.9999996924491162,
+        5.403344168247425e-08
       ],
       [
-        0.0038881145619384236,
-        -3.1032763297963905e-06,
-        0.9999924412491942
+        0.0038994948804357663,
+        -3.1123461207378994e-06,
+        0.9999923969360921
       ]
     ],
-    "anisotropy": 1343.4544796248176,
+    "anisotropy": 1379.6573864664922,
     "approach_in_site": [
-      0.0038881145619384236,
-      -3.1032763297963905e-06,
-      0.9999924412491942
+      0.0038994948804357663,
+      -3.1123461207378994e-06,
+      0.9999923969360921
     ],
     "calibrated_depth": 0.030000000000000002,
     "calibration_samples": [
@@ -345,39 +422,72 @@
         0.07706097594713257
       ]
     ],
-    "closing_angle_deg": -0.04485204011606925,
+    "closing_angle_deg": -0.04493616581009974,
+    "closing_in_site": [
+      0.9999920893877148,
+      -0.0007842780032449241,
+      -0.0038994961221064848
+    ],
     "contact_offset": [
-      0.002336549490379355,
-      -1.8639478789313702e-06,
-      -0.030709826313786215
+      0.0023403022026952957,
+      -1.8669389382629824e-06,
+      -0.03071001085802303
     ],
     "depth_band": 0.135,
+    "finger_geoms": [
+      "gripper0_right_left_outer_knuckle_visual",
+      "gripper0_right_left_outer_knuckle_collision",
+      "gripper0_right_left_outer_finger_visual",
+      "gripper0_right_left_outer_finger_collision",
+      "gripper0_right_left_inner_finger_visual",
+      "gripper0_right_left_inner_finger_collision",
+      "gripper0_right_left_fingertip_visual",
+      "gripper0_right_left_fingertip_collision",
+      "gripper0_right_left_fingerpad_collision",
+      "gripper0_right_left_inner_knuckle_visual",
+      "gripper0_right_left_inner_knuckle_collision",
+      "gripper0_right_right_outer_knuckle_visual",
+      "gripper0_right_right_outer_knuckle_collision",
+      "gripper0_right_right_outer_finger_visual",
+      "gripper0_right_right_outer_finger_collision",
+      "gripper0_right_right_inner_finger_visual",
+      "gripper0_right_right_inner_finger_collision",
+      "gripper0_right_right_fingertip_visual",
+      "gripper0_right_right_fingertip_collision",
+      "gripper0_right_right_fingerpad_collision",
+      "gripper0_right_right_inner_knuckle_visual",
+      "gripper0_right_right_inner_knuckle_collision"
+    ],
+    "finger_travel_mm": 54.83113983014562,
     "n_moving_geoms": 22,
-    "robosuite": "Robotiq140Gripper"
+    "plus_one_closes": true,
+    "robosuite": "Robotiq140Gripper",
+    "spread_closed": 0.11062003724433547,
+    "spread_open": 0.1654511770744811
   },
   "robotiq3f": {
     "alignment": [
       [
-        0.9958575704216096,
-        0.007205493879638864,
-        0.09064094158778127
+        0.9958595521076674,
+        0.00719618084651423,
+        0.09061990651694816
       ],
       [
-        -0.004385235098428475,
-        0.9995011856779518,
-        -0.031275382355779334
+        -0.004376687523849496,
+        0.9995012736871145,
+        -0.03127376702852572
       ],
       [
-        -0.09082108316410127,
-        0.030748344448427938,
-        0.9953924201874255
+        -0.09079976366838596,
+        0.030747664611482022,
+        0.9953943861800232
       ]
     ],
-    "anisotropy": 4.262580731343681,
+    "anisotropy": 4.262753322035843,
     "approach_in_site": [
-      -0.09082108316410127,
-      0.030748344448427938,
-      0.9953924201874255
+      -0.09079976366838596,
+      0.030747664611482022,
+      0.9953943861800232
     ],
     "calibrated_depth": 0.0225,
     "calibration_samples": [
@@ -434,39 +544,82 @@
         0.00011176305699034383
       ]
     ],
-    "closing_angle_deg": 0.41455444703417754,
+    "closing_angle_deg": 0.41401783413303406,
+    "closing_in_site": [
+      0.9958595521076674,
+      0.00719618084651423,
+      0.09061990651694816
+    ],
     "contact_offset": [
-      -0.00755706063344971,
-      0.004450843238239709,
-      -0.020710163988482452
+      -0.007553464688484492,
+      0.004450711616262127,
+      -0.020710903092747444
     ],
     "depth_band": 0.03,
+    "finger_geoms": [
+      "gripper0_right_palm_visual",
+      "gripper0_right_palm",
+      "gripper0_right_f1_l0_vis",
+      "gripper0_right_f1_l0",
+      "gripper0_right_f1_l1_vis",
+      "gripper0_right_f1_l1",
+      "gripper0_right_f1_l2_vis",
+      "gripper0_right_f1_l2",
+      "gripper0_right_f1_l3_vis",
+      "gripper0_right_f1_l3",
+      "gripper0_right_f1_tip_collision",
+      "gripper0_right_f1_pad_collision",
+      "gripper0_right_f2_l0_vis",
+      "gripper0_right_f2_l0",
+      "gripper0_right_f2_l1_vis",
+      "gripper0_right_f2_l1",
+      "gripper0_right_f2_l2_vis",
+      "gripper0_right_f2_l2",
+      "gripper0_right_f2_l3_vis",
+      "gripper0_right_f2_l3",
+      "gripper0_right_f2_tip_collision",
+      "gripper0_right_f2_pad_collision",
+      "gripper0_right_f3_l0_vis",
+      "gripper0_right_f3_l0",
+      "gripper0_right_f3_l1_vis",
+      "gripper0_right_f3_l1",
+      "gripper0_right_f3_l2_vis",
+      "gripper0_right_f3_l2",
+      "gripper0_right_f3_l3_vis",
+      "gripper0_right_f3_l3",
+      "gripper0_right_finger_middle_tip_collision",
+      "gripper0_right_finger_middle_pad_collision"
+    ],
+    "finger_travel_mm": 84.73680064055215,
     "n_moving_geoms": 32,
-    "robosuite": "RobotiqThreeFingerGripper"
+    "plus_one_closes": true,
+    "robosuite": "RobotiqThreeFingerGripper",
+    "spread_closed": 0.0796500876498736,
+    "spread_open": 0.16438688829042575
   },
   "robotiq85": {
     "alignment": [
       [
-        0.9999957765237758,
-        1.5190896792942148e-05,
-        -0.0029063213599758685
+        0.9999958094031282,
+        1.8232374786746574e-05,
+        -0.002894968698142459
       ],
       [
-        -1.5190832636303642e-05,
-        0.9999999998846185,
-        4.414962776993499e-08
+        -1.8232298385244082e-05,
+        0.9999999998337903,
+        5.2782154353800956e-08
       ],
       [
-        0.0029063213603112044,
-        6.167600490127607e-17,
-        0.999995776639157
+        0.0028949686986236307,
+        -4.459511800214597e-17,
+        0.9999958095693371
       ]
     ],
-    "anisotropy": 597.649331883105,
+    "anisotropy": 587.2363472384889,
     "approach_in_site": [
-      0.0029063213603112044,
-      6.167600490127607e-17,
-      0.999995776639157
+      0.0028949686986236307,
+      -4.459511800214597e-17,
+      0.9999958095693371
     ],
     "calibrated_depth": 0.030000000000000002,
     "calibration_samples": [
@@ -523,39 +676,72 @@
         0.08475950574153368
       ]
     ],
-    "closing_angle_deg": 0.0008703779492122976,
+    "closing_angle_deg": 0.0010446425033450168,
+    "closing_in_site": [
+      0.9999958094031282,
+      1.8232374786746574e-05,
+      -0.002894968698142459
+    ],
     "contact_offset": [
-      0.0006026918424003075,
-      1.337662864548026e-18,
-      -0.017787748041396097
+      0.0006007349355171894,
+      -5.84797830127954e-18,
+      -0.017787663015994503
     ],
     "depth_band": 0.135,
+    "finger_geoms": [
+      "gripper0_right_left_outer_knuckle_visual",
+      "gripper0_right_left_outer_knuckle_collision",
+      "gripper0_right_left_outer_finger_visual",
+      "gripper0_right_left_outer_finger_collision",
+      "gripper0_right_left_inner_finger_visual",
+      "gripper0_right_left_inner_finger_collision",
+      "gripper0_right_left_fingertip_visual",
+      "gripper0_right_left_fingertip_collision",
+      "gripper0_right_left_fingerpad_collision",
+      "gripper0_right_left_inner_knuckle_visual",
+      "gripper0_right_left_inner_knuckle_collision",
+      "gripper0_right_right_outer_knuckle_visual",
+      "gripper0_right_right_outer_knuckle_collision",
+      "gripper0_right_right_outer_finger_visual",
+      "gripper0_right_right_outer_finger_collision",
+      "gripper0_right_right_inner_finger_visual",
+      "gripper0_right_right_inner_finger_collision",
+      "gripper0_right_right_fingertip_visual",
+      "gripper0_right_right_fingertip_collision",
+      "gripper0_right_right_fingerpad_collision",
+      "gripper0_right_right_inner_knuckle_visual",
+      "gripper0_right_right_inner_knuckle_collision"
+    ],
+    "finger_travel_mm": 28.91033349959177,
     "n_moving_geoms": 22,
-    "robosuite": "Robotiq85Gripper"
+    "plus_one_closes": true,
+    "robosuite": "Robotiq85Gripper",
+    "spread_closed": 0.1024490872426467,
+    "spread_open": 0.13135942074223847
   },
   "umi": {
     "alignment": [
       [
-        -1.727133545411904e-06,
-        -0.9978536738905126,
-        0.06548316959512437
+        -2.2019418366175228e-06,
+        -0.9978550236987962,
+        0.06546259752123088
       ],
       [
-        -0.9999999999985087,
-        1.7234265536741984e-06,
-        -1.1309817760587402e-07
+        -0.9999999999975759,
+        2.197218723511963e-06,
+        -1.441448330499912e-07
       ],
       [
-        -1.264645169480337e-15,
-        -0.06548316959522205,
-        -0.9978536738920009
+        8.357817071615719e-16,
+        -0.06546259752138955,
+        -0.9978550237012151
       ]
     ],
-    "anisotropy": 401716.63264345296,
+    "anisotropy": 559231.2225735926,
     "approach_in_site": [
-      -1.264645169480337e-15,
-      -0.06548316959522205,
-      -0.9978536738920009
+      8.357817071615719e-16,
+      -0.06546259752138955,
+      -0.9978550237012151
     ],
     "calibrated_depth": 0.03,
     "calibration_samples": [
@@ -612,39 +798,54 @@
         0.03517765127633321
       ]
     ],
-    "closing_angle_deg": 89.99990082968537,
+    "closing_angle_deg": 89.99987356682988,
+    "closing_in_site": [
+      -2.2019418366175228e-06,
+      -0.9978550236987962,
+      0.06546259752123088
+    ],
     "contact_offset": [
-      7.498870172882095e-05,
-      -0.03698792957582427,
-      -0.14173216828286195
+      7.498870172928248e-05,
+      -0.0369850625268015,
+      -0.14173216828286203
     ],
     "depth_band": 0.015,
+    "finger_geoms": [
+      "gripper0_right_right_finger_visual",
+      "gripper0_right_right_finger_collision",
+      "gripper0_right_left_finger_visual",
+      "gripper0_right_left_finger_collision"
+    ],
+    "finger_travel_mm": 44.78173785483125,
     "n_moving_geoms": 4,
-    "robosuite": "UMIGripper"
+    "plus_one_closes": true,
+    "robosuite": "UMIGripper",
+    "spread_closed": 0.055681240679129745,
+    "spread_open": 0.100462978533961
   },
   "xarm": {
     "alignment": [
       [
-        -5.144561310440477e-09,
-        -0.9999999996289739,
-        -2.7240638247070616e-05
+        -9.286253746551671e-09,
+        -0.9999999996215075,
+        -2.7513357954970673e-05
       ],
       [
-        0.9999999985764271,
-        -3.6910375104247113e-09,
-        -5.335865411368936e-05
+        0.9999999985764272,
+        -7.818178108043736e-09,
+        -5.33586496657406e-05
       ],
       [
-        5.335865399334568e-05,
-        -2.724063848279844e-05,
-        0.9999999982054008
+        5.3358649430440414e-05,
+        -2.7513358411305364e-05,
+        0.9999999981979347
       ]
     ],
-    "anisotropy": 87626.23335774039,
+    "anisotropy": 85210.14820746888,
     "approach_in_site": [
-      5.335865399334568e-05,
-      -2.724063848279844e-05,
-      0.9999999982054008
+      5.3358649430440414e-05,
+      -2.7513358411305364e-05,
+      0.9999999981979347
     ],
     "calibrated_depth": 0.030000000000000002,
     "calibration_samples": [
@@ -701,39 +902,60 @@
         0.09952704892696063
       ]
     ],
-    "closing_angle_deg": 89.99999970523834,
+    "closing_angle_deg": 89.99999946793685,
+    "closing_in_site": [
+      -9.286253746551671e-09,
+      -0.9999999996215075,
+      -2.7513357954970673e-05
+    ],
     "contact_offset": [
-      7.197148682349817e-06,
-      -5.62004376576201e-06,
-      0.003308605407014782
+      7.197148682321655e-06,
+      -5.670373215729887e-06,
+      0.003308622845917878
     ],
     "depth_band": 0.135,
+    "finger_geoms": [
+      "gripper0_right_g1_vis",
+      "gripper0_right_g2_vis",
+      "gripper0_right_left_finger_pad_1",
+      "gripper0_right_left_finger_pad_2",
+      "gripper0_right_g3_vis",
+      "gripper0_right_g4_vis",
+      "gripper0_right_g5_vis",
+      "gripper0_right_right_finger_pad_1",
+      "gripper0_right_right_finger_pad_2",
+      "gripper0_right_g6_vis"
+    ],
+    "finger_travel_mm": 35.33290047878286,
     "n_moving_geoms": 10,
-    "robosuite": "XArm7Gripper"
+    "plus_one_closes": true,
+    "robosuite": "XArm7Gripper",
+    "spread_closed": 0.07165964537604406,
+    "spread_open": 0.10699254585482693
   },
   "yumi": {
     "alignment": [
       [
-        -0.9999999982545995,
-        -2.2600294709708743e-09,
-        -5.908300107494634e-05
+        -0.9999999959966763,
+        -2.239286184604395e-09,
+        -8.947987199866821e-05
       ],
       [
-        2.26002946699748e-09,
-        -0.9999999999999999,
-        1.3401571563686211e-13
+        2.239286175597645e-09,
+        -1.0000000000000002,
+        2.0084223793787206e-13
       ],
       [
-        -5.9083001074946335e-05,
-        4.863919749284951e-16,
-        0.9999999982545994
+        -8.947987199866821e-05,
+        4.711967729710406e-16,
+        0.9999999959966763
       ]
     ],
-    "anisotropy": 54969886.531844236,
+    "anisotropy": 52844826.806150235,
     "approach_in_site": [
-      -5.9083001074946335e-05,
-      4.863919749284951e-16,
-      0.9999999982545994
+      -8.947987199866821e-05,
+      4.711967729710406e-16,
+      0.9999999959966763
     ],
     "calibrated_depth": -0.0075,
     "calibration_samples": [
@@ -790,14 +1012,29 @@
         0.05773811710815546
       ]
     ],
-    "closing_angle_deg": 1.2949016081620357e-07,
+    "closing_angle_deg": 1.2830165019295237e-07,
+    "closing_in_site": [
+      -0.9999999959966763,
+      -2.239286184604395e-09,
+      -8.947987199866821e-05
+    ],
     "contact_offset": [
-      -6.516740279611296e-06,
-      4.345482307321902e-16,
-      0.01675929945336627
+      -9.869456134243247e-06,
+      4.3324718812520757e-16,
+      0.016759299453366343
     ],
     "depth_band": 0.06,
+    "finger_geoms": [
+      "gripper0_right_gripper_r_finger_r_visual",
+      "gripper0_right_gripper_r_finger_r_collision",
+      "gripper0_right_gripper_r_finger_l_visual",
+      "gripper0_right_gripper_r_finger_l_collision"
+    ],
+    "finger_travel_mm": 49.99147775179082,
     "n_moving_geoms": 4,
-    "robosuite": "YumiRightGripper"
+    "plus_one_closes": true,
+    "robosuite": "YumiRightGripper",
+    "spread_closed": 0.008403508004896743,
+    "spread_open": 0.05839498575668756
   }
 }

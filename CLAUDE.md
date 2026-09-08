@@ -47,8 +47,12 @@ python -m tpgpt.grasp.server                    # status, and how to start it
   4-12 s per inference. Budget that against MuJoCo's ~1 GB.
 - Assets come from the sibling checkout via `GRASPGENX_GRIPPER_CFG_DIR` and
   `GRASPGENX_PROJECT_ROOT`. Nothing is duplicated into this repo.
-- Only `franka_panda`, `robotiq_2f_85` and `robotiq_2f_140` are loaded by
-  default; other grippers need the server restarted with them.
+- `franka_panda`, `robotiq_2f_85` and `robotiq_2f_140` are what a running
+  server usually has resident, but **any registered gripper works without a
+  restart**: `zmq_server.py:110` loads a sampler *lazily* on the first `infer`
+  request naming it, then caches it. `python -m tpgpt.grasp.server` reports
+  `loaded grippers`, which is what has been asked for so far, not a whitelist.
+  Budget the first call for that hand accordingly.
 - `tests/integration/test_graspgen.py` **skips** when the server is unreachable,
   so the suite still runs offline. Never start the server implicitly from a test.
 
@@ -218,6 +222,44 @@ Each of these cost real debugging time. Full detail in `ROBOTICS_NOTES.md`.
   must stay stretched by `K^-1 D v` (~24 mm at 0.25 m/s) to supply the force.
   Before "fixing" it, read `§2.7`: the lag is transport-invariant here and lands
   the arm where the demonstrating arm actually was, so it may be correct.
+- **`+1` closes every hand in the registry, and the jaw *reading* is what
+  differs.** Robosuite's per-gripper `format_action` sign multipliers look
+  inverted between hands (`[-1, +1]` for the Panda, `[+1, -1]` for the Robotiq
+  2F-140), but they compensate for opposite joint conventions in the two models;
+  measured on all nine, the fingers converge on `+1` and reopen on `-1`,
+  reversibly to 0.1 mm. What is **not** cross-hand valid is
+  `diagnose._jaw_opening`, `sum |qpos|` over the gripper joints: it *falls* on
+  closing for the two prismatic hands and *rises* for the five revolute ones,
+  it is metres on some and radians on others (0.001 vs 4.9 for "shut"), and it
+  has no signal at all on the Rethink (+0.0012) and Yumi (0.0000) whose fingers
+  travel 46 mm and 38 mm. Reading it as a width diagnosed a sign bug that does
+  not exist. Use `diagnose.jaw_closure_probe`, which is 0 open and 1 closed on
+  every hand. `§7.28`.
+- **The same seed does not settle the objects identically across hands.** The
+  placement sampler is seeded the same, but the scene's 60 settle steps then run
+  with a different gripper attached, and the can comes to rest 14.6 mm away
+  between a Panda and a Robotiq 2F-140. Every cross-hand comparison carries that
+  ~15 mm scene difference by construction; a reproducibility check must be keyed
+  per hand or it will flag it as a failure.
+- **Never let a campaign be the first test of its own harness.** Four harness
+  bugs in one thread were each found only *after* a 12-25 minute physics run had
+  produced plausible numbers -- wrist-frame labels, a reused environment, the
+  wrong hand mounted, and the jaw units above -- and all four are answerable in
+  milliseconds from a fresh scene. `diagnose.replay_preconditions` checks
+  `gripper_mounted`, `scene_unstepped`, `object_placement` and
+  `closure_calibrated` on every cell and `diagnose.require` aborts before any
+  physics. Extend it rather than adding checks by hand. `§7.28`.
+- **`measure_frames.main` used to overwrite `gripper_frames.json` wholesale**,
+  wiping `calibrated_depth`, which comes from a much more expensive 13-grasp
+  physics sweep and which `_physics_verified` reads to decide which hands
+  campaigns may use -- and that function **falls back to all measured pairs when
+  the list is empty**, so the Inspire hand, which lifts nothing, would quietly
+  re-enter every campaign. It merges now. Any new per-hand measurement must
+  merge too.
+- **The Inspire hand's fingers travel 0.7 mm.** It does not actuate, which is a
+  simpler explanation for its 24 failed grasp attempts than the registry
+  docstring's "five fingers cannot pinch a can from above". Against 29-90 mm for
+  every other hand.
 - **Two capabilities exist in the policy and are never used at runtime.**
   `prediction.reference` — the regressed attractor position, the paper's own
   Sec. V formulation and the policy's only restoring term — is fitted and never

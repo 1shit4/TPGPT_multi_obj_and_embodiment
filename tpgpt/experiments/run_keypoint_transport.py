@@ -30,6 +30,7 @@ from pathlib import Path
 import numpy as np
 
 from tpgpt.experiments.reshelving_pipeline import record_source_placement
+from tpgpt.grasp.grippers import GRIPPER_PAIRS
 from tpgpt.perception.cameras import object_point_cloud
 from tpgpt.reporting.html import write_manifest
 from tpgpt.sim.keypoints import (
@@ -156,6 +157,7 @@ def build_scene(
     seed: int = 0,
     camera_size: int = 256,
     controller_config: dict | None = None,
+    gripper: str = "panda",
 ):
     """A tabletop-shelf scene with depth and instance segmentation enabled.
 
@@ -165,11 +167,22 @@ def build_scene(
             position-control config from
             :func:`~tpgpt.sim.replay.make_position_controller_config` is what
             makes the scene replayable.
+        gripper: Registry short name of the hand to **mount**, resolved to its
+            robosuite class through :func:`resolve_pair`.
+
+            This has to be set at construction too, and forgetting it is silent:
+            a first version of the multi-hand replay hardcoded a Panda while
+            planning grasps for a Robotiq, so the only thing that actually varied
+            was the tool offset handed to the replay. Every number came out
+            monotonic in that offset and read convincingly as a cross-hand
+            result. It was not one.
     """
+    from tpgpt.grasp.grippers import resolve_pair
     from tpgpt.sim.scenes.tabletop_shelf import TabletopShelf
 
     env = TabletopShelf(
         robots="Panda",
+        gripper_types=resolve_pair(gripper).robosuite,
         objects=objects,
         has_offscreen_renderer=True,
         use_camera_obs=True,
@@ -559,6 +572,176 @@ def summarise(label: str, result: dict) -> dict:
     }
 
 
+#: Hands for the cross-embodiment geometry sweep.
+#:
+#: All nine registered pairs, including the Inspire hand that lifts nothing.
+#: Geometry costs milliseconds and a hand that cannot execute a grasp can still
+#: say whether the *map* holds for it, so there is no reason to exclude any --
+#: and the contrast between "the geometry is fine" and "the hand cannot do it"
+#: is itself the answer to whether the keypoints are the limiting factor.
+SWEEP_GRIPPERS = tuple(GRIPPER_PAIRS)
+
+
+def gripper_sweep(
+    labels,
+    source_placement,
+    objects=ABLATION_OBJECTS,
+    slot: str = "top_middle",
+    variants=VARIANTS,
+    grippers=SWEEP_GRIPPERS,
+    seed: int = 0,
+    height_fraction: float = 0.5,
+    reference_approach=None,
+    controller_config: dict | None = None,
+) -> list[dict]:
+    """Every construction, every object, **every hand** -- scored geometrically.
+
+    This is the cheap half of the cross-embodiment question. The keypoint cube is
+    a *fixed* 20 mm half extent and encodes nothing about the hand: not the jaw
+    aperture, not the fingertip depth, not the finger count. So if the grasp
+    centre is a good enough representation, the map should come out equally well
+    conditioned and equally well aimed for all nine hands, and the only things a
+    hand changes are
+
+    1. **which grasp GraspGen-X returns for it**, since the planner conditions on
+       the hand's swept volume, and
+    2. **the tool offset** the labels are expressed against, which spans 24 to
+       134 mm across the registry.
+
+    Both are inputs to the map rather than parameters of it, which is what makes
+    the prediction falsifiable: a construction that quietly depended on the hand
+    would show up as ``min_det`` or ``aim_map`` moving with the hand.
+
+    A **scene is rebuilt per hand**, because the mounted gripper has to be set at
+    construction (:func:`build_scene`) and because the same seed does not settle
+    the objects identically with a different hand attached -- the can comes to
+    rest 14.6 mm away between a Panda and a Robotiq 2F-140. That difference is
+    real and is carried in the rows as ``object_position`` rather than hidden.
+
+    Alongside the map metrics each row carries what the *hand* brings, so the
+    "we never input jaw width" question can be read straight off the table:
+
+    ``aperture_mm``
+        The hand's published jaw opening, 50 to 125 mm across the registry.
+    ``object_width_mm``
+        The object's extent **along this grasp's own closing axis**, from the
+        target keypoints. Not an axis-aligned extent: a 30 x 100 mm box yawed 45
+        degrees measures 92 x 92 and reads as ungraspable (7.18).
+    ``closing_budget_mm``
+        ``(aperture - object width) / 2``, the room on each side once the jaws
+        meet the object. This is the tolerance the closing-axis aim error has to
+        fit inside, derived per hand and per object rather than assumed.
+    ``tool_offset_mm``
+        ``||contact_offset(hand)||``, the wrist-to-fingertip distance the labels
+        are converted by.
+
+    Grasps come from the **cache** (:mod:`tpgpt.grasp.cache`), keyed on the cloud
+    and the hand, so a re-run compares the same candidate sets. GraspGen-X's
+    planner is an unseeded diffusion model and without the cache this would be
+    comparing random draws, not hands (7.15).
+
+    Returns:
+        Flat JSON-safe rows, one per (hand, object, construction), plus a
+        ``skipped`` or ``failed`` row wherever a cell could not be built -- never
+        a silently missing cell.
+    """
+    from tpgpt.experiments.diagnose import closing_budget
+    from tpgpt.grasp.grasps import contact_offset
+    from tpgpt.grasp.grippers import gripper_geometry, resolve_pair
+
+    rows: list[dict] = []
+    for hand in grippers:
+        pair = resolve_pair(hand)
+        try:
+            aperture = float(gripper_geometry(pair.graspgen).aperture)
+        except Exception:  # pragma: no cover - absent sibling checkout
+            aperture = float("nan")
+        try:
+            offset_mm = float(np.linalg.norm(contact_offset(hand)) * 1000)
+        except Exception:
+            offset_mm = float("nan")
+        env = build_scene(
+            objects=objects, seed=seed, controller_config=controller_config,
+            gripper=hand,
+        )
+        try:
+            obs = env._get_observations()
+            for name in objects:
+                position = np.asarray(env.object_position(name), dtype=float)
+                try:
+                    target, _ = target_placement(
+                        env, name, slot, height_fraction=height_fraction, obs=obs,
+                        grasp_source="graspgen",
+                        reference_approach=reference_approach, gripper=hand,
+                    )
+                except ValueError as exc:
+                    rows.append({
+                        "label": f"{hand} {name}", "gripper": hand,
+                        "object": name, "skipped": str(exc),
+                    })
+                    continue
+                for variant in variants:
+                    label = f"{variant.name} {hand} {name}"
+                    try:
+                        result = transport(
+                            labels, source_placement, target, variant=variant
+                        )
+                        row = summarise(label, result)
+                        width = float(
+                            np.ptp(
+                                np.asarray(result["target_keypoints"], dtype=float)
+                                @ target.grasp.closing
+                            )
+                        ) if "target_keypoints" in result else float("nan")
+                        row["object_width_mm"] = width * 1000
+                        row["closing_budget_mm"] = (
+                            max(0.5 * (aperture - width), 0.0) * 1000
+                            if np.isfinite(width) and np.isfinite(aperture)
+                            else float("nan")
+                        )
+                    except Exception as exc:
+                        row = {"label": label, "variant": variant.name,
+                               "failed": f"{type(exc).__name__}: {exc}"}
+                    row.update(
+                        gripper=hand,
+                        object=name,
+                        robosuite=pair.robosuite,
+                        graspgen=pair.graspgen,
+                        family=pair.robosuite,
+                        aperture_mm=aperture * 1000,
+                        tool_offset_mm=offset_mm,
+                        object_position=position.tolist(),
+                    )
+                    rows.append(row)
+                    print("  " + _gripper_line(row), flush=True)
+        finally:
+            env.close()
+    return rows
+
+
+def _gripper_line(row: dict) -> str:
+    if "failed" in row or "skipped" in row:
+        note = row.get("failed") or row.get("skipped")
+        return (f"{row.get('variant', '-'):20}{row.get('gripper', '?'):11}"
+                f"{row.get('object', '?'):8} {note[:52]}")
+    g = lambda k, d=float("nan"): row.get(k, d)
+    return (
+        f"{row['variant']:20}{row['gripper']:11}{row['object']:8}"
+        f"{g('min_det'):9.3f}{g('aim_map') * 1000:9.1f}"
+        f"{g('orientation_error_deg'):8.1f}{g('tilt_mid_path'):8.1f}"
+        f"{g('keypoint_residual') * 1000:9.4f}"
+        f"{g('aperture_mm'):8.0f}{g('object_width_mm'):8.1f}"
+        f"{g('closing_budget_mm'):9.1f}{g('tool_offset_mm'):8.1f}"
+    )
+
+
+GRIPPER_HEADER = (
+    f"{'variant':20}{'hand':11}{'object':8}{'minDet':>9}{'aimmm':>9}"
+    f"{'orient':>8}{'tiltMid':>8}{'residmm':>9}{'apermm':>8}{'widthmm':>8}"
+    f"{'budgetmm':>9}{'tcpmm':>8}"
+)
+
+
 def tilt_sweep(
     labels,
     source_placement,
@@ -908,9 +1091,144 @@ def main(out_dir: str | Path = "outputs/keypoints", slot: str = "top_middle") ->
         env.close()
 
 
+def main_grippers(
+    out_dir: str | Path = "outputs/keypoints_grippers",
+    slot: str = "top_middle",
+    seed: int = 0,
+    grippers=SWEEP_GRIPPERS,
+    objects=ABLATION_OBJECTS,
+) -> dict:
+    """The cross-embodiment geometry sweep, on its own.
+
+    A separate entry point rather than another block inside :func:`main`,
+    because it rebuilds a scene per hand -- nine scenes against that campaign's
+    one -- and because the question it answers is independent: *does the
+    construction hold across hands*, not *which construction*. Keeping it apart
+    means neither run's cost is charged to the other's question.
+
+    Reported for every (hand, object, construction): the map's validity, its
+    aim, its transported orientation, and -- so the "we never input jaw width"
+    question is answerable -- the hand's published aperture, the object's width
+    along that grasp's own closing axis, and the closing budget those imply.
+    """
+    out_dir = Path(out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    print("recording the source demonstration (reshelving, seed 0)", flush=True)
+    labels, source_placement, demo_ok = record_source_placement(0)
+    if not demo_ok:
+        raise RuntimeError(
+            "the source demonstration failed; transporting it is meaningless"
+        )
+
+    # The labels are the *fingertip* path the keypoints are anchored to, not the
+    # wrist path the demonstration was recorded at. Converting is not optional:
+    # a map is exact only at its keypoints, and the grasp cube's centre *is* the
+    # fingertip point, so warping the wrist path spends that guarantee on the
+    # wrong point and the offset arrives undiminished (7.20).
+    from tpgpt.experiments.pipeline import (
+        SOURCE_GRIPPER,
+        _demonstrated_approach,
+        _to_tool_frame,
+    )
+    from tpgpt.grasp.grasps import contact_offset
+
+    labels = _to_tool_frame(labels, contact_offset(SOURCE_GRIPPER))
+    reference_approach = _demonstrated_approach(labels)
+
+    print(f"\nnine hands, {len(objects)} objects, {len(VARIANTS)} constructions")
+    print(GRIPPER_HEADER)
+    print("-" * len(GRIPPER_HEADER), flush=True)
+    rows = gripper_sweep(
+        labels, source_placement, objects=objects, slot=slot,
+        grippers=grippers, seed=seed, reference_approach=reference_approach,
+    )
+
+    manifest = write_manifest(
+        out_dir,
+        title="Does one keypoint construction hold across nine hands?",
+        description=(
+            "Every keypoint construction transported onto every tabletop "
+            "object, for every registered gripper, scored geometrically -- no "
+            "policy, no rollout. The grasp cube is a fixed 20 mm half extent "
+            "and encodes nothing about the hand, so a construction that holds "
+            "should give the same map validity and aim for all nine. The only "
+            "things a hand changes are which grasp GraspGen-X returns for it "
+            "and the tool offset the labels are expressed against, both of "
+            "which are inputs to the map rather than parameters of it. Each "
+            "row also carries the hand's aperture, the object's width along "
+            "that grasp's closing axis, and the closing budget those imply, "
+            "because no gripper dimension is ever fed to the keypoints."
+        ),
+        settings={
+            "varied": {
+                "gripper": list(grippers),
+                "object": list(objects),
+                "variant": [v.name for v in VARIANTS],
+            },
+            "fixed": {
+                "source": "reshelving seed 0, one demonstration",
+                "slot": slot,
+                "seed": seed,
+                "grasp_height_fraction": 0.5,
+                "grasp_source": (
+                    "graspgen, from tpgpt.grasp.cache -- the planner is an "
+                    "unseeded diffusion model, so without the cache this would "
+                    "compare random draws rather than hands (7.15)"
+                ),
+                "labels": "tool frame, contact_offset(source hand)",
+                "cube_half_extent_m": GRASP_CUBE_HALF_EXTENT,
+                "scene": (
+                    "rebuilt per hand -- the mounted gripper must be set at "
+                    "construction, and the same seed settles the can 14.6 mm "
+                    "differently with a different hand attached, so "
+                    "object_position is carried per row rather than assumed "
+                    "equal"
+                ),
+                "scored": "geometry only -- no rollout, no policy",
+            },
+        },
+        thresholds={
+            "min_determinant": 0.2,
+            "keypoint_residual_max": 1e-5,
+            "note": (
+                "aim_map is ~0 by construction for the cube variants "
+                "(aim_is_pinned) and is not evidence for them; what is "
+                "evidence across hands is whether min_det, the orientation "
+                "error and the closing budget move with the hand."
+            ),
+        },
+        rows=rows,
+    )
+    (out_dir / "rows.json").write_text(json.dumps(rows, indent=2, default=float))
+    print(f"\nwrote:\n  {manifest}\n  {out_dir / 'rows.json'}")
+    return {"rows": rows}
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--out", default="outputs/keypoints")
+    parser.add_argument("--out", default=None)
     parser.add_argument("--slot", default="top_middle")
+    parser.add_argument(
+        "--sweep", choices=("constructions", "grippers"), default="constructions",
+        help=(
+            "'constructions' is the original campaign: six constructions, five "
+            "objects, two grasp heights, the tilt axis and the cube-size axis, "
+            "on one hand. 'grippers' is the cross-embodiment sweep: every "
+            "construction against every object for all nine hands."
+        ),
+    )
+    parser.add_argument(
+        "--grippers", default=None,
+        help="Comma-separated registry short names; defaults to all nine.",
+    )
     args = parser.parse_args()
-    main(args.out, args.slot)
+    if args.sweep == "grippers":
+        main_grippers(
+            args.out or "outputs/keypoints_grippers",
+            args.slot,
+            grippers=tuple(args.grippers.split(",")) if args.grippers
+            else SWEEP_GRIPPERS,
+        )
+    else:
+        main(args.out or "outputs/keypoints", args.slot)

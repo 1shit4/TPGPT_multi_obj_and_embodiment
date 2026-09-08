@@ -205,6 +205,18 @@ def replay_labels(
                 if not all(reachable) else float("nan")
             ),
             "reachable_fraction": float(np.mean(reachable)) if reachable else 0.0,
+            # **Per waypoint, not just aggregated.** A reachable fraction says
+            # how much of a path the arm cannot hold; it cannot say *where*, and
+            # "the arm could not follow this during the carry" is a different
+            # problem from "it could not reach the grasp". Both arrays are in
+            # label order, so an unreachable run is localisable against
+            # ``carry_indices`` -- approach, grasp, lift, transit or insertion.
+            #
+            # Added because a bread replay failed at 28% unreachable with a
+            # 111 mm residual on those poses and the aggregate could not say
+            # which segment it was.
+            "reachable_per_waypoint": np.asarray(reachable, dtype=bool),
+            "tracking_error_per_waypoint": tracking,
             "position_control": True,
             "tool_offset": offset.tolist(),
             "placement_error_xy": float(np.linalg.norm(final[:2])),

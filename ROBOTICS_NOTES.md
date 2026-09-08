@@ -1968,6 +1968,235 @@ negative, that a point mid-segment is on the path, that a late trajectory shows
 no drift, that a deep error does not pollute the closing axis, and that an
 untracked source file is fatal to reproducibility.
 
+### 7.28 The jaw reading was metres on one hand and radians on the next
+
+A multi-gripper replay comparison gave the grasp-pose cube 3 of 4 on a Panda and
+0 of 4 on both a Robotiq 2F-85 and a Robotiq 2F-140, while the *geometry* for all
+three was healthy: `min det(J)` between 0.79 and 0.98, aim 0.0 mm, transported
+gripper orientation within 1.1 degrees, and 86 to 98 percent of the path
+reachable. Something was going wrong in physics that the map could not see.
+
+The number that looked like the explanation was the jaw trace. Recorded per
+waypoint, it read:
+
+| hand | settle steps | jaw min | jaw at lift | held steps | place error |
+|---|---|---|---|---|---|
+| panda | 8 | 0.0430 | 0.0497 | 148 | 20.6 mm |
+| panda | 32 | 0.0010 | 0.0010 | 29 | 382.9 mm |
+| robotiq140 | 8 | 0.1999 | **0.6286** | 6 | 336.1 mm |
+| robotiq140 | 32 | 0.1905 | **1.3789** | 3 | 399.5 mm |
+
+Read as a width, that says the Robotiq's jaws were **wide open at the lift**, and
+opened *further* the longer they were commanded shut. The obvious cause is an
+inverted close command, and robosuite's per-gripper `format_action` appears to
+confirm it: the Panda's is `current_action + [-1, +1] * speed * sign(action)` and
+the Robotiq 2F-140's is `current_action + [+1, -1] * speed * sign(action)` --
+opposite signs on the same `+1`. A grep confirmed nothing in `tpgpt/` normalises
+that, and three sites issue a raw binary `±1` (`sim/replay.py:166`,
+`sim/rollout.py:346`, `controllers/cartesian_impedance.py:261`). The conclusion
+drawn was a pipeline-wide sign bug undermining the project's multi-embodiment
+claim.
+
+**That conclusion was wrong, and it is withdrawn.** Two independent measurements
+say `+1` shuts every hand in the registry.
+
+The first is direct. Mount each hand, hold the arm still, command `-1` then `+1`
+then `-1`, and measure the **spread of the moving gripper geoms along the
+measured closing axis** -- naming-free, so it needs no per-family special case
+and works for three- and five-fingered hands:
+
+| hand | spread at `-1` | at `+1` | reopened | travel | `+1` shuts? |
+|---|---|---|---|---|---|
+| panda | 103.8 mm | 25.6 mm | 103.8 mm | 78.2 mm | yes |
+| robotiq85 | 131.4 | 102.3 | 131.4 | 29.1 | yes |
+| robotiq140 | 165.5 | 110.6 | 165.5 | 54.8 | yes |
+| rethink | 76.8 | 30.8 | 76.8 | 45.9 | yes |
+| xarm | 106.9 | 71.7 | 106.9 | 35.2 | yes |
+| umi | 100.0 | 55.7 | 99.9 | 44.2 | yes |
+| robotiq3f | 165.9 | 76.4 | 165.8 | 89.5 | yes |
+| yumi | 56.9 | 18.5 | 57.1 | 38.3 | yes |
+| inspire | 66.2 | 65.5 | 65.4 | **0.7** | nominally |
+
+Every hand's fingers converge on `+1` and return on `-1`, reversibly to within
+0.1 mm. The differing `format_action` multipliers are not opposite *commands*;
+they are opposite **joint conventions** in the two models, and each hand's
+multiplier compensates for its own. Robosuite's uniform docstring, "-1 => open,
+1 => closed", is correct for all of them.
+
+The second is a cross-check that was already in the repository.
+`grasp/verify.calibrate_depth` sweeps 13 approach depths per hand, drives each
+one with `gripper=1.0`, and only stores an offset when the reference can rises
+more than `LIFT_THRESHOLD = 50 mm`. `gripper_frames.json` carries a
+`calibrated_depth` for eight of the nine hands, the Robotiq 2F-140's among them.
+It had already picked the can up on `+1`, months before.
+
+**What was actually broken was the instrument.** `diagnose._jaw_opening` returns
+`sum |qpos|` over `gripper.joints`. Its own docstring said "Not a width in metres
+-- hands differ", and it was read as one anyway. Measured fully open to fully
+closed:
+
+| hand | joints | type | `sum abs(qpos)` open | closed | direction on close |
+|---|---|---|---|---|---|
+| panda | 2 | prismatic | 0.0794 | 0.0010 | **decreases** |
+| umi | 2 | prismatic | 0.0678 | 0.0230 | **decreases** |
+| robotiq85 | 6 | revolute | 0.9896 | 1.8056 | increases |
+| robotiq140 | 6 | revolute | 0.2352 | 1.9881 | increases |
+| xarm | 6 | revolute | 0.2143 | 4.8980 | increases |
+| robotiq3f | 11 | revolute | 1.6764 | 7.1434 | increases |
+| inspire | 12 | revolute | 5.3075 | 5.8104 | increases |
+| rethink | 2 | prismatic | 0.0225 | 0.0237 | **+0.0012: none** |
+| yumi | 2 | prismatic | 0.0250 | 0.0250 | **0.0000: none** |
+
+Three separate defects, each enough on its own:
+
+1. **The sign is hand-dependent.** A prismatic finger pair travels toward each
+   other, so their positions shrink toward zero and `sum |qpos|` *falls* on
+   closing. A revolute linkage folds inward on a *rising* angle, so it *climbs*.
+   Two of nine hands go one way and five the other. The Robotiq's 0.63 to 1.38
+   was the hand closing **harder**, not opening -- and "harder with more settle
+   steps" is exactly what a linkage under a sustained command does.
+2. **The units are hand-dependent.** Metres on the prismatic hands, radians on
+   the revolute ones. "Shut" is 0.0010 on a Panda and 4.8980 on an XArm, a
+   factor of 4900, so no threshold and no cross-hand comparison is possible.
+   The Panda's 0.043 and the Robotiq's 0.199 were never comparable quantities.
+3. **For two hands there is no signal at all.** The Rethink's joints move
+   0.0012 and the Yumi's move 0.0000 while their fingers travel 45.9 mm and
+   38.3 mm. Whatever `gripper.joints` names for those models, it is not the
+   actuated pair. A hand whose jaw channel is a constant would have been read as
+   never closing, on any threshold.
+
+So the physics failure on the two Robotiq hands is **real and still
+unexplained**, and the sign hypothesis was a wrong answer built on a broken
+ruler. What the table above actually licenses is one narrow statement: the
+Robotiq 2F-140 closed. Why it did not then complete the task is open.
+
+#### The fix
+
+`diagnose.jaw_closure_probe(env, gripper)` returns a closure fraction where
+**0 is fully open and 1 is fully closed on air, for every hand**, so one
+threshold means one thing across the registry. It is built from geom
+displacement rather than joint positions, for the reasons above: displacement
+needs no joint names, has one sign by construction, and is in metres everywhere.
+
+The calibration -- which geoms are fingers, the closing axis in `grip_site`
+coordinates, and the spread at both extremes -- is measured once per hand by
+`grasp/measure_frames.py` and cached in `gripper_frames.json` alongside
+`alignment` and `contact_offset`. At run time the live `grip_site` rotation is
+applied before projecting, so the reading holds with the wrist at any
+orientation; the calibration is taken with the arm stationary and reading along a
+fixed world axis instead would make a 90-degree wrist roll report the jaws shut.
+
+Values outside `[0, 1]` are **not** clipped. Above 1 means the fingers were
+pressed past their free-air closed pose, which is what squeezing an object looks
+like, so `closure_max > 1` is positive evidence of a grasp; below 0 means forced
+wider than open. Clipping would erase the one signal that separates "holding" from
+"shut on nothing". An uncalibrated hand returns `nan`, never 0.0 -- a zero would
+read as "wide open throughout", indistinguishable from a hand that never closed,
+which is the recurring lesson of 7.13.
+
+`_jaw_opening` is kept, because it needs no calibration and cheaply shows that
+*something* moved on a hand already known to work, but its docstring now states
+all three defects and says not to threshold it.
+
+Two incidental fixes came out of the same reading:
+
+- **`measure_frames.main` overwrote `gripper_frames.json` wholesale.**
+  `measure_frame` does not produce `calibrated_depth`, which comes from the
+  expensive 13-grasp physics sweep, so re-running the frame measurement silently
+  emptied it. `grippers._physics_verified` reads that field to decide which hands
+  campaigns may use, and **falls back to all measured pairs when the list comes
+  back empty** -- so the Inspire hand, which lifts nothing, would have quietly
+  re-entered every campaign. `main` now merges.
+- **The Inspire hand's fingers travel 0.7 mm.** The registry docstring explains
+  its 24 failed grasp attempts as "a five-fingered hand driven by one open/close
+  command does not pinch a can from above". The simpler explanation, measured, is
+  that it does not actuate: 0.7 mm against 29 to 90 mm for every other hand. It
+  is not a grasp-strategy failure, it is a model that barely moves.
+
+#### Two back-end facts checked at the same time, both good
+
+While the sign hypothesis was being tested, two other assumptions behind a
+multi-hand campaign were checked. Both hold, and one corrects the documentation.
+
+**Any registered gripper works without restarting the server.** `CLAUDE.md` said
+only `franka_panda`, `robotiq_2f_85` and `robotiq_2f_140` were available and that
+"other grippers need the server restarted with them". That is wrong:
+`GraspGenX/graspgenx/serving/zmq_server.py:110` loads a sampler **lazily** on the
+first `infer` request naming a gripper. Asked for five it had never served, on the
+same 1500-point synthetic cylinder cloud, it returned a full candidate set for
+each:
+
+| gripper | grasps returned | wall time |
+|---|---|---|
+| `sawyer_hand` | 100 | 25.4 s |
+| `xarm_hand` | 100 | 27.7 s |
+| `franka_umi` | 100 | 30.0 s |
+| `abb_yumi` | 100 | 30.5 s |
+| `robotiq_3f` | 100 | 71.5 s |
+
+Against the usual 4-12 s per inference, so the first call for a hand costs
+something, but no restart and no re-plan of the campaign. `python -m
+tpgpt.grasp.server` reports `loaded grippers`, and that is a record of what has
+been *asked for*, not a whitelist.
+
+**And the server honours `gripper_name` rather than falling back to its
+default.** Worth checking, because `loaded_grippers` did **not** grow after the
+five calls above, which is exactly what a silent fallback to `franka_panda` would
+look like -- and a silent fallback would have made a nine-hand campaign into one
+hand run nine times, which is the same failure as the `build_scene` hardcode.
+
+The test is geometric. A grasp pose is anchored at the gripper *base*, which sits
+`tcp_depth` back from the fingertips along the approach, so a deeper hand's base
+poses must sit systematically further from the object. Same cloud, 100 candidates
+each, mean distance from the base pose to the cloud centroid:
+
+| hand | published `tcp_depth` | base to centroid | sd |
+|---|---|---|---|
+| panda | 103.4 mm | 135.1 mm | 17.9 |
+| yumi | 125.0 mm | 153.2 mm | 18.6 |
+| robotiq85 | 136.0 mm | 157.2 mm | 17.5 |
+| robotiq3f | 190.0 mm | 189.8 mm | 15.8 |
+| robotiq140 | 195.0 mm | 205.9 mm | 17.5 |
+
+The standoff tracks the published depth monotonically across a 92 mm spread, at a
+per-hand spread of under 19 mm. A fallback would have given five statistically
+identical rows. The gripper is honoured.
+
+#### Why this took a campaign to find, and what now prevents it
+
+This is the fourth harness bug in this thread found *after* a 12 to 25 minute
+physics campaign had produced plausible numbers. The others: labels replayed in
+the wrist frame instead of the tool frame (the cube held the object for 0 to 1 of
+119 steps); no `env.reset()` between replays, so ordering decided the result
+(placement errors of 354, 698 and 1170 mm, 0 percent reachable on the last
+object); and `build_scene` hardcoding `robots="Panda"` with no `gripper_types`,
+so a three-hand comparison ran a Panda three times and nothing in the numbers
+looked wrong.
+
+Every one of those four is answerable in **milliseconds** from a freshly built
+environment. The cost was paid because the campaign was the first test of the
+harness, which entangles "is the harness right" with "what is the answer" and
+pays physics time to discover a one-line bug.
+
+`diagnose.replay_preconditions` now checks four statements on **every** cell
+before any physics runs, and `diagnose.require` aborts the campaign on a failure,
+printing every check and what it measured -- passed ones included, because a
+green check that reports nothing cannot be distinguished from a check that did
+not run, which is precisely the 7.19 failure:
+
+| check | catches |
+|---|---|
+| `gripper_mounted` | the hand on the arm is not the one requested |
+| `scene_unstepped` | `sim.data.time != 0`, so this environment has already been driven |
+| `object_placement` | the object is not where the same seed put it on the first cell |
+| `closure_calibrated` | the hand has no measured closure calibration, or `+1` is not known to shut it |
+
+24 unit tests cover the two new instruments, asserting the properties the old
+measure failed: one sign across a closing sweep, the same fraction at two hands'
+different midpoints, a squeeze reported above 1 rather than clipped, `nan` rather
+than 0.0 for an uncalibrated hand, an unchanged reading under a 90-degree wrist
+roll, and each of the four preconditions catching its own historical bug.
+
 ## 8. Open items
 
 > **Read 7.26 first.** Every end-to-end campaign has been deleted, so the items

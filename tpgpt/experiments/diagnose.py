@@ -30,6 +30,8 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
+from tpgpt.sim.keypoints import carry_indices
+
 #: The hand must be within this of the commanded grasp point when the jaws move.
 #:
 #: The impedance controller's own steady-state lag is 20-45 mm (``ROBOTICS_NOTES``
@@ -149,14 +151,180 @@ class Diagnosis:
         return f"failed at '{failure.name}': {failure.detail}"
 
 
-def object_probe(env, object_name: str):
+@dataclass(frozen=True)
+class Precondition:
+    """One checkable statement about a run's setup.
+
+    Attributes:
+        name: Short identifier, used in the abort message.
+        ok: Whether it holds.
+        detail: What was measured, always -- including when it passed, so a
+            green check still says what it saw. A check that reports only
+            "ok" cannot be distinguished from a check that did not run, and
+            7.19 is about exactly that: a diagnostic whose instrument was
+            returning zeros was recorded as having *disproved* a hypothesis.
+    """
+
+    name: str
+    ok: bool
+    detail: str
+
+
+def replay_preconditions(
+    env, gripper: str, object_name: str, object_reference=None
+) -> list[Precondition]:
+    """Assert a replay cell's setup before spending physics on it.
+
+    Every check here corresponds to a bug that was found *after* a 12 to 25
+    minute campaign had already run, and every one of them is answerable in
+    milliseconds from a freshly built environment. Running them on the first
+    cell and aborting turns "discover the harness was wrong once the results
+    look strange" into "refuse to start".
+
+    The four:
+
+    ``gripper_mounted``
+        The hand actually on the arm is the one asked for. ``build_scene``
+        hardcoded ``robots="Panda"`` and passed no ``gripper_types``, so a
+        three-hand comparison ran a Panda three times and reported it as a
+        cross-embodiment result. Nothing in the numbers looked wrong.
+    ``scene_unstepped``
+        The only stepping that has happened is the scene's own object settling,
+        so this environment has not been *driven* yet. A replay leaves the
+        object displaced and the arm parked at the end of the path; reusing one
+        environment made the *ordering* decide the result, at placement errors
+        of 354, 698 and 1170 mm and 0% reachability on the last object.
+
+        Compared against ``SETTLE_STEPS * timestep`` rather than against zero,
+        because ``TabletopShelf._reset_internal`` legitimately runs 60 sim steps
+        so the dropped meshes come to rest -- 0.120 s at a 2 ms timestep. A
+        cloud captured before they settle describes a pose the object is no
+        longer in. Anything past that budget is a control step, which is what
+        this check exists to refuse.
+    ``object_placement``
+        The object sits where the same seed put it last time, **for this hand**.
+        Catches an unseeded sampler, which would silently turn a comparison of
+        constructions into a comparison of scenes.
+
+        Keyed per hand, not shared across them, because it is not shared: the
+        same seed with a different gripper mounted settles the can 14.6 mm away
+        (``[-0.1255, -0.0683, 0.8399]`` on a Panda against
+        ``[-0.1139, -0.0777, 0.8426]`` on a Robotiq 2F-140). The placement
+        sampler is seeded identically; the 60 settle steps then run with a
+        different hand in the scene, and the meshes come to rest somewhere
+        slightly different. So a cross-hand comparison carries a ~15 mm scene
+        difference by construction, and this check must not report that as a
+        reproducibility failure.
+    ``closure_calibrated``
+        This hand has a measured closure calibration and ``+1`` is known to
+        shut it. Without this the jaw trace is uninterpretable, which is how a
+        Robotiq 2F-140 closing harder was read as its jaws flying open
+        (7.28).
+
+    Args:
+        env: A freshly built, unstepped environment.
+        gripper: Registry short name of the hand that was requested.
+        object_name: Object this cell manipulates.
+        object_reference: The object position recorded on the first cell, or
+            ``None`` on the first cell itself.
+
+    Returns:
+        One :class:`Precondition` per check, in order. Use :func:`require` to
+        turn a failure into an abort.
+    """
+    from tpgpt.grasp.grippers import gripper_frame, resolve_pair
+
+    checks: list[Precondition] = []
+
+    expected = resolve_pair(gripper).robosuite
+    mounted = env.robots[0].gripper
+    mounted = mounted["right"] if isinstance(mounted, dict) else mounted
+    actual = type(mounted).__name__
+    checks.append(Precondition(
+        "gripper_mounted",
+        actual == expected,
+        f"requested {gripper!r} -> {expected}; mounted {actual}",
+    ))
+
+    elapsed = float(env.sim.data.time)
+    settle = float(
+        getattr(env, "SETTLE_STEPS", 0) * float(env.sim.model.opt.timestep)
+    )
+    checks.append(Precondition(
+        "scene_unstepped",
+        elapsed <= settle + 1e-9,
+        f"sim.data.time = {elapsed:.4f} s against a settle budget of "
+        f"{settle:.4f} s ({getattr(env, 'SETTLE_STEPS', 0)} steps)",
+    ))
+
+    position = np.asarray(env.object_position(object_name), dtype=float)
+    if object_reference is None:
+        checks.append(Precondition(
+            "object_placement", True,
+            f"{object_name} at {np.round(position, 4).tolist()} (reference for later cells)",
+        ))
+    else:
+        moved = float(np.linalg.norm(position - np.asarray(object_reference, float)))
+        checks.append(Precondition(
+            "object_placement", moved < 1e-6,
+            f"{object_name} moved {moved * 1000:.3f} mm from the first cell's placement",
+        ))
+
+    frame = gripper_frame(gripper) or {}
+    span = float(frame.get("spread_open", 0.0)) - float(frame.get("spread_closed", 0.0))
+    shuts = bool(frame.get("plus_one_closes", False))
+    reading = jaw_closure_probe(env, gripper)()
+    checks.append(Precondition(
+        "closure_calibrated",
+        span > 1e-6 and shuts and np.isfinite(reading),
+        f"travel {span * 1000:.1f} mm, +1 shuts = {shuts}, "
+        f"reads {reading:.3f} at reset",
+    ))
+    return checks
+
+
+def require(checks: list[Precondition], context: str = "") -> None:
+    """Raise unless every precondition holds.
+
+    Args:
+        checks: Output of :func:`replay_preconditions`.
+        context: Named in the message, e.g. the cell being started.
+
+    Raises:
+        RuntimeError: listing every check and what it measured, passed ones
+            included, so the abort message is a complete picture of the setup
+            rather than a single line about the first thing that broke.
+    """
+    if all(check.ok for check in checks):
+        return
+    lines = [
+        f"  [{'ok ' if check.ok else 'FAIL'}] {check.name}: {check.detail}"
+        for check in checks
+    ]
+    raise RuntimeError(
+        f"preconditions failed{' for ' + context if context else ''}; "
+        "refusing to run:\n" + "\n".join(lines)
+    )
+
+
+def object_probe(env, object_name: str, gripper: str | None = None):
     """A ``probe`` for :func:`~tpgpt.sim.rollout.rollout_policy`.
 
     Records what the *object* is doing, which is the half of the story the
     end-effector trace cannot tell. Kept to scalars and one 3-vector so a
     thousand-step rollout costs a few tens of kilobytes.
+
+    Args:
+        env: The environment being run.
+        object_name: Object to watch.
+        gripper: Registry short name of the mounted hand. When given, the trace
+            also carries ``closure``, a cross-hand reading of how far the jaws
+            have shut (:func:`jaw_closure_probe`). Without it only ``jaw`` is
+            recorded, which is **hand-local** and must not be compared across
+            embodiments -- see :func:`_jaw_opening`. Optional so single-hand
+            callers keep working, but any multi-hand comparison must pass it.
     """
-    from tpgpt.grasp.grippers import resolve_pair  # noqa: F401  (kept for symmetry)
+    closure = jaw_closure_probe(env, gripper) if gripper else None
 
     def probe(env_) -> dict:
         position = env_.object_position(object_name)
@@ -167,6 +335,8 @@ def object_probe(env, object_name: str):
             "jaw": float(_jaw_opening(env_)),
             "held": float(_gripper_touches(env_, object_name)),
         }
+        if closure is not None:
+            record["closure"] = float(closure())
         # The hand's *measured* orientation. Where the fingertips are is the
         # wrist plus a hand-specific offset rotated into the world, so using the
         # planned rotation instead of the real one mis-states the fingertip
@@ -195,10 +365,25 @@ def _eef_rotation(env) -> np.ndarray:
 
 
 def _jaw_opening(env) -> float:
-    """Sum of the gripper's finger joint positions.
+    """Sum of the gripper's finger joint positions. **Hand-local only.**
 
-    Not a width in metres -- hands differ -- but a monotone stand-in for one,
-    which is all that is needed to see the jaws move.
+    Kept because it needs no calibration and is a cheap way to see that
+    *something* moved on a hand already known to work. It is **not** comparable
+    across hands and must never be read as a width or thresholded:
+
+    * the sign flips -- closing *lowers* it on the Panda and UMI (prismatic
+      fingers travelling toward each other) and *raises* it on the five
+      revolute hands (linkages folding inward on a rising angle);
+    * the units differ -- metres on the prismatic hands, radians on the
+      revolute ones, so "shut" is 0.001 on a Panda and 4.9 on an XArm;
+    * for the Rethink and Yumi hands the joints named in ``gripper.joints``
+      move 0.0012 and 0.0000 while the fingers travel 45.9 mm and 38.3 mm, so
+      there is no signal at all.
+
+    Use :func:`jaw_closure_probe` for anything cross-hand. Reading this number
+    as a width is what misattributed the first multi-gripper comparison: a
+    Robotiq 2F-140 closing harder, 0.63 -> 1.38 rad, was read as its jaws
+    flying open. ROBOTICS_NOTES.md section 7.28.
     """
     try:
         gripper = env.robots[0].gripper
@@ -209,6 +394,70 @@ def _jaw_opening(env) -> float:
         ]])))
     except Exception:  # pragma: no cover - embodiment without named joints
         return float("nan")
+
+
+def jaw_closure_probe(env, gripper: str):
+    """A cross-hand reading of how far the jaws have shut, in ``[0, 1]``.
+
+    ``0`` is fully open and ``1`` is fully closed on air, for every hand, so one
+    threshold means the same thing on a Panda and on a Robotiq 2F-140. Built
+    from **geom displacement** rather than joint positions, for the reasons in
+    :func:`_jaw_opening`: displacement needs no joint names, has one sign by
+    construction, and is in metres on every hand.
+
+    The calibration -- which geoms are fingers, the closing axis, and the spread
+    at both extremes -- is measured once per hand by
+    :mod:`tpgpt.grasp.measure_frames` and cached in ``gripper_frames.json``.
+    Here the current spread is projected onto the *live* ``grip_site`` closing
+    axis, so the reading is valid with the wrist at any orientation, unlike the
+    stationary-arm measurement it is calibrated against.
+
+    Values slightly outside ``[0, 1]`` are **not** clipped: above 1 means the
+    fingers are squeezed past their free-air closed pose, which happens when
+    they are pressed onto an object, and below 0 means forced wider than the
+    open pose. Both are informative, and clipping would hide the squeeze that
+    distinguishes "holding" from "shut on nothing".
+
+    Args:
+        env: A constructed robosuite environment.
+        gripper: Registry short name, e.g. ``"robotiq140"``. Needed because the
+            calibration is per hand and there is no way to recover it from the
+            environment alone.
+
+    Returns:
+        A zero-argument callable returning the closure fraction, or ``nan``
+        when this hand has no calibration -- never a plausible default. An
+        uncalibrated hand reading ``0.0`` would say "wide open" forever, which
+        is exactly the failure mode that
+        :func:`tpgpt.grasp.grippers.contact_offset` was changed to refuse.
+    """
+    from tpgpt.grasp.grippers import gripper_frame
+
+    frame = gripper_frame(gripper) or {}
+    names = frame.get("finger_geoms")
+    closing = frame.get("closing_in_site")
+    span = float(frame.get("spread_open", 0.0)) - float(frame.get("spread_closed", 0.0))
+    if not names or closing is None or span <= 1e-6:
+        return lambda: float("nan")
+
+    model = env.sim.model
+    ids = [model.geom_name2id(n) for n in names if n in model.geom_names]
+    grip = env.robots[0].gripper
+    grip = grip["right"] if isinstance(grip, dict) else grip
+    site = model.site_name2id(grip.important_sites["grip_site"])
+    closing = np.asarray(closing, dtype=float)
+    spread_open = float(frame["spread_open"])
+    if len(ids) < 2:
+        return lambda: float("nan")
+
+    def closure() -> float:
+        data = env.sim.data
+        axis = np.array(data.site_xmat[site]).reshape(3, 3) @ closing
+        projected = np.asarray(data.geom_xpos)[ids] @ axis
+        spread = float(projected.max() - projected.min())
+        return (spread_open - spread) / span
+
+    return closure
 
 
 def _gripper_touches(env, object_name: str) -> bool:
@@ -608,6 +857,71 @@ def attractor_drift(rollout, transported) -> dict:
         "drift_at_step": stats["argmax"],
         "drift_frechet": frechet_distance(attractors, path),
     }
+
+
+def unreachable_segments(replay, labels, window: int = 12) -> dict:
+    """Which *part* of a path the arm could not hold, not just how much of it.
+
+    A reachable fraction is an aggregate: it says a quarter of a trajectory is
+    unreachable and cannot say whether that quarter is the descent onto the
+    object, the lift, the transit or the insertion. Those are different problems
+    with different fixes -- an unreachable grasp is a grasp-selection failure, an
+    unreachable transit is a path-shape failure -- and 7.25 measured the aggregate
+    version of this while leaving the location open.
+
+    Segments are cut from the demonstration's own gripper channel rather than by
+    fraction, so they mean the same thing on trajectories of different lengths:
+
+    * ``approach``  -- start until ``window`` labels before the jaws close
+    * ``grasp``     -- the ``window`` labels either side of closing
+    * ``carry``     -- between the grasp and the release windows
+    * ``place``     -- the ``window`` labels either side of opening
+    * ``retreat``   -- after the release window
+
+    Args:
+        replay: A :class:`~tpgpt.sim.replay.ReplayResult` carrying
+            ``metadata["reachable_per_waypoint"]``.
+        labels: The label set that was replayed, for its gripper channel.
+        window: Half-width of the grasp and place windows, in labels.
+
+    Returns:
+        ``{"<segment>_unreachable": fraction, "<segment>_track_max": metres}``
+        per segment, plus ``"worst_segment"``. Empty when the per-waypoint trace
+        is missing -- never a plausible-looking zero.
+    """
+    meta = getattr(replay, "metadata", None) or {}
+    reachable = meta.get("reachable_per_waypoint")
+    tracking = meta.get("tracking_error_per_waypoint")
+    if reachable is None or tracking is None or not len(reachable):
+        return {}
+    reachable = np.asarray(reachable, dtype=bool)
+    tracking = np.asarray(tracking, dtype=float)
+    n = len(reachable)
+    try:
+        close, release = carry_indices(labels)
+    except Exception:  # no gripper channel: fall back to thirds
+        close, release = n // 3, 2 * n // 3
+
+    bounds = {
+        "approach": (0, max(0, close - window)),
+        "grasp": (max(0, close - window), min(n, close + window)),
+        "carry": (min(n, close + window), max(0, release - window)),
+        "place": (max(0, release - window), min(n, release + window)),
+        "retreat": (min(n, release + window), n),
+    }
+    out: dict = {}
+    worst, worst_share = None, -1.0
+    for name, (lo, hi) in bounds.items():
+        lo, hi = int(np.clip(lo, 0, n)), int(np.clip(hi, 0, n))
+        if hi <= lo:
+            continue
+        share = float(1.0 - reachable[lo:hi].mean())
+        out[f"{name}_unreachable"] = share
+        out[f"{name}_track_max"] = float(tracking[lo:hi].max())
+        if share > worst_share:
+            worst, worst_share = name, share
+    out["worst_segment"] = worst
+    return out
 
 
 def grasp_slip(rollout, positions=None) -> dict:
