@@ -21,6 +21,8 @@ from __future__ import annotations
 
 import xml.etree.ElementTree as ET
 
+import warnings
+
 import numpy as np
 from robosuite.environments.manipulation.manipulation_env import ManipulationEnv
 from robosuite.models.arenas import TableArena
@@ -360,23 +362,308 @@ class TabletopShelf(ManipulationEnv):
             obj.name: self.sim.model.body_name2id(obj.root_body) for obj in self.objects
         }
 
-    #: Simulation steps run after placement so objects come to rest.
+    #: Minimum simulation steps run after placement so objects come to rest.
     #:
     #: Mesh objects are dropped from a small height and settle by up to 3 cm.
     #: A point cloud captured before they settle describes a pose the object is
     #: no longer in, which would silently corrupt every grasp derived from it.
     SETTLE_STEPS = 60
 
+    #: Hard cap on settling, in simulation steps. 2000 steps is 4 s at a 2 ms
+    #: timestep -- four times the slowest case measured, so it is a guard against
+    #: a never-resting scene rather than a working limit.
+    MAX_SETTLE_STEPS = 2000
+
+    #: An object counts as still when it moves less than this, in metres, over
+    #: :data:`SETTLE_WINDOW` steps.
+    #:
+    #: **Displacement, not velocity.** Velocity is the obvious criterion and it
+    #: does not work: an object resting on the table carries 8 to 23 mm/s and
+    #: 0.18 to 0.65 rad/s of solver jitter indefinitely, oscillating in sign, so
+    #: it never falls below any threshold tight enough to be meaningful -- while
+    #: the object's actual position does not change by 0.1 mm over a second.
+    #: Asking whether it *went anywhere* sidesteps the jitter entirely.
+    SETTLE_TOLERANCE = 5e-4
+
+    #: Steps over which that displacement is measured.
+    SETTLE_WINDOW = 50
+
+    #: Consecutive still windows required before the scene counts as settled.
+    #:
+    #: **Momentarily still is not stable.** With a single window, the UMI
+    #: scene's cereal box passed at 150 steps and then toppled 63.8 mm on its
+    #: own -- a tall box balanced on an edge pauses before it tips, and one
+    #: window cannot tell that pause from rest. Requiring the stillness to
+    #: persist for 4 windows (200 steps) means a box that is about to go has to
+    #: hold station for a fifth of a second first, which a tipping box does not.
+    SETTLE_CONFIRMATIONS = 4
+
+    #: Where every arm's **fingertips** start, in world coordinates.
+    #:
+    #: **The same point for every hand, not the same joint configuration.** A
+    #: shared joint configuration puts a 97 mm-deep Panda hand and a 270 mm-deep
+    #: Robotiq 2F-140 in completely different places, which is what made the
+    #: scene depend on the gripper. Solving IK per hand for a shared *fingertip*
+    #: pose is what actually makes the start position identical, and the
+    #: fingertip is the right point because the transported labels are a
+    #: fingertip path (7.20).
+    #:
+    #: Chosen above and behind the sampling region so that no hand overlaps an
+    #: object at reset. The old rest pose sat *inside* it: measured
+    #: interpenetration at placement was 4.85 mm (yumi), 12.85 (robotiq85),
+    #: 20.64 (xarm) and 26.77 (robotiq140), and MuJoCo ejects an object it finds
+    #: inside a body, which is what scattered the scene differently for every
+    #: hand. Section 7.32.
+    #:
+    #: **Eight of the nine registered hands reach this, and every other point
+    #: tried.** Swept over 48 candidates -- x in -0.05 to -0.20, y in -0.05 to
+    #: 0.05, z in 1.05 to 1.20 -- the panda, yumi, xarm, robotiq85, robotiq140,
+    #: rethink, robotiq3f and inspire each reached **48 of 48**. The **UMI
+    #: reached 0 of 48**: its 117.2 mm contact offset, the registry's only one
+    #: with a large lateral component, puts the wrist target outside the arm's
+    #: envelope everywhere in that volume. That is the same limit that made 8 of
+    #: its 8 Tier 2 paths unreachable, so it is an embodiment limit rather than a
+    #: bad choice of point, and the UMI is excluded from cross-gripper campaigns
+    #: on this measurement rather than by omission.
+    HOME_TCP = np.array([-0.10, 0.0, 1.15])
+
+    #: Orientation the hand starts in: approach straight down, jaws along y.
+    HOME_ROTATION = np.array([[1.0, 0.0, 0.0],
+                              [0.0, -1.0, 0.0],
+                              [0.0, 0.0, -1.0]])
+
+    def _gripper_short_name(self):
+        """Registry short name of the mounted hand, or ``None``."""
+        try:
+            from tpgpt.grasp.grippers import resolve_pair
+            gripper = self.robots[0].gripper
+            gripper = gripper["right"] if isinstance(gripper, dict) else gripper
+            return resolve_pair(type(gripper).__name__)
+        except Exception:  # pragma: no cover - an unregistered hand
+            return None
+
+    def _move_arm_home(self):
+        """Put the fingertips at :data:`HOME_TCP`, whatever hand is mounted."""
+        from tpgpt.grasp.grasps import contact_offset
+        from tpgpt.sim.kinematics import solve_ik
+
+        pair = self._gripper_short_name()
+        if pair is None:
+            return
+        try:
+            offset = contact_offset(pair)
+        except Exception:  # pragma: no cover - an unmeasured hand
+            return
+        # ``solve_ik`` targets the grip_site, so step back from the fingertips
+        # by this hand's own contact offset -- the same conversion the replay
+        # does, and the reason every hand lands with its *fingertips* together.
+        wrist = self.HOME_TCP - self.HOME_ROTATION @ offset
+        result = solve_ik(self, wrist, self.HOME_ROTATION, arm="right")
+        controller = self.robots[0].composite_controller.part_controllers["right"]
+        index = np.asarray(controller.qpos_index)
+        self.sim.data.qpos[index] = np.asarray(result.qpos, dtype=float)
+        self.sim.data.qvel[np.asarray(controller.qvel_index)] = 0.0
+        self.sim.forward()
+        self.home_reachable = bool(result.reachable)
+
+    def _hold_arm(self):
+        """Cancel gravity on the arm so it does not sag while objects settle.
+
+        The settle loop calls ``sim.step()`` directly -- raw physics, no
+        controller -- so the arm is unactuated and falls. It falls *differently*
+        for each hand, because a Robotiq 2F-140 is much heavier than a Panda
+        hand, which is why the fingertips ended up 200 mm apart across grippers
+        even after being placed at a common point. Applying the bias force holds
+        the configuration without any controller.
+
+        **Only the arm's degrees of freedom.** A first version wrote
+        ``qfrc_applied[:] = qfrc_bias`` across the whole model, which cancels
+        gravity on the *objects* as well: they hung at their placement heights
+        and never settled at all, while the scene reported itself perfectly
+        reproducible and perfectly upright precisely because nothing had moved.
+        A settle that freezes what it is meant to settle looks exactly like a
+        settle that works.
+        """
+        data = self.sim.data
+        data.qfrc_applied[:] = 0.0
+        try:
+            controller = self.robots[0].composite_controller.part_controllers["right"]
+            dofs = np.asarray(controller.qvel_index)
+        except Exception:  # pragma: no cover - an embodiment without that arm
+            return
+        data.qfrc_applied[dofs] = data.qfrc_bias[dofs]
+
+    #: Gap left between an object's lowest point and the table when placing it.
+    #:
+    #: One millimetre, enough that the solver sees a clean approaching contact
+    #: rather than an initial interpenetration, and small enough that the object
+    #: does not fall far enough to bounce.
+    PLACEMENT_CLEARANCE = 1e-3
+
+    #: Placement attempts before giving up on a robot-free arrangement.
+    PLACEMENT_ATTEMPTS = 20
+
+    def _geom_vertices(self, body_id):
+        """World-frame corners of every geom's bounding box on a body.
+
+        From ``model.geom_aabb``, MuJoCo's own local-frame bounding box, rather
+        than from the mesh vertex array. A first version read ``mesh_vert``
+        directly and was wrong: MuJoCo keeps each mesh's own frame in
+        ``mesh_pos`` / ``mesh_quat``, and the cereal's and the bread's are a
+        90-degree rotation, so transforming the raw vertices by ``geom_xmat``
+        alone put their extents on the wrong axes. Objects were then seated
+        through the table and fell to the floor -- the cereal ended at 15 mm.
+
+        The box is conservative for a tilted object, but these are placed with a
+        yaw-only rotation, for which its z extent is exact.
+        """
+        model, data = self.sim.model, self.sim.data
+        out = []
+        for g in range(model.ngeom):
+            if model.geom_bodyid[g] != body_id:
+                continue
+            centre, half = np.array(model.geom_aabb[g][:3]), np.array(model.geom_aabb[g][3:])
+            corners = np.array([[x, y, z] for x in (-half[0], half[0])
+                                for y in (-half[1], half[1])
+                                for z in (-half[2], half[2])]) + centre
+            rot = np.array(data.geom_xmat[g]).reshape(3, 3)
+            out.append(corners @ rot.T + np.array(data.geom_xpos[g]))
+        return np.vstack(out) if out else np.zeros((0, 3))
+
+    def _seat_objects(self):
+        """Lower every object until it just rests on the table.
+
+        **The sampler drops them, and it drops them much further than it says.**
+        ``z_offset`` is 2 mm, but robosuite places an object at
+        ``table_z + z_offset + |bottom_offset|`` and each of these objects
+        declares a ``bottom_offset`` about 25 mm larger than its true half
+        height. Measured: the cereal is placed at 902.0 mm and comes to rest at
+        874.6, the milk at 887.0 resting at 860.9, the can 862.0 -> 840.1, the
+        bread 847.0 -> 822.2 -- a **22 to 27 mm** drop in every case, landing at
+        roughly 0.7 m/s.
+
+        That is more than enough to bounce a 150 mm cereal box onto its side,
+        which is exactly what happened: with the old fixed 60-step settle the
+        scene handed the box over *mid-topple*, so the cloud, the grasp planned
+        on it and the keypoint box all described a pose the object was leaving.
+        Section 7.32.
+
+        Seating them from their own geometry removes the impact entirely, so
+        they stay in the upright pose the sampler intended.
+        """
+        table_z = float(self.table_offset[2])
+        for obj in self.objects:
+            body = self.object_body_ids[obj.name]
+            vertices = self._geom_vertices(body)
+            if not len(vertices):
+                continue
+            drop = float(vertices[:, 2].min()) - (table_z + self.PLACEMENT_CLEARANCE)
+            if abs(drop) < 1e-9:
+                continue
+            address = self.sim.model.jnt_qposadr[
+                self.sim.model.joint_name2id(obj.joints[0])
+            ]
+            self.sim.data.qpos[address + 2] -= drop
+        self.sim.forward()
+
+    def _robot_penetration(self):
+        """Worst interpenetration between an object and the robot, in metres.
+
+        Zero when they are merely touching or apart. A placement that starts
+        *inside* the arm is ejected violently on the first step: measured at
+        **32 mm** of penetration between a Robotiq 2F-85's inner knuckle and the
+        can, which throws the can across the table before anything is commanded.
+        It is gripper-dependent, because a deeper hand reaches further into the
+        sampling region at the same joint configuration.
+        """
+        model, data = self.sim.model, self.sim.data
+        object_bodies = set(self.object_body_ids.values())
+        worst = 0.0
+        for i in range(data.ncon):
+            contact = data.contact[i]
+            b1 = model.geom_bodyid[contact.geom1]
+            b2 = model.geom_bodyid[contact.geom2]
+            hits_object = (b1 in object_bodies) != (b2 in object_bodies)
+            if not hits_object:
+                continue
+            other = contact.geom2 if b1 in object_bodies else contact.geom1
+            name = model.geom_id2name(other) or ""
+            if name.startswith(("robot", "gripper")):
+                worst = max(worst, -float(contact.dist))
+        return worst
+
+    def _object_positions(self):
+        """World position of every object, as one array."""
+        return np.array([
+            np.array(self.sim.data.body_xpos[self.object_body_ids[obj.name]])
+            for obj in self.objects
+        ]) if self.objects else np.zeros((0, 3))
+
     def _reset_internal(self):
         super()._reset_internal()
         if not self.deterministic_reset:
+            # **Arm out of the way before the objects exist.** Otherwise they are
+            # created inside it and thrown clear on the first step.
+            self._move_arm_home()
             for pos, quat, obj in self.placement_initializer.sample().values():
                 self.sim.data.set_joint_qpos(
                     obj.joints[0], np.concatenate([np.array(pos), np.array(quat)])
                 )
             self.sim.forward()
-            for _ in range(self.SETTLE_STEPS):
+            # Recorded, not acted on. Seating the objects on the table was tried
+            # and made things worse -- see 7.32 -- so the scene still drops them
+            # ~25 mm and this says how bad the starting state is. It reads 0.00
+            # for every registered hand now that the arm starts clear.
+            self.placement_penetration = self._robot_penetration()
+            # **Settle until the objects stop, not for a fixed count.**
+            #
+            # A fixed 60 steps -- 0.12 s -- was the original rule and it is not
+            # enough. Measured with the arm held completely still, the 150 mm
+            # cereal box needs 60 steps in one scene and **480** in another, and
+            # in the four scenes where 60 was short it did not merely drift: it
+            # **toppled over**, falling 35 to 78 mm entirely on its own.
+            #
+            # The reason it is scene-dependent is that a different gripper is a
+            # different MuJoCo model, so the constraint solver's arithmetic
+            # differs and a marginally balanced tall box tips one way or the
+            # other. The same seed put the cereal's origin anywhere from 804 to
+            # 889 mm across six grippers.
+            #
+            # Everything downstream reads a pose the object does not hold: the
+            # cloud, the grasp planned on it, the keypoint box fitted to it, and
+            # the physics. Section 7.32.
+            self._hold_arm()
+            self.settle_steps_taken = 0
+            reference = self._object_positions()
+            moved, still = float("inf"), 0
+            for step in range(self.MAX_SETTLE_STEPS):
                 self.sim.step()
+                self.settle_steps_taken = step + 1
+                if (step + 1) % self.SETTLE_WINDOW:
+                    continue
+                current = self._object_positions()
+                moved = (float(np.abs(current - reference).max())
+                         if len(current) else 0.0)
+                reference = current
+                still = still + 1 if moved < self.SETTLE_TOLERANCE else 0
+                if (step + 1 >= self.SETTLE_STEPS
+                        and still >= self.SETTLE_CONFIRMATIONS):
+                    break
+            else:
+                # Never a silent pass: a scene that will not settle is a scene
+                # whose cloud cannot be trusted.
+                warnings.warn(
+                    f"objects still moving after {self.MAX_SETTLE_STEPS} settle "
+                    f"steps ({moved * 1000:.2f} mm in the last "
+                    f"{self.SETTLE_WINDOW}); any cloud captured now describes a "
+                    "pose they will leave",
+                    RuntimeWarning, stacklevel=2,
+                )
+            # Release the hold and re-assert the home pose, so every hand ends
+            # the reset with its fingertips at exactly the same point whatever
+            # happened during settling.
+            self.sim.data.qfrc_applied[:] = 0.0
+            self._move_arm_home()
         self.sim.forward()
 
     # ------------------------------------------------------------ observables

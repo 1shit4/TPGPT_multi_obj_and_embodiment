@@ -128,7 +128,14 @@ REPLAY_OBJECTS = ("cereal", "milk", "can", "bread")
 #: is an approximation (anisotropy 4.3), and the Inspire hand's fingers travel
 #: 0.7 to 6.5 mm against 29 to 90 mm for every other hand, so it does not
 #: actuate and cannot execute any plan (7.28).
-REPLAY_GRIPPERS = ("yumi", "xarm", "panda", "robotiq85", "robotiq140", "umi")
+#: The UMI is **excluded**, on a measurement rather than by omission: it reaches
+#: **0 of 48** candidate home poses spanning a 150 x 100 x 150 mm volume, where
+#: the other eight registered hands reach 48 of 48. Its 117.2 mm contact offset
+#: -- the registry's only one with a large lateral component -- puts the wrist
+#: target outside the Panda arm's envelope everywhere, which is the same limit
+#: that left 8 of its 8 Tier 2 paths unreachable. The remaining five still span
+#: 24.3 to 60.8 mm of tool offset and 50 to 125 mm of aperture. `7.32`.
+REPLAY_GRIPPERS = ("yumi", "xarm", "panda", "robotiq85", "robotiq140")
 
 
 def _closure_summary(replay) -> dict:

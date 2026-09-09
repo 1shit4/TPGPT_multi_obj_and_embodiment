@@ -2541,6 +2541,116 @@ bulk during approach, its jaw width, and the stability of the grip it achieves.
 - **Replay is not the policy.** These are upper bounds under position control; the
   GP policy with an impedance controller and a lag gate will do worse.
 
+### 7.31 Most of the grasps were bad, and the discriminator is anti-predictive
+
+Every number in 7.29 and 7.30 compares one transported plan against another,
+which cannot say whether transportation helps or hurts. The missing control is
+obvious in hindsight: command the GraspGen-X pose directly, close, lift, with no
+map anywhere in the loop.
+
+Same executor as 7.30 -- `replay_labels`, IK per waypoint under stiff joint
+position control, the same `contact_offset` -- so the only difference from a Tier
+2 cell is the path. Back off 120 mm along the grasp's own approach axis, descend,
+hold for the demonstration's own 15-waypoint dwell, lift 150 mm.
+
+Two versions of this control were wrong before one was right, and both errors are
+worth recording because both are the same shape: changing two things at once.
+
+* The first drove with the `CartesianImpedanceController` while Tier 2 used
+  position control. `panda/can` then failed the "control" while succeeding in
+  both transported conditions -- backwards, and the giveaway.
+* The second used a dwell of 25 waypoints because I picked it. Swept, the panda's
+  can lifts at 3, 5 and 10 and is **squeezed out at 25**. The demonstration's own
+  dwell is exactly 15 -- it holds still for fifteen waypoints (0.0 mm x 15, then
+  6.4, 12.8, 19.2) -- so the control now carries the schedule the transported
+  path carries.
+
+#### 9 of 23 grasps lift with no transportation at all
+
+| hand | direct | 7.30 cloud box | 7.30 cube |
+|---|---|---|---|
+| panda | 3/4 | 2/4 | 3/4 |
+| robotiq85 | 3/4 | 1/4 | 0/4 |
+| yumi | 2/3 | 0/3 | 2/3 |
+| xarm | 1/4 | 0/4 | 0/4 |
+| **robotiq140** | **0/4** | 1/4 | 0/4 |
+| **umi** | **0/4** | 0/4 | 0/4 |
+| total | **9/23** | 4/23 | 5/23 |
+
+Every cell was 100% reachable, so this is grasp quality alone.
+
+| reading | n |
+|---|---|
+| **the grasp is bad, transport exonerated** | **12** |
+| works | 6 |
+| **transport broke it** | **3** |
+| transport *helped* a bad grasp | 2 |
+
+**Of the 17 failures 7.30 attributed to the keypoints and the map, 12 were bad
+grasps and 3 were transport's.** That section measured grasp quality with a
+transportation-shaped ruler, and its absolute rates are not measurements of
+transportation. The construction comparison survives -- both got identical
+grasps -- but is interpretable only on the 9 cells where the grasp works at all.
+
+#### The planner's confidence predicts failure
+
+| | n | score median | range |
+|---|---|---|---|
+| lifted | 9 | **0.577** | 0.462-0.867 |
+| did not | 14 | **0.769** | 0.573-0.917 |
+
+`r(score, lifted) = -0.529`. The Robotiq 2F-140's four candidates score 0.871,
+0.917, 0.871, 0.573 and **none lifts anything**; the Panda's score 0.867, 0.462,
+0.660, 0.560 and three of four work. GraspGen-X conditions on a hand's swept
+volume, but its discriminator was trained on its own gripper set and on this
+registry it cannot rank candidates. **Grasp selection has no working quality
+signal**, and that alone explains the Robotiq 2F-140's results without any
+reference to transport.
+
+#### The objects are being knocked over, and it is upstream of everything
+
+| cell | lift | object moved | held |
+|---|---|---|---|
+| robotiq140/cereal | **-71.2 mm** | 112.5 mm | 0 |
+| xarm/cereal | **-67.5 mm** | 93.4 mm | **0** |
+| umi/cereal | -63.5 mm | 114.7 mm | 16 |
+| robotiq140/milk | -42.2 mm | **270.4 mm** | 0 |
+
+A negative lift means the object finished *lower than it started*. With no map in
+the loop, on a path descending along the grasp's own approach axis.
+
+So it is not a transport failure. It is also not obviously a grasp-*generation*
+failure: a hand descending its own approach axis onto a correctly placed grasp
+should not strike the object. **`xarm/cereal` rules out the easy explanation** --
+`held = 0`, no gripper *collision* geom ever touched the cereal, and the cereal
+still moved 93.4 mm and fell 67.5. Something that is not a gripper contact geom
+displaced it: an arm link, a gripper geom outside the collision set
+(`contact_geoms` covers 4 of the xarm's 11), or another object toppling into it.
+
+**Leading hypothesis, untested: partial observability.** The grasp is planned on
+a cloud of only the surfaces three cameras see, and `by_collision` checks the
+approach corridor against a scene cloud with the same limitation. A corridor
+clear of every *observed* point can be blocked by a surface nobody observed --
+which would explain `xarm/cereal` passing all seven filters and still knocking
+the cereal 93 mm. The test is cheap and needs no physics: compare each object's
+true extent, from MuJoCo's own body and geom data, against the extent of the
+cloud the cameras produced.
+
+#### What this says about what to build
+
+A **centre-of-mass stability filter addresses half of one mechanism.** It is the
+right treatment for 7.30's Mechanism 3 (firm grip, then slip) and does nothing
+for the twelve bad grasps here, most of which fail by knocking the object over
+before any grip exists. The ordering is:
+
+1. **Test the partial-cloud hypothesis.** It is upstream of everything: if the
+   clouds under-describe the objects, the planner, the collision filter *and* the
+   keypoint box are all working from bad geometry.
+2. **Find a grasp quality signal that works**, since the planner's is
+   anti-correlated. Direct execution is the ground truth and costs ~2 minutes a
+   cell, so it can label a candidate set to test any proposed surrogate.
+3. **Then** the stability filter, on grasps already known to be executable.
+
 ## 8. Open items
 
 > **Read 7.26 first.** Every end-to-end campaign has been deleted, so the items

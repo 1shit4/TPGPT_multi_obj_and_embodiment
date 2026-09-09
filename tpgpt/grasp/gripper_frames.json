@@ -743,7 +743,8 @@
       -0.06546259752138955,
       -0.9978550237012151
     ],
-    "calibrated_depth": 0.03,
+    "calibrated_depth": null,
+    "calibration_note": "No working depth band on a correctly-settled scene: 0 of 13 swept offsets lift the reference can, best lift 5.4 mm against a 50 mm threshold and most samples negative (-16.4 mm, the hand pushing the can down). The previous stored value of 0.030 was measured before ROBOTICS_NOTES 7.32, in a scene where objects were dropped 25 mm and ejected by an interpenetrating arm, and is withdrawn. The UMI is also the only registered hand that cannot be placed at a shared home pose: it reaches 0 of 48 candidates where the other eight reach 48 of 48, because its 117.2 mm contact offset -- the registry's only one with a large lateral component -- puts the wrist target outside the Panda arm's envelope. Convertible, not executable.",
     "calibration_samples": [
       [
         -0.09,
