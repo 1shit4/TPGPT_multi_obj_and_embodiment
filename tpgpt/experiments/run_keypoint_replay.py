@@ -135,10 +135,17 @@ def _closure_summary(replay) -> dict:
     """How far the jaws shut during the replay, on a cross-hand scale.
 
     ``0`` is fully open and ``1`` is fully closed on air, for every hand, so one
-    threshold reads the same on a Panda and a Robotiq 2F-140. Above 1 means the
-    fingers were pressed *past* their free-air closed pose, which is what
-    squeezing an object looks like -- so ``closure_max > 1`` is positive
-    evidence of a grasp and is deliberately not clipped away.
+    threshold reads the same on a Panda and a Robotiq 2F-140.
+
+    Values are **not clipped**, but a reading above 1 is *not* evidence of a
+    grasp, and an early version of this docstring claimed it was. The
+    calibration's "closed" spread is taken after 40 settle steps of free-air
+    closing; a longer or harder press compresses the linkage further with
+    nothing between the fingers at all. Measured: an XArm on the cereal reached
+    ``closure_max`` **1.04** while ``held_steps`` was **0**. So above 1 means
+    only "pressed harder than during calibration". Below 0 means forced wider
+    than the open pose. Both are kept because they are real states of the hand,
+    not because either identifies a grasp.
 
     **Read ``closure_at_lift``, not ``closure_max``, for whether the object was
     in the jaws.** ``closure_at_lift`` is the reading at the first commanded
@@ -393,7 +400,17 @@ def main(
                         env, labels, source_placement, target, variant,
                         gripper=gripper,
                     )
-                except ValueError as exc:
+                # **Both, and deliberately.** ``ValueError`` is "too little
+                # cloud to describe the object"; ``RuntimeError`` is "every
+                # candidate is beyond the approach filter". Both are the
+                # pipeline legitimately refusing an object -- there is no
+                # admissible grasp for this hand in this scene -- and neither is
+                # a failure of the keypoint construction, so filing them under
+                # the generic ``failed`` bucket understates every variant
+                # equally and misattributes the cause. The Tier 1 sweep already
+                # files the identical condition as a skip; these two drivers
+                # must agree or the two tiers cannot be read together.
+                except (ValueError, RuntimeError) as exc:
                     row = {"object": name, "variant": variant.name,
                            "skipped": str(exc)}
                 except Exception as exc:
@@ -454,7 +471,11 @@ def main(
 def _replay_line(row: dict) -> str:
     if "failed" in row or "skipped" in row:
         note = row.get("failed") or row.get("skipped")
-        return f"{row.get('variant', '?'):18}{row.get('object', '?'):8} {note[:60]}"
+        # The hand, too. With one gripper it was inferable from context; with
+        # six it is not, and a refusal that does not name the hand cannot be
+        # read at all -- the whole point of the run is which hand did what.
+        return (f"{row.get('variant', '?'):18}{row.get('gripper', '?'):11}"
+                f"{row.get('object', '?'):8} {note[:56]}")
     g = lambda k, d=float("nan"): row.get(k, d)
     return (
         f"{row['variant']:18}{row.get('gripper', '?'):11}{row['object']:8}"

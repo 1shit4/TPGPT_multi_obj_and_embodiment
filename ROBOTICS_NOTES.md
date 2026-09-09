@@ -2378,6 +2378,169 @@ that difference by construction. It is recorded per row as `object_position`
 rather than assumed away, and the reproducibility precondition is keyed per hand
 so it does not report this as a failure.
 
+### 7.30 The map transports across hands; the execution does not
+
+Tier 2, the physics half of 7.29. The transported path is followed pose by pose
+under position control -- IK per waypoint, a stiff `JOINT_POSITION` controller,
+**no GP policy, no attractor integration, no lag gate** -- so every result is
+attributable to the plan rather than to the executor. Replay is an upper bound:
+what fails here is the keypoints' or the frame's; what fails only under the policy
+is the dynamics thread's.
+
+Six hands spanning 24.3 to 117.2 mm of tool offset and 50 to 125 mm of aperture,
+four objects, two constructions. 48 cells, **46 ran**. Real GraspGen-X candidates
+per hand, full 6-DoF pose used as-is. `outputs/keypoint_replay_grippers6/`,
+commit `e07c738`, `reproducible: True`.
+
+#### The result
+
+| hand | closing angle | aperture | tool offset | success | median `min det` |
+|---|---|---|---|---|---|
+| **panda** *(the source hand)* | 0 deg | 80 mm | 41.1 mm | **5/8** | 0.932 |
+| yumi | 0 deg | 50 mm | 24.3 mm | 2/6 | 0.706 |
+| robotiq85 | 0 deg | 85 mm | 47.8 mm | 1/8 | 0.667 |
+| robotiq140 | 0 deg | 125 mm | 60.8 mm | 1/8 | 0.788 |
+| xarm | -90 deg | 85 mm | 26.7 mm | 0/8 | 0.700 |
+| umi | -90 deg | 80 mm | 117.2 mm | 0/8 | 0.684 |
+
+**Only the hand the demonstration was recorded on works: 4 successes in the 38
+cells on every other hand.**
+
+The two constructions **tie**: cloud box 4/23, grasp-pose cube 5/23. The cube's
+3-of-4 against 2-of-4 from the Panda-only run does **not** generalise, and that
+earlier claim is superseded.
+
+#### They tie on the score and differ completely in how they fail
+
+| stage the cell died at | cloud box | cube |
+|---|---|---|
+| path <50% reachable | 4 | 5 |
+| reachable but **never touched the object** | **11** | **3** |
+| brief contact (<100 steps) | 5 | 5 |
+| firm grip (>=100 steps) | **3** | **10** |
+| of those firm grips, succeeded | **3/3** | **5/10** |
+
+**The cube acquires the object 3.3x more often and then drops half of them.** It
+converts an aiming problem into a holding problem. Contact rate overall: cube
+15/23 cells, cloud box 8/23.
+
+#### Four mechanisms
+
+**1. The path is unreachable (9 cells, 0 succeeded).** Entirely the UMI, 8 of its
+8 cells, at 0-30% reachable and 44-164 mm of tracking error. The transported
+labels are a *fingertip* path and IK must solve for the **wrist**, which sits
+`contact_offset` behind them: `wrist = target - R.offset`. The UMI's offset is
+117.2 mm, nearly 3x the Panda's, so every waypoint asks the wrist 117 mm further
+back and out of the arm's envelope. Not a keypoint failure and not a grasp
+failure -- the frame conversion doing exactly what it should, on a hand this arm
+cannot accommodate.
+
+Note the direction: the cube is *worse* than the cloud box on UMI reachability in
+all four objects (30->4, 20->0, 24->6, 30->26). The cube aims exactly at the
+planned grasp so it inherits the full setback; the cloud box's 52-108 mm aim
+error pulls the path somewhere more nearly reachable. **Being right about the
+target is a disadvantage when the target is unreachable.**
+
+**2. The hand arrives and the object is not between the fingers (14 cells, 0
+succeeded).** Eleven are the cloud box, and there the cause is measured: it aims
+wrong. Median `aim` 73.2 mm in the cells where it never touched, against 42.9 mm
+where it did. A plan passing 73 mm from the intended grasp puts the fingers 73 mm
+from the object and a Panda jaw is 80 mm wide. **This is the non-tautological half
+of 7.29 arriving in physics.**
+
+The three cube cells in this category are **all the cereal**, on three different
+hands, and they are the important ones:
+
+| hand | reach | track | `aim` | `orient` | `min det` | held |
+|---|---|---|---|---|---|---|
+| xarm | 84% | 4.7 mm | 0.0 mm | 0.6 deg | 0.832 | **0** |
+| robotiq85 | **100%** | **5.7 mm** | **0.0 mm** | **0.4 deg** | 0.864 | **0** |
+| robotiq140 | 97% | 12.0 mm | 0.0 mm | 0.5 deg | 0.790 | **0** |
+
+Every quantity the map controls is perfect on the robotiq85 row -- fully
+reachable, tracked to 5.7 mm, aimed exactly, oriented to 0.4 degrees -- and the
+hand never touches the cereal. **This is the clearest evidence in the project that
+matching TCP and orientation is not sufficient for a grasp.**
+
+The mechanism is **not established**. The candidate is that the hand's *body*,
+not its fingertips, contacts the cereal during the approach and pushes it away:
+the cereal is the tallest object and these three hands are 145-270 mm deep.
+Testing it needs the object's position trace during the approach, and this run
+**did not persist the probe traces** -- `replay_variant` extracts summary scalars
+only. That is an instrumentation gap and the first thing to fix.
+
+**3. Firm grip, then the object slips out (5 cells, all the cube).** Of 13 firm
+grips, 8 succeeded; the 5 failures are all the cube and slip separates them:
+
+| | n | median slip | median track | median place |
+|---|---|---|---|---|
+| firm grip, succeeded | 8 | **18.4 mm** | 20.2 mm | 31.5 mm |
+| firm grip, failed | 5 | **50.1 mm** | **9.0 mm** | 136.3 mm |
+
+The tracking error is *lower* in the failures, so this is not the arm missing the
+path: it follows well, holds for over a hundred steps, and the object rotates out
+anyway. The obvious explanations do not survive: `r(tilt_mid_path, slip) = +0.352`
+and the cube's median mid-path tilt among firm grips is **6.7 deg against the
+cloud box's 10.8** -- it tilts the transit *less*; `r(min_det, slip) = +0.071`;
+`r(tracking, slip) = +0.026`. `r(orientation_error, slip) = -0.521` is a confound,
+since the cube owns both the low orientation errors and all five slips.
+
+The testable hypothesis: **the cloud box's aim error may be accidentally helping.**
+Its three firm grips succeeded 3/3 with aim errors of 26.5, 43.8 and 87.1 mm --
+it grips somewhere other than the planned point, plausibly nearer the centre of
+mass where the gravity torque about the grip is smaller, while the cube grips
+exactly where the planner said, which may be a pinch on a narrow face. Comparing
+grip point to centroid settles it. **n = 3, so this is a hypothesis.**
+
+**4. The jaw is too narrow (1 clear cell).** `yumi/can/cube`: held 6 steps, placed
+360 mm away. Aperture 50 mm against a can measuring 45.2 mm along the closing
+axis gives `(50 - 45.2)/2 = 2.4 mm` per side; every other hand has 10-40 mm. Real,
+invisible to the keypoints, and **not the driver of the run**: success against
+aperture is not monotone, the two 80 mm hands being 5/8 and 0/8.
+
+#### What this does to 7.29
+
+**The geometry does not predict the physics.** Over the 23 cube cells:
+`r(min_det, held) = -0.071`, `r(aim, held) = +0.015`,
+`r(orientation_error, held) = -0.027`, `r(tilt_mid_path, held) = +0.106`. All
+approximately zero.
+
+And a criticism of 7.29 that should have been stated there: **for the cube
+variants `aim` is ~0 and `orient` is ~0 by construction.** The cube's centre *is*
+the target grasp point and `phi` interpolates keypoints exactly, so the aim is
+guaranteed. The corners are laid out in the source and target grasp frames, so
+`J_perp` is asked to recover a rotation built into the keypoints, and it nearly
+does -- a self-consistency check on cube size, which is why size moved it from 0.1
+to 20.6 degrees, not a fact about the world.
+
+What in 7.29 stays informative: `min det(J)` (nothing pins it, and the cloud box
+really folds where the cube does not), mid-path tilt and lift deviation (far from
+any keypoint), **every cloud-box number** (nothing pins those either, which is what
+makes the aim comparison above meaningful), and the composed variant's 10.9 mm
+residual.
+
+**The two tiers read together:** the transportation map is sound and
+hand-independent, and that is necessary and nowhere near sufficient. Execution is
+limited by what the map does not model -- the hand's setback from the labels, its
+bulk during approach, its jaw width, and the stability of the grip it achieves.
+
+#### What would make this false
+
+- **One seed, one slot, one demonstration.** The hand-versus-object confound
+  cannot be separated without more scenes.
+- **The Panda advantage may be a grasp-selection artefact.** The demonstration was
+  recorded on a Panda and candidates are filtered to within 45 degrees of *its*
+  approach; the Panda's median `min det` is 0.932 against 0.667-0.788 for the
+  others, so it may simply be getting better target grasps rather than executing
+  better. Testing needs a demonstration recorded on another hand, which does not
+  exist.
+- **Mechanisms 2 and 3 are described, not diagnosed.** Both need the per-waypoint
+  object trace this run did not save.
+- **`n` is small everywhere** -- 3 cloud-box firm grips, 5 cube slips, 1 aperture
+  case. None of the per-mechanism claims is offered as statistically significant.
+- **Replay is not the policy.** These are upper bounds under position control; the
+  GP policy with an impedance controller and a lag gate will do worse.
+
 ## 8. Open items
 
 > **Read 7.26 first.** Every end-to-end campaign has been deleted, so the items

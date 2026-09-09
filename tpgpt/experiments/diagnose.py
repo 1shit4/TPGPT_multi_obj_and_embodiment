@@ -412,11 +412,14 @@ def jaw_closure_probe(env, gripper: str):
     axis, so the reading is valid with the wrist at any orientation, unlike the
     stationary-arm measurement it is calibrated against.
 
-    Values slightly outside ``[0, 1]`` are **not** clipped: above 1 means the
-    fingers are squeezed past their free-air closed pose, which happens when
-    they are pressed onto an object, and below 0 means forced wider than the
-    open pose. Both are informative, and clipping would hide the squeeze that
-    distinguishes "holding" from "shut on nothing".
+    Values outside ``[0, 1]`` are **not** clipped, but neither bound identifies
+    a grasp. Above 1 means the fingers were pressed past their free-air closed
+    pose, which happens when they are pressed onto an object *and* when they are
+    simply pressed harder or longer than the 40 settle steps the calibration
+    used -- measured at ``closure_max`` 1.04 with ``held_steps`` 0 on an XArm.
+    Below 0 means forced wider than the open pose. Both are real states of the
+    hand and worth keeping; contact is what ``held_steps`` measures, and closure
+    says *how* the jaws got there rather than whether anything was in them.
 
     Args:
         env: A constructed robosuite environment.
