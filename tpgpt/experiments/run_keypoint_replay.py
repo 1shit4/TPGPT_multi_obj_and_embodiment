@@ -202,6 +202,93 @@ def _closure_summary(replay) -> dict:
     }
 
 
+def stage_outcome(replay, labels, target, env=None) -> dict:
+    """Was the object **grasped**, **traversed** and **placed**? Three questions.
+
+    Deliberately not aim or orientation. For the grasp-cube constructions those
+    are ~0 *by construction* -- the cube's centre is the target grasp point and
+    ``phi`` interpolates keypoints exactly, and the corners are laid out in the
+    source and target grasp frames so ``J_perp`` recovers a rotation that was
+    built into them. They are a self-consistency check on the construction, not a
+    fact about the world, and measured against physics they correlate with
+    contact at ``r`` between -0.07 and +0.02 (7.31). What is not tautological is
+    whether the hand ends up holding the object, keeps holding it, and puts it
+    down in the right place.
+
+    The three stages are cut from the demonstration's own gripper channel, so
+    they mean the same thing on trajectories of different lengths:
+
+    ``grasped``
+        Did the jaws take the object at all? ``held_at_close`` is contact within
+        the closing window; ``lift_height`` is how far the object rose above its
+        resting height, which is the only unambiguous evidence that the hand is
+        bearing its weight rather than merely touching it.
+    ``traversed``
+        Did it stay held? ``held_fraction_carry`` is the fraction of carry
+        waypoints in contact, and ``lost_at`` is the first waypoint after the
+        grasp where contact stops and does not resume -- the moment it was
+        dropped, which a slip maximum cannot give.
+    ``placed``
+        Did it end up in the slot? ``placement_error_xy`` plus whether the object
+        finished at shelf height rather than on the floor or still in the hand.
+
+    Returns a flat, JSON-safe row. Missing channels give ``nan``, never a
+    plausible zero.
+    """
+    from tpgpt.sim.keypoints import carry_indices
+
+    trace = (getattr(replay, "metadata", None) or {}).get("probe") or {}
+    out: dict = {}
+    z = np.asarray(trace.get("object_z", []), dtype=float)
+    held = np.asarray(trace.get("held", []), dtype=float)
+    if not len(z) or not len(held):
+        return {"stage_trace": "missing"}
+
+    try:
+        close, release = carry_indices(labels)
+    except Exception:
+        close, release = len(z) // 3, 2 * len(z) // 3
+    n = len(z)
+    close = int(np.clip(close, 0, n - 1))
+    release = int(np.clip(release, close + 1, n - 1))
+    window = 12
+
+    # --- grasped -----------------------------------------------------------
+    lo, hi = max(0, close - window), min(n, close + window + 1)
+    out["held_at_close"] = float(held[lo:hi].max()) if hi > lo else 0.0
+    resting = float(np.median(z[:max(1, close - window)])) if close > window else float(z[0])
+    out["lift_height"] = float(z[close:release].max() - resting) if release > close else float("nan")
+    out["grasped"] = bool(out["held_at_close"] > 0 and out["lift_height"] > 0.02)
+
+    # --- traversed ---------------------------------------------------------
+    carry = held[close:release]
+    out["held_fraction_carry"] = float(carry.mean()) if len(carry) else float("nan")
+    lost = None
+    if len(carry):
+        contact = np.flatnonzero(carry > 0)
+        if len(contact):
+            after = carry[contact[0]:]
+            gone = np.flatnonzero(after == 0)
+            if len(gone) and not after[gone[0]:].any():
+                lost = int(close + contact[0] + gone[0])
+    out["lost_at"] = lost
+    out["lost_fraction"] = (float(lost - close) / max(release - close, 1)
+                            if lost is not None else float("nan"))
+    out["traversed"] = bool(out["grasped"] and lost is None
+                            and out["held_fraction_carry"] > 0.5)
+
+    # --- placed ------------------------------------------------------------
+    out["object_z_final"] = float(z[-1])
+    if env is not None and target is not None:
+        try:
+            destination = np.asarray(target.destination, dtype=float)
+            out["placed_on_shelf"] = bool(abs(z[-1] - destination[2]) < 0.06)
+        except Exception:
+            out["placed_on_shelf"] = None
+    out["placed"] = bool(replay.success)
+    return out
+
+
 def replay_variant(env, labels, source_placement, target, variant, gripper="panda") -> dict:
     """Transport under one construction, then follow the result under position control.
 
@@ -256,6 +343,9 @@ def replay_variant(env, labels, source_placement, target, variant, gripper="pand
             if k in replay.metadata
         },
         "success": bool(replay.success),
+        # **Grasped, traversed, placed** -- the three questions that are not
+        # tautological. See stage_outcome.
+        **stage_outcome(replay, warped, target, env),
         # Did the jaws actually shut, on a scale that means the same thing on
         # every hand? Without this a hand that never closed is indistinguishable
         # from one that closed and dropped the object, and the raw ``jaw``
@@ -265,6 +355,22 @@ def replay_variant(env, labels, source_placement, target, variant, gripper="pand
         # Which *segment* the arm could not hold, not just how much of the path.
         **unreachable_segments(replay, warped),
     }
+    # **Persist the per-waypoint traces.** Their absence is what blocked
+    # diagnosing two of the four failure mechanisms in 7.30 and the cross-hand
+    # closing-schedule question, and forced a re-run each time. They are a few
+    # hundred floats per cell.
+    trace = (getattr(replay, "metadata", None) or {}).get("probe") or {}
+    row["trace"] = {
+        key: np.asarray(trace[key], dtype=float).tolist()
+        for key in ("object_x", "object_y", "object_z", "held", "closure")
+        if key in trace
+    }
+    for key in ("reachable_per_waypoint", "tracking_error_per_waypoint"):
+        if key in replay.metadata:
+            row["trace"][key] = np.asarray(
+                replay.metadata[key], dtype=float
+            ).tolist()
+    row["trace"]["gripper_command"] = np.asarray(replay.gripper, dtype=float).tolist()
     return row
 
 

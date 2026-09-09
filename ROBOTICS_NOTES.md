@@ -2651,6 +2651,209 @@ before any grip exists. The ordering is:
    cell, so it can label a candidate set to test any proposed surrogate.
 3. **Then** the stability filter, on grasps already known to be executable.
 
+### 7.32 The scene handed over objects that were still falling, inside the robot
+
+This is the deepest defect found in the project so far, and it sits upstream of
+the perception, the grasp planner, the keypoints and every physics result. It was
+found while chasing why objects were being "knocked over" during grasp execution,
+after four wrong explanations. The chain is worth recording in full, because the
+wrong explanations were each plausible and each was killed by one measurement.
+
+#### What was wrong
+
+`TabletopShelf` settled for a fixed 60 simulation steps -- **0.12 s** -- and then
+handed the scene over. Measured with the arm held completely still, that is not
+enough:
+
+| scene | cereal settles at | milk | can |
+|---|---|---|---|
+| panda | 60 steps | 60 | 60 |
+| xarm | **120** | 60 | 60 |
+| robotiq140 | **240** | 60 | 120 |
+| robotiq85 | **480** | **480** | **480** |
+
+In the four scenes where 60 was short the 150 mm cereal box did not merely
+drift, it **toppled over**, falling 35 to 78 mm entirely on its own with the arm
+idle. Which way it went depended on the mounted gripper, because a different
+gripper is a different MuJoCo model and the constraint solver's arithmetic
+differs. The same seed put the cereal's origin anywhere from **804 to 889 mm**
+across six hands.
+
+That is exactly what `SETTLE_STEPS`' own docstring existed to prevent -- *"a
+point cloud captured before they settle describes a pose the object is no longer
+in, which would silently corrupt every grasp derived from it"*. It did. The
+cloud, the grasp planned on it, the keypoint box fitted to it and the physics
+run against it all described a pose the object was leaving.
+
+#### The cause was upstream of the settle
+
+The arm's rest pose sat **inside the object sampling region**. Objects were
+created interpenetrating the gripper, and MuJoCo ejects a body it finds inside
+another:
+
+| hand | interpenetration at placement |
+|---|---|
+| panda | 0.00 mm |
+| umi | 0.00 mm |
+| yumi | 4.85 mm |
+| robotiq85 | 12.85 mm |
+| xarm | **20.64 mm** |
+| robotiq140 | **26.77 mm** |
+
+Ejected objects landed somewhere different for every hand, so **the scene was not
+reproducible across grippers**. Object positions differed from the Panda's by up
+to **154 mm** (cereal 145.1, can 153.9, milk 131.9). Every cross-gripper
+comparison in 7.30 and 7.31 was comparing different worlds.
+
+The 25 mm drop compounds it: `z_offset` says 2 mm, but robosuite places an object
+at `table_z + z_offset + |bottom_offset|` and each of these objects declares a
+`bottom_offset` about 25 mm larger than its true half height. Measured, the
+cereal is placed at 902.0 mm and rests at 874.6, the milk 887.0 -> 860.9, the can
+862.0 -> 840.1, the bread 847.0 -> 822.2. A 25 mm drop lands at 0.7 m/s, which is
+ample to bounce a tall box onto its side.
+
+#### The fix, in four parts
+
+**Settle until the objects stop, not for a fixed count.** The criterion is
+**displacement over a 50-step window**, not velocity. Velocity is the obvious
+choice and it does not work: an object resting on the table carries **8 to
+23 mm/s and 0.18 to 0.65 rad/s** of solver jitter indefinitely, oscillating in
+sign, so it never falls below a threshold tight enough to mean anything -- while
+its position does not change by 0.1 mm in a second. Asking whether it *went
+anywhere* sidesteps the jitter entirely.
+
+**Four consecutive still windows**, because one is not enough. With a single
+window the UMI scene's cereal passed at 150 steps and then fell 63.8 mm. A box
+balanced on an edge pauses before it tips, and one window cannot tell that pause
+from rest. **Momentarily still is not stable.**
+
+**Move the arm clear before the objects exist**, to a shared **fingertip** pose
+rather than a shared joint configuration. This distinction is the whole point: a
+shared `init_qpos` is what made the scene gripper-dependent, because it puts a
+97 mm-deep Panda hand and a 270 mm-deep Robotiq 2F-140 in completely different
+places. IK solves per hand for the wrist that puts *its own* fingertips at
+`HOME_TCP`, which is the same conversion the replay does and the right reference
+because the transported labels are a fingertip path (7.20).
+
+**Hold the arm against gravity while the objects settle.** The settle loop calls
+`sim.step()` directly -- raw physics, no controller -- so the arm was unactuated
+and fell, and fell *differently* per hand because a Robotiq 2F-140 hand is much
+heavier. The fingertips ended up 200 mm apart across grippers even after being
+placed at a common point.
+
+#### The near-miss that is the real lesson
+
+The first version of that hold wrote `qfrc_applied[:] = qfrc_bias` across the
+**whole model**, which cancels gravity on the *objects* as well. They hung at
+their placement heights and never settled at all.
+
+Every metric I was using to validate the fix then reported perfection --
+interpenetration 0.00 mm, cross-gripper spread 0.00 mm, all objects upright --
+**because nothing had moved.** A settle that freezes what it is meant to settle
+looks exactly like a settle that works.
+
+It was caught by three integration tests that had nothing to do with the change:
+`test_objects_are_at_rest_after_reset`, `test_every_object_yields_a_cloud_matching_its_true_size`
+and `test_real_clouds_are_truncated_above_the_table`. My first reaction was that
+those tests encoded the old broken scene and needed updating. They did not. They
+were right, and they caught what my own verification could not, because
+verification written *after* a change tends to check what its author expects
+rather than what is true.
+
+#### Result
+
+| property | before | after |
+|---|---|---|
+| object poses across grippers | up to **154 mm** apart | **0.00 mm** |
+| fingertip start across grippers | ~200 mm apart | **3-4 mm** |
+| interpenetration at placement | 4.85-26.77 mm on 4 of 6 hands | **0.00 mm** |
+| settling | fixed 60 steps, mid-topple | converged, identical, upright |
+
+`Reshelving` is unaffected -- a separate class without this settle path -- so the
+17/20 regression gate stands.
+
+#### Four explanations that were wrong first
+
+Recorded because each was plausible, and because the pattern in them is the
+lesson: each generalised one cell's mechanism before checking the others.
+
+| explanation | killed by |
+|---|---|
+| the transportation map is at fault | direct execution, no map, knocks objects too |
+| the grasps are bad | ground-truth clouds give identical results |
+| the point cloud is partial | truth clouds at matched density: 4 of 5 cells identical to 0.1 mm |
+| the objects are falling at handover | they settle to 0.1-0.7 mm over 2.4 s in the panda scene |
+| the hand starts on top of the object | the UMI has the *largest* clearance, 229-299 mm, and still fails |
+
+What finally worked was not a better theory but a **finer instrument**: a
+per-control-step trace naming the actual contacting geom, then an idle test that
+built the scene and simply watched. Both were cheaper than any of the hypotheses
+they replaced.
+
+#### The UMI is excluded, on three measurements
+
+* **0 of 48** candidate home poses reachable, spanning 150 x 100 x 150 mm, where
+  the other eight hands reach 48 of 48. Its 117.2 mm contact offset -- the
+  registry's only one with a large lateral component -- puts the wrist target
+  outside the Panda arm's envelope everywhere in that volume.
+* **8 of 8** Tier 2 paths unreachable (7.30).
+* **0 of 13** swept depth offsets lift the reference can on the corrected scene;
+  best lift 5.4 mm against a 50 mm threshold, most samples *negative*.
+
+Convertible, not executable -- the same distinction the Inspire hand occupies.
+`VERIFIED_PAIRS` is 7, and the reasons are stored in `gripper_frames.json` rather
+than left as a silent `None`.
+
+#### Every contact depth was calibrated against a moving object
+
+`calibrated_depth` is measured by sweeping an approach-depth offset and keeping
+the middle of the widest band that lifts the reference can. Every stored value
+was measured on the broken scene. Re-measured, **all seven moved**:
+
+| hand | old | new | change | band | working |
+|---|---|---|---|---|---|
+| panda | 0.0375 | 0.0075 | **-30.0 mm** | 150 mm | 10/13 |
+| rethink | 0.0300 | 0.0000 | **-30.0 mm** | 105 mm | 7/13 |
+| robotiq140 | 0.0300 | 0.0075 | -22.5 mm | 180 mm | 12/13 |
+| robotiq85 | 0.0300 | 0.0150 | -15.0 mm | 165 mm | 11/13 |
+| yumi | -0.0075 | 0.0075 | +15.0 mm | 60 mm | 4/13 |
+| xarm | 0.0300 | 0.0225 | -7.5 mm | 150 mm | 10/13 |
+| robotiq3f | 0.0225 | 0.0150 | -7.5 mm | 165 mm | 11/13 |
+
+The new bands are **wider** (105-180 mm against 120-135 before) with 7 to 12 of
+13 offsets working, which is what a sweep looks like when the object is not being
+knocked around during it -- the evidence that the new numbers are the trustworthy
+ones.
+
+`contact_offset` derives from this and moves with it. **The Panda's
+wrist-to-fingertip offset was 41.1 mm all along and is 11.1 mm.** Also rethink
+35.1 -> 5.1, robotiq140 60.8 -> 38.3, robotiq85 47.8 -> 32.8, yumi 24.3 -> 9.3,
+xarm 26.7 -> 19.2, robotiq3f 43.6 -> 36.4. For scale, 19.7 mm of wrong tool offset
+was measured turning a 28 mm placement into a 232 mm one.
+
+That reaches past the physics results: `contact_offset` appears in
+`_to_tool_frame`, which converts the source demonstration's labels, so the whole
+label path shifts and the map fitted to it with it.
+
+No test hard-coded 41.1 mm -- the frame contract is asserted behaviourally, by
+whether the hand lifts the object -- which is why a 30 mm shift passes the suite
+cleanly, and also why the wrong value survived undetected until the scene was
+fixed.
+
+#### What this invalidates
+
+**Everything quantitative measured on the tabletop scene**, which is 7.29, 7.30
+and 7.31 in their entirety. Not only the physics: 7.29 is geometry, but its
+labels are converted by a `contact_offset` that has moved 30 mm.
+
+**Not invalidated**: the instruments built alongside them --
+`diagnose.jaw_closure_probe`, `diagnose.replay_preconditions`,
+`metrics/transport.py`, the `closing_budget` fix, `_robot_penetration` -- which
+are mechanisms with unit tests rather than measurements. Nor the structural
+findings: that velocity cannot detect settling, that a shared joint configuration
+cannot give a shared start pose, that the jaw channel is not cross-hand
+comparable. Nor the reshelving 17/20 gate.
+
 ## 8. Open items
 
 > **Read 7.26 first.** Every end-to-end campaign has been deleted, so the items

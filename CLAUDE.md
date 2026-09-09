@@ -222,6 +222,46 @@ Each of these cost real debugging time. Full detail in `ROBOTICS_NOTES.md`.
   must stay stretched by `K^-1 D v` (~24 mm at 0.25 m/s) to supply the force.
   Before "fixing" it, read `§2.7`: the lag is transport-invariant here and lands
   the arm where the demonstrating arm actually was, so it may be correct.
+- **The tabletop scene handed over objects that were still falling, inside the
+  robot. Read `§7.32` before trusting any number measured in it.** Three
+  defects, all fixed: `SETTLE_STEPS = 60` was 0.12 s where the cereal needed up
+  to 0.96 s, so a 150 mm box toppled 35-78 mm *on its own* after handover; the
+  arm's rest pose sat inside the sampling region, so objects were created
+  interpenetrating the gripper (4.85-26.77 mm on four of six hands) and ejected
+  on the first step; and objects are dropped 25 mm, not the 2 mm `z_offset`
+  claims, because each declares a `bottom_offset` that much larger than its true
+  half height. The scene consequently **differed by up to 154 mm between
+  grippers from the same seed**. It is now identical across hands to 0.00 mm.
+- **Settling is detected by displacement, never by velocity.** An object at rest
+  on the table carries 8-23 mm/s and 0.18-0.65 rad/s of solver jitter
+  indefinitely, oscillating in sign, so no meaningful velocity threshold is ever
+  met while the object does not move 0.1 mm in a second. And **one still window
+  is not enough**: a box balanced on an edge pauses before it tips, which is why
+  the gate needs four consecutive windows.
+- **A shared joint configuration does not give a shared start pose.** The same
+  `init_qpos` puts a 97 mm-deep Panda hand and a 270 mm-deep Robotiq 2F-140 in
+  completely different places. `HOME_TCP` is a **fingertip** target and IK solves
+  per hand for the wrist behind it, which is what makes every arm start at the
+  same point (3-4 mm) — the same conversion the replay does.
+- **Gravity compensation during a settle must touch only the arm's DOFs.**
+  `qfrc_applied[:] = qfrc_bias` across the whole model makes the *objects*
+  weightless: they hang at their placement heights, and every check reports
+  perfection — no interpenetration, no cross-gripper spread, all upright —
+  because nothing has moved. **A settle that freezes what it is meant to settle
+  looks exactly like a settle that works.** Three integration tests caught it
+  when the purpose-built verification did not.
+- **Every `calibrated_depth` in the registry was re-measured after `§7.32` and
+  all seven moved, by up to 30 mm.** `contact_offset` derives from it, so the
+  Panda's wrist-to-fingertip offset was **41.1 mm** throughout the project and is
+  **11.1 mm**. Any note quoting 41.1 mm predates this. The value feeds
+  `_to_tool_frame`, `grasp_to_eef_pose`, the replay's IK and the home pose, and
+  19.7 mm of tool-offset error was separately measured turning a 28 mm placement
+  into a 232 mm one — so this is not a rounding detail.
+- **`VERIFIED_PAIRS` is 7, not 8: the UMI is out.** On the corrected scene it
+  lifts nothing (0 of 13 swept depths), reaches **0 of 48** candidate home poses
+  where the other eight reach 48 of 48, and had 8 of 8 Tier 2 paths unreachable.
+  Convertible, not executable, like the Inspire hand. The reasons are stored in
+  `gripper_frames.json`, not left as a silent `None`.
 - **`+1` closes every hand in the registry, and the jaw *reading* is what
   differs.** Robosuite's per-gripper `format_action` sign multipliers look
   inverted between hands (`[-1, +1]` for the Panda, `[+1, -1]` for the Robotiq
