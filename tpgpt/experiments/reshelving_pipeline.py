@@ -342,17 +342,28 @@ def reshelving_placement(
     # product (see reshelving_waypoints), so the keypoints must describe that
     # grasp and not a generic one.
     #
-    # ``rotation[:, 0]``, the product's x axis, because that is the axis the
-    # Panda's jaws actually close along: the demonstration commands
-    # ``top_down_orientation(product_yaw)`` and the Panda's closing angle is
-    # measured at 0, so its jaws lie along the commanded frame's +X.
+    # **The grasp is taken from the demonstrating hand, not from the product.**
     #
-    # This was ``rotation[:, 1]`` and the reshelving result never noticed,
-    # because that product is square in cross-section -- 25 mm by 25 mm -- so
-    # both choices fit the same box. It matters enormously off that scene: the
-    # keypoint frame decides which of the *target* object's axes the jaws map
-    # onto, and 90 degrees out put an 80 mm Panda hand across a cereal box's
-    # 96 mm face while a correctly chosen candidate closed across its 39 mm one.
+    # This used to be ``rotation[:, 0]``, the *product's* body x axis, on the
+    # reasoning that the demonstration commands ``top_down_orientation(
+    # product_yaw)`` so the jaws end up along it. The direction is right and the
+    # **sign is not defined**: a body axis points wherever the mesh author put
+    # it, and nothing about the object says which of the two fingers is on which
+    # side. (It was ``rotation[:, 1]`` before that, and the reshelving result
+    # never noticed, because that product is 25 mm square in cross-section so
+    # both choices fit the same box.)
+    #
+    # An undefined sign here is what forced every consumer downstream to invent
+    # one, and ``task_frame``'s world-axis test -- since deleted -- is the
+    # invention that broke: the source's own pick and place frames came out 180
+    # degrees apart and reflected every carried object through its grasp point.
+    # 7.33.
+    #
+    # The hand's pose has no such problem. ``site_rotation`` is where the wrist
+    # actually is, so converting it into the grasp convention with this hand's
+    # measured ``alignment_rotation`` gives a closing axis whose sign is a fact
+    # about the gripper rather than about the mesh -- the same convention every
+    # GraspGen-X target candidate already arrives in. 7.34.
     offset = (2.0 * grasp_fraction - 1.0) * PRODUCT_HALF_SIZE[2]
     # Anchored at the point where the hand actually *holds* the object, not at
     # the commanded grip_site. The two differ by this gripper's measured contact
@@ -370,10 +381,13 @@ def reshelving_placement(
         + np.array([0.0, 0.0, offset])
         + site_rotation @ contact_offset(resolve_pair("panda"))
     )
+    from tpgpt.grasp.grasps import to_grasp_convention
+
+    grasp_rotation = to_grasp_convention(site_rotation, resolve_pair("panda"))
     grasp = GraspFrame(
         tcp=holding,
-        approach=np.array([0.0, 0.0, -1.0]),
-        closing=rotation[:, 0],
+        approach=grasp_rotation[:, 2],
+        closing=grasp_rotation[:, 0],
     )
     # The plane the product rests on, not ``env.table_top``. That property adds
     # half the table thickness to ``table_offset``, but robosuite's TableArena

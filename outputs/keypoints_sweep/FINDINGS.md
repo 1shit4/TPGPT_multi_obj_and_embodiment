@@ -15,8 +15,7 @@ numbers are a scratch experiment, not evidence — that rule is `ROBOTICS_NOTES`
 > # ⚠ EVERY NUMBER IN EXPERIMENTS G, H AND I IS WITHDRAWN
 >
 > **The scene they were measured in was broken.** `ROBOTICS_NOTES.md` §7.32 has
-> the full account; the short version is three compounding defects in
-> `TabletopShelf`:
+ame.> `TabletopShelf`:
 >
 > 1. **Objects were still falling at handover.** `SETTLE_STEPS = 60` is 0.12 s;
 >    the cereal needed up to 0.96 s. In four of six scenes a 150 mm box toppled

@@ -397,7 +397,6 @@ class GraspFrame:
 def task_frame(
     support_normal: np.ndarray,
     closing_axis: np.ndarray,
-    reference: np.ndarray | None = None,
 ) -> np.ndarray:
     """Orthonormal frame defined by the task, not by the object's mesh.
 
@@ -417,23 +416,33 @@ def task_frame(
     their signs flip arbitrarily on near-symmetric objects, so a lemon's
     principal axes are noise.
 
-    The sign of ``c`` matters and is **not** a free choice, because flipping it
-    also flips ``a`` and so turns the frame 180 degrees about ``n``, permuting
-    every corner label. A parallel jaw is physically identical under that flip,
-    so the two objects must simply agree.
+    **The sign of ``c`` is taken from the grasp and never re-derived here.**
+    A parallel jaw closing along ``+c`` and along ``-c`` grips the same object
+    the same way, so it is tempting to treat the sign as free and pick one by
+    convention. This function used to do exactly that, with a world-axis test
+    (``c . y >= 0``, tie-broken on ``c . x``) and an optional ``reference``
+    frame to make two ends of a task agree. Both are gone, and the reason is
+    worth stating because the test looked harmless for a long time.
 
-    Pass ``reference`` -- the frame the other end of the task used -- and the
-    sign is chosen to agree with it. Without a reference the sign falls back to
-    a world-axis test (``c . y >= 0``), which is deterministic but arbitrary:
-    it depends on the *object's own yaw*, so a source and a target standing at
-    different yaws can flip independently and plant a spurious half turn in the
-    middle of the map.
+    A grasp is not an axis, it is a **pose**. ``Grasp6D`` carries a full
+    rotation whose first column *is* the closing direction, with a definite
+    sign fixed by the planner and by which finger of that hand is which. There
+    is no ambiguity in the input, so there is nothing here to resolve -- and
+    resolving it anyway threw away information and then invented a replacement
+    from the object's yaw in the world, which is unrelated to the gripper.
 
-    That is not hypothetical. It cost the reshelving campaign 17/20 -> 5/20,
-    every failure a stall, and it stayed hidden for as long as the closing axis
-    was taken from the product's ``y`` axis: over that scene's +-47 degree yaw
-    range the test never fired. Taking the axis the jaws actually close along
-    made it fire about half the time.
+    What that cost: the source demonstration places its object square with the
+    shelf, so its placed closing axis lands on world ``x`` at ``[1, -1e-17, 0]``.
+    ``c[1]`` fell inside the epsilon, the ``c[0] < 0`` tie-break decided
+    instead, and it decided the opposite way to the pick, whose ``c[1]`` is an
+    unambiguous ``-0.581``. The source's own two frames came out **180 degrees
+    apart**, which reflects the carried object through the grasp point and lands
+    it twice its lateral grasp offset away.
+
+    The caller's obligation is therefore upstream: hand this a closing axis that
+    came from a real gripper pose. :func:`~tpgpt.grasp.grasps.Grasp6D.closing`
+    does; an object's body axis does not, and that is what the world-axis test
+    was quietly compensating for.
 
     Raises:
         ValueError: if the closing axis is parallel to the support normal, which
@@ -451,29 +460,19 @@ def task_frame(
             "support surface"
         )
     c = _unit(c)
-    if reference is not None:
-        if float(c @ np.asarray(reference, dtype=float)[:, 0]) < 0.0:
-            c = -c
-    elif c[1] < -_EPS or (abs(c[1]) <= _EPS and c[0] < 0.0):
-        c = -c
     a = np.cross(n, c)
     return np.column_stack([c, a, n])
 
 
-def grasp_pose_frame(
-    grasp: "GraspFrame",
-    support_normal: np.ndarray = (0.0, 0.0, 1.0),
-    reference: np.ndarray | None = None,
-) -> np.ndarray:
-    """The grasp's **full** orientation, with :func:`task_frame`'s sign convention.
+def grasp_pose_frame(grasp: "GraspFrame") -> np.ndarray:
+    """The grasp's own rotation, columns ``(closing, jaw, approach)``.
 
-    :func:`task_frame` projects the closing axis perpendicular to the support
-    normal, so it can only ever express a *yaw* about the vertical and it
-    discards the grasp's approach tilt entirely. A cube built in this frame
-    instead carries the whole grasp orientation, which is what makes Eq. 11
-    deliver the hand at the angle the grasp actually asks for.
+    A cube laid out in this frame carries the whole grasp orientation, including
+    the approach tilt that :func:`task_frame` discards by projecting into the
+    support plane. That is what makes Eq. 11 deliver the hand at the angle the
+    grasp actually asks for.
 
-    That is not free. ``J_perp`` is one rotation per point and Eq. 11 uses it for
+    It is not free. ``J_perp`` is one rotation per point and Eq. 11 uses it for
     the gripper, so whatever rotation reaches the hand also reaches the vertical.
     Measured against a target grasp tilted 30 degrees out of plane: the task
     frame leaves the gripper 30 degrees wrong and the vertical untouched, this
@@ -482,37 +481,18 @@ def grasp_pose_frame(
     are legitimate; the trade is the point, and
     :func:`tpgpt.metrics.transport.tilt_profile` is how it is measured.
 
-    **The sign is taken from :func:`task_frame`, not re-derived.** A parallel jaw
-    is physically identical under ``closing -> -closing``, but flipping it turns
-    the cube 180 degrees and permutes every corner label -- the mechanism that
-    cost the reshelving campaign 17/20 -> 5/20 and stayed hidden because the
-    world-axis test never fired over that scene's yaw range (see
-    :func:`task_frame`). Resolving it in one place means the two frames can never
-    disagree about which corner is which.
+    **This used to re-derive the closing axis's sign** against
+    :func:`task_frame`, and took a support normal and a reference frame in order
+    to do it. Both are gone. A grasp is a pose, not an axis: the sign is already
+    fixed by the planner and by which finger of the hand is which, so there is
+    nothing to resolve. See :func:`task_frame` for what the resolution cost.
 
-    Args:
-        grasp: The grasp to build the frame from.
-        support_normal: Passed to :func:`task_frame` for the sign resolution.
-        reference: The frame the other end of the task used, forwarded to
-            :func:`task_frame`.
-
-    Returns:
-        ``(3, 3)`` rotation with columns ``(closing, jaw, approach)``.
-
-    Raises:
-        ValueError: from :func:`task_frame` if the closing axis is parallel to
-            the support normal, so that both frames refuse the same grasps.
+    Note this frame needs no support normal at all, which is the other reason to
+    prefer it: a hand approaching straight down has no horizontal component to
+    project, so any construction that leans on the support plane degenerates
+    exactly where this one does not.
     """
-    resolved = task_frame(support_normal, grasp.closing, reference=reference)[:, 0]
-    n = _unit(support_normal)
-    projected = grasp.closing - float(grasp.closing @ n) * n
-    flipped = float(projected @ resolved) < 0.0
-    signed = GraspFrame(
-        tcp=grasp.tcp,
-        approach=grasp.approach,
-        closing=-grasp.closing if flipped else grasp.closing,
-    )
-    return signed.rotation
+    return grasp.rotation
 
 
 def to_frame(points: np.ndarray, frame: np.ndarray) -> np.ndarray:
@@ -809,7 +789,7 @@ def object_keypoints(
     corner_frame = (
         frame
         if orientation == "task"
-        else grasp_pose_frame(grasp, support_normal, reference=frame)
+        else grasp_pose_frame(grasp)
     )
     all_points = np.vstack(
         [centre[None], centre + from_frame(CUBE_CORNERS * half, corner_frame)]
@@ -1189,10 +1169,15 @@ def scene_keypoints(
     Args:
         box: Forwarded to :func:`object_keypoints` for all four blocks.
         orientation: Likewise. With ``"grasp"``, each block's corners are laid
-            out in its own grasp's pose. The target blocks resolve their closing
-            sign against the frame they are handed, so ``flip_target`` is
-            honoured automatically and the cube can never disagree with the task
-            frame about which corner is which.
+            out in its own grasp's pose, taken as given -- no sign is resolved
+            anywhere, so no two blocks can disagree about which corner is which.
+        flip_target: Take the *other* roll about the target grasp's approach
+            axis, rather than the one that agrees with the demonstration. Both
+            grip the object identically and both are executable; they are
+            different wrist configurations, and a wrist has a limited range, so
+            a caller may legitimately try both and keep whichever the arm can
+            hold. Applied to the grasp before either target block is derived, so
+            the pick and the place can never disagree.
         cube_half_extent: Likewise.
 
     Returns:
@@ -1202,6 +1187,61 @@ def scene_keypoints(
     n = _unit(support_normal)
 
     source_frame = task_frame(n, source.grasp.closing)
+
+    # --- which way round to approach the target -----------------------------
+    #
+    # A parallel jaw grips the same object identically with its fingers swapped,
+    # so the target grasp and that grasp rolled a half turn about its approach
+    # are two poses for one physical grip. Both are executable; they are
+    # different wrist configurations. **Something has to choose, and the choice
+    # is made here, once, on the grasp itself** -- so both target blocks inherit
+    # it and cannot disagree.
+    #
+    # The criterion is agreement with the demonstration: take the roll whose
+    # closing axis points the same way as the source's. That is a statement
+    # about the task -- grip this object the way the demonstrated hand gripped
+    # its object -- and it needs one dot product.
+    #
+    # **This is not the sign resolution that 7.33 removed, and the difference
+    # matters.** That one ran independently at each of four blocks, and decided
+    # by asking whether the axis pointed along world ``+y`` -- a question about
+    # the object's yaw in the scene, unrelated to the gripper, which answered
+    # differently at the pick and the place and planted a half turn between
+    # them. This runs once, on a grasp, and compares against the demonstration.
+    #
+    # **Why it is not optional.** ``phi`` has to carry the source cube onto the
+    # target cube, so the angle between the two frames is a rotation the map
+    # must realise. Measured across 20 cells, ``min det(J)`` against that angle:
+    #
+    # =================  ==============  =========================
+    # source-to-target   ``min det``     ``min det``, other roll
+    # =================  ==============  =========================
+    # 3 - 19 deg         0.94 - 0.99     0.006 - 0.08
+    # 74 - 135 deg       0.33 - 0.79     0.46 - 0.99
+    # 149 - 179 deg      **-0.06 - 0.16**  0.93 - 1.00
+    # =================  ==============  =========================
+    #
+    # Three of twenty maps fold outright without it. Choosing by agreement gives
+    # a worst case of 0.456 and a median of 0.93 over the same cells, against
+    # 0.443 and 0.878 for the world-axis version it replaces.
+    take_other_roll = float(
+        np.asarray(target.grasp.closing) @ np.asarray(source.grasp.closing)
+    ) < 0.0
+    if flip_target:
+        take_other_roll = not take_other_roll
+    if take_other_roll:
+        target = ObjectPlacement(
+            points=target.points,
+            grasp=GraspFrame(
+                tcp=target.grasp.tcp,
+                approach=target.grasp.approach,
+                closing=-target.grasp.closing,
+            ),
+            support_height=target.support_height,
+            destination=target.destination,
+            destination_height=target.destination_height,
+            metadata=target.metadata,
+        )
     source_pick = object_keypoints(
         source.points, source.grasp, n, source.support_height, "src_pick",
         source_frame, include_contacts, box, orientation, cube_half_extent,
@@ -1225,18 +1265,12 @@ def scene_keypoints(
     )
     offset = lateral_offset(source_place_points, source.destination, source_place_frame)
 
-    # Signed to agree with the source: a half turn between the two frames is a
-    # half turn planted in the map, and the jaws cannot tell the difference.
-    #
-    # ``flip_target`` takes the other choice. Both describe the same physical
-    # grasp -- a parallel jaw closing along ``+c`` and along ``-c`` is one
-    # grasp -- but they command gripper yaws 180 degrees apart, and a wrist has
-    # a limited range. Measured on a tabletop scene: every point of the warped
-    # path was reachable in position, and only 3 of 20 were reachable with the
-    # commanded orientation, leaving the arm 98 mm behind an attractor it could
-    # not satisfy. The caller tries both and keeps the one the arm can hold.
-    closing = -target.grasp.closing if flip_target else target.grasp.closing
-    target_frame = task_frame(n, closing, reference=source_frame)
+    # **No reference, and none is needed.** Each frame takes its sign from its
+    # own grasp, and a grasp's closing axis has a definite sign fixed by the
+    # planner and by which finger of the hand is which. Two frames derived that
+    # way cannot disagree; two frames that each invent a sign from the object's
+    # yaw in the world can, and did, by 180 degrees (7.33).
+    target_frame = task_frame(n, target.grasp.closing)
     target_pick = object_keypoints(
         target.points, target.grasp, n, target.support_height, "tgt_pick",
         target_frame, include_contacts, box, orientation, cube_half_extent,
@@ -1288,7 +1322,16 @@ def scene_keypoints(
         "target_carry_rotation": target_carry,
         "lateral_offset": offset,
         "source_frame": source_frame,
+        "source_place_frame": source_place_frame,
         "target_frame": target_frame,
+        # **The grasp actually executed**, which is the incoming one rolled a
+        # half turn about its approach when that agrees better with the
+        # demonstration. Exposed because everything downstream that converts a
+        # grasp into a robot command -- ``grasp_to_eef_pose`` above all -- has to
+        # be given *this* pose and not the one the planner emitted, or it will
+        # command the other roll and disagree with the plan by 180 degrees.
+        "target_grasp": target.grasp,
+        "target_grasp_rolled": bool(take_other_roll),
         "contacts_from_cloud": {
             "src_pick": source_pick.metadata["contacts_from_cloud"],
             "src_place": source_place.metadata["contacts_from_cloud"],

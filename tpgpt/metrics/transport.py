@@ -113,6 +113,69 @@ def orientation_transport_error(
     return np.degrees(angle)
 
 
+def carry_orientation_error(
+    transport_map,
+    x_grasp: np.ndarray,
+    x_release: np.ndarray,
+    R_grasp: np.ndarray,
+    R_release: np.ndarray,
+    R_grasp_target: np.ndarray,
+    R_release_target: np.ndarray,
+) -> float:
+    """How far the plan turns the carried object from how far it should turn.
+
+    Between the jaws closing and opening the object is rigidly attached to the
+    hand, so its placed orientation is fixed by the hand's *relative* rotation
+    over that span and by nothing else. This compares the relative rotation Eq.
+    11 delivers,
+
+    ``(J_perp(x_release) R_release) (J_perp(x_grasp) R_grasp)^T``
+
+    against the one the target configurations ask for,
+    ``R_release_target R_grasp_target^T``.
+
+    **Why this exists rather than two calls to**
+    :func:`orientation_transport_error`. That function minimises over
+    :data:`JAW_SYMMETRY` at each point independently, which is right for a
+    single grasp and destroys the pairing. A half turn about the approach taken
+    at *both* ends cancels here -- it is the same task with the wrist rolled
+    over -- while one taken at a *single* end does not, and that is exactly what
+    has to be caught: it reflects the object through the grasp point and lands
+    it twice its lateral grasp offset away.
+
+    Nothing else sees that. The map stays a valid diffeomorphism, the keypoint
+    residual stays at 1e-7, and **the aim stays at 0.00 mm** -- because a half
+    turn about the approach leaves the grasp point fixed, so it is the one point
+    a reflection cannot move. Measured over 40 cells before the frames were made
+    to agree, this read **178.5 to 180.0 degrees** while
+    ``orientation_transport_error`` read 0.2 to 4.5 at both ends. Section 7.33.
+
+    Args:
+        transport_map: A fitted map exposing ``orthogonal_jacobian``.
+        x_grasp: ``(3,)`` source-space position where the jaws close.
+        x_release: ``(3,)`` source-space position where they open.
+        R_grasp: ``(3, 3)`` source hand orientation at the grasp.
+        R_release: ``(3, 3)`` source hand orientation at the release.
+        R_grasp_target: ``(3, 3)`` orientation wanted at the target grasp.
+        R_release_target: ``(3, 3)`` orientation wanted at the target release.
+
+    Returns:
+        The angle in **degrees**.
+    """
+    X = np.vstack([
+        np.asarray(x_grasp, dtype=float).reshape(3),
+        np.asarray(x_release, dtype=float).reshape(3),
+    ])
+    J = transport_map.orthogonal_jacobian(X)
+    delivered = (J[1] @ np.asarray(R_release, dtype=float).reshape(3, 3)) @ (
+        J[0] @ np.asarray(R_grasp, dtype=float).reshape(3, 3)
+    ).T
+    wanted = np.asarray(R_release_target, dtype=float).reshape(3, 3) @ np.asarray(
+        R_grasp_target, dtype=float
+    ).reshape(3, 3).T
+    return float(np.degrees(rotation_geodesic(delivered[None], wanted[None])[0]))
+
+
 def vertical_tilt(transport_map, X: np.ndarray, up: np.ndarray = UP) -> np.ndarray:
     """How far the map tilts "up" at each queried point, in degrees.
 

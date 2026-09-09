@@ -28,7 +28,13 @@ import numpy as np
 from tpgpt.experiments.diagnose import diagnose, object_probe
 from tpgpt.experiments.reshelving_pipeline import record_source_placement
 from tpgpt.grasp.filters import FilterFunnel, filter_grasps
-from tpgpt.grasp.grasps import Grasp6D, contact_offset, grasp_to_eef_pose
+from tpgpt.grasp.grasps import (
+    Grasp6D,
+    contact_offset,
+    grasp_to_eef_pose,
+    to_grasp_convention,
+    to_wrist_convention,
+)
 from tpgpt.grasp.grippers import resolve_pair
 from tpgpt.language.parser import parse_task
 from tpgpt.perception.cameras import object_point_cloud, scene_point_cloud
@@ -41,7 +47,7 @@ from tpgpt.sim.keypoints import (
     scene_keypoints,
 )
 from tpgpt.sim.rollout import rollout_policy, slot_score
-from tpgpt.transport.labels import transport_labels
+from tpgpt.transport.labels import PolicyLabels, transport_labels
 from tpgpt.transport.maps import TransportMap
 
 #: Why a run ended. Exactly one of these is reported.
@@ -339,6 +345,22 @@ def run(
         source_offset = contact_offset(SOURCE_GRIPPER)
         target_offset = contact_offset(gripper)
         tool_labels = _to_tool_frame(labels, source_offset)
+        # **And into the grasp convention.** ``record_demonstration`` records the
+        # source hand's ``grip_site`` orientations, while every keypoint cube is
+        # built from a grasp pose, which is in GraspGen-X's convention -- the one
+        # frame that means the same thing on all nine hands. Working in it from
+        # end to end leaves exactly one per-hand step, putting the *executing*
+        # hand's alignment back on below. Without it the source Panda's own
+        # 180 degree alignment rides through the map and arrives attached to
+        # whichever hand is executing: 0.2 degrees of error on a Robotiq 2F-85,
+        # 90 on an XArm. 7.34.
+        tool_labels = PolicyLabels(
+            positions=tool_labels.positions,
+            velocities=tool_labels.velocities,
+            orientations=to_grasp_convention(tool_labels.orientations, SOURCE_GRIPPER),
+            gripper=tool_labels.gripper,
+            time_belief=tool_labels.time_belief,
+        )
 
         candidates = [grasp_set.grasps[i] for i in funnel.survivors[:MAX_CANDIDATES]]
         chosen = _choose_grasp(
@@ -399,6 +421,12 @@ def run(
         # map carries contact point to contact point, and each hand steps out to
         # its own wrist from there.
         transported = transport_labels(transport_map, tool_labels)
+        # Back into *this* hand's wrist convention, which is what the controller
+        # commands and what IK aims. See the conversion above.
+        if transported.orientations is not None:
+            transported.orientations = to_wrist_convention(
+                transported.orientations, gripper
+            )
         result.demonstration = labels.positions
         result.transported = transported.positions
         result.transported_labels = transported

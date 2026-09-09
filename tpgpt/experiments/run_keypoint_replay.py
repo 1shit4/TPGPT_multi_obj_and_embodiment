@@ -73,7 +73,11 @@ from tpgpt.experiments.run_keypoint_transport import (
     target_placement,
     transport,
 )
-from tpgpt.grasp.grasps import contact_offset
+from tpgpt.grasp.grasps import (
+    contact_offset,
+    to_grasp_convention,
+    to_wrist_convention,
+)
 from tpgpt.reporting.html import write_manifest
 from tpgpt.sim.replay import make_position_controller_config, replay_labels
 from tpgpt.sim.rollout import slot_score
@@ -298,11 +302,26 @@ def replay_variant(env, labels, source_placement, target, variant, gripper="pand
     the fingertip point and the trajectory would be a wrist path.
     """
     result = transport(labels, source_placement, target, variant=variant)
+    # **Back into this hand's wrist convention before it is commanded.**
+    #
+    # ``labels`` arrive in the *grasp* convention (see ``main``), the keypoint
+    # cubes are built in it, so the transported orientations come out in it too.
+    # Inverse kinematics aims the ``grip_site``, which is a different frame --
+    # by 0.2 degrees on a Robotiq 2F-85 and by 90 on an XArm -- and the
+    # difference is this hand's measured ``alignment_rotation``.
+    #
+    # Omitting it is what ``grasp_to_eef_pose`` exists to prevent for a single
+    # grasp, and neither it nor ``alignment_rotation`` used to appear anywhere in
+    # this driver. Measured before the fix, the commanded wrist orientation was
+    # 0.6 to 91 degrees from the correct one depending on the hand. 7.34.
     warped = PolicyLabels(
         positions=result["warped"],
         velocities=labels.velocities,
-        orientations=result["map"].transport_orientations(
-            labels.positions, labels.orientations
+        orientations=to_wrist_convention(
+            result["map"].transport_orientations(
+                labels.positions, labels.orientations
+            ),
+            gripper,
         ),
         gripper=None if labels.gripper is None else labels.gripper.copy(),
         time_belief=None if labels.time_belief is None else labels.time_belief.copy(),
@@ -411,6 +430,26 @@ def main(
     # same mistake and its own retraction warns that a null result deserves as
     # much suspicion as a surprising one.
     labels = _to_tool_frame(labels, contact_offset(SOURCE_GRIPPER))
+
+    # **And into the grasp convention, once, here.**
+    #
+    # ``record_demonstration`` records the Panda's ``grip_site`` orientations.
+    # Every keypoint cube downstream is built from a grasp pose, which is in
+    # GraspGen-X's convention -- uniform across all nine hands, which is exactly
+    # why geometry that has to hold across embodiments belongs there. Stripping
+    # the source hand's own alignment here means the map operates in one frame
+    # from end to end, and the only per-hand step left is putting the *target*
+    # hand's alignment back on at the moment of command (``replay_variant``).
+    #
+    # Without this the source Panda's 180 degree alignment rode through the map
+    # and arrived attached to whichever hand was executing. 7.34.
+    labels = PolicyLabels(
+        positions=labels.positions,
+        velocities=labels.velocities,
+        orientations=to_grasp_convention(labels.orientations, SOURCE_GRIPPER),
+        gripper=labels.gripper,
+        time_belief=labels.time_belief,
+    )
 
     # Real planner grasps, filtered exactly as ``filter_grasps`` filters them.
     # A top-down recipe makes the task frame and the full grasp pose coincide,
