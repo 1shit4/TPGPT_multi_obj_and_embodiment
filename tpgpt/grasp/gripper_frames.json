@@ -24,6 +24,7 @@
       0.2377164768185497
     ],
     "calibrated_depth": null,
+    "calibration_note": "No usable depth band on the corrected scene: 1 of 13 swept offsets lift the reference can (a band 15 mm wide), below the 3-offset minimum. A single working sample is a coincidence of one grasp, not a calibration. Consistent with this hand's finger travel of 0.7 to 6.5 mm against 29 to 90 mm for every other hand: it does not actuate. ROBOTICS_NOTES 7.32.",
     "calibration_samples": [
       [
         -0.09,
@@ -149,7 +150,9 @@
       3.2194593847175325e-16,
       0.9999999999942536
     ],
-    "calibrated_depth": 0.037500000000000006,
+    "calibrated_depth": 0.0075,
+    "calibration_band": 0.15,
+    "calibration_note": "Re-measured on the corrected scene (ROBOTICS_NOTES 7.32). Previous value 0.0375 -> 0.0075, a change of -30.0 mm; 10 of 13 offsets lift the can over a 150 mm band. The old value was measured in a scene that dropped objects 25 mm and ejected them from an interpenetrating arm, so every stored depth was fitted against an object that was moving.",
     "calibration_samples": [
       [
         -0.09,
@@ -204,6 +207,7 @@
         0.0749390833265614
       ]
     ],
+    "calibration_working": 10,
     "closing_angle_deg": -3.410605131648481e-12,
     "closing_in_site": [
       -0.9999999999942537,
@@ -255,7 +259,9 @@
       1.460522975194662e-16,
       0.9999999999999987
     ],
-    "calibrated_depth": 0.030000000000000002,
+    "calibrated_depth": 1.982541115402065e-18,
+    "calibration_band": 0.105,
+    "calibration_note": "Re-measured on the corrected scene (ROBOTICS_NOTES 7.32). Previous value 0.0300 -> 0.0000, a change of -30.0 mm; 7 of 13 offsets lift the can over a 105 mm band. The old value was measured in a scene that dropped objects 25 mm and ejected them from an interpenetrating arm, so every stored depth was fitted against an object that was moving.",
     "calibration_samples": [
       [
         -0.09,
@@ -310,6 +316,7 @@
         0.08262304181416724
       ]
     ],
+    "calibration_working": 7,
     "closing_angle_deg": -5.427978067018557e-10,
     "closing_in_site": [
       -0.9999999999999987,
@@ -367,7 +374,9 @@
       -3.1123461207378994e-06,
       0.9999923969360921
     ],
-    "calibrated_depth": 0.030000000000000002,
+    "calibrated_depth": 0.007499999999999997,
+    "calibration_band": 0.18,
+    "calibration_note": "Re-measured on the corrected scene (ROBOTICS_NOTES 7.32). Previous value 0.0300 -> 0.0075, a change of -22.5 mm; 12 of 13 offsets lift the can over a 180 mm band. The old value was measured in a scene that dropped objects 25 mm and ejected them from an interpenetrating arm, so every stored depth was fitted against an object that was moving.",
     "calibration_samples": [
       [
         -0.09,
@@ -422,6 +431,7 @@
         0.07706097594713257
       ]
     ],
+    "calibration_working": 12,
     "closing_angle_deg": -0.04493616581009974,
     "closing_in_site": [
       0.9999920893877148,
@@ -489,7 +499,9 @@
       0.030747664611482022,
       0.9953943861800232
     ],
-    "calibrated_depth": 0.0225,
+    "calibrated_depth": 0.014999999999999998,
+    "calibration_band": 0.16499999999999998,
+    "calibration_note": "Re-measured on the corrected scene (ROBOTICS_NOTES 7.32). Previous value 0.0225 -> 0.0150, a change of -7.5 mm; 11 of 13 offsets lift the can over a 165 mm band. The old value was measured in a scene that dropped objects 25 mm and ejected them from an interpenetrating arm, so every stored depth was fitted against an object that was moving.",
     "calibration_samples": [
       [
         -0.09,
@@ -544,6 +556,7 @@
         0.00011176305699034383
       ]
     ],
+    "calibration_working": 11,
     "closing_angle_deg": 0.41401783413303406,
     "closing_in_site": [
       0.9958595521076674,
@@ -621,7 +634,9 @@
       -4.459511800214597e-17,
       0.9999958095693371
     ],
-    "calibrated_depth": 0.030000000000000002,
+    "calibrated_depth": 0.014999999999999998,
+    "calibration_band": 0.16499999999999998,
+    "calibration_note": "Re-measured on the corrected scene (ROBOTICS_NOTES 7.32). Previous value 0.0300 -> 0.0150, a change of -15.0 mm; 11 of 13 offsets lift the can over a 165 mm band. The old value was measured in a scene that dropped objects 25 mm and ejected them from an interpenetrating arm, so every stored depth was fitted against an object that was moving.",
     "calibration_samples": [
       [
         -0.09,
@@ -676,6 +691,7 @@
         0.08475950574153368
       ]
     ],
+    "calibration_working": 11,
     "closing_angle_deg": 0.0010446425033450168,
     "closing_in_site": [
       0.9999958094031282,
@@ -848,7 +864,9 @@
       -2.7513358411305364e-05,
       0.9999999981979347
     ],
-    "calibrated_depth": 0.030000000000000002,
+    "calibrated_depth": 0.0225,
+    "calibration_band": 0.15,
+    "calibration_note": "Re-measured on the corrected scene (ROBOTICS_NOTES 7.32). Previous value 0.0300 -> 0.0225, a change of -7.5 mm; 10 of 13 offsets lift the can over a 150 mm band. The old value was measured in a scene that dropped objects 25 mm and ejected them from an interpenetrating arm, so every stored depth was fitted against an object that was moving.",
     "calibration_samples": [
       [
         -0.09,
@@ -903,6 +921,7 @@
         0.09952704892696063
       ]
     ],
+    "calibration_working": 10,
     "closing_angle_deg": 89.99999946793685,
     "closing_in_site": [
       -9.286253746551671e-09,
@@ -958,7 +977,9 @@
       4.711967729710406e-16,
       0.9999999959966763
     ],
-    "calibrated_depth": -0.0075,
+    "calibrated_depth": 0.0075,
+    "calibration_band": 0.06,
+    "calibration_note": "Re-measured on the corrected scene (ROBOTICS_NOTES 7.32). Previous value -0.0075 -> 0.0075, a change of +15.0 mm; 4 of 13 offsets lift the can over a 60 mm band. The old value was measured in a scene that dropped objects 25 mm and ejected them from an interpenetrating arm, so every stored depth was fitted against an object that was moving.",
     "calibration_samples": [
       [
         -0.09,
@@ -1013,6 +1034,7 @@
         0.05773811710815546
       ]
     ],
+    "calibration_working": 4,
     "closing_angle_deg": 1.2830165019295237e-07,
     "closing_in_site": [
       -0.9999999959966763,
