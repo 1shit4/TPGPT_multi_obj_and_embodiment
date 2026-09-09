@@ -398,7 +398,27 @@ def main(
     slot: str = "top_middle",
     seed: int = 0,
     grippers=REPLAY_GRIPPERS,
+    filters: str = "approach",
 ) -> dict:
+    """Replay every construction on every hand and object.
+
+    Args:
+        filters: Which grasp filters select the candidate, forwarded to
+            :func:`~tpgpt.experiments.run_keypoint_transport.target_placement`.
+
+            ``"approach"`` keeps only the 45 degree approach test and ranks the
+            survivors by how closely they match the demonstration. ``"full"``
+            runs the whole funnel -- adding visibility, on-target, jaw width,
+            collision and reachability -- and ranks by GraspGen-X's own score,
+            which is what ``filter_grasps`` returns.
+
+            **The two select different grasps**, by a median of 15.7 mm and up
+            to 51.1 mm of TCP, because the ranking changes as well as the
+            filtering: the chosen candidate's approach mismatch goes from a
+            median of 3.2 degrees to 13.8. So a run that changes this *and*
+            anything else measures neither. Hold it fixed to compare
+            constructions; vary it alone to ask what the funnel is worth.
+    """
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
 
@@ -538,7 +558,7 @@ def main(
                         # particular nothing checked that the arm could reach
                         # the placement, which is where most of the failures
                         # turned out to be.
-                        filters="full",
+                        filters=filters,
                         slot_for_filters=slot,
                     )
                     target.metadata["object_name"] = name
@@ -605,11 +625,12 @@ def main(
                 "scene": "rebuilt fresh for every replay, asserted reproducible",
                 "control": "JOINT_POSITION via solve_ik, no policy",
                 "grasp_source": (
-                    "graspgen -- real GraspGen-X candidates for *this* hand, "
-                    "filtered to within MAX_APPROACH_MISMATCH_DEG of the "
-                    "demonstrated approach. A top-down recipe would make the "
-                    "task frame and the full grasp pose coincide and could not "
-                    "separate the two constructions."
+                    f"graspgen, filters={filters!r} -- real GraspGen-X "
+                    "candidates for *this* hand. 'approach' keeps the 45 degree "
+                    "approach test and ranks by agreement with the "
+                    "demonstration; 'full' runs the whole funnel and ranks by "
+                    "the planner's score. They pick different grasps, so this "
+                    "must be held fixed to compare constructions."
                 ),
                 "labels": "tool frame -- converted by _to_tool_frame before transport",
                 "tool_offset": (
@@ -664,10 +685,19 @@ if __name__ == "__main__":
             "offset and 50 to 125 mm of aperture."
         ),
     )
+    parser.add_argument(
+        "--filters", default="approach", choices=("approach", "full"),
+        help=(
+            "Grasp selection. 'approach' matches the historic runs and is what "
+            "a construction comparison must hold fixed; 'full' runs the whole "
+            "funnel and picks different grasps."
+        ),
+    )
     args = parser.parse_args()
     main(
         args.out,
         args.slot,
         grippers=tuple(args.grippers.split(",")) if args.grippers
         else REPLAY_GRIPPERS,
+        filters=args.filters,
     )
