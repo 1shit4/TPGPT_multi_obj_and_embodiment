@@ -247,14 +247,19 @@ def replay_preconditions(
     ))
 
     elapsed = float(env.sim.data.time)
-    settle = float(
-        getattr(env, "SETTLE_STEPS", 0) * float(env.sim.model.opt.timestep)
-    )
+    # **The budget is what the scene actually spent settling, not its minimum.**
+    # ``SETTLE_STEPS`` is now a floor, not the count: settling runs until the
+    # objects stop moving (7.32), which takes 150 to 600 steps depending on the
+    # scene. Comparing against the 60-step floor rejected every cell of a
+    # campaign -- correctly, by its own logic, and uselessly.
+    steps = int(getattr(env, "settle_steps_taken", 0) or
+                getattr(env, "SETTLE_STEPS", 0))
+    settle = float(steps * float(env.sim.model.opt.timestep))
     checks.append(Precondition(
         "scene_unstepped",
         elapsed <= settle + 1e-9,
-        f"sim.data.time = {elapsed:.4f} s against a settle budget of "
-        f"{settle:.4f} s ({getattr(env, 'SETTLE_STEPS', 0)} steps)",
+        f"sim.data.time = {elapsed:.4f} s against the {steps} settle steps "
+        f"this scene took ({settle:.4f} s)",
     ))
 
     position = np.asarray(env.object_position(object_name), dtype=float)

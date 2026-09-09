@@ -65,10 +65,12 @@ class FakeRobot:
 
 
 class FakeEnv:
-    #: Matches ``TabletopShelf.SETTLE_STEPS``: 60 steps at 2 ms is 0.120 s of
-    #: legitimate stepping, run so the dropped meshes come to rest before a
-    #: cloud is captured.
+    #: Matches ``TabletopShelf``: settling runs until the objects stop, so the
+    #: budget is what this scene *took*, not the 60-step floor. Comparing
+    #: against the floor rejected all 40 cells of a campaign once settling
+    #: became adaptive (7.32).
     SETTLE_STEPS = 60
+    settle_steps_taken = 300
 
     def __init__(self, gripper_class=PandaGripper, time=0.0, position=(0.1, 0.2, 0.9)):
         self.sim = FakeSim(time)
@@ -133,19 +135,19 @@ class TestSceneUnstepped:
         dropped and must come to rest before a cloud is captured. Comparing
         against zero instead rejected every real scene -- which is what the
         first version of this check did."""
-        checks = replay_preconditions(FakeEnv(time=0.120), "panda", "can")
+        checks = replay_preconditions(FakeEnv(time=0.600), "panda", "can")
         assert named(checks, "scene_unstepped").ok
 
     def test_one_control_step_past_the_settle_budget_is_caught(self, calibrated):
-        checks = replay_preconditions(FakeEnv(time=0.122), "panda", "can")
+        checks = replay_preconditions(FakeEnv(time=0.602), "panda", "can")
         assert not named(checks, "scene_unstepped").ok
 
     def test_the_budget_is_reported_alongside_the_reading(self, calibrated):
         detail = named(
-            replay_preconditions(FakeEnv(time=0.120), "panda", "can"),
+            replay_preconditions(FakeEnv(time=0.600), "panda", "can"),
             "scene_unstepped",
         ).detail
-        assert "0.1200" in detail and "60 steps" in detail
+        assert "0.6000" in detail and "300 settle steps" in detail
 
 
 class TestObjectPlacement:
