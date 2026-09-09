@@ -225,6 +225,8 @@ def target_placement(
     gripper: str = "panda",
     grasp_rank: int = 0,
     reference_approach: np.ndarray | None = None,
+    filters: str = "approach",
+    slot_for_filters: str | None = None,
 ) -> tuple[ObjectPlacement, np.ndarray]:
     """Describe an object in the scene and where the task wants it.
 
@@ -268,6 +270,24 @@ def target_placement(
         reference_approach: The demonstration's own approach direction, from
             ``pipeline._demonstrated_approach(labels)``. Required for
             ``"graspgen"``.
+        filters: Which of the grasp filters to apply to the planner's output.
+
+            ``"approach"`` (default) applies only the
+            :data:`MAX_APPROACH_MISMATCH_DEG` test against
+            ``reference_approach``. Cheap, needs no scene cloud, and enough to
+            stop the map being handed a candidate approached from underneath --
+            but it is **one** of the seven stages the pipeline actually uses.
+
+            ``"full"`` runs :func:`~tpgpt.grasp.filters.filter_grasps`: the
+            approach test plus visibility, on-target, jaw width, collision
+            against the rest of the scene, **reachability** at the pick, the
+            lift, the placement and the approach corridors into both, and
+            duplicate suppression. This is what the pipeline runs, and running
+            anything less here means an experiment measures candidates the
+            pipeline would have thrown away. Requires ``slot_for_filters`` so a
+            placement pose exists to test reachability against.
+        slot_for_filters: Destination slot, needed by ``filters="full"`` to
+            derive the placement pose the reachability stage checks.
         gripper: Registry short name, when ``grasp_source="graspgen"``.
         grasp_rank: Which ranked candidate to take.
 
@@ -318,8 +338,44 @@ def target_placement(
                 f"(closest {angles.min():.1f} deg); the pipeline would reject "
                 "this object before keypoints are built"
             )
-        # Best-aligned first, then by rank within that.
-        order = keep[np.argsort(angles[keep])]
+        if filters == "full":
+            # The whole funnel, exactly as ``pipeline.run`` applies it. Ordered
+            # by the planner's own score, which is what ``filter_grasps``
+            # returns, rather than by approach agreement -- the approach test is
+            # now a pass/fail stage inside the funnel rather than the ranking.
+            from tpgpt.experiments.pipeline import place_pose_for
+            from tpgpt.grasp.filters import filter_grasps
+            from tpgpt.perception.cameras import scene_point_cloud
+
+            if slot_for_filters is None:
+                raise ValueError(
+                    "filters='full' needs slot_for_filters: the reachability "
+                    "stage tests the placement pose, and there is no placement "
+                    "without a slot"
+                )
+            scene = scene_point_cloud(env, exclude=(instance,), obs=obs)
+            provisional = place_pose_for(
+                env, slot_for_filters, grasp_set.grasps[0], gripper,
+                float(np.ptp(cloud.points[:, 2])),
+            )
+            funnel = filter_grasps(
+                grasp_set.grasps, gripper, cloud.points, scene_points=scene,
+                camera_positions=cloud.camera_positions, env=env,
+                place_pose=provisional, reference_approach=reference,
+            )
+            if not len(funnel.survivors):
+                raise RuntimeError(
+                    f"every candidate for {instance!r} was rejected by the grasp "
+                    f"filters, mostly by {funnel.rejected_by}"
+                )
+            order = np.asarray(funnel.survivors, dtype=int)
+        elif filters == "approach":
+            # Best-aligned first, then by rank within that.
+            order = keep[np.argsort(angles[keep])]
+        else:
+            raise ValueError(
+                f"unknown filters {filters!r}; expected 'approach' or 'full'"
+            )
         grasp = GraspFrame.from_grasp(
             grasp_set.grasps[order[min(grasp_rank, len(order) - 1)]]
         )

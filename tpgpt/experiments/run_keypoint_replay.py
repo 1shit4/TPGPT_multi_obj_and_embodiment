@@ -531,6 +531,15 @@ def main(
                         grasp_source="graspgen",
                         reference_approach=reference_approach,
                         gripper=gripper,
+                        # **The whole funnel, not just the approach test.**
+                        # Earlier runs of this driver applied only
+                        # ``MAX_APPROACH_MISMATCH_DEG`` and so measured
+                        # candidates the pipeline would have rejected -- in
+                        # particular nothing checked that the arm could reach
+                        # the placement, which is where most of the failures
+                        # turned out to be.
+                        filters="full",
+                        slot_for_filters=slot,
                     )
                     target.metadata["object_name"] = name
                     # The rebuild is only sound if the seeded scene is
