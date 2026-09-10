@@ -1856,8 +1856,54 @@ independently: a Robotiq 2F-85's pads rotate inward as they open, so an object
 set down over a surface can catch on the opening fingers
 (`6dof_GraspMAS/docs/simulation.md`, "A release that does not release").
 
-**The real finding here is the drop itself**, which no previous experiment had
-looked at, and it is now the largest known execution weakness.
+### The real finding: the hand is commanded through the shelf
+
+The drop is not a control weakness, it is a collision, and no previous
+experiment had looked.
+
+The scene's shelf is the **cubby** variant, so the top slot is a slot between
+two walls rather than an open board:
+
+| part | x | z |
+|---|---|---|
+| bottom cubby's back panel | 0.168 - 0.180 | up to **1.101** — 20 mm above the top board |
+| top board | 0.170 - 0.270 | 1.069 - 1.081 |
+| top cubby's back wall | 0.258 - 0.270 | 1.081 - **1.261** |
+
+That leaves a **78 mm gap in x** to thread the hand down, and the plan does not
+know the wall is there. Measured by placing the arm at the IK solution for each
+of the last 40 commanded waypoints and running MuJoCo's own collision detection:
+**15 of 20 cells command the hand inside `shelf_top_back`, by 4.8 to 79.9 mm.**
+
+Caught in physics on the clearest case, `robotiq140/bread`:
+
+```
+gripper0_right_right_inner_finger <-> shelf_top_back   waypoints 132-195, deepest -8.24 mm
+tracking error:   wp 130 = 5 mm     wp 145 = 52 mm     wp 159 = 124 mm
+```
+
+The contact starts at waypoint 132 and the error starts climbing at waypoint
+132. The controller is a stiff joint-position law, so it drives the arm into the
+wall instead of yielding, and the object's own motion collapses from 6.8 mm per
+waypoint to **0.99** while the command keeps advancing 5.3.
+
+The contrast is what settles it. On cells that work the contact is the **object
+touching the board** — `yumi/bread` at 0.17 mm, `panda/cereal` at 0.05 mm — which
+is a set-down. On the failing cell a **finger** is in the wall and the object
+never reaches the board.
+
+**Why nothing upstream saw it.** `solve_ik` has no collision model — it is joint
+angles and a Jacobian. That is why the release pose "solves to 3.4 to 4.9 mm"
+while being physically unreachable. And `by_collision` checks the hand at the
+*grasp* against the scene cloud; `by_reachability` does check the placement, but
+through that same collision-blind solver.
+
+**What is not established.** The foul does not predict which cells fail:
+`panda/bread` fouls deepest at −79.9 mm and places, `robotiq85/milk` does not
+foul and fails, and the correlation with tracking error is only **r = +0.373**
+with 12 of the 15 fouling cells placing anyway. Dropping an object from 4 cm
+usually works. So the mechanism and its prevalence are established; that it
+decides any particular outcome is not.
 
 ---
 
@@ -1975,17 +2021,18 @@ and took the grasp-pose cube from 12/20 to 15/20 (§8j), including both cells
 whose error magnitude was predicted in advance.
 
 It also opened a new one, which is now the largest known execution weakness:
-**every placement is a drop.** The arm stops 13 to 130 mm short of the commanded
-release pose, so the object is let go a median 40 mm and up to 153 mm above the
-shelf board and falls. It usually lands anyway — the height does not separate
-success from failure — but it turns each placement into a partial lottery, and
-it is what makes marginal cells flip between runs.
+**every placement is a drop, because the hand is commanded through the shelf.**
+The top slot of the cubby is a 78 mm gap between two walls, and 15 of 20 cells
+command the hand inside the back wall by up to 79.9 mm. The arm jams against it,
+stops 13 to 130 mm short of the release pose, and opens its jaws a median 40 mm
+above the board. It usually lands anyway, which is why this went unnoticed, but
+it turns each placement into a partial lottery.
 
 ### Open, not started
 
 | # | item | why it matters |
 |---|---|---|
-| 1 | **The arm does not complete the descent into the shelf**, so every placement is a drop from a median 40 mm and up to 153 mm (§8j) | The largest known execution weakness, and the reason marginal cells flip between runs. Tracking error at the release waypoint is 13-130 mm while the pose itself solves IK to 3-5 mm, so this is not a workspace limit |
+| 1 | **The plan commands the hand through the shelf's back wall on 15 of 20 cells**, by 4.8 to 79.9 mm, so the arm jams and every placement becomes a drop from a median 40 mm (§8j, `ROBOTICS_NOTES.md` §7.35) | `solve_ik` has no collision model, which is why the pose "solves to 3-5 mm" while being physically unreachable, and `by_collision` only ever checks the grasp. Candidate fixes — a collision-aware reachability gate, a front approach, or standing the release off the board — are all untried |
 | 1b | **The half-turn symmetry is applied to two hands that declare themselves asymmetric** (§8l) | `robotiq3f` and `inspire` are `revolute_3f` with `symmetric: False` in GraspGen-X's own config. Every orientation number recorded for them, including their rows in §8g, used a symmetry they do not have |
 | 1c | **Does the full grasp funnel help?** Asked with the ranking held fixed | §8k could not answer it, because `filter_grasps` changes the ranking as well as the filtering and 39 of 40 cells got a different grasp |
 | 1d | **`robotiq140` is now the weakest hand at 1/4**, having been 2/4 | Different from where the investigation started, and undiagnosed. Its two clean failures carry the object faithfully and misplace it |

@@ -3075,44 +3075,114 @@ so every orientation figure recorded for those two hands, including their rows
 in 7.29's nine-hand table, used a symmetry they do not have. Neither appears in
 any Tier 2 run, so no physics result is affected. **Not yet fixed.**
 
-### 7.35 Every placement is a drop, and nobody had looked
+### 7.35 Every placement is a drop, because the hand is commanded through the shelf
 
 Found while explaining two cells that regressed across the 7.33-7.34 fix, and it
 is larger than the thing it was found chasing.
 
+#### The symptom
+
 The plan puts each object's base exactly on the shelf board -- measured against
 the true geometry, the real base lands **-0.1 to +1.8 mm** from it across a 48 to
 150 mm height range, so the vertical snap is correct and does not scale with
-object size. What happens in physics is different:
+object size. Physics does something else:
 
 | | Experiment L | Experiment M |
 |---|---|---|
 | object released above the board | median **44.4 mm**, max 129 | median **39.6 mm**, max 153 |
 | tracking error at the release waypoint | median 69.4 mm, max 133 | median 51.8 mm, max 130 |
 
-**The arm does not complete the descent into the shelf.** It stops 13 to 130 mm
-short of the commanded release pose, so the jaws open with the object up to
-15 cm above the board and it falls.
+The arm stops 13 to 130 mm short of the commanded release pose, so the jaws open
+with the object up to 15 cm above the board and it falls.
 
-This is not a workspace limit: the release pose itself solves full 6-DoF IK to
-**3.4 to 4.9 mm** on 15 of 20 cells. Nor is it the warm-started IK chain, which
-changes the release residual on only 2 of 20 cells.
+**It is a block, not a lag.** The commanded path moves a uniform 5.3 mm per
+waypoint through the descent and each waypoint gets 8 control steps, which is
+0.4 s at 0.016 m/s -- slow. Yet the object's own motion collapses from 6.8 mm
+per waypoint to **0.99** over the same span on ``robotiq140/bread``, while the
+command keeps advancing. The arm has stopped.
 
-**And the height does not separate success from failure** -- placed cells sit a
-median 37 mm above the board, failed cells 40, and `xarm/bread` was released
-**153 mm** high and placed successfully. So it is a systemic weakness with a
-partly random outcome, which is exactly what makes marginal cells flip between
-runs. Both of Experiment M's regressions are that lottery resampled:
-`robotiq140/bread` released 22 mm higher than before, bounced off the board and
-fell 435 mm to the table; `robotiq85/milk` released *lower* than before but the
+#### The cause
+
+The scene's default shelf is the **cubby** variant, so the top slot is not an
+open board but a slot between two walls:
+
+| geom | x | z |
+|---|---|---|
+| bottom cubby's back panel | 0.168 - 0.180 | up to **1.101**, i.e. 20 mm above the top board |
+| top board | 0.170 - 0.270 | 1.069 - 1.081 |
+| top cubby's back wall | 0.258 - 0.270 | 1.081 - **1.261** |
+
+That leaves a **78 mm gap in x** to thread the hand down.
+
+Measured directly, by putting the arm at the IK solution for each of the last
+40 commanded waypoints and running MuJoCo's own collision detection: **15 of 20
+cells command the hand inside ``shelf_top_back``**, by 4.8 to 79.9 mm.
+
+And caught in physics on ``robotiq140/bread``, which is the cleanest case:
+
+```
+gripper0_right_right_inner_finger <-> shelf_top_back   waypoints 132-195, deepest -8.24 mm
+tracking error:  wp 130 = 5 mm    wp 145 = 52 mm    wp 159 = 124 mm
+```
+
+The contact begins at waypoint 132 and the tracking error begins to climb at
+waypoint 132. The controller is a stiff joint-position law, so it keeps driving
+the arm into the wall rather than yielding.
+
+The contrast is what makes it conclusive. On cells that work the contact is the
+**object touching the board** -- ``yumi/bread`` at 0.17 mm, ``panda/cereal`` at
+0.05 mm -- which is a set-down. On the failing cell a **finger** is in the wall
+and the object never reaches the board at all.
+
+#### Why nothing upstream saw it
+
+**``solve_ik`` has no collision model.** It is joint angles and a Jacobian. That
+is exactly why the release pose "solves full 6-DoF IK to 3.4 to 4.9 mm on 15 of
+20 cells" while being physically unreachable: the arm can hold that
+configuration in the abstract and cannot get to it through a shelf. Two earlier
+candidate explanations were ruled out against that same blind instrument and are
+still correctly ruled out -- it is not the workspace envelope (reach in x
+correlates at r = -0.028 with the tracking error) and not the warm-started IK
+chain (solving from rest changes the release residual on 2 of 20 cells) -- but
+neither ruling could have found this.
+
+**And the collision filter never looks at the placement.** ``by_collision``
+checks the hand *at the grasp* against the scene cloud. ``by_reachability`` does
+check the placement, but through the same collision-blind ``solve_ik``.
+
+#### What is not established
+
+**The foul does not predict which cells fail.** ``panda/bread`` fouls deepest of
+all at -79.9 mm and places successfully; ``robotiq85/milk`` does not foul at all
+and fails. Correlation between foul depth and tracking error is **r = +0.373**,
+and 12 of the 15 fouling cells placed anyway.
+
+So the *mechanism* is established and so is its prevalence. What is not
+established is that it decides any particular outcome. Dropping an object from
+4 cm usually works; the drop converts each placement into a partial lottery and
+nothing here models which tickets win. That is also why release height does not
+separate success from failure -- placed cells sit a median 37 mm above the board
+and failed cells 40, and ``xarm/bread`` was released **153 mm** high and placed.
+
+Both of Experiment M's regressions are that lottery resampled:
+``robotiq140/bread`` released 22 mm higher than before, bounced off the board and
+fell 435 mm to the table; ``robotiq85/milk`` released *lower* than before but the
 object moved **81.9 mm laterally after the jaws opened**, against 40.1 before.
 
-The sibling project measured the second effect independently on the same family
+The sibling project measured that second effect independently on the same family
 of hand: a Robotiq 2F-85's pads rotate inward as they open, so an object set down
 over a surface can catch on the opening fingers and be carried back up
-(`6dof_GraspMAS/docs/simulation.md`, "A release that does not release"). It notes
-a Panda never does this, "which is exactly why one gripper's behaviour cannot
-stand in for the others'".
+(``6dof_GraspMAS/docs/simulation.md``, "A release that does not release"). It
+notes a Panda never does this, "which is exactly why one gripper's behaviour
+cannot stand in for the others'".
+
+#### What would fix it, none of it tried
+
+Give ``solve_ik`` a collision check, or gate the placement on one; approach the
+top shelf from the front rather than from above, which is the open item already
+recorded for a shelf with a roof; or stand the release off the board by the
+hand's own depth and let the object down separately. All three are designs, not
+results.
 
 ## 8. Open items
 

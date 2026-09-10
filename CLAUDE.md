@@ -351,14 +351,23 @@ Each of these cost real debugging time. Full detail in `ROBOTICS_NOTES.md`.
   `orientation_transport_error` applies it unconditionally, so every orientation
   figure for those two hands, including their rows in `§7.29`'s nine-hand table,
   used a symmetry they do not have. **Not yet fixed.** `§7.34`.
-- **Every placement is a drop, not a set-down.** The plan puts each object's
-  base within **1.8 mm** of the shelf board -- the vertical snap is correct --
-  but the arm stops **13 to 130 mm short** of the commanded release pose, so the
-  jaws open a median 40 mm and up to 153 mm above the board. Not a workspace
-  limit: the release pose solves IK to 3.4-4.9 mm on 15 of 20 cells. Not the
-  warm-started IK chain either: solving from rest changes 2 of 20. The height
-  does **not** predict failure, which is what makes marginal cells flip between
-  runs. `§7.35`.
+- **The plan commands the hand through the shelf, and `solve_ik` cannot see it.**
+  The default scene is the **cubby** variant, so the top slot is a **78 mm gap
+  in x** between the bottom cubby's back panel (which rises 20 mm *above* the
+  top board) and the top cubby's 180 mm back wall. **15 of 20 cells command the
+  hand inside `shelf_top_back`, by 4.8 to 79.9 mm.** The arm jams: on
+  `robotiq140/bread` a finger is 8.24 mm into the wall from waypoint 132, which
+  is exactly where the tracking error starts to climb, and the object's motion
+  collapses to 0.99 mm per waypoint against 5.3 commanded. So every placement is
+  a **drop** from a median 40 mm rather than a set-down -- on cells that work the
+  contact is the *object* on the *board* at 0.05-0.17 mm.
+  **`solve_ik` is joint angles and a Jacobian with no collision model**, which is
+  why the release pose "solves to 3.4-4.9 mm" while being physically
+  unreachable, and it is why ruling out the workspace envelope (r = -0.028) and
+  the warm-started IK chain (2 of 20 cells) was correct and could not find this.
+  `by_collision` only ever checks the hand at the **grasp**. The foul does *not*
+  predict which cells fail -- `panda/bread` fouls deepest at -79.9 mm and places
+  -- so the mechanism is established and its decisiveness is not. `§7.35`.
 - **`reachable_fraction` is a property of the whole path, not of a pose.**
   `replay_labels` seeds each IK solve from the previous one, so it answers "can
   the arm move *between* these poses". The direct control places objects at
