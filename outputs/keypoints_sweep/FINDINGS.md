@@ -2288,12 +2288,35 @@ it turns each placement into a partial lottery.
 | 1c | **Why the funnel's grasps are lost during the carry** — six cells to zero, one-sided, p = 0.031 (§8k) | Six grasp properties measured, none separates them, and the *grasping* difference is not significant (p = 0.375). Re-running Tier 2 on the same filters would reproduce it: nothing upstream has changed since |
 | 1e | **Experiments A to F have no corrected equivalent** | All six are withdrawn and none re-run. `GRASP_CUBE_HALF_EXTENT = 0.02` in particular rests on a withdrawn sweep read through a metric blind to the half turn (§10) |
 | 1d | **`robotiq140` is now the weakest hand at 1/4**, having been 2/4 | Different from where the investigation started, and undiagnosed. Its two clean failures carry the object faithfully and misplace it |
-| 2 | **Cross-hand closing schedule.** Jaws close at a fixed speed from different apertures, but the dwell is inherited from a Panda demonstration through the time belief | The traces from §8i record calibrated `closure` per waypoint, so this is answerable **without a new run** |
+| 2 | ~~Cross-hand closing schedule~~ — **measured, see below.** Only the robotiq140 is affected: median 5 waypoints of delay before the fingers touch anything, worst **15**. The other four hands: 0 | Caused `robotiq140/can`'s failure in §8j and its false `grasped: no`. **Not fixed** — nothing in the codebase gates on closure or scales the dwell |
 | 3 | **Contact-gated closing.** The rule must be closure-**rate** based: a box arrests the jaws dead (milk, +0.010 over the dwell) while a cylinder keeps yielding (can, +0.080) and never stalls | Needs 2. Also needs the phase to wait for the grasp event — a rollout change in the dynamics thread |
 | 4 | **Per-hand dwell scaling**, the cheaper alternative to 3, needing no new sensing | Derivable from the finger-travel calibration in `gripper_frames.json` |
 | 5 | **Objects are still dropped ~25 mm** at placement, landing at 0.7 m/s | Seating them at rest height was attempted and reverted: the arithmetic verified correct in isolation but produced floor-level escapes. The settle absorbs the bounce, so this is now cosmetic rather than corrupting |
 | 6 | **Whether `object_keypoints` should default to the grasp cube** | Now clearly favoured: **15/20 against 10/20** on the corrected code (§8j), 18/20 grasped against 14/20, and better conditioned. The 67%-against-83% conversion gap that argued against it was the half turn, which only the cube carried. Still its own commit |
 | 7 | **`prediction.reference` and `GPPolicy.attractor()` are fitted and never read; `velocity_desired` is never passed** | Pre-existing, dynamics thread, §2.7–2.8 |
+
+### The closing schedule, measured from the stored traces
+
+Open item 2, answered without a new run. How long the jaws take to reach the
+object after being told to close, one waypoint being 8 control steps or 0.4 s:
+
+| hand | jaw aperture | median delay | worst |
+|---|---|---|---|
+| yumi | 50 mm | 0 | 0 |
+| panda | 80 mm | 0 | 0 |
+| xarm | 85 mm | 0 | 0 |
+| robotiq85 | 85 mm | 0 | 0 |
+| **robotiq140** | **125 mm** | **5** | **15** |
+
+The demonstration's carry begins **one waypoint** after the close command, so
+there is no headroom. On the robotiq140 the lift therefore starts up to 15
+waypoints — six seconds — before the fingers have touched anything, which is
+what `robotiq140/can` does in §8j: it catches the can 15 waypoints late, lifts
+it 426 mm anyway, and is scored as never having grasped.
+
+**The problem is one hand, not the fleet**, which was not obvious beforehand and
+makes the cheap fix viable: scale the dwell per hand from the finger-travel
+figures already in `gripper_frames.json` rather than sensing anything.
 
 ### Grey areas — recorded because they are *not* solid
 
