@@ -416,6 +416,19 @@ def replay_variant(env, labels, source_placement, target, variant, gripper="pand
             if k in replay.metadata
         },
         "success": bool(replay.success),
+        # Which grasp was executed and how it was chosen. Two selection rules
+        # that pick the same candidate on a cell make that cell uninformative
+        # about the rule, so a comparison must report how many cells actually
+        # differed rather than treating all of them as evidence.
+        **{
+            f"grasp_{k}": v
+            for k, v in (target.metadata.get("grasp_funnel_flags") or {}).items()
+            if k in ("chosen_index", "chosen_score",
+                     "chosen_approach_mismatch_deg", "n_candidates",
+                     "n_survivors", "ranked_by",
+                     "cloud_too_sparse_for_jaw_width")
+        },
+        "cloud_points": target.metadata.get("cloud_points"),
         # **Grasped, traversed, placed** -- the three questions that are not
         # tautological. See stage_outcome.
         **stage_outcome(replay, warped, target, env),
@@ -454,6 +467,7 @@ def main(
     grippers=REPLAY_GRIPPERS,
     filters: str = "approach",
     rank_by: str = "auto",
+    approach_filter: bool = True,
     variant_names=REPLAY_VARIANTS,
 ) -> dict:
     """Replay every construction on every hand and object.
@@ -474,6 +488,10 @@ def main(
             median of 3.2 degrees to 13.8. So a run that changes this *and*
             anything else measures neither. Hold it fixed to compare
             constructions; vary it alone to ask what the funnel is worth.
+
+        approach_filter: Whether the 45 degree approach test is applied.
+            Independent of ``rank_by``, which is what makes the two measurable
+            separately.
 
         variant_names: Keypoint constructions to replay. Defaults to both of
             :data:`REPLAY_VARIANTS`. Restrict it when the question is about
@@ -627,6 +645,7 @@ def main(
                         # turned out to be.
                         filters=filters,
                         rank_by=rank_by,
+                        approach_filter=approach_filter,
                         slot_for_filters=slot,
                     )
                     target.metadata["object_name"] = name
@@ -687,6 +706,8 @@ def main(
         settings={
             "varied": {"variant": [v.name for v in variants],
                        "object": list(REPLAY_OBJECTS)},
+            "grasp_selection": {"filters": filters, "rank_by": rank_by,
+                                "approach_filter": bool(approach_filter)},
             "fixed": {
                 "source": "reshelving seed 0, one demonstration",
                 "slot": slot,
@@ -757,6 +778,14 @@ if __name__ == "__main__":
         ),
     )
     parser.add_argument(
+        "--no-approach-filter", action="store_true",
+        help=(
+            "Drop the 45 degree approach test, inline and as the funnel's "
+            "'demonstrated' stage. The demonstration is still used to choose "
+            "the target's roll, and still ranks if --rank-by=demonstration."
+        ),
+    )
+    parser.add_argument(
         "--rank-by", default="auto",
         choices=("auto", "demonstration", "score"),
         help=(
@@ -783,4 +812,5 @@ if __name__ == "__main__":
         else REPLAY_GRIPPERS,
         filters=args.filters,
         rank_by=args.rank_by,
+        approach_filter=not args.no_approach_filter,
     )

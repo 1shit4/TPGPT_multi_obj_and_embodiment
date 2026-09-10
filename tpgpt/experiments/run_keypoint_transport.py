@@ -228,6 +228,7 @@ def target_placement(
     filters: str = "approach",
     slot_for_filters: str | None = None,
     rank_by: str = "auto",
+    approach_filter: bool = True,
 ) -> tuple[ObjectPlacement, np.ndarray]:
     """Describe an object in the scene and where the task wants it.
 
@@ -236,6 +237,15 @@ def target_placement(
             natural narrow direction. The keypoint box is built in a frame
             derived from the closing axis, so the closing *direction* changes the
             keypoints while the grasp's height does not.
+        approach_filter: Whether the 45 degree approach test is applied, both
+            inline and as the funnel's "demonstrated" stage. Independent of
+            ``rank_by``, so the demonstration can rank without filtering or
+            filter without ranking.
+
+            Default ``True``, which is the historical behaviour. Switch it off
+            to ask what the test is worth -- see the note at the test itself for
+            why that is an open question rather than a settled one.
+
         rank_by: Which surviving candidate is executed. Independent of
             ``filters``, because "which candidates are allowed" and "which
             allowed one is used" are separate decisions.
@@ -332,17 +342,21 @@ def target_placement(
                 f"GraspGen-X returned no candidate for {instance!r} with "
                 f"{gripper!r}; refusing to substitute a top-down recipe"
             )
-        # Apply the pipeline's own approach filter. Without it the planner's
-        # top-scoring candidate is routinely 119-174 degrees from the
-        # demonstration's grasp orientation -- very nearly inverted -- and a
-        # construction that transports orientation faithfully then rotates the
-        # world by the same angle, turning the demonstrated lift into a descent.
-        # ``filter_grasps`` rejects those, so measuring without the filter
-        # measures a candidate the pipeline would never execute.
+        # The demonstration is used for two unrelated things here, and they are
+        # kept apart deliberately. It **ranks** candidates whenever
+        # ``rank_by="demonstration"``, and it **filters** them only when
+        # ``approach_filter`` is set. Welding those together is what stopped the
+        # approach test from being measurable at all: it could not be switched
+        # off without also losing the ability to rank by it.
+        #
+        # A reference is still required, because the target's roll is chosen by
+        # agreement with the demonstration regardless (`ROBOTICS_NOTES.md`
+        # 7.33), so a caller without one has a deeper problem than this filter.
         if reference_approach is None:
             raise ValueError(
-                "grasp_source='graspgen' needs a reference_approach to filter "
-                "against; pass _demonstrated_approach(labels)"
+                "grasp_source='graspgen' needs a reference_approach; the "
+                "target's roll is chosen by agreement with it even when "
+                "approach_filter is off. Pass _demonstrated_approach(labels)"
             )
         reference = np.asarray(reference_approach, dtype=float).reshape(3)
         angles = np.degrees(
@@ -350,14 +364,32 @@ def target_placement(
                 np.clip([g.approach @ reference for g in grasp_set.grasps], -1.0, 1.0)
             )
         )
-        keep = np.flatnonzero(angles <= MAX_APPROACH_MISMATCH_DEG)
-        if not len(keep):
-            raise RuntimeError(
-                f"every one of {len(grasp_set)} candidates for {instance!r} is "
-                f"beyond the {MAX_APPROACH_MISMATCH_DEG:.0f} deg approach filter "
-                f"(closest {angles.min():.1f} deg); the pipeline would reject "
-                "this object before keypoints are built"
-            )
+        if approach_filter:
+            # Turning it off is a real experiment, not a convenience. The case
+            # for the filter: with it off, the planner's top-scoring candidate
+            # was measured 119-174 degrees from the demonstration's grasp
+            # orientation, and a construction that transports orientation
+            # faithfully then rotates the world by the same angle -- turning the
+            # demonstrated lift into a descent.
+            #
+            # The case against, which is why it is now switchable: 45 degrees
+            # has no measurement behind it; the quantity that actually folds the
+            # map is the full source-to-target *frame* rotation, which includes
+            # a roll this test cannot see; and the figure quoted for dropping it
+            # (a valid map in 7 of 16 cells) comes from FINDINGS.md 8g, whose
+            # numbers are marked superseded because it predates the frame fixes.
+            # Filtering target grasps to resemble the source also narrows what a
+            # transport result can claim.
+            keep = np.flatnonzero(angles <= MAX_APPROACH_MISMATCH_DEG)
+            if not len(keep):
+                raise RuntimeError(
+                    f"every one of {len(grasp_set)} candidates for {instance!r} is "
+                    f"beyond the {MAX_APPROACH_MISMATCH_DEG:.0f} deg approach filter "
+                    f"(closest {angles.min():.1f} deg); the pipeline would reject "
+                    "this object before keypoints are built"
+                )
+        else:
+            keep = np.arange(len(grasp_set.grasps))
         if filters == "full":
             # The whole funnel, exactly as ``pipeline.run`` applies it. Ordered
             # by the planner's own score, which is what ``filter_grasps``
@@ -381,7 +413,11 @@ def target_placement(
             funnel = filter_grasps(
                 grasp_set.grasps, gripper, cloud.points, scene_points=scene,
                 camera_positions=cloud.camera_positions, env=env,
-                place_pose=provisional, reference_approach=reference,
+                place_pose=provisional,
+                # None disables the funnel's own "demonstrated" stage, which is
+                # how the approach test is switched off inside the full funnel.
+                # The reference is still held above for ranking and the roll.
+                reference_approach=reference if approach_filter else None,
                 target_name=instance,
             )
             if not len(funnel.survivors):
@@ -430,9 +466,19 @@ def target_placement(
         # comment claimed a secondary key it did not have.
         order = survivors[np.argsort(key, kind="stable")]
         funnel_flags["ranked_by"] = chosen_rank
-        grasp = GraspFrame.from_grasp(
-            grasp_set.grasps[order[min(grasp_rank, len(order) - 1)]]
-        )
+        chosen = int(order[min(grasp_rank, len(order) - 1)])
+        grasp = GraspFrame.from_grasp(grasp_set.grasps[chosen])
+        # Which candidate was executed, and why. Recorded because a comparison
+        # of selection rules is only informative on cells where the rules
+        # actually disagree: if two settings happen to pick the same candidate,
+        # that cell is the same run twice and carries no information about the
+        # rule. `flip_target` was inert for the life of the project for want of
+        # exactly this check (`ROBOTICS_NOTES.md` 7.34).
+        funnel_flags["chosen_index"] = chosen
+        funnel_flags["chosen_score"] = float(grasp_set.grasps[chosen].score)
+        funnel_flags["chosen_approach_mismatch_deg"] = float(angles[chosen])
+        funnel_flags["n_candidates"] = int(len(grasp_set.grasps))
+        funnel_flags["n_survivors"] = int(len(survivors))
     else:
         raise ValueError(
             f"unknown grasp_source {grasp_source!r}; expected 'recipe' or 'graspgen'"
