@@ -1967,20 +1967,31 @@ the object 71 mm, past the 60 mm pass mark.
 
 Three different things go wrong, and none of them is the map.
 
-**The hand knocks the object over before it can close on it** — `xarm/cereal`.
-Watching the object rather than the arm: it starts shifting at waypoint 46,
-*four waypoints before the jaws are told to close*, and by the time they do
-close it has already slid 21.9 mm and is toppling. The fingers then shut on
-empty air — the jaw reading goes straight to 1.00, which is what closing on
-nothing looks like — and the cereal box ends up lying 104 mm from where it
-started. The hand did not miss the box; it hit it on the way in.
+**The object is disturbed before the jaws close, and topples** —
+`xarm/cereal`. Watching the object rather than the arm: something touches it at
+waypoint 46, four waypoints *before* the jaws are told to close, and by the time
+they do close it has shifted **22.1 mm** — the largest pre-close disturbance in
+the run. The fingers then shut fully on nothing, the box falls from 0.875 m to
+0.811 m, and it ends up lying 104 mm from where it started.
 
-The underlying reason is that **nothing checked whether the hand could get to
-that grasp**. This run used the approach-angle filter alone, which has no
-collision stage, so a candidate whose approach corridor is blocked by the object
-it is reaching for passes straight through. That the grasp itself is the problem
-rather than the plan is confirmed by Experiment K, which drives the arm to the
-same candidate with no map at all and also fails.
+**It is not the warp.** That was the obvious suspect, since a warped path need
+not descend along the grasp's own approach axis, and it was measured rather than
+assumed: the transported path's direction of travel at the grasp tilts only
+**1.0 degree** off that axis, and driving a clean straight descent to the same
+pose contacts the object to within 0.2 mm of the warped one (−2.8 against
+−3.0 mm). Across all twenty cells the tilt is 0.2 to 1.7 degrees. The warp
+leaves the approach straight.
+
+Nor is it the fingers being wedged apart on the way down. The jaw reading does go
+slightly negative here, which would mean the fingers forced wider than their open
+pose — but it does so on **all four** xarm cells, three of which succeed, so it
+is a calibration offset on that hand and not a contact.
+
+**Why that grasp disturbs the object is not established.** What is clear is where
+it does not lie: it reproduces in Experiment K with no map in the loop at all, so
+it is a property of that grasp on that object with that hand rather than anything
+the transport does. And a large pre-close disturbance is not sufficient on its
+own — `yumi/bread` moves 19.5 mm before closing and places successfully.
 
 **The jaws are still closing when the demonstration says to lift** —
 `robotiq140/can`. The Robotiq 2F-140 has the widest jaws in the registry, 125 mm

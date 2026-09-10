@@ -359,12 +359,17 @@ Each of these cost real debugging time. Full detail in `ROBOTICS_NOTES.md`.
   carried to 1.266 m. The gripper schedule is inherited from a Panda
   demonstration whose narrower jaws close much sooner -- so this is the
   cross-hand closing schedule (open item 2) surfacing as a *measurement* fault.
-- **A grasp can be unreachable because the object itself is in the way.** The
-  hand strikes the object on its approach and topples it before the fingers
-  close: `xarm/cereal` starts moving four waypoints *before* the commanded
-  close, slides 21.9 mm, and the jaws then shut on air (reading 1.00). Nothing
-  caught it because the approach-angle filter has no collision stage -- this is
-  what `filters="full"` and the new `arm_collides` exist for.
+- **The warp does not bend the approach, so do not reach for it to explain a
+  disturbed object.** A transported path need not descend along the grasp's own
+  approach axis, which makes it the obvious suspect when the hand disturbs the
+  object before closing. Measured: the tilt is **0.2 to 1.7 degrees** across all
+  20 cells, and a clean straight descent to the same pose contacts the object to
+  within 0.2-2.5 mm of the warped one. `xarm/cereal` shifts its box 22.1 mm
+  before the jaws close and topples it, and the cause is **not established** --
+  it is not the warp, and it is not the fingers being forced apart (the negative
+  jaw reading is a calibration offset present on all four xarm cells, three of
+  which succeed). It reproduces with no map in the loop, so it is a property of
+  that grasp, object and hand.
 - **A Robotiq flicks the object sideways as it opens.** Its finger pads swing
   inward while parting, so an object between them is nudged rather than let go:
   72.8 mm and 81.9 mm of post-release travel on two cells that fouled nothing
