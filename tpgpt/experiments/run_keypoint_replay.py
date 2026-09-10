@@ -48,12 +48,15 @@ from __future__ import annotations
 
 import argparse
 import json
+import warnings
 from pathlib import Path
 
 import numpy as np
 
 from tpgpt.experiments.diagnose import (
     _gripper_touches,
+    finger_groups,
+    fingers_touching,
     grasp_slip,
     object_probe,
     replay_preconditions,
@@ -207,6 +210,36 @@ def _closure_summary(replay) -> dict:
     }
 
 
+def _fingers_gate(env, gripper: str, object_name: str):
+    """"Is the object actually pinched?", as a test the replay can call.
+
+    Not "is anything touching it": a single finger on the side, or the palm
+    resting on top, is contact and is not a grasp. Two distinct fingers is the
+    minimum that can pinch, on a hand with two fingers or five, and
+    :func:`~tpgpt.experiments.diagnose.finger_groups` gets the grouping from the
+    finger count GraspGen-X declares rather than guessing it from the model --
+    three ways of guessing it were measured and each is wrong on at least one
+    hand in this registry.
+
+    Falls back to a plain contact test for a hand whose fingers cannot be
+    grouped, with a warning, rather than refusing the cell: a weaker gate is
+    still better than lifting on a stopwatch, and the alternative is that one
+    unusual hand blocks the whole campaign.
+    """
+    from tpgpt.sim.replay import GRASP_MIN_FINGERS
+
+    try:
+        groups = finger_groups(env, gripper)
+    except ValueError as exc:
+        warnings.warn(
+            f"{gripper}: {exc}. Falling back to any-contact, which cannot tell "
+            "a pinch from a nudge",
+            RuntimeWarning, stacklevel=2,
+        )
+        return lambda e: _gripper_touches(e, object_name)
+    return lambda e: fingers_touching(e, object_name, groups) >= GRASP_MIN_FINGERS
+
+
 def stage_outcome(replay, labels, target, env=None) -> dict:
     """Was the object **grasped**, **traversed** and **placed**? Three questions.
 
@@ -348,7 +381,7 @@ def replay_variant(env, labels, source_placement, target, variant, gripper="pand
         # further to travel. See `replay_labels` for why contact and not a
         # scaled dwell or a closure rate.
         grasp_gate=(
-            (lambda e: _gripper_touches(e, target.metadata["object_name"]))
+            _fingers_gate(env, gripper, target.metadata["object_name"])
             if target.metadata.get("object_name") else None
         ),
     )

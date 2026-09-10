@@ -214,6 +214,58 @@ def gripper_config_path(graspgen_name: str) -> Path:
 
 
 @lru_cache(maxsize=None)
+def declared_fingers(graspgen_name: str) -> int:
+    """How many fingers a gripper has, from GraspGen-X's own config.
+
+    Its ``type`` field encodes it: ``parallel_2f`` and ``revolute_2f`` are two,
+    ``revolute_3f`` is three. Reading it beats deriving it, because deriving it
+    from the model is not reliable -- three defensible schemes were measured
+    across the registry and **each one is wrong on at least one hand**. The body
+    sub-tree splits a Robotiq's linkage into four chains and collapses a Yumi's
+    into one; the driving actuator collapses the XArm, whose single actuator
+    moves both fingers through a coupling; the sign along the closing axis
+    cannot see a Yumi's geoms and reduces a three-finger hand to two sides.
+
+    Knowing the count turns that from a guess into a choice -- see
+    :func:`~tpgpt.experiments.diagnose.finger_groups`, which derives groups both
+    ways and keeps whichever matches this number.
+
+    Raises:
+        ValueError: if the type does not name a finger count. Deliberately not a
+            default of 2: a hand whose count is unknown must be measured, not
+            assumed, and assuming the commonest case is how the registry
+            acquired a *zero* contact offset that read as a plausible number.
+    """
+    import re
+
+    config = json.loads(gripper_config_path(graspgen_name).read_text())
+    kind = str(config.get("type", ""))
+    match = re.search(r"(\d+)f$", kind)
+    if match is None:
+        raise ValueError(
+            f"gripper {graspgen_name!r} declares type {kind!r}, which does not "
+            "name a finger count; measure it and record it rather than assuming"
+        )
+    return int(match.group(1))
+
+
+def declared_symmetric(graspgen_name: str) -> bool:
+    """Whether a half turn about the approach axis is the *same* grasp.
+
+    GraspGen-X's config declares this per gripper and **it is not the same for
+    all of them**: ``parallel_2f`` and ``revolute_2f`` are symmetric, and
+    ``revolute_3f`` -- `robotiq_3f` and `inspire_hand` in this registry -- is
+    not. Rolling a two-finger hand over swaps its fingers and grips identically;
+    rolling a three-finger hand over puts its fingers somewhere else entirely.
+
+    ``metrics.transport.orientation_transport_error`` applies the symmetry
+    unconditionally, so every orientation figure recorded for those two hands
+    used a symmetry they do not have. See `FINDINGS.md` 8l.
+    """
+    config = json.loads(gripper_config_path(graspgen_name).read_text())
+    return bool(config.get("symmetric", True))
+
+
 def gripper_geometry(graspgen_name: str) -> GripperGeometry:
     """Read a gripper's published geometry.
 

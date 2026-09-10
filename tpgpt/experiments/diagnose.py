@@ -468,6 +468,121 @@ def jaw_closure_probe(env, gripper: str):
     return closure
 
 
+def finger_groups(env, gripper: str, arm: str = "right") -> list[set[int]]:
+    """The gripper's collision geoms, grouped one set per finger.
+
+    **Deriving this from the model alone does not work.** Three schemes were
+    measured across the registry and each is wrong on at least one hand:
+
+    ========================  =====  ====  ====  =========  ==========  =========
+    scheme                    panda  yumi  xarm  robotiq85  robotiq140  robotiq3f
+    ========================  =====  ====  ====  =========  ==========  =========
+    *true count*              2      2     2     2          2           3
+    body sub-tree             2      **1** 2     **4**      **4**       3
+    driving actuator          2      2     **1** 2          2           **4**
+    sign along the closing    2      **0** 2     2          2           **2**
+    ========================  =====  ====  ====  =========  ==========  =========
+
+    The body sub-tree splits a Robotiq's linkage into four chains and collapses
+    a Yumi's into one. The actuator collapses the XArm, whose single actuator
+    drives both fingers through a coupling, and over-counts the three-finger
+    hand because its palm-spread joint looks like another finger.
+
+    What resolves it is that **the count is already declared**, in GraspGen-X's
+    own gripper config (:func:`~tpgpt.grasp.grippers.declared_fingers`). Given
+    the number, this derives groups both ways and keeps whichever matches it --
+    a choice rather than a guess. Every hand in the registry is resolved by one
+    of the two.
+
+    Raises:
+        ValueError: when neither scheme matches the declared count. Refusing is
+            deliberate: a wrong grouping makes a one-finger touch read as a
+            grip, and that fails silently.
+    """
+    import mujoco  # noqa: F401  (model access below needs it loaded)
+    from tpgpt.grasp.grippers import declared_fingers, resolve_pair
+
+    model = env.sim.model
+    raw = env.sim.model._model
+    hand = env.robots[0].gripper
+    hand = hand[arm] if isinstance(hand, dict) else hand
+    names = [n for n in hand.contact_geoms if n in model.geom_names]
+    ids = {n: model.geom_name2id(n) for n in names}
+    wanted = declared_fingers(resolve_pair(gripper).graspgen)
+
+    # (a) one group per body sub-tree hanging off the gripper's root body
+    root = model.body_name2id(hand.root_body)
+    subtree: dict[int, set[int]] = {}
+    for n in names:
+        body = raw.geom_bodyid[ids[n]]
+        chain = []
+        while body != -1 and body != root:
+            chain.append(body)
+            body = raw.body_parentid[body]
+        if chain:
+            subtree.setdefault(chain[-1], set()).add(ids[n])
+
+    # (b) one group per actuated gripper joint upstream of the geom
+    driven = {
+        raw.actuator_trnid[a][0] for a in range(raw.nu)
+        if (model.actuator_id2name(a) or "").startswith("gripper0")
+    }
+    byjoint: dict[int, set[int]] = {}
+    for n in names:
+        body, found = raw.geom_bodyid[ids[n]], None
+        while body > 0:
+            span = range(raw.body_jntadr[body],
+                         raw.body_jntadr[body] + raw.body_jntnum[body])
+            hit = [j for j in span if j in driven]
+            if hit:
+                found = hit[0]
+                break
+            body = raw.body_parentid[body]
+        if found is not None:
+            byjoint.setdefault(found, set()).add(ids[n])
+
+    for groups in (byjoint, subtree):
+        if len(groups) == wanted:
+            return list(groups.values())
+    raise ValueError(
+        f"cannot group {gripper!r}'s geoms into its declared {wanted} fingers: "
+        f"the body sub-tree gives {len(subtree)} and the driving actuator gives "
+        f"{len(byjoint)}. Measure the grouping for this hand rather than letting "
+        "a wrong one make a single-finger touch read as a grip"
+    )
+
+
+def fingers_touching(env, object_name: str, groups: list[set[int]]) -> int:
+    """How many distinct fingers are in contact with the object.
+
+    **Contact is not a grip**, which is the gap this closes. A single finger
+    brushing the side registers as contact, and so does the palm resting on top:
+    measured on `xarm/cereal`, something touches the box four waypoints before
+    the jaws are told to close and shoves it 22.1 mm, and a test that asked only
+    "is anything touching" would have called that a grasp.
+
+    Counting *fingers* rather than contacts is what generalises. A Robotiq has
+    five collision geoms per finger and a Yumi has one, so a threshold on the
+    number of contacts would mean different things on different hands; a
+    threshold on fingers means the same thing on two, three or five of them.
+    """
+    body = env.object_body_ids[object_name]
+    target = {
+        i for i in range(env.sim.model.ngeom)
+        if env.sim.model.geom_bodyid[i] == body
+    }
+    data = env.sim.data
+    touching = set()
+    for i in range(data.ncon):
+        pair = {data.contact[i].geom1, data.contact[i].geom2}
+        if not pair & target:
+            continue
+        for index, group in enumerate(groups):
+            if pair & group:
+                touching.add(index)
+    return len(touching)
+
+
 def _gripper_touches(env, object_name: str) -> bool:
     """Whether any gripper geom is in contact with the object.
 

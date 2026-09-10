@@ -62,6 +62,21 @@ JOINT_ACTION_SCALE = 0.5
 #: it" from "the hand knocked into it".
 GRASP_CONTACT_STEPS = 4
 
+#: Distinct **fingers** that must be touching before the jaws count as holding.
+#:
+#: Two, and it is a floor rather than a per-hand quantity: two opposing contacts
+#: are the minimum that can pinch anything, whether the hand has two fingers,
+#: three or five. A three-finger hand gripping with two of its three is holding
+#: the object; one touching with a single finger is pushing it.
+#:
+#: Counting *fingers* is what generalises. A threshold on contacting **geoms**
+#: would mean different things on different hands, because a Robotiq has five
+#: collision geoms per finger and a Yumi has one. The grouping comes from
+#: :func:`~tpgpt.experiments.diagnose.finger_groups`, which takes the count
+#: GraspGen-X's own config declares and picks whichever derivation matches it --
+#: three ways of deriving it were measured and each is wrong on at least one hand.
+GRASP_MIN_FINGERS = 2
+
 #: Control steps the jaws are given to find the object before giving up.
 #:
 #: 200 is 10 s at 20 Hz, generous against the worst measured case: a Robotiq

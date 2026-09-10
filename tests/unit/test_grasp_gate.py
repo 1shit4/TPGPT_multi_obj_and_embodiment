@@ -219,3 +219,93 @@ class TestNothingElseChanges:
         # one gated waypoint plus three ungated ones, and the gate's own steps
         # come out of the gated waypoint's budget
         assert env.steps <= 4 * 8 + GRASP_CONTACT_STEPS
+
+
+class TestFingerGrouping:
+    """Counting fingers, not contacts, and taking the count from the gripper.
+
+    Contact is not a grip: a single finger on the side counts, and so does the
+    palm resting on top. Two distinct fingers is the minimum that can pinch, on
+    a hand with two fingers or five, so the gate counts fingers.
+
+    Grouping geoms into fingers cannot be derived reliably. Three schemes were
+    measured across the registry and each is wrong on at least one hand -- the
+    body sub-tree splits a Robotiq's linkage into four chains and collapses a
+    Yumi's into one, the driving actuator collapses the XArm's coupled pair and
+    over-counts the three-finger hand's palm-spread joint, and the sign along
+    the closing axis cannot see a Yumi's geoms at all. What resolves it is that
+    **GraspGen-X's own config declares the count**, so the derivation becomes a
+    choice rather than a guess.
+    """
+
+    def test_the_finger_count_comes_from_the_gripper_config(self):
+        from tpgpt.grasp.grippers import declared_fingers, resolve_pair
+
+        counts = {
+            h: declared_fingers(resolve_pair(h).graspgen)
+            for h in ("panda", "yumi", "xarm", "robotiq85", "robotiq140",
+                      "robotiq3f", "rethink", "umi", "inspire")
+        }
+        assert counts["panda"] == 2 and counts["robotiq140"] == 2
+        assert counts["robotiq3f"] == 3 and counts["inspire"] == 3
+
+    def test_an_unknown_count_is_refused_rather_than_assumed(self):
+        """Two is the commonest case and assuming it is how a registry rots.
+
+        `contact_offset` once returned a *zero* for an unmeasured hand -- a
+        plausible-looking number that read as the arm missing its target.
+        """
+        import json
+
+        from tpgpt.grasp import grippers
+
+        original = grippers.gripper_config_path
+
+        class Fake:
+            def read_text(self):
+                return json.dumps({"type": "suction_cup"})
+
+        grippers.gripper_config_path = lambda name: Fake()
+        try:
+            with pytest.raises(ValueError, match="does not name a finger count"):
+                grippers.declared_fingers("whatever")
+        finally:
+            grippers.gripper_config_path = original
+
+    def test_the_minimum_is_a_floor_not_a_per_hand_number(self):
+        """Two opposing contacts pinch, whatever the hand's finger count."""
+        from tpgpt.sim.replay import GRASP_MIN_FINGERS
+
+        assert GRASP_MIN_FINGERS == 2
+
+    def test_counting_fingers_and_not_geoms_is_the_point(self):
+        """A Robotiq has five collision geoms per finger and a Yumi has one.
+
+        So a threshold on the number of contacting geoms would mean "one finger"
+        on one hand and "five fingers" on another, which is exactly the
+        cross-hand incomparability that made the raw jaw reading useless (7.28).
+        """
+        from tpgpt.experiments.diagnose import fingers_touching
+
+        class Scene:
+            object_body_ids = {"thing": 1}
+
+            class sim:
+                class model:
+                    ngeom = 12
+                    geom_bodyid = [1, 1] + [0] * 10
+
+                class data:
+                    ncon = 2
+
+                    class _c:
+                        def __init__(self, a, b):
+                            self.geom1, self.geom2 = a, b
+
+                    contact = [_c(0, 5), _c(1, 6)]
+
+        # five geoms on one finger, one on the other: two fingers, six geoms
+        groups = [{5, 7, 8, 9, 10}, {6}]
+        assert fingers_touching(Scene(), "thing", groups) == 2
+        # both contacts on the *same* finger is one finger, not two
+        assert fingers_touching(Scene(), "thing", [{5, 6}, {11}]) == 1

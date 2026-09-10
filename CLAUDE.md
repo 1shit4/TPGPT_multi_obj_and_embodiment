@@ -351,6 +351,19 @@ Each of these cost real debugging time. Full detail in `ROBOTICS_NOTES.md`.
   `orientation_transport_error` applies it unconditionally, so every orientation
   figure for those two hands, including their rows in `§7.29`'s nine-hand table,
   used a symmetry they do not have. **Not yet fixed.** `§7.34`.
+- **The number of fingers a gripper has is declared, in GraspGen-X's own
+  config.** Its `type` field: `parallel_2f` and `revolute_2f` are two,
+  `revolute_3f` is three. Read it with `grippers.declared_fingers` rather than
+  deriving it -- **three ways of deriving it were measured and each is wrong on
+  at least one hand.** The body sub-tree splits a Robotiq's linkage into four
+  chains and collapses a Yumi's into one; the driving actuator collapses the
+  XArm, whose single actuator moves both fingers through a coupling, and
+  over-counts the 3F because its palm-spread joint looks like a finger; the sign
+  along the closing axis cannot see a Yumi's geoms at all. Knowing the count
+  makes the derivation a *choice*: `diagnose.finger_groups` tries both and keeps
+  whichever matches, which resolves eight of the nine hands and **refuses** the
+  Inspire rather than guessing. The same config also carries `symmetric`
+  (`declared_symmetric`), which is `False` for both three-finger hands.
 - **The lift now waits for the jaws, and it is gated on contact.**
   `replay_labels` holds at the grasp until the gripper has had **continuous**
   contact for `GRASP_CONTACT_STEPS = 4` control steps, capped at
@@ -365,7 +378,16 @@ Each of these cost real debugging time. Full detail in `ROBOTICS_NOTES.md`.
   waypoints across four objects on one hand, *not* monotonic in object width.
   The continuity requirement is not decoration: `xarm/cereal` touches its box
   four waypoints before the close, so a one-step gate would report a grasp that
-  does not exist.
+  does not exist. And it counts **fingers**, not contacts -- `GRASP_MIN_FINGERS
+  = 2`, a floor valid on two, three or five fingers -- because a Robotiq has
+  five collision geoms per finger and a Yumi has one, so a threshold on contacts
+  would mean different things on different hands.
+  **What it does not fix is squeezing.** The fingers stay commanded shut for the
+  whole carry, so a hand the gate waits longer for also squeezes longer: on
+  `robotiq140/can` the gate waits ~15 waypoints and a 15-waypoint dwell is where
+  the can previously began sliding out (0.0 mm for 15 waypoints, then 6.4, 12.8,
+  19.2). Freezing the command at contact needs force control, which this
+  position-controlled gripper does not have and real grippers do.
 - **A closure-*rate* rule cannot detect contact, and object shape is not why.**
   The jaws are position-commanded (`+1` = "go to fully closed") and `closure`
   reports where the fingers *are*, so it asymptotes toward the commanded value
