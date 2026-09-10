@@ -1963,6 +1963,36 @@ The prediction is `2 x (lateral grasp offset)`: the half turn reflects the objec
 through the grip point, so a grip 35.5 mm off centre on the yumi's cereal swings
 the object 71 mm, past the 60 mm pass mark.
 
+### Why each of the five grasp-pose cube failures failed
+
+| hand | object | observed | grasped | cause |
+|---|---|---|---|---|
+| xarm | cereal | 218 mm | **no** | **the grasp does not hold.** 7 mm of lift, 9 control steps of contact. Also Experiment K's single failure, where no map is in the loop, so it fails under every protocol tried |
+| robotiq140 | can | 217 mm | **no** | the jaws never take it: contact only from waypoint 66, 5 mm of lift. The hand is commanded **40.0 mm inside** the shelf's back wall and stalls 119 mm short of the release |
+| robotiq140 | bread | 235 mm | yes | carried correctly, then **dropped from 150 mm above the board**. The hand is 45.0 mm inside the back wall; the object bounces off and falls 435 mm to the table |
+| robotiq140 | milk | 110 mm | yes | carried correctly, released 40 mm high, then moves **72.8 mm** after the jaws open |
+| robotiq85 | milk | 62 mm | yes | carried correctly, released 21 mm high, then moves **81.9 mm** after the jaws open. Two millimetres past the 60 mm gate |
+
+**Three of the five are the shelf collision** (§7.35): the hand is commanded
+through the cubby's back wall, jams, and lets go with the object still in the
+air. That is a scene-and-executor problem, not a keypoint one — the plan asks
+for a pose that is correct and unreachable in practice.
+
+**One is a bad grasp** — `xarm/cereal`, which fails identically with no map in
+the loop.
+
+**One is the release itself.** `robotiq85/milk` fouls nothing and is released
+only 21 mm high, yet the object travels 81.9 mm after the jaws open. The sibling
+project measured this effect independently on the same family of hand: a Robotiq
+2F-85's pads rotate inward as they open, so an object set down over a surface can
+catch on the opening fingers (`6dof_GraspMAS/docs/simulation.md`).
+
+**The two regressions against Experiment L are both in that last group** —
+`robotiq140/bread` and `robotiq85/milk` — and neither is a new defect. Release
+height and tracking error at the release are the same in both runs (median 39.6
+against 44.4 mm, and 51.8 against 69.4 mm), so what changed is which side of the
+gate a drop happened to land on.
+
 ### Two claims this retires
 
 **"The xarm's grip does not hold" is withdrawn.** The hand went from 1/4 to 3/4:
@@ -1983,84 +2013,36 @@ Only its *successes* were ever evidence.
   the check that paths expected to be untouched really are;
 * 590 tests pass, 25 of them new.
 
-### Why the two regressions are not a new defect
-
-`robotiq140/bread` went from 54.3 mm to 235 mm and `robotiq85/milk` from 8.1 mm
-to 62.3. Both are Robotiq hands and both are release-phase failures, and the
-underlying weakness is present in **both** runs equally:
-
-| | Experiment L | Experiment M |
-|---|---|---|
-| object released above the shelf board | median 44.4 mm, max 129 | median 39.6 mm, max 153 |
-| tracking error at the release waypoint | median 69.4 mm, max 133 | median 51.8 mm, max 130 |
-
-**Every placement in this experiment is a drop, not a set-down.** The arm does
-not complete the descent into the shelf — it stops 13 to 130 mm short of the
-commanded release pose — so the object is let go from up to 15 cm above the
-board and falls. Whether it stays on the board is then decided by the bounce.
-
-That release height does **not** separate success from failure: placed cells sit
-a median 37 mm above the board and failed cells 40 mm, and `xarm/bread` was
-released **153 mm** high and placed successfully. So it is a systemic weakness
-with a partly random outcome rather than a cause specific to any cell.
-
-The two regressions are that lottery resampled. `robotiq140/bread` was released
-22 mm higher than before (150 against 128 mm), bounced off the board and fell
-435 mm to the table. `robotiq85/milk` was released *lower* than before (21
-against 52 mm) but the object moved **81.9 mm laterally after the jaws opened**,
-against 40.1 mm before — and the sibling project measured exactly this
-independently: a Robotiq 2F-85's pads rotate inward as they open, so an object
-set down over a surface can catch on the opening fingers
-(`6dof_GraspMAS/docs/simulation.md`, "A release that does not release").
-
 ### The real finding: the hand is commanded through the shelf
 
-The drop is not a control weakness, it is a collision, and no previous
-experiment had looked.
+The drop is not a control weakness, it is a collision, and no earlier experiment
+had looked. Full mechanism in `ROBOTICS_NOTES.md` §7.35.
 
-The scene's shelf is the **cubby** variant, so the top slot is a slot between
-two walls rather than an open board:
+The scene's shelf is the **cubby** variant, so the top slot is a **78 mm gap in
+x** between the lower cubby's back panel — which rises 20 mm above the top board
+— and the upper cubby's 180 mm back wall. The plan does not know the wall is
+there. Putting the arm at the IK solution for each of the last 40 commanded
+waypoints and running MuJoCo's own collision detection: **15 of 20 cells command
+the hand inside `shelf_top_back`, by 4.8 to 79.9 mm.**
 
-| part | x | z |
-|---|---|---|
-| bottom cubby's back panel | 0.168 - 0.180 | up to **1.101** — 20 mm above the top board |
-| top board | 0.170 - 0.270 | 1.069 - 1.081 |
-| top cubby's back wall | 0.258 - 0.270 | 1.081 - **1.261** |
+Caught in physics on `robotiq140/bread`: a finger **8.24 mm inside the wall from
+waypoint 132**, which is exactly where the tracking error starts to climb (5 →
+52 → 124 mm), while the object's motion collapses from 6.8 mm per waypoint to
+**0.99** against the 5.3 commanded. The controller is a stiff joint-position
+law, so it drives into the wall rather than yielding. On cells that work the
+contact is instead the **object touching the board** at 0.05 to 0.17 mm — a
+set-down.
 
-That leaves a **78 mm gap in x** to thread the hand down, and the plan does not
-know the wall is there. Measured by placing the arm at the IK solution for each
-of the last 40 commanded waypoints and running MuJoCo's own collision detection:
-**15 of 20 cells command the hand inside `shelf_top_back`, by 4.8 to 79.9 mm.**
+`solve_ik` is joint angles and a Jacobian with **no collision model**, which is
+why the release pose "solves to 3.4 to 4.9 mm" while being physically
+unreachable, and why ruling out the workspace envelope (r = −0.028) and the
+warm-started IK chain (2 of 20 cells) was correct and could not find this.
+`by_collision` only ever checks the hand at the **grasp**.
 
-Caught in physics on the clearest case, `robotiq140/bread`:
-
-```
-gripper0_right_right_inner_finger <-> shelf_top_back   waypoints 132-195, deepest -8.24 mm
-tracking error:   wp 130 = 5 mm     wp 145 = 52 mm     wp 159 = 124 mm
-```
-
-The contact starts at waypoint 132 and the error starts climbing at waypoint
-132. The controller is a stiff joint-position law, so it drives the arm into the
-wall instead of yielding, and the object's own motion collapses from 6.8 mm per
-waypoint to **0.99** while the command keeps advancing 5.3.
-
-The contrast is what settles it. On cells that work the contact is the **object
-touching the board** — `yumi/bread` at 0.17 mm, `panda/cereal` at 0.05 mm — which
-is a set-down. On the failing cell a **finger** is in the wall and the object
-never reaches the board.
-
-**Why nothing upstream saw it.** `solve_ik` has no collision model — it is joint
-angles and a Jacobian. That is why the release pose "solves to 3.4 to 4.9 mm"
-while being physically unreachable. And `by_collision` checks the hand at the
-*grasp* against the scene cloud; `by_reachability` does check the placement, but
-through that same collision-blind solver.
-
-**What is not established.** The foul does not predict which cells fail:
+**What is not established.** The foul does not decide any particular outcome:
 `panda/bread` fouls deepest at −79.9 mm and places, `robotiq85/milk` does not
-foul and fails, and the correlation with tracking error is only **r = +0.373**
-with 12 of the 15 fouling cells placing anyway. Dropping an object from 4 cm
-usually works. So the mechanism and its prevalence are established; that it
-decides any particular outcome is not.
+foul and fails, and 12 of the 15 fouling cells placed anyway. Dropping an object
+from 4 cm usually works.
 
 ---
 
@@ -2151,24 +2133,47 @@ comparison is between two different grasps as well as two filter settings.
 
 **grasp-pose cube**: grasped 15/20, traversed 12/20, placed **8/20**, median error on success 25.8 mm, `min det` median 0.880.
 
+### Where it diverges from Experiment M
+
+Paired over the same 20 cells, so the comparison is like for like on everything
+except which grasp was chosen:
+
+| stage | Experiment N | Experiment M | exact p |
+|---|---|---|---|
+| grasped | 15 | 18 | **0.375 — not significant** |
+| traversed | 12 | 18 | 0.031 |
+| placed | 8 | 15 | 0.039 |
+
+**The grasping difference is not real.** Four cells to one discordant on twenty
+pairs is a coin flip, so "the funnel picks grasps that will not hold" is not
+supported, and an earlier version of this section claiming it is withdrawn.
+
+The divergence is at the **traverse**, six cells to zero, entirely one-sided:
+the object is taken and then lost during the carry. Six grasp properties were
+measured against whether the grasp held, over all 40 selections, and **none
+separates them**:
+
+| property | held | slipped | r |
+|---|---|---|---|
+| object between the jaws | 36.7 mm | 38.7 mm | −0.082 |
+| grip offset from the object's centre | 14.0 mm | 15.2 mm | −0.047 |
+| jaw clearance | 48.1 mm | 47.0 mm | +0.019 |
+| tilt from vertical | 10.5° | 12.1° | −0.058 |
+| grasp height on the object | 0.80 | 0.70 | +0.294 |
+
+`min det` does not separate them either, and goes the wrong way where it moves
+at all: `panda/bread` is 0.896 here and slips, 0.456 in Experiment M and holds.
+
+**So why the funnel's grasps are lost during the carry is unexplained.** Seven
+cells slipped out of 40 selections, which is thin, and no mechanism proposed for
+it has survived testing.
+
 ### What is worth keeping from it
 
-Two things, neither of which needed the physics:
-
-* **the measurement above**, which is the reason grasp selection is now an
-  explicit parameter (`--filters approach|full`) with its consequences written
-  into its own docstring, rather than a property of whichever code path a driver
-  happened to take;
-* **the observation that ranking by the planner's confidence may be actively
-  worse for transport.** The method's whole job is to reproduce a demonstrated
-  approach, so taking a candidate 40 degrees off instead of 6 is not a neutral
-  choice — and §8h already found no evidence the planner's score predicts
-  anything.
-
-**Still open:** whether the funnel's *filtering* helps, asked with the ranking
-held fixed. That needs one run varying only the filter.
-
----
+* **the selection measurement**, which is why grasp selection is now an explicit
+  parameter (`--filters approach|full`) rather than a property of whichever code
+  path a driver happened to take;
+* **the open question above**, which is the successor to this experiment.
 
 ## 8l. What GraspGen-X declares about its own grippers, and one thing we ignore
 
@@ -2243,7 +2248,8 @@ it turns each placement into a partial lottery.
 |---|---|---|
 | 1 | **The plan commands the hand through the shelf's back wall on 15 of 20 cells**, by 4.8 to 79.9 mm, so the arm jams and every placement becomes a drop from a median 40 mm (§8j, `ROBOTICS_NOTES.md` §7.35) | `solve_ik` has no collision model, which is why the pose "solves to 3-5 mm" while being physically unreachable, and `by_collision` only ever checks the grasp. Candidate fixes — a collision-aware reachability gate, a front approach, or standing the release off the board — are all untried |
 | 1b | **The half-turn symmetry is applied to two hands that declare themselves asymmetric** (§8l) | `robotiq3f` and `inspire` are `revolute_3f` with `symmetric: False` in GraspGen-X's own config. Every orientation number recorded for them, including their rows in §8g, used a symmetry they do not have |
-| 1c | **Does the full grasp funnel help?** Asked with the ranking held fixed | §8k could not answer it, because `filter_grasps` changes the ranking as well as the filtering and 39 of 40 cells got a different grasp |
+| 1c | **Why the funnel's grasps are lost during the carry** — six cells to zero, one-sided, p = 0.031 (§8k) | Six grasp properties measured, none separates them, and the *grasping* difference is not significant (p = 0.375). Re-running Tier 2 on the same filters would reproduce it: nothing upstream has changed since |
+| 1e | **Experiments A to F have no corrected equivalent** | All six are withdrawn and none re-run. `GRASP_CUBE_HALF_EXTENT = 0.02` in particular rests on a withdrawn sweep read through a metric blind to the half turn (§10) |
 | 1d | **`robotiq140` is now the weakest hand at 1/4**, having been 2/4 | Different from where the investigation started, and undiagnosed. Its two clean failures carry the object faithfully and misplace it |
 | 2 | **Cross-hand closing schedule.** Jaws close at a fixed speed from different apertures, but the dwell is inherited from a Panda demonstration through the time belief | The traces from §8i record calibrated `closure` per waypoint, so this is answerable **without a new run** |
 | 3 | **Contact-gated closing.** The rule must be closure-**rate** based: a box arrests the jaws dead (milk, +0.010 over the dwell) while a cylinder keeps yielding (can, +0.080) and never stalls | Needs 2. Also needs the phase to wait for the grasp event — a rollout change in the dynamics thread |
