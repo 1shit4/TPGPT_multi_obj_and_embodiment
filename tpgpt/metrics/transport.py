@@ -68,7 +68,7 @@ def orientation_transport_error(
     X: np.ndarray,
     R_source: np.ndarray,
     R_target: np.ndarray,
-    symmetric: bool = True,
+    symmetric: bool = False,
 ) -> np.ndarray:
     """How far Eq. 11 leaves the transported hand from the orientation it needs.
 
@@ -88,9 +88,24 @@ def orientation_transport_error(
             source grasp and release points.
         R_source: ``(n, 3, 3)`` or ``(3, 3)`` source hand orientations.
         R_target: ``(n, 3, 3)`` or ``(3, 3)`` orientations the hand must reach.
-        symmetric: Minimise over :data:`JAW_SYMMETRY`. Leave it on for any
-            parallel jaw. Turn it off only for a hand with no such symmetry, or
-            to see the raw signed disagreement.
+        symmetric: Minimise over :data:`JAW_SYMMETRY`. **Off by default, and
+            the default changed on a measurement.** Compared against the grasp
+            actually *executed* -- ``scene_keypoints``' diagnostics report it as
+            ``target_grasp``, which is the planner's grasp after the roll choice
+            -- the minimisation changes the answer on **0 of 20** cells. It is
+            inert, so all it can do is hide a regression.
+
+            It used to be on, and it was hiding one: the 13 cells where it still
+            alters the reading are all comparisons against the grasp the planner
+            *emitted* rather than the one executed, where it turns 179 degrees
+            into 1. That is a reference mismatch, not a symmetry, and forgiving
+            it concealed the half turn of 7.33 for the life of the project.
+
+            Turn it on only to ask "could this hand form this grasp at all",
+            where the roll genuinely does not matter -- and never for a hand
+            GraspGen-X declares asymmetric
+            (:func:`~tpgpt.grasp.grippers.declared_symmetric` is ``False`` for
+            both three-finger hands in the registry).
 
     Returns:
         ``(n,)`` angles in **degrees**.

@@ -562,12 +562,18 @@ def transport(
         ),
         # Eq. 11's own error: no keypoint pins a *derivative*, so this stays
         # informative for every variant.
+        # Against the grasp **actually executed**, which is the planner's grasp
+        # after the roll choice. Comparing against the emitted one instead reads
+        # 179 degrees on the 13 of 20 cells that get rolled, and the jaw-symmetry
+        # minimisation was what hid that -- for the life of the project. It is
+        # now off by default, and against the executed grasp it changes nothing
+        # on any cell, which is how it should be. 7.33.
         "orientation_error_deg": float(
             orientation_transport_error(
                 transport_map,
                 source_placement.grasp.tcp[None],
                 source_placement.grasp.rotation,
-                target.grasp.rotation,
+                diagnostics["target_grasp"].rotation,
             )[0]
         ),
         # Where the minimum determinant *is* matters as much as its value: a

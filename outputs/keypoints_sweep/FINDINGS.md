@@ -2284,13 +2284,15 @@ it turns each placement into a partial lottery.
 | # | item | why it matters |
 |---|---|---|
 | 1 | **The plan commands the hand through the shelf's back wall on 15 of 20 cells**, by 4.8 to 79.9 mm, so the arm jams and every placement becomes a drop from a median 40 mm (§8j, `ROBOTICS_NOTES.md` §7.35) | `solve_ik` has no collision model, which is why the pose "solves to 3-5 mm" while being physically unreachable, and `by_collision` only ever checks the grasp. Candidate fixes — a collision-aware reachability gate, a front approach, or standing the release off the board — are all untried |
-| 1b | **The half-turn symmetry is applied to two hands that declare themselves asymmetric** (§8l) | `robotiq3f` and `inspire` are `revolute_3f` with `symmetric: False` in GraspGen-X's own config. Every orientation number recorded for them, including their rows in §8g, used a symmetry they do not have |
+| 1b | ~~The half-turn symmetry is applied to two hands that declare themselves asymmetric~~ — **closed, and it turned out to be redundant.** Compared against the grasp actually *executed*, minimising over the symmetry changes the answer on **0 of 20** cells, so it is now off by default | It was inert and could only hide a regression. The 13 cells where it still altered the reading were all comparisons against the grasp the planner *emitted* rather than the one executed — a reference mismatch, and forgiving it is what concealed §7.33 |
 | 1c | **Why the funnel's grasps are lost during the carry** — six cells to zero, one-sided, p = 0.031 (§8k) | Six grasp properties measured, none separates them, and the *grasping* difference is not significant (p = 0.375). Re-running Tier 2 on the same filters would reproduce it: nothing upstream has changed since |
 | 1e | **Experiments A to F have no corrected equivalent** | All six are withdrawn and none re-run. `GRASP_CUBE_HALF_EXTENT = 0.02` in particular rests on a withdrawn sweep read through a metric blind to the half turn (§10) |
 | 1d | **`robotiq140` is now the weakest hand at 1/4**, having been 2/4 | Different from where the investigation started, and undiagnosed. Its two clean failures carry the object faithfully and misplace it |
 | 2 | ~~Cross-hand closing schedule~~ — **measured, see below.** Only the robotiq140 is affected: median 5 waypoints of delay before the fingers touch anything, worst **15**. The other four hands: 0 | Caused `robotiq140/can`'s failure in §8j and its false `grasped: no`. **Not fixed** — nothing in the codebase gates on closure or scales the dwell |
 | 3 | ~~Contact-gated closing~~ — **built.** `replay_labels` now holds at the grasp until the jaws have had continuous contact for four control steps, capped at 200 with a named warning | Unmeasured in a campaign. It changes when the lift begins, so any Tier 2 number predating it is not comparable |
 | 4 | ~~Per-hand dwell scaling~~ — **rejected, not deferred.** An open-loop step budget is the shape of `SETTLE_STEPS = 60`, and the delay is not derivable anyway: 0, 0, 10 and 15 waypoints across four objects on one hand, **not monotonic in object width** | Kept as the *floor* inside item 3 rather than as the mechanism |
+| 4b | ~~`worst_segment` accuses the approach when nothing failed~~ — **fixed.** It is `None` when no waypoint was unreachable, with `worst_segment_share` alongside | "Nothing unreachable" is not "the run succeeded": the function only answers *where could the arm not hold its pose*, and a run can fail with every pose reachable |
+| 4c | ~~Does the gate squeeze the object out?~~ — **no, measured.** Slip changes by at most 1.8 mm over a 20× increase in hold | See below. The pre-compaction 25-waypoint squeeze measurement is withdrawn — broken scene, wrong contact offsets |
 | 5 | **Objects are still dropped ~25 mm** at placement, landing at 0.7 m/s | Seating them at rest height was attempted and reverted: the arithmetic verified correct in isolation but produced floor-level escapes. The settle absorbs the bounce, so this is now cosmetic rather than corrupting |
 | 6 | **Whether `object_keypoints` should default to the grasp cube** | Now clearly favoured: **15/20 against 10/20** on the corrected code (§8j), 18/20 grasped against 14/20, and better conditioned. The 67%-against-83% conversion gap that argued against it was the half turn, which only the cube carried. Still its own commit |
 | 7 | **`prediction.reference` and `GPPolicy.attractor()` are fitted and never read; `velocity_desired` is never passed** | Pre-existing, dynamics thread, §2.7–2.8 |
@@ -2345,6 +2347,32 @@ whole transient is below the sampling resolution.
 per step and marks the event exactly, at the cost of being simulation-only; or
 sample closure per control step and give a rate rule something to see, which
 would still need the commanded position to tell "arrived" from "obstructed".
+
+### Holding the jaws shut for longer does not squeeze the object out
+
+The contact gate makes a slow hand wait longer with its fingers commanded shut,
+which raised the worry that it had traded lifting-too-early for
+squeezing-too-long. Measured by approaching a grasp, closing, holding for a
+varying number of control steps, then lifting, and recording how far the object
+moved *relative to the hand*:
+
+| cell | 8 steps | 40 | 80 | 120 | 160 |
+|---|---|---|---|---|---|
+| robotiq140 / bread | 14.7 mm | 14.1 | 13.8 | 13.6 | 13.6 |
+| panda / can | 9.4 mm | 10.2 | 10.7 | 11.0 | 11.2 |
+
+Over a twenty-fold increase in hold, slip changes by at most **1.8 mm**, and
+every cell lifts 124 to 143 mm. **The concern is not supported**, so the gate is
+safe to leave in.
+
+Two things to note rather than gloss. The pre-compaction measurement that a
+25-waypoint dwell squeezed a can out was taken on the broken scene with the
+wrong contact offsets and is **withdrawn**. And a third cell, `robotiq140/can`,
+registers contact only two waypoints into the *lift* whatever the hold length,
+with an identical contact count at every hold — so the fingers are not on the
+can during the hold at all and that cell did not exercise the mechanism. Its
+apparent improvement from 14.1 to 1.1 mm is something else and is not evidence
+here.
 
 ### Grey areas — recorded because they are *not* solid
 

@@ -722,7 +722,9 @@ def _replay_line(row: dict) -> str:
         # shut and the object came out" while the run is still going (7.28).
         f"{g('closure_at_lift'):10.2f}{g('closure_max'):8.2f}"
         f"{g('placement_error_xy') * 1000:8.1f}"
-        f"{str(row.get('worst_segment', '-')):>11}"
+        # "none" rather than a segment name when every pose was reachable --
+        # the question has no answer then, and naming one is a false accusation.
+        f"{(row.get('worst_segment') or 'none'):>11}"
         f"{'  yes' if row.get('success') else '   no':>4}"
     )
 

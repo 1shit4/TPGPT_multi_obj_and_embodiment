@@ -387,12 +387,13 @@ Each of these cost real debugging time. Full detail in `ROBOTICS_NOTES.md`.
   object. Opposition needs no threshold and means the same thing on two fingers,
   three or five. Counting contacting *geoms* would be worse still: a Robotiq has
   five per finger and a Yumi one.
-  **What it does not fix is squeezing.** The fingers stay commanded shut for the
-  whole carry, so a hand the gate waits longer for also squeezes longer: on
-  `robotiq140/can` the gate waits ~15 waypoints and a 15-waypoint dwell is where
-  the can previously began sliding out (0.0 mm for 15 waypoints, then 6.4, 12.8,
-  19.2). Freezing the command at contact needs force control, which this
-  position-controlled gripper does not have and real grippers do.
+  **Holding shut for longer does not squeeze the object out, measured.** The
+  worry was that a hand the gate waits longer for also squeezes longer. Over a
+  **20x** increase in hold -- 8 to 160 control steps -- slip in the grip moves
+  by at most 1.8 mm (`panda/can` 9.4 -> 11.2 mm, `robotiq140/bread`
+  14.7 -> 13.6), and every cell still lifts 124-143 mm. The pre-compaction
+  measurement that a 25-waypoint dwell squeezed a can out was taken on the
+  broken scene with the wrong contact offsets and is withdrawn.
 - **A closure-*rate* rule cannot detect contact, and object shape is not why.**
   The jaws are position-commanded (`+1` = "go to fully closed") and `closure`
   reports where the fingers *are*, so it asymptotes toward the commanded value

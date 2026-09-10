@@ -548,3 +548,59 @@ class TestAttractorDrift:
         rollout = make_rollout()
         rollout.attractors = self._path()
         assert attractor_drift(rollout, None) == {}
+
+
+class TestWorstSegmentDoesNotAccuse:
+    """``worst_segment`` names where the arm could not hold its pose, or nothing.
+
+    It used to seed the comparison at -1.0, so a path with *no* unreachable
+    waypoint returned whichever segment happened to be tested first -- always
+    ``"approach"``. Every fully reachable cell in Experiment M is labelled that
+    way in the published table, which reads as a diagnosis and means the
+    opposite.
+
+    And "nothing unreachable" is not "the run succeeded": this function only
+    ever answers *where could the arm not hold its commanded pose*. A run can
+    fail with every pose reachable, by dropping the object or by putting it in
+    the wrong slot.
+    """
+
+    def _replay(self, reachable):
+        import numpy as np
+
+        n = len(reachable)
+        return type("R", (), {"metadata": {
+            "reachable_per_waypoint": np.array(reachable, dtype=bool),
+            "tracking_error_per_waypoint": np.zeros(n),
+        }})()
+
+    def _labels(self, n):
+        import numpy as np
+
+        from tpgpt.transport.labels import PolicyLabels
+
+        grip = np.full(n, -1.0)
+        grip[n // 3: 2 * n // 3] = 1.0
+        return PolicyLabels(
+            positions=np.zeros((n, 3)), velocities=np.zeros((n, 3)),
+            orientations=np.stack([np.eye(3)] * n), gripper=grip,
+            time_belief=np.linspace(0, 1, n),
+        )
+
+    def test_all_reachable_names_no_segment(self):
+        from tpgpt.experiments.diagnose import unreachable_segments
+
+        out = unreachable_segments(self._replay([True] * 90), self._labels(90))
+        assert out["worst_segment"] is None
+        assert out["worst_segment_share"] == 0.0
+
+    def test_it_still_names_the_segment_that_did_fail(self):
+        import numpy as np
+
+        from tpgpt.experiments.diagnose import unreachable_segments
+
+        reach = np.ones(90, dtype=bool)
+        reach[70:85] = False          # the place/retreat end
+        out = unreachable_segments(self._replay(reach), self._labels(90))
+        assert out["worst_segment"] in {"place", "retreat"}
+        assert out["worst_segment_share"] > 0.0

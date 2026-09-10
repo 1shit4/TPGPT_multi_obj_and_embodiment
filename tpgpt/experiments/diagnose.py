@@ -1158,8 +1158,15 @@ def unreachable_segments(replay, labels, window: int = 12) -> dict:
 
     Returns:
         ``{"<segment>_unreachable": fraction, "<segment>_track_max": metres}``
-        per segment, plus ``"worst_segment"``. Empty when the per-waypoint trace
-        is missing -- never a plausible-looking zero.
+        per segment, plus ``"worst_segment"`` and its ``"worst_segment_share"``.
+        Empty when the per-waypoint trace is missing -- never a
+        plausible-looking zero.
+
+        ``worst_segment`` is **None when no waypoint anywhere was unreachable**.
+        That is not "the run succeeded": this function only answers *where could
+        the arm not hold its commanded pose*, and a run can fail with every pose
+        reachable, by dropping the object or by placing it in the wrong slot.
+        Read it with ``worst_segment_share``, which is 0.0 in that case.
     """
     meta = getattr(replay, "metadata", None) or {}
     reachable = meta.get("reachable_per_waypoint")
@@ -1182,7 +1189,7 @@ def unreachable_segments(replay, labels, window: int = 12) -> dict:
         "retreat": (min(n, release + window), n),
     }
     out: dict = {}
-    worst, worst_share = None, -1.0
+    worst, worst_share = None, 0.0
     for name, (lo, hi) in bounds.items():
         lo, hi = int(np.clip(lo, 0, n)), int(np.clip(hi, 0, n))
         if hi <= lo:
@@ -1192,7 +1199,17 @@ def unreachable_segments(replay, labels, window: int = 12) -> dict:
         out[f"{name}_track_max"] = float(tracking[lo:hi].max())
         if share > worst_share:
             worst, worst_share = name, share
+    # **None when no segment had an unreachable waypoint**, which is not the
+    # same as the run succeeding: this function only ever answers "where could
+    # the arm not hold its commanded pose", and a run can fail with every pose
+    # reachable -- by dropping the object, or by placing it in the wrong slot.
+    #
+    # It used to start the comparison at -1.0, so an all-reachable path returned
+    # whichever segment happened to be tested first. Every fully reachable cell
+    # in Experiment M is therefore labelled "approach" in the published table,
+    # which reads as an accusation and means the opposite.
     out["worst_segment"] = worst
+    out["worst_segment_share"] = worst_share
     return out
 
 
