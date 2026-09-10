@@ -2854,6 +2854,266 @@ findings: that velocity cannot detect settling, that a shared joint configuratio
 cannot give a shared start pose, that the jaw channel is not cross-hand
 comparable. Nor the reshelving 17/20 gate.
 
+### 7.33 A half turn between the source's own two frames, hidden by three metrics
+
+The grasp-pose cube was landing objects 4 to 100 mm from where its own keypoints
+said they should go, and every instrument the campaign recorded read clean while
+it did. The cause is one line, and the reason it survived matters more than the
+line.
+
+#### What a task frame has to decide, and why it could get it wrong
+
+`task_frame` builds a small coordinate system whose first axis is the direction
+the jaws close along. That direction has two equally good answers, `+c` and
+`-c`, because a two-finger hand closing left to right and right to left performs
+one squeeze. So the function had to pick a sign, and its own docstring already
+said the choice was not free: flipping `c` also flips the second axis, turning
+the frame 180 degrees and permuting every corner label of the box built in it.
+It recorded that this once cost the reshelving campaign 17/20 to 5/20.
+
+The defence was a `reference` argument -- pass the frame the other end of the
+task used and the sign is chosen to agree. Without one the sign fell back to a
+world-axis test: keep `c` when `c[1] >= 0`, flip when `c[1] < -1e-9`, and when
+`|c[1]| <= 1e-9` decide on `c[0] < 0` instead.
+
+`scene_keypoints` builds **four** configurations. Three were referenced. The
+fourth, `source_place_frame`, was not.
+
+#### The measurement
+
+On the reshelving source demonstration, seed 0:
+
+| | horizontal closing axis | `c[1]` | what the fallback did |
+|---|---|---|---|
+| source **pick** | `[ 0.814, -0.581, 0]` | **-0.581** | below `-1e-9`, so it **flipped** to `[-0.814, 0.581, 0]` |
+| source **place** | `[ 1.000, -0.000, 0]` | **-1e-17** | inside the epsilon, so the `c[0] > 0` tie-break **kept** it |
+
+Carry the pick frame forward by the demonstration's own 35.5 degree turn and its
+first axis reads `[-1, 0, 0]`. The placed frame reads `[+1, 0, 0]`. **The two
+source frames were 180 degrees apart, and the deciding coordinate was exactly
+zero.**
+
+It is exactly zero because the demonstration *places the object square with the
+shelf*. That is the task, not an accident of this seed: any demonstration ending
+square with an axis-aligned receptacle puts its placed closing axis on a world
+axis and lands on this tie-break.
+
+#### What the half turn does to the object
+
+The keypoint cube is laid out in that frame, so the source's picked cube and its
+placed cube -- the same rigid object 0.6 s apart -- were labelled 180 degrees
+apart about the grasp's approach axis, and the map reproduced that faithfully.
+
+Once the jaws shut the object is rigid with the hand, so its placed pose is
+fixed by how far the hand turns between closing and opening and by nothing else.
+Get that relative turn wrong by a half turn about the approach and the object is
+**reflected through the grasp point**. Hold it dead centre and a reflection about
+the centre changes nothing; hold it `d` off-centre and it lands `2d` away.
+
+Measured over 20 cells, comparing the rigid motion the plan implies for the
+object against the one its own target keypoints encode:
+
+| | before | after |
+|---|---|---|
+| plan's carried rotation vs the keypoints' | **178.5 - 180.0 deg** | max 1.53 deg |
+| predicted landing error | mean **34.4 mm**, max **99.6 mm** | mean 1.6, max 3.7 |
+| cells inside the 60 mm gate | 17/20 | **20/20** |
+
+Lateral grasp offsets ran 2.0 to 50.1 mm and the predicted error tracked
+`2 x offset` throughout. Physics agreed: over the 15 cells that reached the
+shelf, predicted against observed gave `r = 0.725` with a 12.0 mm mean residual.
+
+#### Why three instruments read clean, none of them broken
+
+1. **The map stayed a valid diffeomorphism.** `min det(J)` 0.44 to 1.00,
+   keypoint residual 1.6e-7 to 1.1e-6. It has to be: a consistently mislabelled
+   frame is still a frame.
+2. **The aim was exactly 0.00 mm at both ends.** A half turn about the approach
+   leaves the grasp point **fixed** -- it is the one point a reflection does not
+   move -- so every aim metric is blind to it by construction, not by accident.
+3. **`orientation_transport_error` minimises over `JAW_SYMMETRY`.** Its
+   `symmetric=True` default takes `min(angle to R, angle to R @ diag(-1,-1,1))`,
+   and `diag(-1,-1,1)` **is** this half turn. It reported 0.2 to 4.5 degrees at
+   both ends of a plan that was 179 degrees wrong, and 7.29's per-hand figures of
+   0.45 to 1.41 degrees were read through it.
+
+The symmetry is a correct model of a parallel jaw asked "can you form this
+grasp". It is the wrong model for a pick and place, because the two ends must
+agree: a half turn taken at **both** ends genuinely cancels out of the object's
+motion, and one taken at a single end does not.
+`metrics.transport.carry_orientation_error` compares the *relative* rotation
+between grasp and release, where a consistent symmetry cancels from a
+subtraction and an inconsistent one does not.
+
+#### The fix, and the job it nearly lost
+
+The sign is now taken from the grasp. `Grasp6D` carries a full rotation whose
+first column *is* the closing direction, with a sign fixed by the planner and by
+which finger of that hand is which, so there was never anything to resolve. The
+world-axis test, the `reference` argument and `grasp_pose_frame`'s borrowed
+support normal are all gone; `grasp_pose_frame` is now `return grasp.rotation`.
+
+The source grasp had to change too, and it is the real origin of the mess.
+`reshelving_placement` built it from `rotation[:, 0]`, the **product's body x
+axis** -- a body axis, whose sign points wherever the mesh author put it. An
+undefined sign there is what forced everything downstream to invent one. It now
+comes from the demonstrating hand's own pose, converted into the grasp
+convention.
+
+Deleting the sign resolution lost a second job it had been doing silently:
+keeping the source-to-target frame rotation small. `min det` tracks that angle,
+and **three of twenty maps folded** without it:
+
+| source-to-target rotation | `min det` | `min det`, other roll |
+|---|---|---|
+| 3 - 19 deg | 0.94 - 0.99 | 0.006 - 0.08 |
+| 74 - 135 deg | 0.33 - 0.79 | 0.46 - 0.99 |
+| 149 - 179 deg | **-0.06 to 0.16** | 0.93 - 1.00 |
+
+So the target's roll is chosen **once, on the grasp**, by agreement with the
+demonstration, before either target block is derived. That is a different rule
+from the one removed: the old one ran four times and asked about world `+y`;
+this runs once and asks about the demonstration. Result over the same 20 cells:
+`min det` median 0.944, minimum 0.456, **no folds** -- against 0.878 and 0.443
+for the world-axis version.
+
+**One honest limit.** On a synthetic target-yaw sweep the cheap criterion picks
+the worse roll at 2 of 8 yaws and the map still folds. That is **not** a
+regression: the original code folds at the same two yaws, at -0.43 and -0.39,
+and could not be rescued because `flip_target` was inert (7.34). The other roll
+now gives 0.87 and 0.97 there, so the guarantee the construction can honestly
+offer is that *some* roll always works, and a caller needing a conditioned map
+must try both.
+
+### 7.34 The plan was computed in one frame and commanded in another
+
+Independent of 7.33, found while fixing it, and it is the answer to why the
+XArm looked like a bad hand.
+
+#### Three frames, two of them conflated
+
+* the **grasp convention** -- GraspGen-X's, `+Z` approach and `+X` closing. It
+  is uniform across every hand, which is what makes it the right place for
+  geometry that has to hold across embodiments, and it is what every keypoint
+  cube is built in;
+* the **wrist convention** -- each gripper model's own `grip_site`, whose
+  orientation relative to the fingers was chosen by whoever authored that model.
+  Inverse kinematics aims this one and the controller commands it;
+* the **task frame**, which is 7.33's subject.
+
+`alignment_rotation` is the measured, constant, per-hand rotation between the
+first two, and `grasp_to_eef_pose` already applies it for a single grasp.
+**Neither appeared anywhere in the Tier 2 replay path.** The transported plan was
+computed in the grasp convention and handed to IK as though it were a wrist pose.
+
+#### The measurement
+
+The commanded orientation at the grasp, against the two candidates:
+
+| cell | vs the GraspGen-X pose | vs the correct wrist pose |
+|---|---|---|
+| yumi/milk | 0.3 deg | **179.7 deg** |
+| xarm/cereal | 1.5 deg | **91.3 deg** |
+| panda/milk | 0.6 deg | **179.5 deg** |
+| robotiq85/milk | 0.5 deg | 0.6 deg |
+
+It is a grasp pose being commanded as a wrist pose. The error is each hand's own
+alignment: **0.2 deg** for the two Robotiqs, **90 deg** for the XArm, **180 deg**
+for the Panda, Yumi and Rethink, 76 for the Inspire.
+
+The source sets the convention because the source cube is built from the
+demonstrating hand: `angle(demo grip_site rotation, source GraspFrame.rotation)`
+measured **0.0 degrees**, so the source cube was in the Panda's *wrist* frame
+while every target cube was in GraspGen-X's.
+
+#### What it cost, and one wrong explanation it produced
+
+The XArm placed 1 of 4 and I proposed that its 90 degree error put the jaws
+across a face they could not span. **That was falsified before it was acted on**:
+measured at the slab where the fingers actually bite, every commanded grasp fits
+inside the aperture -- 0 of 20 impossible -- and the orientation error does not
+separate success from failure at all (failed cells 1, 1, 1, 91, 91, 91, 179, 179
+degrees; placed cells 1, 1, 1, 1, 89, 179, 179, 179, 179, 179, 180, 180).
+
+What the fix actually did: the XArm went from **1/4 to 3/4**, `xarm/milk` from
+268 mm to 8.4 and `xarm/bread` from 352 mm to 56.9. So the defect was real and
+costly and the mechanism I proposed for it was wrong. It is worth being explicit
+about that, because a correct diagnosis reached through a falsified mechanism is
+luck, not method.
+
+**The direct-execution control was not independent evidence.** It ran on the
+unfixed code and commanded the grasp rotation straight to the wrist, so it
+contained this defect. When it failed on those two cells it was reproducing the
+bug it was being used to test for. Only its successes were ever evidence.
+
+#### The fix
+
+`to_grasp_convention` and `to_wrist_convention` convert once at each end: strip
+the source hand's alignment before transporting, apply the executing hand's
+after. The map then operates in one frame from end to end and the only per-hand
+step is at the moment of command. Verified over 20 cells: the commanded wrist
+orientation is now within **1.62 degrees** of what `grasp_to_eef_pose` gives for
+the grasp actually executed, against 0.6 to 91 before.
+
+**`flip_target` was inert**, and this is the third defect. The sign resolution
+ran after it and put the sign back, so both branches produced identical
+keypoints -- measured on the old code, the same `min det` to three decimals at
+all eight yaws of a sweep. `pipeline._choose_grasp` loops over both rolls and
+keeps whichever scores better on reachability; that search had been scoring one
+option twice for the life of the project.
+
+#### What GraspGen-X declares, and what we still ignore
+
+Its gripper configs carry a **`symmetric`** flag, and it is per gripper:
+`parallel_2f` and `revolute_2f` declare `True`; **`revolute_3f` declares
+`False`** -- `robotiq_3f` and `inspire_hand`, both in our registry.
+
+A half turn about the approach is the same grasp for a two-finger hand and a
+**different** grasp for a three-finger one, and the authoritative source says so
+explicitly. `orientation_transport_error` applies the symmetry unconditionally,
+so every orientation figure recorded for those two hands, including their rows
+in 7.29's nine-hand table, used a symmetry they do not have. Neither appears in
+any Tier 2 run, so no physics result is affected. **Not yet fixed.**
+
+### 7.35 Every placement is a drop, and nobody had looked
+
+Found while explaining two cells that regressed across the 7.33-7.34 fix, and it
+is larger than the thing it was found chasing.
+
+The plan puts each object's base exactly on the shelf board -- measured against
+the true geometry, the real base lands **-0.1 to +1.8 mm** from it across a 48 to
+150 mm height range, so the vertical snap is correct and does not scale with
+object size. What happens in physics is different:
+
+| | Experiment L | Experiment M |
+|---|---|---|
+| object released above the board | median **44.4 mm**, max 129 | median **39.6 mm**, max 153 |
+| tracking error at the release waypoint | median 69.4 mm, max 133 | median 51.8 mm, max 130 |
+
+**The arm does not complete the descent into the shelf.** It stops 13 to 130 mm
+short of the commanded release pose, so the jaws open with the object up to
+15 cm above the board and it falls.
+
+This is not a workspace limit: the release pose itself solves full 6-DoF IK to
+**3.4 to 4.9 mm** on 15 of 20 cells. Nor is it the warm-started IK chain, which
+changes the release residual on only 2 of 20 cells.
+
+**And the height does not separate success from failure** -- placed cells sit a
+median 37 mm above the board, failed cells 40, and `xarm/bread` was released
+**153 mm** high and placed successfully. So it is a systemic weakness with a
+partly random outcome, which is exactly what makes marginal cells flip between
+runs. Both of Experiment M's regressions are that lottery resampled:
+`robotiq140/bread` released 22 mm higher than before, bounced off the board and
+fell 435 mm to the table; `robotiq85/milk` released *lower* than before but the
+object moved **81.9 mm laterally after the jaws opened**, against 40.1 before.
+
+The sibling project measured the second effect independently on the same family
+of hand: a Robotiq 2F-85's pads rotate inward as they open, so an object set down
+over a surface can catch on the opening fingers and be carried back up
+(`6dof_GraspMAS/docs/simulation.md`, "A release that does not release"). It notes
+a Panda never does this, "which is exactly why one gripper's behaviour cannot
+stand in for the others'".
+
 ## 8. Open items
 
 > **Read 7.26 first.** Every end-to-end campaign has been deleted, so the items

@@ -1595,8 +1595,13 @@ puts the fingers on the object, and one that misses by 37 to 94 mm does not.
 of 12 (83%)** and the cube **12 of 18 (67%)**. The cube acquires more and loses
 more. That shape survived from §8e, which is notable given everything else about
 §8e did not.
-
 ### Why the eight grasped-but-not-placed cells fail
+
+> **Diagnosed after the fact, and the diagnosis is in §8j.** This section
+> originally offered four "mechanisms" reasoning backwards from the symptoms.
+> All four are withdrawn. The real causes were three coordinate-frame defects,
+> found by working forwards from the geometry and confirmed by re-running these
+> same cells with the defects fixed and the grasp selection held identical.
 
 | hand | object | variant | held through carry | lost at | slip | placement |
 |---|---|---|---|---|---|---|
@@ -1609,13 +1614,105 @@ more. That shape survived from §8e, which is notable given everything else abou
 | xarm | milk | cube | 0.78 | wp 135 | 29 mm | 268 mm |
 | xarm | bread | cube | 0.09 | wp 60 | 3 mm | 352 mm |
 
-**Six of eight never lose the object at all.** They hold it through 100% of the
-carry and set it down in the wrong place. Only two are genuine drops, and both
-are the same hand.
+**Six of eight never lose the object at all.** They hold it through the whole
+carry and set it down in the wrong place. That shape is what pointed the
+investigation at the *plan* rather than at the grasp.
 
-The `robotiq140` is the clearest case: three cells with a perfect grip and
-placements of 213 to 344 mm. It carries the object faultlessly a third of a metre
-from where it should go. That is a **placement** failure, not a grasp failure.
+### The three defects that caused them
+
+Full mechanism in `ROBOTICS_NOTES.md` §7.33 and §7.34. In short, the code was
+doing geometry in two different coordinate systems and treating them as one.
+
+A **frame** here means three arrows glued to the gripper: the **approach** (the
+direction the hand drives in along), the **closing axis** (the direction the two
+fingers travel as they squeeze), and a third at right angles to both. Three such
+systems are in play, and two of them were being confused:
+
+* the **grasp convention**, which is GraspGen-X's: `+Z` is the approach and
+  `+X` is the closing direction. It means the same thing on all nine hands,
+  which is why geometry that has to work across embodiments belongs in it;
+* the **wrist convention**, each gripper model's own `grip_site`. Its
+  orientation relative to the fingers was chosen by whoever authored that model,
+  and it is *not* the same across hands. Inverse kinematics aims this one;
+* the **task frame**, support normal plus closing axis, used to fit a box to a
+  point cloud and snap it onto a surface.
+
+**Defect A — the source's own pick and place frames were 180 degrees apart.**
+The closing axis has two equally valid directions, because a two-finger hand
+closing left-to-right and right-to-left performs the same squeeze. `task_frame`
+chose between them with a world-axis rule — keep the arrow if its `y` component
+is positive, flip it if negative, and if `y` is zero decide on `x` instead — run
+independently at each of four places. The demonstration **places its object
+square with the shelf**, which puts the placed closing axis exactly along world
+`x` at `[1, -1e-17, 0]`. Its `y` component is a rounding crumb, so the tie-break
+fired and answered the opposite way to the pick, whose `y` is an unambiguous
+`-0.581`.
+
+Once the fingers close the object is rigid with the hand, so where it lands is
+decided entirely by how far the hand turns between closing and opening. A half
+turn taken at one end and not the other **reflects the object through the point
+where the fingers grip it**: hold it dead centre and nothing moves, hold it `d`
+off-centre and it lands `2d` away. Grips here sat 2 to 50 mm off centre.
+
+**Defect B — the plan was commanded in the wrong frame.** The keypoint cubes are
+built in the grasp convention; inverse kinematics aims the wrist. Neither
+`alignment_rotation` nor `grasp_to_eef_pose` appeared anywhere in this driver, so
+no conversion happened. The error is each hand's own offset: 0.2° for the two
+Robotiqs, 90° for the XArm, 180° for the Panda, Yumi and Rethink.
+
+**Defect C — `flip_target` was inert.** The sign resolution ran after it and put
+the sign back, so both branches produced identical keypoints. Measured on the old
+code across a target-yaw sweep, the two branches returned the same `min det` to
+three decimals at all eight yaws. `pipeline._choose_grasp` loops over both rolls
+and keeps whichever scores better; it has been scoring one option twice.
+
+### Why nothing caught them, which matters more than the defects
+
+Three instruments looked straight at this and read clean, and **none of them was
+broken**:
+
+1. **The map stayed a valid warp** — `min det(J)` 0.44 to 1.00, keypoint
+   residual about 1e-7, property (ii) of Sec. III-D satisfied on every cell. It
+   has to: a consistently mislabelled coordinate system is still a coordinate
+   system.
+2. **The aim was exactly 0.00 mm** at both the pick and the release. This is the
+   cruel one. A half turn about the approach axis leaves the grasp point
+   **fixed** — it is the one point a reflection does not move — so every aim
+   metric is blind to it by construction, not by accident.
+3. **`orientation_transport_error` minimises over `JAW_SYMMETRY`**, which *is*
+   this half turn, so it reported 0.2 to 4.5 degrees for a plan that was 179
+   degrees wrong. The default is `symmetric=True` and `transport()` calls it
+   bare, so every orientation number in §§5-8g was measured with the error
+   forgiven.
+
+That third one is defensible for a *single grasp* and wrong for a *journey*. A
+half turn taken at **both** ends genuinely cancels — it is the same task done
+with the wrist rolled over — while one taken at a single end does not, and
+minimising each end separately cannot tell those apart.
+`metrics.transport.carry_orientation_error` compares the *change* in angle from
+grasp to release instead, where a consistent roll cancels out of the subtraction
+and an inconsistent one does not. It reads 178.5 to 180.0 degrees on these cells.
+
+### Per cell, against the re-run
+
+Confirmed by §8j, which re-ran these cells with the defects fixed and the grasp
+selection held identical:
+
+| hand | object | recorded | after the fixes | verdict |
+|---|---|---|---|---|
+| yumi | cereal | 66.9 mm ✗ | **14.4 mm ✓** | Defect A — predicted 70.4 mm before the run |
+| panda | cereal | 76.1 mm ✗ | **14.2 mm ✓** | Defect A — predicted 85.7 mm before the run |
+| yumi | bread | stuck in the hand ✗ | **16.4 mm ✓** | the frame defects |
+| xarm | milk | 268 mm ✗ | **8.4 mm ✓** | the frame defects |
+| xarm | bread | 352 mm ✗ | **56.9 mm ✓** | the frame defects |
+| robotiq140 | milk | 275 mm ✗ | 110 mm ✗ | improves, still fails |
+| robotiq140 | can | 200 mm ✗ | 217 mm ✗ | unexplained |
+| xarm | cereal | 414 mm ✗ | 218 mm ✗ | the grasp does not hold — see below |
+
+**`xarm/cereal` is the only one of the eight that is not a frame defect.** It
+never lifts the object — 7 mm of rise, 9 control steps of contact — and it is
+also Experiment K's single failure, where no map is in the loop at all. It fails
+under every protocol tried, which is what a genuinely bad grasp looks like.
 
 ### Does a centre-of-mass stability filter have a target?
 
@@ -1628,6 +1725,229 @@ The open question this leaves is a different one: **why does a plan that grips
 the object and carries it faithfully release it in the wrong place?** That is
 about where the transported path *ends*, not about the grasp, and it is the
 natural successor to this experiment.
+
+---
+
+## 8j. Experiment M — Tier 2 with the three frame defects fixed
+
+**The before-and-after for §8i.** Same five hands, same four objects, same two
+constructions, same seed, **and the same grasp selection**, so the only thing
+that differs from Experiment L is the three defects. `outputs/keypoint_replay_v4/`,
+commit `6fb83d4`.
+
+Holding the grasp selection fixed is not a detail. An earlier attempt at this
+run changed the filters at the same time and had to be thrown away; that is
+§8k.
+
+### What was changed
+
+Described in full in `ROBOTICS_NOTES.md` §7.33-§7.34 and summarised in §8i. One
+sentence each:
+
+* the closing axis's sign is now **taken from the grasp** rather than re-derived
+  from a world axis, and the source grasp is derived from the demonstrating
+  *hand* rather than from the product's body axis, which is where the undefined
+  sign entered;
+* the plan is converted **out of** the grasp convention and **into** the
+  executing hand's wrist convention, once at each end, by that hand's measured
+  `alignment_rotation`;
+* `flip_target` works, so a caller can genuinely try both wrist rolls.
+
+One thing had to be added rather than removed. Deleting the sign resolution lost
+a second job it was quietly doing — keeping the rotation between the source and
+target frames small — and three of twenty maps folded as a result. `min det`
+tracks that angle closely:
+
+| source-to-target frame rotation | `min det` | `min det`, other roll |
+|---|---|---|
+| 3 - 19° | 0.94 - 0.99 | 0.006 - 0.08 |
+| 74 - 135° | 0.33 - 0.79 | 0.46 - 0.99 |
+| 149 - 179° | **-0.06 to 0.16** | 0.93 - 1.00 |
+
+So the target's roll is now chosen **once, on the grasp**, by agreement with the
+demonstration, before either target block is derived. That is a different thing
+from the rule it replaces: the old one ran four times and asked "does this point
+along world `+y`", a question about the object's yaw with nothing to do with the
+gripper; this asks "does this grip the object the way the demonstration gripped
+its object".
+
+### Result
+
+| | Experiment M | Experiment L | change |
+|---|---|---|---|
+| **grasp-pose cube placed** | **15/20** | 12/20 | **+3** |
+| cube traversed | 18/20 | 16/20 | +2 |
+| cube grasped | 18/20 | 18/20 | 0 |
+| cloud box placed | 10/20 | 10/20 | 0 |
+| cloud box grasped | 14/20 | 12/20 | +2 |
+
+Five cube cells recovered, two regressed. Per hand, grasp-pose cube:
+
+| hand | Experiment M | Experiment L |
+|---|---|---|
+| yumi | **4/4** | 2/4 |
+| panda | **4/4** | 3/4 |
+| xarm | **3/4** | 1/4 |
+| robotiq85 | 3/4 | 4/4 |
+| robotiq140 | 1/4 | 2/4 |
+
+### The two predictions that were registered before the run
+
+These are the only two cells where the mechanism gave a *number* in advance, so
+they are the ones that carry evidential weight rather than merely being
+consistent:
+
+| cell | predicted from the defect | before | after |
+|---|---|---|---|
+| yumi/cereal | 70.4 mm | 66.9 mm ✗ | **14.4 mm ✓** |
+| panda/cereal | 85.7 mm | 76.1 mm ✗ | **14.2 mm ✓** |
+
+The prediction is `2 x (lateral grasp offset)`: the half turn reflects the object
+through the grip point, so a grip 35.5 mm off centre on the yumi's cereal swings
+the object 71 mm, past the 60 mm pass mark.
+
+### Two claims this retires
+
+**"The xarm's grip does not hold" is withdrawn.** The hand went from 1/4 to 3/4:
+`xarm/milk` from 268 mm to **8.4 mm** and `xarm/bread` from 352 mm to 56.9 mm.
+Those two failures were the frame defects.
+
+**And the direct-execution control that appeared to corroborate it was not
+independent.** It ran on the unfixed code and commanded the grasp rotation
+straight to the wrist, so it contained Defect B — the very error it was being
+used to test for. When it failed on those two cells it was reproducing the bug.
+Only its *successes* were ever evidence.
+
+### Nothing else moved
+
+* the reshelving 17/20 regression gate is **bit-identical**: the same placement
+  errors to 0.1 mm on all ten seeds and the same single failure on seed 8;
+* the cloud box's four Panda cells are bit-identical to Experiment L, which is
+  the check that paths expected to be untouched really are;
+* 590 tests pass, 25 of them new.
+
+### Why the two regressions are not a new defect
+
+`robotiq140/bread` went from 54.3 mm to 235 mm and `robotiq85/milk` from 8.1 mm
+to 62.3. Both are Robotiq hands and both are release-phase failures, and the
+underlying weakness is present in **both** runs equally:
+
+| | Experiment L | Experiment M |
+|---|---|---|
+| object released above the shelf board | median 44.4 mm, max 129 | median 39.6 mm, max 153 |
+| tracking error at the release waypoint | median 69.4 mm, max 133 | median 51.8 mm, max 130 |
+
+**Every placement in this experiment is a drop, not a set-down.** The arm does
+not complete the descent into the shelf — it stops 13 to 130 mm short of the
+commanded release pose — so the object is let go from up to 15 cm above the
+board and falls. Whether it stays on the board is then decided by the bounce.
+
+That release height does **not** separate success from failure: placed cells sit
+a median 37 mm above the board and failed cells 40 mm, and `xarm/bread` was
+released **153 mm** high and placed successfully. So it is a systemic weakness
+with a partly random outcome rather than a cause specific to any cell.
+
+The two regressions are that lottery resampled. `robotiq140/bread` was released
+22 mm higher than before (150 against 128 mm), bounced off the board and fell
+435 mm to the table. `robotiq85/milk` was released *lower* than before (21
+against 52 mm) but the object moved **81.9 mm laterally after the jaws opened**,
+against 40.1 mm before — and the sibling project measured exactly this
+independently: a Robotiq 2F-85's pads rotate inward as they open, so an object
+set down over a surface can catch on the opening fingers
+(`6dof_GraspMAS/docs/simulation.md`, "A release that does not release").
+
+**The real finding here is the drop itself**, which no previous experiment had
+looked at, and it is now the largest known execution weakness.
+
+---
+
+## 8k. Experiment N — the full grasp funnel, and why it cannot be read
+
+**Recorded so the mistake is not repeated, not because it measured anything.**
+`outputs/keypoint_replay_v3_FULLFILTER_CONFOUNDED/`, commit `9894bd6`.
+
+### What was asked, and what was actually changed
+
+Experiment L applied **one** of the seven grasp filter stages — the 45 degree
+approach test. The other six, including the reachability check that tests the
+pick, the lift, the placement and the approach corridors into both, never ran.
+So it measured candidates the pipeline itself would have thrown away. Running
+the whole funnel is plainly the right thing.
+
+The problem is that `filter_grasps` changes the **ranking** as well as the
+filtering, and this was not noticed before the run:
+
+* the approach path keeps candidates within 45 degrees of the demonstration and
+  takes the **closest**;
+* `filter_grasps` keeps the same candidates and returns them ranked by
+  **GraspGen-X's own confidence score**.
+
+Measured across the 20 cells:
+
+| | approach only | full funnel |
+|---|---|---|
+| approach mismatch of the chosen grasp | median **3.2°** | median **13.8°**, up to 40.3 |
+| grasp TCP moves by | — | median **15.7 mm**, up to 51.1 |
+
+**39 of 40 cells executed a different grasp.** The run therefore changed the
+construction and the grasp selection together and measured neither. Its numbers
+(cloud box 10/20, cube 8/20) are not comparable with anything.
+
+This is the failure mode §7.26 exists to prevent, committed while the document
+that forbids it was open.
+
+### What is worth keeping from it
+
+Two things, neither of which needed the physics:
+
+* **the measurement above**, which is the reason grasp selection is now an
+  explicit parameter (`--filters approach|full`) with its consequences written
+  into its own docstring, rather than a property of whichever code path a driver
+  happened to take;
+* **the observation that ranking by the planner's confidence may be actively
+  worse for transport.** The method's whole job is to reproduce a demonstrated
+  approach, so taking a candidate 40 degrees off instead of 6 is not a neutral
+  choice — and §8h already found no evidence the planner's score predicts
+  anything.
+
+**Still open:** whether the funnel's *filtering* helps, asked with the ranking
+held fixed. That needs one run varying only the filter.
+
+---
+
+## 8l. What GraspGen-X declares about its own grippers, and one thing we ignore
+
+Read from the authoritative source — the gripper configs in the sibling
+GraspGen-X checkout — rather than measured, so this is a contract, not a result.
+
+Every config carries a **`symmetric`** flag, and it is **not the same for all
+grippers**:
+
+| our name | GraspGen-X name | type | `symmetric` |
+|---|---|---|---|
+| panda, yumi, umi | franka_panda, abb_yumi, franka_umi | `parallel_2f` | True |
+| rethink, xarm, robotiq85, robotiq140 | sawyer_hand, xarm_hand, robotiq_2f_85, robotiq_2f_140 | `revolute_2f` | True |
+| **robotiq3f** | robotiq_3f | `revolute_3f` | **False** |
+| **inspire** | inspire_hand | `revolute_3f` | **False** |
+
+The flag says whether rolling the hand a half turn about its approach axis gives
+the *same physical grasp*. For a two-finger hand it does — the fingers swap and
+the squeeze is identical. **For a three-finger hand it does not**: the fingers
+land somewhere else entirely.
+
+`metrics.transport.orientation_transport_error` applies that symmetry
+unconditionally, with `symmetric=True` as its default, and `transport()` calls
+it without an argument. **So every orientation figure recorded for `robotiq3f`
+and `inspire` was measured with a symmetry those hands do not have** — including
+their rows in Experiment J's nine-hand table (§8g).
+
+Neither hand appears in any Tier 2 run, so no physics result is affected. What
+is affected is the geometry claim that the grasp-pose cube's transported
+orientation is hand-independent, which rests on that table.
+
+**Not yet fixed**, and the fix has two parts: read the flag from the registry,
+and refuse the half-turn symmetry — both in the metric and in the target-roll
+choice of §8j — for any hand that declares itself asymmetric.
 
 ---
 
@@ -1646,31 +1966,41 @@ survives the people running it — the failure `ROBOTICS_NOTES.md` §7.26 is abo
 | Does a centre-of-mass stability filter have a target? | **No.** Only **2 of 40** cells lose the object mid-carry, both on one hand. Six of the eight grasped-but-unplaced cells hold it through **100%** of the carry and misplace it (§8i) |
 | Does the plan execute across hands? | Partly. **10/20 cloud box, 12/20 cube**, up from ~20% on the broken scene |
 
-### The question those runs opened
+### The question those runs opened, and its answer
 
 **Why does a plan that grips the object and carries it faithfully release it in
-the wrong place?** Six of eight failures hold the object through the entire carry
-and place it 15 to 344 mm off. The `robotiq140` does this three times with a
-perfect grip. This is about where the transported path *ends* — the release point
-and the placed pose — not about the grasp, and nothing currently measures it
-directly. It is the natural successor to §8i.
+the wrong place?** **Answered — three coordinate-frame defects**, §8i and
+`ROBOTICS_NOTES.md` §7.33-§7.34. Fixing them recovered five of the eight cells
+and took the grasp-pose cube from 12/20 to 15/20 (§8j), including both cells
+whose error magnitude was predicted in advance.
+
+It also opened a new one, which is now the largest known execution weakness:
+**every placement is a drop.** The arm stops 13 to 130 mm short of the commanded
+release pose, so the object is let go a median 40 mm and up to 153 mm above the
+shelf board and falls. It usually lands anyway — the height does not separate
+success from failure — but it turns each placement into a partial lottery, and
+it is what makes marginal cells flip between runs.
 
 ### Open, not started
 
 | # | item | why it matters |
 |---|---|---|
-| 1 | **The placement failure above** | The dominant remaining failure mode. Needs a metric for the release, as `stage_outcome` measures the grasp and the carry but scores the placement only by the final error |
+| 1 | **The arm does not complete the descent into the shelf**, so every placement is a drop from a median 40 mm and up to 153 mm (§8j) | The largest known execution weakness, and the reason marginal cells flip between runs. Tracking error at the release waypoint is 13-130 mm while the pose itself solves IK to 3-5 mm, so this is not a workspace limit |
+| 1b | **The half-turn symmetry is applied to two hands that declare themselves asymmetric** (§8l) | `robotiq3f` and `inspire` are `revolute_3f` with `symmetric: False` in GraspGen-X's own config. Every orientation number recorded for them, including their rows in §8g, used a symmetry they do not have |
+| 1c | **Does the full grasp funnel help?** Asked with the ranking held fixed | §8k could not answer it, because `filter_grasps` changes the ranking as well as the filtering and 39 of 40 cells got a different grasp |
+| 1d | **`robotiq140` is now the weakest hand at 1/4**, having been 2/4 | Different from where the investigation started, and undiagnosed. Its two clean failures carry the object faithfully and misplace it |
 | 2 | **Cross-hand closing schedule.** Jaws close at a fixed speed from different apertures, but the dwell is inherited from a Panda demonstration through the time belief | The traces from §8i record calibrated `closure` per waypoint, so this is answerable **without a new run** |
 | 3 | **Contact-gated closing.** The rule must be closure-**rate** based: a box arrests the jaws dead (milk, +0.010 over the dwell) while a cylinder keeps yielding (can, +0.080) and never stalls | Needs 2. Also needs the phase to wait for the grasp event — a rollout change in the dynamics thread |
 | 4 | **Per-hand dwell scaling**, the cheaper alternative to 3, needing no new sensing | Derivable from the finger-travel calibration in `gripper_frames.json` |
 | 5 | **Objects are still dropped ~25 mm** at placement, landing at 0.7 m/s | Seating them at rest height was attempted and reverted: the arithmetic verified correct in isolation but produced floor-level escapes. The settle absorbs the bounce, so this is now cosmetic rather than corrupting |
-| 6 | **Whether `object_keypoints` should default to the grasp cube** | §8g and §8i both favour it — better conditioned, hand-independent orientation, and 18/20 grasped against 12/20 — but it converts worse (67% against 83%). Should be its own commit and probably waits on item 1 |
+| 6 | **Whether `object_keypoints` should default to the grasp cube** | Now clearly favoured: **15/20 against 10/20** on the corrected code (§8j), 18/20 grasped against 14/20, and better conditioned. The 67%-against-83% conversion gap that argued against it was the half turn, which only the cube carried. Still its own commit |
 | 7 | **`prediction.reference` and `GPPolicy.attractor()` are fitted and never read; `velocity_desired` is never passed** | Pre-existing, dynamics thread, §2.7–2.8 |
 
 ### Grey areas — recorded because they are *not* solid
 
-- **The cube grasps more and places less.** 18/20 against 12/20 grasped, but 67% against 83% conversion. Both effects are real and they pull opposite ways; which construction is better depends on item 1.
-- **`reachable_fraction` is stricter than physical feasibility.** Three cells in §8h report 0% reachable and lift the object anyway. It says IK did not converge to tolerance, not that the arm cannot get there, and must not be used as a failure predictor.
+- ~~**The cube grasps more and places less.**~~ **Resolved.** The conversion gap was the half turn, which the cloud box's keypoints are immune to because a fitted box is symmetric under it. On the corrected code the cube leads on every stage: grasped 18/20 against 14/20, traversed 18 against 13, placed **15/20 against 10/20** (§8j).
+- **`reachable_fraction` is stricter than physical feasibility, and it is a property of the whole path.** `replay_labels` seeds each IK solve from the previous one, so it answers "can the arm move *between* these poses", not "is this pose reachable". Solving each from the rest configuration instead changes the release residual on only **2 of 20** cells. Its 5 mm tolerance also flickers: successful solves land at 2.4-5.0 mm. The direct-execution control places objects at 3.8 mm while reporting 53% reachable.
+- **`worst_segment` names "approach" whenever nothing was unreachable.** `unreachable_segments` takes the maximum share starting from -1, so an all-reachable path returns the first segment tested. It reads as an accusation and means the opposite.
 - **Why `robotiq3f` folds under composition** (`min det = −0.045`, §8g) is unexplained — the only outright fold in 136 cells.
 - **`shut@lift` is not a usable signal.** Four separate wrong readings came from the jaw channel. The traces record it; nothing should be concluded from it without a properly averaged statistic over the held interval.
 - **One seed, one slot, one demonstration** everywhere. The hand-versus-object confound cannot be separated without more scenes.
@@ -1688,7 +2018,11 @@ depths; the UMI's verification status; the partial-cloud hypothesis for knocking
 (**falsified** — ground-truth clouds gave identical results); "GraspGen-X's
 grasps are mostly bad" (**withdrawn**, §8h); "its discriminator is
 anti-predictive" (**withdrawn**, §8h); "a COM filter is justified" (**withdrawn**,
-§8i).
+§8i); "the xarm's grip does not hold" (**withdrawn**, §8j — 1/4 to 3/4 once the
+frames were fixed); the four failure "mechanisms" of §8e (**withdrawn**, §8i —
+reasoned backwards from symptoms); "the vertical snap sits high because the
+clouds are short" (**withdrawn** — measured, the clouds capture 99.9 to 106.1%
+of true height and each object's base lands within 1.8 mm of the board).
 
 ---
 

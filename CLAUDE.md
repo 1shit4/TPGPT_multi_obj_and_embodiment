@@ -300,6 +300,78 @@ Each of these cost real debugging time. Full detail in `ROBOTICS_NOTES.md`.
   simpler explanation for its 24 failed grasp attempts than the registry
   docstring's "five fingers cannot pinch a can from above". Against 29-90 mm for
   every other hand.
+- **A grasp is a pose, not an axis. Never re-derive its closing direction.**
+  `task_frame` used to pick the closing axis's sign with a world-axis test
+  (`c[1] >= 0`, tie-broken on `c[0]`), run independently at each of
+  `scene_keypoints`' four blocks. The demonstration **places its object square
+  with the shelf**, so the placed closing axis lands on world `x` at
+  `[1, -1e-17, 0]`, the tie-break fires and answers the opposite way to the
+  pick, whose `c[1]` is an unambiguous `-0.581`. The source's own two frames
+  came out **180 degrees apart**. Once the jaws shut the object is rigid with
+  the hand, so a half turn at one end only **reflects it through the grasp
+  point**: dead centre nothing moves, `d` off-centre it lands `2d` away --
+  4 to 100 mm over 20 cells. `Grasp6D.closing` has a definite sign; use it.
+  The origin was upstream: `reshelving_placement` built the source grasp from
+  `rotation[:, 0]`, the **product's body axis**, whose sign is undefined, and
+  everything downstream was compensating. `§7.33`.
+- **Three instruments read clean through that, and none was broken.** The map
+  stayed a valid diffeomorphism (`min det` 0.44-1.00, residual ~1e-7). **The aim
+  was exactly 0.00 mm at both ends** -- a half turn about the approach leaves
+  the grasp point *fixed*, so aim is blind to it by construction. And
+  `orientation_transport_error` minimises over `JAW_SYMMETRY`, which **is** that
+  half turn, so it read 0.2-4.5 degrees. For anything that *carries* an object
+  use `metrics.transport.carry_orientation_error`: it compares the relative
+  rotation between grasp and release, where a roll taken at both ends cancels
+  and one taken at a single end does not.
+- **Keypoints live in the grasp convention; the robot is commanded in the wrist
+  convention; convert explicitly.** GraspGen-X emits `+Z` approach and `+X`
+  closing, uniform across all nine hands. Each gripper model's `grip_site` is
+  its own frame, differing by the measured `alignment_rotation`: **0.2 degrees**
+  for the Robotiqs, **90** for the XArm, **180** for the Panda, Yumi and
+  Rethink. Neither `alignment_rotation` nor `grasp_to_eef_pose` appeared in the
+  Tier 2 path, so the plan was commanded 0.6-91 degrees wrong. Use
+  `to_grasp_convention` / `to_wrist_convention`, once at each end. `§7.34`.
+- **`flip_target` was a no-op for the life of the project.** The sign resolution
+  ran after it and put the sign back; both branches gave identical keypoints, to
+  three decimals of `min det` at all eight yaws of a sweep.
+  `pipeline._choose_grasp` tries both rolls and keeps the better -- it was
+  scoring one option twice. Any "try both and pick the best" search deserves an
+  assertion that the two branches actually differ.
+- **Removing the sign resolution loses a job it was doing silently.** `min det`
+  tracks the source-to-target frame rotation, and **three of twenty maps fold**
+  past about 145 degrees. The target's roll is now chosen *once, on the grasp*,
+  by agreement with the demonstration -- not four times from a world axis. Over
+  the same cells: median 0.944, min 0.456, no folds, against 0.878 and 0.443.
+  On a synthetic yaw sweep the cheap criterion still picks the worse roll at
+  2 of 8 yaws; the old code folded at those same two and could not be rescued.
+- **GraspGen-X declares `symmetric` per gripper and we ignore it.**
+  `parallel_2f` and `revolute_2f` are `True`; **`revolute_3f` is `False`** --
+  `robotiq3f` and `inspire`. A half turn about the approach is the same grasp
+  for two fingers and a *different* grasp for three.
+  `orientation_transport_error` applies it unconditionally, so every orientation
+  figure for those two hands, including their rows in `§7.29`'s nine-hand table,
+  used a symmetry they do not have. **Not yet fixed.** `§7.34`.
+- **Every placement is a drop, not a set-down.** The plan puts each object's
+  base within **1.8 mm** of the shelf board -- the vertical snap is correct --
+  but the arm stops **13 to 130 mm short** of the commanded release pose, so the
+  jaws open a median 40 mm and up to 153 mm above the board. Not a workspace
+  limit: the release pose solves IK to 3.4-4.9 mm on 15 of 20 cells. Not the
+  warm-started IK chain either: solving from rest changes 2 of 20. The height
+  does **not** predict failure, which is what makes marginal cells flip between
+  runs. `§7.35`.
+- **`reachable_fraction` is a property of the whole path, not of a pose.**
+  `replay_labels` seeds each IK solve from the previous one, so it answers "can
+  the arm move *between* these poses". The direct control places objects at
+  3.8 mm while reporting 53% reachable. Its 5 mm tolerance also flickers --
+  successful solves land at 2.4-5.0 mm. And `worst_segment` says "approach"
+  whenever *nothing* was unreachable, which reads as an accusation.
+- **Hold the grasp selection fixed when comparing constructions.**
+  `target_placement`'s `filters="approach"` keeps the 45-degree test and ranks
+  by agreement with the demonstration; `"full"` runs the whole funnel and ranks
+  by GraspGen-X's own score. The chosen candidate's approach mismatch goes from
+  a median of 3.2 to 13.8 degrees and its TCP moves a median 15.7 mm, so
+  **39 of 40 cells execute a different grasp**. A run that varies this and
+  anything else measures neither. `§8k` in `outputs/keypoints_sweep/FINDINGS.md`.
 - **Two capabilities exist in the policy and are never used at runtime.**
   `prediction.reference` — the regressed attractor position, the paper's own
   Sec. V formulation and the policy's only restoring term — is fitted and never
@@ -391,19 +463,33 @@ median 0.5-1.6 degrees against the cloud box's 5.4-14.3, and
 offset. Composition on top of it is dead — median keypoint residual **10.9 mm**,
 violating property (i) on 29 of 29 cells.
 
-**What is not resolved is execution.** All of the above is geometry. Tier 2
-physics across six hands is the open item, and until it runs the default in
-`object_keypoints` stays `box="cloud"`; flipping it is its own commit.
+**Execution has now been measured, twice, and the second time it was worth
+having.** Tier 2 across five hands: the grasp-pose cube places **15 of 20**
+against the cloud box's 10, grasps 18 against 14, and traverses 18 against 13.
+That is on the corrected code; the first attempt gave 12 and 10 and was largely
+measuring three coordinate-frame defects (`§7.33`, `§7.34`), whose repair
+recovered five cells and whose two quantitatively predicted cases both came out
+as predicted. The default in `object_keypoints` still stays `box="cloud"` until
+flipping it is its own commit, but the evidence now clearly favours the cube on
+every stage rather than trading aim against conditioning.
 
 **Grasping, filtering and end-to-end physics (built end to end; reliability
 unmeasured).** Text prompt -> object and shelf -> cloud -> ranked 6-DoF grasps
 -> seven filters -> keypoints -> transport -> policy -> execute -> scored, with
 per-run HTML reports. Nine gripper pairs registered, eight verified in physics.
 
-**There is currently no trustworthy end-to-end success rate**, and there should
-not be one until the provenance rules of §7.26 are in force. Everything that
-used to be quoted here — per-campaign success counts, which stage is the
-bottleneck, what predicts success — came from the deleted campaigns.
+**The end-to-end numbers that exist are the Tier 2 replays**, which run under a
+stiff position controller with no policy and no attractor integration, so they
+are an **upper bound** on what the keypoints can support rather than a rate for
+the full pipeline. Read them as 15/20 and 10/20 with that caveat attached;
+`outputs/keypoint_replay_v4/`, commit `6fb83d4`, and the per-cell attribution is
+in `FINDINGS.md` §8j. Nothing from the campaigns deleted under §7.26 has been
+reinstated, and the policy-driven rate remains unmeasured.
+
+**The largest known execution weakness is that every placement is a drop.** The
+arm stops 13 to 130 mm short of the commanded release pose, so the jaws open a
+median 40 mm above the shelf board. It usually lands anyway, which is why this
+went unnoticed, and it is what makes marginal cells flip between runs. `§7.35`.
 
 **Two threads are open, and they are independent of each other.** The interface
 between them is the transported label set: keypoints and the map *produce* it,
@@ -453,9 +539,12 @@ offset is the only one in the registry with a large lateral component
 (`[0.0, -0.035, -0.112]`) and which §7.2 measured as tolerating only 15 mm of
 depth error against 120-135 mm for the parallel jaws.
 
-423 tests pass (10 skipped, needing the grasp server) in ~4 min; the unit
-suite alone is ~330 tests in ~10 s. The suite was unaffected by the campaign
-deletion: it tests mechanisms, not campaign outcomes.
+**590 tests pass** in ~5 min; the unit suite alone is 492 in ~17 s. The suite
+was unaffected by the campaign deletion, because it tests mechanisms rather than
+campaign outcomes — but note that it also failed to catch the three frame
+defects of `§7.33`-`§7.34` for the life of the project, and one of its tests
+actively *enforced* the wrong behaviour. When a test breaks under a change,
+treat it as a question about which of the two is right, not as a verdict.
 
 ## History
 
