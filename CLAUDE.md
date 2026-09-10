@@ -378,10 +378,15 @@ Each of these cost real debugging time. Full detail in `ROBOTICS_NOTES.md`.
   waypoints across four objects on one hand, *not* monotonic in object width.
   The continuity requirement is not decoration: `xarm/cereal` touches its box
   four waypoints before the close, so a one-step gate would report a grasp that
-  does not exist. And it counts **fingers**, not contacts -- `GRASP_MIN_FINGERS
-  = 2`, a floor valid on two, three or five fingers -- because a Robotiq has
-  five collision geoms per finger and a Yumi has one, so a threshold on contacts
-  would mean different things on different hands.
+  does not exist. And the test is **opposition**, not a count: at least one
+  finger touching from *each side* of the closing axis. A count would have been
+  wrong -- "two fingers" is safe on a parallel jaw, where two is both of them,
+  and wrong on a three-finger hand, which carries **two fingers on one side and
+  one on the other** (the Robotiq 3F's sit at -63.8, -61.6 and +71.9 mm along its
+  closing axis), so two of its fingers touching can be the pair *shoving* the
+  object. Opposition needs no threshold and means the same thing on two fingers,
+  three or five. Counting contacting *geoms* would be worse still: a Robotiq has
+  five per finger and a Yumi one.
   **What it does not fix is squeezing.** The fingers stay commanded shut for the
   whole carry, so a hand the gate waits longer for also squeezes longer: on
   `robotiq140/can` the gate waits ~15 waypoints and a 15-waypoint dwell is where

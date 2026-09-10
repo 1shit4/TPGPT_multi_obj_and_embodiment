@@ -552,6 +552,75 @@ def finger_groups(env, gripper: str, arm: str = "right") -> list[set[int]]:
     )
 
 
+def finger_sides(env, gripper: str, groups: list[set[int]], arm: str = "right"):
+    """Which side of the pinch each finger sits on, as a sign per group.
+
+    Measured along the hand's own closing axis, in ``grip_site`` coordinates,
+    while the fingers are open -- so it is a fact about the hand's layout rather
+    than about how far it has closed. A parallel jaw's fingers meet at the
+    centre and do not cross it, so the sign is stable through the close.
+
+    **This is what makes "two fingers are touching" mean something.** On a
+    parallel jaw two fingers is necessarily both of them, hence necessarily
+    opposed. On a three-finger hand it is not: the Robotiq 3F carries two
+    fingers on one side and one on the other -- measured at -63.8 mm, -61.6 mm
+    and +71.9 mm -- so two of its fingers touching can be the *pair*, which is
+    two fingers pushing the object the same way.
+    """
+    import numpy as np
+
+    from tpgpt.grasp.grippers import gripper_frame
+
+    # Refuse before touching the scene: the failure is a registry gap, not a
+    # simulation one, and reporting it as an AttributeError hides that.
+    frame = gripper_frame(gripper)
+    if frame is None or frame.get("closing_in_site") is None:
+        raise ValueError(
+            f"{gripper!r} has no measured closing axis, so which side of the "
+            "pinch each finger is on cannot be known; measure it with "
+            "tpgpt.grasp.measure_frames rather than guessing a side"
+        )
+    closing = np.asarray(frame["closing_in_site"], dtype=float)
+    data = env.sim.data
+    site = env.robots[0].eef_site_id
+    site = site[arm] if isinstance(site, dict) else site
+    rotation = np.array(data.site_xmat[site]).reshape(3, 3)
+    origin = np.array(data.site_xpos[site])
+    sides = []
+    for group in groups:
+        centre = np.mean([data.geom_xpos[g] for g in group], axis=0)
+        sides.append(float((rotation.T @ (centre - origin)) @ closing))
+    return sides
+
+
+def is_pinched(env, object_name: str, groups: list[set[int]], sides) -> bool:
+    """Whether the object is held *between* fingers rather than pushed by them.
+
+    The test is opposition, not a count: at least one finger touching from each
+    side of the closing axis. That is the minimum for the object to be trapped,
+    and it means the same thing on a hand with two fingers, three or five --
+    where a count does not, because a three-finger hand can put two fingers on
+    one side.
+    """
+    import numpy as np
+
+    body = env.object_body_ids[object_name]
+    target = {
+        i for i in range(env.sim.model.ngeom)
+        if env.sim.model.geom_bodyid[i] == body
+    }
+    data = env.sim.data
+    seen = set()
+    for i in range(data.ncon):
+        pair = {data.contact[i].geom1, data.contact[i].geom2}
+        if not pair & target:
+            continue
+        for index, group in enumerate(groups):
+            if pair & group:
+                seen.add(np.sign(sides[index]))
+    return {1.0, -1.0} <= seen
+
+
 def fingers_touching(env, object_name: str, groups: list[set[int]]) -> int:
     """How many distinct fingers are in contact with the object.
 

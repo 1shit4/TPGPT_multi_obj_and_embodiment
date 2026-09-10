@@ -272,11 +272,50 @@ class TestFingerGrouping:
         finally:
             grippers.gripper_config_path = original
 
-    def test_the_minimum_is_a_floor_not_a_per_hand_number(self):
-        """Two opposing contacts pinch, whatever the hand's finger count."""
-        from tpgpt.sim.replay import GRASP_MIN_FINGERS
+    def test_two_fingers_is_not_enough_on_a_three_finger_hand(self):
+        """Opposition, not a count -- and a count would have been wrong.
 
-        assert GRASP_MIN_FINGERS == 2
+        A parallel jaw's two fingers are necessarily opposed, so "two touching"
+        is safe there. A Robotiq 3F carries **two fingers on one side and one on
+        the other**, measured at -63.8 mm, -61.6 mm and +71.9 mm along its own
+        closing axis, so two of its fingers touching can be the pair on one
+        side -- two fingers pushing the object rather than pinching it.
+        """
+        from tpgpt.experiments.diagnose import is_pinched
+
+        def scene(contacts):
+            """A scene whose only contacts are the object against those geoms."""
+            class Contact:
+                def __init__(self, g):
+                    self.geom1, self.geom2 = 0, g
+
+            model = type("m", (), {"ngeom": 40, "geom_bodyid": [1] + [0] * 39})
+            data = type("d", (), {"ncon": len(contacts),
+                                  "contact": [Contact(g) for g in contacts]})
+            sim = type("s", (), {"model": model, "data": data})
+            return type("e", (), {"object_body_ids": {"thing": 1}, "sim": sim})()
+
+        groups = [{10}, {11}, {12}]          # two on one side, one on the other
+        sides = [-63.8, -61.6, +71.9]
+        assert not is_pinched(scene([10, 11]), "thing", groups, sides), (
+            "two fingers on the same side is a shove, not a pinch"
+        )
+        assert is_pinched(scene([10, 12]), "thing", groups, sides)
+        assert is_pinched(scene([11, 12]), "thing", groups, sides)
+        assert not is_pinched(scene([12]), "thing", groups, sides)
+
+    def test_a_hand_with_no_measured_closing_axis_is_refused(self):
+        """A guessed side would silently make a shove read as a pinch."""
+        import tpgpt.grasp.grippers as grippers
+        from tpgpt.experiments import diagnose
+
+        keep = grippers.gripper_frame
+        grippers.gripper_frame = lambda short: None
+        try:
+            with pytest.raises(ValueError, match="no measured closing axis"):
+                diagnose.finger_sides(object(), "nonesuch", [{1}])
+        finally:
+            grippers.gripper_frame = keep
 
     def test_counting_fingers_and_not_geoms_is_the_point(self):
         """A Robotiq has five collision geoms per finger and a Yumi has one.

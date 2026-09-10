@@ -56,7 +56,9 @@ import numpy as np
 from tpgpt.experiments.diagnose import (
     _gripper_touches,
     finger_groups,
+    finger_sides,
     fingers_touching,
+    is_pinched,
     grasp_slip,
     object_probe,
     replay_preconditions,
@@ -214,22 +216,30 @@ def _fingers_gate(env, gripper: str, object_name: str):
     """"Is the object actually pinched?", as a test the replay can call.
 
     Not "is anything touching it": a single finger on the side, or the palm
-    resting on top, is contact and is not a grasp. Two distinct fingers is the
-    minimum that can pinch, on a hand with two fingers or five, and
-    :func:`~tpgpt.experiments.diagnose.finger_groups` gets the grouping from the
-    finger count GraspGen-X declares rather than guessing it from the model --
-    three ways of guessing it were measured and each is wrong on at least one
-    hand in this registry.
+    resting on top, is contact and is not a grasp.
+
+    And not "are two fingers touching" either, which is the same mistake one
+    level up. On a parallel jaw two fingers is both of them and so is
+    necessarily opposed, but a three-finger hand carries **two fingers on one
+    side and one on the other** -- the Robotiq 3F's sit at -63.8 mm, -61.6 mm
+    and +71.9 mm along its closing axis -- so two of its fingers touching can be
+    the pair, pushing the object the same way. The test is therefore
+    *opposition*: at least one finger from each side, which needs no threshold
+    and means the same thing on two fingers, three or five.
+
+    The grouping comes from the finger count GraspGen-X declares rather than
+    being guessed from the model -- three ways of guessing it were measured and
+    each is wrong on at least one hand in this registry -- and the sides from the
+    hand's own measured closing axis.
 
     Falls back to a plain contact test for a hand whose fingers cannot be
     grouped, with a warning, rather than refusing the cell: a weaker gate is
     still better than lifting on a stopwatch, and the alternative is that one
     unusual hand blocks the whole campaign.
     """
-    from tpgpt.sim.replay import GRASP_MIN_FINGERS
-
     try:
         groups = finger_groups(env, gripper)
+        sides = finger_sides(env, gripper, groups)
     except ValueError as exc:
         warnings.warn(
             f"{gripper}: {exc}. Falling back to any-contact, which cannot tell "
@@ -237,7 +247,7 @@ def _fingers_gate(env, gripper: str, object_name: str):
             RuntimeWarning, stacklevel=2,
         )
         return lambda e: _gripper_touches(e, object_name)
-    return lambda e: fingers_touching(e, object_name, groups) >= GRASP_MIN_FINGERS
+    return lambda e: is_pinched(e, object_name, groups, sides)
 
 
 def stage_outcome(replay, labels, target, env=None) -> dict:

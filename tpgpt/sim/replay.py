@@ -62,20 +62,18 @@ JOINT_ACTION_SCALE = 0.5
 #: it" from "the hand knocked into it".
 GRASP_CONTACT_STEPS = 4
 
-#: Distinct **fingers** that must be touching before the jaws count as holding.
+#: The gate's test is **opposition**, not a count of fingers.
 #:
-#: Two, and it is a floor rather than a per-hand quantity: two opposing contacts
-#: are the minimum that can pinch anything, whether the hand has two fingers,
-#: three or five. A three-finger hand gripping with two of its three is holding
-#: the object; one touching with a single finger is pushing it.
+#: There is no threshold here, and that is deliberate. "Two fingers touching" is
+#: safe on a parallel jaw, where two *is* both of them and so is necessarily
+#: opposed -- and wrong on a three-finger hand, which carries two fingers on one
+#: side and one on the other: the Robotiq 3F's sit at -63.8 mm, -61.6 mm and
+#: +71.9 mm along its own closing axis, so two of its fingers touching can be
+#: the pair, pushing the object rather than pinching it.
 #:
-#: Counting *fingers* is what generalises. A threshold on contacting **geoms**
-#: would mean different things on different hands, because a Robotiq has five
-#: collision geoms per finger and a Yumi has one. The grouping comes from
-#: :func:`~tpgpt.experiments.diagnose.finger_groups`, which takes the count
-#: GraspGen-X's own config declares and picks whichever derivation matches it --
-#: three ways of deriving it were measured and each is wrong on at least one hand.
-GRASP_MIN_FINGERS = 2
+#: So the test is one finger from each side, which needs no number and means the
+#: same thing on two fingers, three or five. See
+#: :func:`~tpgpt.experiments.diagnose.is_pinched`.
 
 #: Control steps the jaws are given to find the object before giving up.
 #:
