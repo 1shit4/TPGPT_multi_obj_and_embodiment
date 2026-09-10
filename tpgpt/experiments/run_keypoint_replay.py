@@ -53,6 +53,7 @@ from pathlib import Path
 import numpy as np
 
 from tpgpt.experiments.diagnose import (
+    _gripper_touches,
     grasp_slip,
     object_probe,
     replay_preconditions,
@@ -340,6 +341,16 @@ def replay_variant(env, labels, source_placement, target, variant, gripper="pand
         probe=object_probe(env, target.metadata["object_name"], gripper=gripper)
         if target.metadata.get("object_name")
         else None,
+        # **Hold at the grasp until the fingers actually have the object.**
+        # Without this the lift starts on the demonstration's schedule, which
+        # gives one waypoint of headroom -- fine for the Panda it was recorded
+        # on, and 15 waypoints short for a Robotiq 2F-140 whose 125 mm jaws have
+        # further to travel. See `replay_labels` for why contact and not a
+        # scaled dwell or a closure rate.
+        grasp_gate=(
+            (lambda e: _gripper_touches(e, target.metadata["object_name"]))
+            if target.metadata.get("object_name") else None
+        ),
     )
     row = {
         "variant": variant.name,

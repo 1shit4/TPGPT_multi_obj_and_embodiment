@@ -351,6 +351,21 @@ Each of these cost real debugging time. Full detail in `ROBOTICS_NOTES.md`.
   `orientation_transport_error` applies it unconditionally, so every orientation
   figure for those two hands, including their rows in `§7.29`'s nine-hand table,
   used a symmetry they do not have. **Not yet fixed.** `§7.34`.
+- **The lift now waits for the jaws, and it is gated on contact.**
+  `replay_labels` holds at the grasp until the gripper has had **continuous**
+  contact for `GRASP_CONTACT_STEPS = 4` control steps, capped at
+  `GRASP_GATE_MAX_STEPS = 200` with a `RuntimeWarning` naming the waypoint. The
+  gate's steps come *out of* that pose's settle budget rather than on top, so
+  the trajectory's timing is unchanged elsewhere. Default is off
+  (`grasp_gate=None`), so every existing caller is unaffected; the Tier 2 driver
+  opts in. **Any Tier 2 number predating this is not comparable**, because it
+  changes when the lift begins.
+  Contact and not a scaled dwell: an open-loop budget is the shape of
+  `SETTLE_STEPS = 60`, and the delay is not derivable -- 0, 0, 10 and 15
+  waypoints across four objects on one hand, *not* monotonic in object width.
+  The continuity requirement is not decoration: `xarm/cereal` touches its box
+  four waypoints before the close, so a one-step gate would report a grasp that
+  does not exist.
 - **A closure-*rate* rule cannot detect contact, and object shape is not why.**
   The jaws are position-commanded (`+1` = "go to fully closed") and `closure`
   reports where the fingers *are*, so it asymptotes toward the commanded value

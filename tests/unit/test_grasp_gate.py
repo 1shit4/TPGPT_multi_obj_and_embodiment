@@ -1,0 +1,221 @@
+"""Holding at the grasp until the jaws have hold, rather than on a schedule.
+
+The gripper schedule comes from the demonstration, and its carry begins **one
+waypoint** after the close command. That is enough headroom for the Panda it was
+recorded on and nowhere near enough for a hand with wider jaws: measured across
+the registry, a Robotiq 2F-140 first touches a can **15 waypoints** after being
+told to close, because its 125 mm jaws have some 30 mm of travel per finger
+before they reach anything. The other four hands reach contact within one
+waypoint. So the lift began six seconds before that hand had hold, and the run
+was scored as never having grasped while the can was in fact carried 426 mm.
+
+Two alternatives were measured and rejected, and the tests below pin why, since
+both are the obvious things to reach for:
+
+* **a dwell scaled per hand** is an open-loop step budget sized for one case,
+  which is exactly the shape of ``SETTLE_STEPS = 60`` -- 0.12 s where the cereal
+  needed 0.96 -- and that silently handed over objects still in flight (7.32).
+  It is also not derivable here: on one hand the delay runs 0, 0, 10 and 15
+  waypoints across four objects and is *not* monotonic in the object's width;
+* **a closure-rate rule** cannot see contact at all. The jaws are
+  position-commanded and ``closure`` reports where the fingers *are*, so it
+  asymptotes toward the commanded value whether or not anything is between them.
+  On that same can the rate had fallen from 0.343 to 0.012 per waypoint thirteen
+  waypoints *before* contact, then rose to 0.148 *at* contact.
+
+Contact is the signal that means what it says, so the gate uses it directly.
+"""
+
+from __future__ import annotations
+
+import warnings
+
+import numpy as np
+import pytest
+
+import tpgpt.sim.kinematics as kinematics
+from tpgpt.sim.replay import (
+    GRASP_CONTACT_STEPS,
+    GRASP_GATE_MAX_STEPS,
+    replay_labels,
+)
+from tpgpt.transport.labels import PolicyLabels
+
+
+@pytest.fixture(autouse=True)
+def stub_ik(monkeypatch):
+    """Stand in for inverse kinematics, which needs a real MuJoCo model.
+
+    The gate's behaviour is *when it stops stepping*, which is decidable
+    without physics. Driving a real scene here would make the test slow and
+    would be testing the simulator.
+    """
+    monkeypatch.setattr(
+        kinematics, "solve_ik",
+        lambda env, position, rotation=None, **kw: kinematics.IKResult(
+            True, np.zeros(7), 0.0, 0.0, 1
+        ),
+    )
+
+
+class FakeArm:
+    """The smallest thing ``replay_labels`` will drive.
+
+    Deliberately not a MuJoCo scene: the gate's logic is *when* it stops
+    stepping, and that is decidable without physics. A simulator here would
+    make the test slow and would test the simulator.
+    """
+
+    def __init__(self, contact_after: int | None):
+        #: control steps of closing before the jaws touch, or None for never
+        self.contact_after = contact_after
+        self.steps = 0
+        self.closing_steps = 0
+        self.action_dim = 8
+
+    # --- the surface replay_labels uses ------------------------------------
+    @property
+    def robots(self):
+        return [self]
+
+    @property
+    def composite_controller(self):
+        return self
+
+    @property
+    def part_controllers(self):
+        return {"right": self}
+
+    @property
+    def qpos_index(self):
+        return np.arange(7)
+
+    @property
+    def eef_site_id(self):
+        return 0
+
+    @property
+    def sim(self):
+        return self
+
+    @property
+    def data(self):
+        return self
+
+    @property
+    def qpos(self):
+        return np.zeros(7)
+
+    @property
+    def site_xpos(self):
+        return np.zeros((1, 3))
+
+    @property
+    def site_xmat(self):
+        return np.eye(3).reshape(1, 9)
+
+    def step(self, action):
+        self.steps += 1
+        if action[-1] > 0:
+            self.closing_steps += 1
+
+    def holds(self) -> bool:
+        return (
+            self.contact_after is not None
+            and self.closing_steps >= self.contact_after
+        )
+
+
+def labels(n: int = 4, close_at: int = 1) -> PolicyLabels:
+    grip = np.full(n, -1.0)
+    grip[close_at:] = 1.0
+    return PolicyLabels(
+        positions=np.zeros((n, 3)),
+        velocities=np.zeros((n, 3)),
+        orientations=np.stack([np.eye(3)] * n),
+        gripper=grip,
+        time_belief=np.linspace(0, 1, n),
+    )
+
+
+def run(contact_after, settle_steps=8, **kw):
+    env = FakeArm(contact_after)
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        result = replay_labels(
+            env, labels(), settle_steps=settle_steps,
+            grasp_gate=lambda e: e.holds(), **kw,
+        )
+    return env, result, [w for w in caught if w.category is RuntimeWarning]
+
+
+class TestTheGateWaits:
+    def test_it_holds_until_the_jaws_touch(self):
+        """The case the gate exists for: a hand slower than the schedule."""
+        env, result, warned = run(contact_after=60)
+        spent = result.metadata["grasp_gate_steps"]
+        assert spent >= 60, f"gave up after {spent} steps with contact at 60"
+        assert spent <= 60 + GRASP_CONTACT_STEPS, (
+            f"kept closing for {spent} steps after contact at 60"
+        )
+        assert not warned
+
+    def test_it_does_not_wait_on_a_hand_that_is_already_holding(self):
+        """Four of the five registry hands reach contact within one waypoint."""
+        env, result, warned = run(contact_after=1)
+        assert result.metadata["grasp_gate_steps"] <= GRASP_CONTACT_STEPS + 1
+        assert not warned
+
+    def test_a_brush_does_not_count_as_a_grasp(self):
+        """Contact must persist, or a knock reads as a grip.
+
+        ``xarm/cereal`` is the measured case: something touches the box four
+        waypoints before the jaws are told to close and shoves it 22.1 mm. A
+        gate that fired on a single step of contact would report a grasp that
+        does not exist.
+        """
+        class Flickers(FakeArm):
+            def holds(self):
+                # touches every other step, never continuously
+                return self.closing_steps % 2 == 0
+
+        env = Flickers(contact_after=1)
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            replay_labels(env, labels(), settle_steps=8,
+                          grasp_gate=lambda e: e.holds())
+        assert any(w.category is RuntimeWarning for w in caught), (
+            "intermittent contact should exhaust the cap, not satisfy the gate"
+        )
+
+    def test_a_hand_that_never_closes_is_named_rather_than_hanging(self):
+        env, result, warned = run(contact_after=None)
+        assert result.metadata["grasp_gate_steps"] == GRASP_GATE_MAX_STEPS
+        assert len(warned) == 1
+        assert "never took hold" in str(warned[0].message)
+
+    def test_the_cap_is_generous_against_the_worst_measured_hand(self):
+        """A Robotiq 2F-140 needs 15 waypoints, which is 120 control steps."""
+        assert GRASP_GATE_MAX_STEPS >= 120 * 1.5
+
+
+class TestNothingElseChanges:
+    def test_without_a_gate_the_behaviour_is_exactly_as_before(self):
+        """The default must be inert, so every existing caller is unaffected."""
+        plain = FakeArm(contact_after=None)
+        replay_labels(plain, labels(), settle_steps=8)
+        assert plain.steps == 4 * 8
+        assert replay_labels(
+            FakeArm(None), labels(), settle_steps=8
+        ).metadata["grasp_gate_steps"] is None
+
+    def test_the_gate_replaces_the_settle_rather_than_adding_to_it(self):
+        """Its steps count toward the pose's own settle, not on top of it.
+
+        Otherwise every gated waypoint would cost the settle twice, which
+        changes the trajectory's timing rather than only its grasp.
+        """
+        env, result, _ = run(contact_after=2, settle_steps=8)
+        # one gated waypoint plus three ungated ones, and the gate's own steps
+        # come out of the gated waypoint's budget
+        assert env.steps <= 4 * 8 + GRASP_CONTACT_STEPS

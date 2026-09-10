@@ -41,6 +41,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 import copy
+import warnings
 
 import numpy as np
 
@@ -50,6 +51,26 @@ POSITION_GAIN = 300.0
 
 #: Radians of joint travel corresponding to an action of 1.
 JOINT_ACTION_SCALE = 0.5
+
+#: Control steps of *continuous* contact before the jaws count as holding.
+#:
+#: One step is not enough. A hand can brush an object on the way in without
+#: having it between the fingers -- measured on ``xarm/cereal``, where something
+#: touches the box four waypoints before the jaws are told to close and shoves
+#: it 22.1 mm -- and a gate that fired on that would report a grasp that does not
+#: exist. Requiring the contact to persist distinguishes "the fingers are around
+#: it" from "the hand knocked into it".
+GRASP_CONTACT_STEPS = 4
+
+#: Control steps the jaws are given to find the object before giving up.
+#:
+#: 200 is 10 s at 20 Hz, generous against the worst measured case: a Robotiq
+#: 2F-140 closing on a can takes **15 waypoints**, 120 control steps, because its
+#: 125 mm jaws have some 30 mm of travel per finger before they touch anything.
+#: The other four hands in the registry reach contact within one waypoint. The
+#: cap exists so that a hand which never closes produces a named failure rather
+#: than a hang.
+GRASP_GATE_MAX_STEPS = 200
 
 
 def make_position_controller_config(base_config: dict, arm: str = "right") -> dict:
@@ -105,6 +126,9 @@ def replay_labels(
     score=None,
     probe=None,
     ik_tolerance: float = 5e-3,
+    grasp_gate=None,
+    contact_steps: int = GRASP_CONTACT_STEPS,
+    gate_max_steps: int = GRASP_GATE_MAX_STEPS,
 ) -> ReplayResult:
     """Drive the arm along a label set pose by pose, under position control.
 
@@ -143,6 +167,7 @@ def replay_labels(
     )
 
     recorded, targets, commands, probes = [], [], [], []
+    gate_steps = None
     reachable: list[bool] = []
     unreachable = 0
     seed = np.array(env.sim.data.qpos[qpos_index])
@@ -164,7 +189,51 @@ def replay_labels(
         seed = np.asarray(result.qpos, dtype=float)
 
         gripper_command = 1.0 if grip[i] > 0 else -1.0
-        for _ in range(settle_steps):
+        steps = settle_steps
+        # **Wait for the jaws to actually have hold before moving on.**
+        #
+        # The gripper schedule comes from the demonstration, whose carry starts
+        # one waypoint after the close command. That is no headroom for a hand
+        # whose jaws are wider than the demonstrating hand's: a Robotiq 2F-140
+        # first touches a can **15 waypoints** after being told to close, so the
+        # lift began six seconds before it had hold of anything, and the run was
+        # scored as never having grasped while the can was in fact carried
+        # 426 mm. The other four hands in the registry reach contact within one
+        # waypoint, so this is one hand's problem -- but it is the widest-jawed
+        # hand, and the fleet is meant to grow.
+        #
+        # Gated on contact rather than on a scaled dwell, because a dwell is an
+        # open-loop step budget sized for one case, which is precisely the shape
+        # of `SETTLE_STEPS = 60` -- 0.12 s where the cereal needed 0.96 -- and
+        # that silently handed over objects still in flight (7.32).
+        #
+        # Gated on contact rather than on the closure *rate*, because the jaws
+        # are position-commanded and `closure` reports where the fingers are, so
+        # it asymptotes toward the commanded value whether or not anything is
+        # between them. On that same can the rate had already fallen from 0.343
+        # to 0.012 per waypoint thirteen waypoints before contact, and *rose* to
+        # 0.148 at contact -- the opposite of a stall.
+        if grasp_gate is not None and gripper_command > 0 and (
+            i == 0 or grip[i - 1] <= 0
+        ):
+            held, waited = 0, 0
+            while held < contact_steps and waited < gate_max_steps:
+                env.step(_joint_action(env, robot, arm, seed, gripper_command))
+                waited += 1
+                held = held + 1 if grasp_gate(env) else 0
+            if held < contact_steps:
+                warnings.warn(
+                    f"the jaws never took hold within {gate_max_steps} control "
+                    f"steps at waypoint {i}; lifting anyway, and the grasp is "
+                    "expected to fail",
+                    RuntimeWarning,
+                    stacklevel=2,
+                )
+            gate_steps = waited
+            # The floor: the arm still needs its settle steps at this pose, less
+            # whatever the gate has already spent.
+            steps = max(0, settle_steps - waited)
+        for _ in range(steps):
             action = _joint_action(env, robot, arm, seed, gripper_command)
             env.step(action)
 
@@ -189,6 +258,11 @@ def replay_labels(
             "steps": len(recorded) * settle_steps,
             "waypoints": len(recorded),
             "settle_steps": int(settle_steps),
+            # Control steps the gate spent waiting for the jaws to take hold, or
+            # None when no gate was given. A large value is not a fault: it is
+            # this hand needing that long, which is the number a dwell would
+            # have had to guess.
+            "grasp_gate_steps": gate_steps,
             "unreachable_waypoints": int(unreachable),
             "tracking_error_mean": float(tracking.mean()),
             "tracking_error_max": float(tracking.max()),
