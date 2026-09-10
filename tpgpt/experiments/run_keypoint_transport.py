@@ -590,6 +590,27 @@ def transport(
         "keypoint_residual": float(transport_map.keypoint_residual().max()),
         "min_det": float(report.min_determinant),
         "fraction_positive": float(report.fraction_positive),
+        # The rotation the warp has to realise between the source and target
+        # task frames. **This, not the approach mismatch, is what folds the
+        # map**: measured across 20 cells, ``min det`` runs 0.94-0.99 at 3-19
+        # degrees of it and -0.06 to 0.16 at 149-179, folding past about 145.
+        # A frame rotation includes the roll about the approach, which the 45
+        # degree approach test cannot see -- so recording both separates "the
+        # filter let a badly-rotated frame through" from "the filter was not the
+        # thing protecting the map".
+        "frame_rotation_deg": float(
+            np.degrees(
+                np.arccos(
+                    np.clip(
+                        (np.trace(
+                            np.asarray(diagnostics["source_frame"], dtype=float).T
+                            @ np.asarray(diagnostics["target_frame"], dtype=float)
+                        ) - 1.0) / 2.0,
+                        -1.0, 1.0,
+                    )
+                )
+            )
+        ),
         # Does the warp put the hand where the target object's own grasp is?
         "grasp_error": float(np.linalg.norm(warped[grasp_index] - wanted_pick)),
         "release_error": float(np.linalg.norm(warped[release_index] - wanted_place)),

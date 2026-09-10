@@ -400,7 +400,16 @@ def replay_variant(env, labels, source_placement, target, variant, gripper="pand
         "gripper": gripper,
         "tool_offset_mm": float(np.linalg.norm(contact_offset(gripper)) * 1000),
         # geometry, carried through so the two tiers can be read together
+        # **Map validity, carried through in full.** Dropping the approach
+        # filter raises the source-to-target frame rotation, which is the
+        # quantity measured to fold the map -- so a run that varies the filter
+        # has to report whether the map survived, not only whether the object
+        # was placed. ``min_det`` is the useful one: the *fraction* positive is
+        # a weak diagnostic that reads 100% on a collapsed box (7.22).
         "min_det": result["min_det"],
+        "fraction_positive": result["fraction_positive"],
+        "keypoint_residual": result["keypoint_residual"],
+        "frame_rotation_deg": result["frame_rotation_deg"],
         "aim_map": result["aim_map"],
         "orientation_error_deg": result["orientation_error_deg"],
         "tilt_mid_path": result["tilt_mid_path"],
