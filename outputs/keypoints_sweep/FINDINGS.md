@@ -34,7 +34,7 @@ numbers are a scratch experiment, not evidence — that rule is `ROBOTICS_NOTES`
 > | K | §8h grasp control on the corrected scene | — | **stands.** No map in the loop, so no frame defect can reach it |
 > | L | §8i Tier 2 on the corrected scene | frame fixes | **withdrawn as a result, kept as the failure analysis.** Superseded by M |
 > | M | §8j Tier 2 with the frame fixes | — | **stands**, with the caveat below |
-> | N | §8k the full funnel | — | **stands as data**, but confounded against L; see its own banner |
+> | N | §8k the full funnel | — | **stands as data**, but confounded against L; its per-cell diagnosis is **withdrawn** (§7.37) |
 >
 > ### The two corrections, and which numbers each reaches
 >
@@ -2087,6 +2087,20 @@ from 4 cm usually works.
 
 **Recorded so the mistake is not repeated, not because it measured anything.**
 `outputs/keypoint_replay_v3_FULLFILTER_CONFOUNDED/`, commit `9894bd6`.
+
+> **The per-cell diagnosis of this experiment is withdrawn.** A later attempt to
+> attribute each of the twelve failing cells to a physical cause was built on a
+> trace whose script does not reproduce it -- see `ROBOTICS_NOTES.md` §7.37. The
+> grouping it produced (slip / partial carry / never pinched / shelf collision),
+> the pinch and loss waypoints, the lift heights and the contact-force profiles
+> are all withdrawn with it.
+>
+> Rebuilt on committed code the picture differs enough that nothing carried
+> over: **three of the twelve cells succeed**, `yumi/can` best of all at 2.29 mm.
+> Note this is not a contradiction of the numbers above -- the funnel gained
+> collision checking at every corridor pose (`c73f67a`) *after* this experiment
+> ran, so the current pipeline chooses different grasps. It is a statement that
+> the cells cannot be diagnosed from this run's outcomes.
 
 ### What was asked, and what was actually changed
 

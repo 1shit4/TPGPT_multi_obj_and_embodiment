@@ -3184,169 +3184,218 @@ recorded for a shelf with a roof; or stand the release off the board by the
 hand's own depth and let the object down separately. All three are designs, not
 results.
 
-### 7.36 The jaw-width filter certified a grasp that cannot exist
+### 7.36 The jaw-width filter cannot measure width from a sparse cloud
 
-The filter meant to reject grasps on objects too wide for the hand passed one
-on a can the hand physically cannot span, and the reason is that it read the
-object's width off a point cloud that had barely seen it.
+> **Corrected the same day it was written.** The first version of this section
+> claimed the yumi physically cannot span the can it was given, and built that
+> on physics from a run that turned out to be unreproducible (7.37). Re-measured
+> on committed code, **``yumi/can`` succeeds**: it carries the can 413 mm and
+> places it **2.29 mm** from the slot centre, the best placement of the twelve
+> cells, bit-identical across two runs. The claim is withdrawn. What survives is
+> the measurement fault in the filter, which needs no physics at all.
 
-#### What happened
+#### The fault, which is real and needs no simulator
 
-``yumi/can`` in Experiment N. The yumi's jaws open to **50.0 mm**. The can,
-measured from its own mesh vertices, is **49.9 x 49.8 x 80.0 mm** -- a 50 mm
-cylinder. A hand whose maximum opening equals the object's diameter cannot get
-*around* it; it can only touch it tangentially at the widest point. There is no
-grasp of that can by that hand at any approach, and no amount of squeezing or
-dwelling changes that.
+``by_jaw_width`` measures an object's width along the grasp's own closing axis,
+inside a 12 mm slab of cloud the jaws sweep, and compares it to the hand's
+aperture. On ``yumi/can`` the whole can is **57 cloud points** at the default
+256 px, and the slab held **11** of them, spanning **5.9 mm**. The can is
+**49.9 x 49.8 x 80.0 mm**, measured from its own mesh vertices. So the filter's
+estimate was under an eighth of the object.
 
-The physics agrees, exactly as that geometry predicts. Converting the
-``jaw_closure_probe`` reading into millimetres of finger gap using the hand's
-own measured travel (``spread_open`` 58.39 mm, ``spread_closed`` 8.40 mm):
+The general statement, and the reason this is a fault rather than imprecision:
+**an observed cloud is a lower bound on an object's width.** The cameras see the
+near surface and the object continues behind it. So
 
-===============  =============  ============  =================  ==========
-cell             gap at pinch   gap at loss   closed through     outcome
-===============  =============  ============  =================  ==========
-``panda/bread``  65.6 mm        64.8 mm       **0.9 mm**         succeeds
-``xarm/bread``   87.2 mm        80.9 mm       6.3 mm             fails
-robotiq85/can    114.2 mm       106.2 mm      8.0 mm             fails
-``yumi/bread``   40.6 mm        31.0 mm       9.6 mm             fails
-``yumi/can``     49.2 mm        9.6 mm        **39.6 mm**        fails
-===============  =============  ============  =================  ==========
+- ``observed + margin > aperture`` **is** a sound rejection -- a lower bound
+  that does not fit means the object does not fit, whatever the point count;
+- ``observed + margin <= aperture`` is **not** a sound acceptance.
 
-The jaws travel **39.6 mm through a rigid steel can**, which is impossible
-unless the can is no longer between them. It is not: it slides 16.1 mm along
-the jaw axis while the grip force bleeds from 20.3 N to 0.6 N, and the fingers
-finish flush at 9.6 mm holding nothing.
-
-Note the control row. In the cell that succeeds the **object is the end-stop**:
-the jaws move 0.9 mm past contact and stall, and the force then sits flat at
-18.7 N for a hundred waypoints. The gripper is commanded ``+1``, a *position*
-target meaning "drive to fully shut", so nothing but the object stops it. A
-grasp that does not seat properly gets ground open.
-
-#### Why the filter missed it
-
-``by_jaw_width`` measures the object's extent along the grasp's own closing
-axis, inside a 12 mm slab of cloud the jaws sweep. The whole can is **57 cloud
-points** at the default 256 px, and the slab held **11** of them, spanning
-**5.9 mm**. The check it ran was ``5.9 + 5 <= 50``, which passes comfortably.
-The check it should have run was ``50 + 5 <= 50``, which fails.
-
-There was also a guard at ``filters.py`` for slabs with fewer than four points,
-which *deliberately passed* the grasp on the reasoning that absence of evidence
-is not evidence of a wide object. The reasoning is correct and the action taken
-on it was not. Eleven points cleared the guard anyway.
+The two directions are not symmetric, and the error always favours passing.
 
 #### It is not sparsity, and resolution does not fix it
 
-The obvious remedy is a denser cloud, and it fails. Holding the grasp axes fixed
-at the ones recorded at 256 px -- necessary because GraspGen-X is unseeded and
-would otherwise propose a different candidate at each resolution (7.15) --
-and re-measuring against clouds of increasing density:
+Holding the grasp axes fixed at the ones recorded earlier -- necessary because
+GraspGen-X is unseeded and would otherwise propose a different candidate at each
+resolution (7.15) -- and re-measuring against denser clouds:
 
-=============  ========  =========  ====================  ==================
-``yumi/can``   cloud     slab pts   slab along closing    verdict
-=============  ========  =========  ====================  ==================
-256 px         57        11         5.9 mm                pass
-384 px         196       51         16.0 mm               pass
-512 px         421       108        21.3 mm               pass
-*truth*                             **52.8 mm**           should reject
-=============  ========  =========  ====================  ==================
+=============  ========  =========  ====================
+``yumi/can``   cloud     slab pts   slab along closing
+=============  ========  =========  ====================
+256 px         57        11         5.9 mm
+384 px         196       51         16.0 mm
+512 px         421       108        21.3 mm
+*truth*                             **~50 mm**
+=============  ========  =========  ====================
 
-At 512 px the slab holds 108 points and still reads 21.3 mm against 52.8 mm.
-The limit is **partial view**, not point count: the cameras see a crescent of
-the can and the object continues behind it.
-
-That is the general statement, and it is what makes the check unsound rather
-than merely imprecise. **An observed cloud is a lower bound on an object's
-width.** So ``observed + margin <= aperture`` can never conclude "it fits",
-while ``observed + margin > aperture`` *can* conclude "too wide" -- the two
-directions are not symmetric, and the error always favours passing a grasp the
-hand cannot make.
+At 512 px the slab holds 108 points and still reads 21.3 mm. The limit is
+**partial view**, not point count.
 
 Two alternative statistics were measured and both fail:
 
-- **Widest horizontal chord.** Rejects ``yumi/can`` correctly (47.5 + 5 > 50)
-  and also rejects ``yumi/bread``, whose grasp fits with 8 mm to spare
-  (57.9 + 5 > 50). It is an upper bound on the closing-axis width, so it
-  over-rejects every elongated object grasped across its narrow side.
+- **Widest horizontal chord.** 47.5 mm on the can, close to the truth -- but
+  57.9 mm on the bread, whose grasp fits its 50 mm hand with room to spare. It
+  is an upper bound on the closing-axis width, so it over-rejects every
+  elongated object grasped across its narrow side.
 - **Slab against whole-cloud disagreement.** Separates ``yumi/can`` (ratio
   0.26) from the bread cells (0.95 - 1.00), but a bottle legitimately grasped
-  at its neck has the same signature -- which is the exact capability the slab
-  exists to provide.
+  at its neck has the same signature -- which is the capability the slab exists
+  to provide.
 
-#### What was changed
+#### Two units that are not commensurable, which is what misled the first pass
 
-``by_jaw_width`` now returns one of three verdicts per grasp
-(``jaw_width_verdicts``) instead of a boolean:
+GraspGen-X declares the yumi's aperture as **50.0 mm**; the can is **50.0 mm**.
+That coincidence was read as zero clearance and therefore impossibility. It is
+not: the registry's own measured ``spread_open`` for that hand is **58.39 mm**,
+and ``jaw_closure_probe`` derives it from ``geom_xpos`` -- the *centres* of the
+outermost finger geoms, not their inner faces. The declared aperture and the
+measured spread are different quantities, and neither is the inner gap. **Do not
+compare a declared aperture against an object dimension and conclude a hand
+cannot close.** The physics is the arbiter and it says the can fits: first
+contact with the jaws essentially fully open, 5.0 mm of further travel, 39.1 N,
+carried and placed at 2.29 mm.
 
-- ``"too_wide"`` -- the cloud already spans more than the hand can open. Sound
-  at any point count, because a lower bound that does not fit settles it.
+#### The margin would have rejected a working grasp
+
+This is the part worth keeping. Had the filter measured the width correctly at
+50 mm, its own rule -- ``width + JAW_MARGIN <= aperture``, so ``50 + 5 <= 50``
+-- would have **rejected a grasp that demonstrably works**. The sparse cloud's
+under-read did not admit an impossible grasp; it admitted a good one the margin
+forbids.
+
+So ``JAW_MARGIN = 0.005`` is now an open question rather than a settled value.
+One data point is not a case for changing it -- and it is 10% of the yumi's
+50 mm opening against 4% of the robotiq140's 125 mm, which is the asymmetry that
+makes a single absolute clearance suspect across a nine-hand registry.
+
+#### What was changed, and it is behaviourally neutral where it was tested
+
+``by_jaw_width`` returns one of three verdicts per grasp
+(``jaw_width_verdicts``) rather than a boolean:
+
+- ``"too_wide"`` -- the observed extent already exceeds the aperture. Sound at
+  any point count, per the lower-bound argument above.
 - ``"unverified"`` -- fewer than ``MIN_JAW_WIDTH_POINTS`` (40, matching the
-  pipeline's own ``MIN_CLOUD_POINTS``) in the slab. Nothing may be concluded in
-  either direction.
-- ``"fits"`` -- enough cloud to measure, and the measurement leaves the margin.
+  pipeline's ``MIN_CLOUD_POINTS``) in the slab. Nothing may be concluded.
+- ``"fits"`` -- enough cloud to measure, and it leaves the margin.
 
-Unverified grasps are **dropped** rather than waved through, so a grasp whose
-fit is known is preferred whenever one exists. Dropping them is safe because the
-funnel never returns an empty set: ``filter_grasps``' ``stage`` helper restores
-its input and raises ``jaw width_fell_back`` if a stage empties it. And the
-funnel records the tally in ``flags["jaw_width"]`` plus
-``flags["cloud_too_sparse_for_jaw_width"]`` when nothing was verifiable, which
-``target_placement`` carries into ``ObjectPlacement.metadata`` -- so **a cell
-that executes an unverified grasp is marked as a perception fault, not a
-grasping one**. Measured on six cells:
+Unverified grasps are dropped, so a grasp whose fit is known is preferred when
+one exists. The funnel never returns an empty set -- ``filter_grasps``' ``stage``
+helper restores its input and raises ``jaw width_fell_back`` -- and the tally
+reaches ``flags["jaw_width"]``, with ``flags["cloud_too_sparse_for_jaw_width"]``
+when nothing was verifiable. ``target_placement`` carries both into
+``ObjectPlacement.metadata``, so a cell running an unverified grasp is marked as
+a **perception** fault rather than a grasping one.
 
-================  =======  ======  ==========  ============  ==================
+================  =======  ======  ==========  ============  ========
 cell              cloud    fits    too_wide    unverified    marked
-================  =======  ======  ==========  ============  ==================
+================  =======  ======  ==========  ============  ========
 ``yumi/can``      57       0       0           27            **yes**
 robotiq85/can     57       0       0           24            **yes**
 ``yumi/bread``    167      9       **3**       0             no
 ``panda/bread``   167      14      0           0             no
 ``xarm/bread``    167      23      0           0             no
 ``panda/cereal``  602      11      0           1             no
-================  =======  ======  ==========  ============  ==================
+================  =======  ======  ==========  ============  ========
 
-``yumi/bread`` gains three sound rejections it never had. ``panda/cereal``
-shows the mark does not over-trigger: one unverifiable candidate among eleven
-verified ones leaves the cell unmarked, because a verified grasp was available.
-``robotiq85/can`` is marked although its can *does* fit its 85 mm jaws -- the
-mark says the width could not be verified, which is true, not that the grasp is
-bad.
+On both can cells every candidate becomes unverified, the stage falls back, the
+same grasp is chosen and the outcome is unchanged -- which is why ``yumi/can``
+still places at 2.29 mm under the new code. So on the cells measured the change
+adds the mark and nothing else. Where it *can* change behaviour is a cell with a
+mix, like ``panda/cereal`` (11 verified, 1 not): the unverified candidate is now
+dropped, and whether that ever discards a better grasp is **not measured**.
 
-#### What this does not fix, and what would
+``yumi/bread``'s three ``too_wide`` rejections are the sound branch firing, and
+are new.
 
-The positive verdict is still optimistic: it says the available evidence does
-not forbid the grasp, not that the grasp is possible. Making it sound needs an
-**upper** bound on the object, which a depth cloud cannot give. Two candidates,
-neither built:
+#### What would make it sound
 
-- **Visual hull.** The segmentation masks give the object's full silhouette in
-  each of the three cameras, and back-projecting and intersecting those cones
-  bounds the object's convex hull from *outside*. That is a genuine upper bound
-  and would reject ``yumi/can`` soundly.
-- **Denser perception**, which helps the estimate without making it sound.
-  ``camera_size`` is already a parameter defaulting to 256 in ``pipeline.py``
-  and ``run_keypoint_transport.py``, so 512 px is a call-site change. Measured
-  gain, with the mask erosion left at 1: cereal 602 -> 2818 points, milk
-  279 -> 1458, bread 167 -> 865, **can 57 -> 430**, and the widest-chord
-  under-read falls from 4.0 - 11.1 mm to 1.8 - 4.5 mm. It would also lift the
-  lemon's 17 points over the ``MIN_CLOUD_POINTS`` floor of 40 (7.18).
+The positive verdict says the available evidence does not forbid the grasp, not
+that the grasp is possible. Soundness needs an **upper** bound on the object,
+which a depth cloud cannot give. The segmentation masks give the object's full
+silhouette in each of the three cameras, and back-projecting and intersecting
+those cones bounds the object's convex hull from outside -- a genuine upper
+bound. Not built.
 
-  **The mask erosion must stay at 1.** Dropping it to 0 yields 2 - 3x more
-  points and they are garbage, exactly as ``cameras.py``'s
-  ``DEFAULT_MASK_EROSION`` docstring warns: boundary pixels sample depth from
-  whatever is behind the object. Measured cloud widths at erosion 0 against
-  truth -- can 88.8 mm against 50.1, cereal 251.0 against 104.5, and the milk
-  **2593.6 mm against 56.3**. The improvement available there is a
-  depth-discontinuity test in place of blind erosion, which would recover most
-  of those points without the outliers. Not built.
+### 7.37 Four hours of measurements from a working tree that no longer exists
 
-  Not changed, deliberately: raising the resolution changes the clouds, so
-  GraspGen-X proposes a different candidate set (7.15) and every Tier 2 number
-  moves. It must be its own commit with its own cache, per the rule at the end
-  of 7.26 about never changing the system and the measurement together.
+Every physics trace taken between 16:00 and 18:16 on 2026-09-10 is withdrawn,
+because the scripts that produced them do not reproduce them on committed code.
+
+#### How it surfaced
+
+``diagN.py``, re-run unedited, put ``panda/bread`` on the table **332.8 mm**
+from its slot where its own output file has it on the shelf at **15.0 mm**, and
+lost the grip at waypoint 68 where the file holds to 160.
+
+Everything cheap was ruled out, each by direct test rather than argument:
+
+=========================================  ==========================================
+candidate                                  result
+=========================================  ==========================================
+the chosen grasp changed                   identical to **0.00 mm** over 4 trials,
+                                           2 in fresh scenes, and identical to the
+                                           pose recorded before the filter commit
+``replay_labels`` is nondeterministic      identical to **0.00 mm** over 3 replays
+the probe perturbs the physics             a probe calling ``mj_contactForce`` is
+                                           **bit-identical** to a position-only one
+the filter commit caused it                a worktree at the parent commit gives the
+                                           same answer to **0.00 mm**
+the grasp cache changed                    untouched since the previous day
+the two scripts differ                     a diff of run-affecting lines shows only
+                                           a trailing comment
+``HEAD`` moved                             reflog: no movement in the window
+the source demonstration is cached         it is not; rebuilt on every call
+=========================================  ==========================================
+
+So ``HEAD`` was the same commit before and after, that commit reproduces the
+*current* answer, and the 16:00 run therefore executed an uncommitted
+working-tree state that no longer exists and cannot be identified even from the
+reflog.
+
+#### What it cost
+
+``diagN.json``, ``slip.json`` and ``force2.json``, and with them: the four-way
+grouping of the twelve cells, every pinch and loss waypoint, the lift heights,
+the shelf-penetration depths, the release-height table, the contact-force decay
+profiles, and the jaw-travel contrast. Several of those had already been
+reported as established. Rebuilt on committed code the picture is different
+enough that no conclusion carried over -- three of the twelve cells now
+**succeed**, including the one 7.36 had been written about.
+
+The jaw-travel claim is the clearest casualty. It read 0.9 mm of travel past
+contact for the succeeding cell against 6.3 - 39.6 mm for the failures, a clean
+separation. On the rebuilt trace the three successes close **4.2, 5.0 and
+6.1 mm** and the nine failures span **0.0 to 45.2 mm** -- overlapping, with a
+failure at 5.6 mm inside the successes' band. There is no separation.
+
+#### Why the existing safeguards did not catch it
+
+7.26's rules are about **campaigns**: ``reporting.provenance`` stamps the commit,
+the modified files and the untracked files into a manifest, and
+``run_experiments --require-clean`` refuses to start on a dirty tree. A
+throwaway diagnostic in a scratch directory goes through none of that and has no
+provenance whatsoever. That is the gap, and it is not a small one -- the
+measurements in this window were driving design decisions and one of them reached
+a commit message.
+
+**A scratch diagnostic that produces a number worth quoting is a campaign.** At
+minimum it must record ``git rev-parse HEAD`` and ``git status --porcelain`` into
+its own output file, so a result can be tied to the code that made it; better,
+refuse to run at all on a dirty tree, as the campaign driver already does.
+
+#### What survived, and why
+
+Anything with no physics in its chain, which is worth noting as a general point:
+the object dimensions from mesh vertices, the cloud sizes by camera resolution,
+the mask-erosion artifact, the filter's own arithmetic, and the recorded grasp
+geometry -- whose stored pose was verified to match current code to 0.00 mm. The
+reshelving regression gate also passed unchanged (9 of 10 seeds, the single
+failure on seed 8, one of the three documented failing seeds; keypoint residual
+0.000 mm and ``det(J) > 0`` at 100% throughout), which is what establishes that
+the map, the policy and the rollout are intact and the damage was confined to
+this session's traces. Running it before attributing anything is the only reason
+that could be said rather than assumed.
 
 ## 8. Open items
 

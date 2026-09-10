@@ -461,24 +461,38 @@ Each of these cost real debugging time. Full detail in `ROBOTICS_NOTES.md`.
   anything else measures neither. `§8k` in `outputs/keypoints_sweep/FINDINGS.md`.
 - **A cloud's extent is a *lower bound* on an object's width, so the jaw-width
   check can prove "too wide" and can never prove "fits".** It read 5.9 mm from
-  11 slab points across a 50.0 mm can and passed it to a hand whose jaws open to
-  exactly 50.0 mm; the fingers then travelled **39.6 mm through the can**,
-  wedging it 16.1 mm sideways while the grip bled from 20.3 N to 0.6 N. Not
-  sparsity -- at 512 px that slab has 108 points and still reads 21.3 mm -- the
-  cameras see a crescent and the object continues behind it. `by_jaw_width` now
-  gives three verdicts and **drops** what it cannot measure; the funnel's own
-  fallback stops that emptying the set, and `flags["cloud_too_sparse_for_jaw_width"]`
-  reaches `ObjectPlacement.metadata` so the cell reads as a *perception* fault,
-  not a grasping one. Widest-chord and slab-disagreement were both measured as
-  replacements and both over-reject a legitimate grasp. `§7.36`.
-- **The object is the gripper's only end-stop, and `+1` is a position command.**
-  In the one cell that holds, the object arrests the jaws after **0.9 mm** and
-  the force sits flat at 18.7 N for a hundred waypoints. In every failing cell
-  they keep travelling -- 6.3, 8.0, 9.6, 39.6 mm -- and the force *decays* as
-  they go, so a decaying grip force means contact is being dismantled, not that
-  the hand is too weak: peak forces are **394x to 8957x** the object's weight.
-  A closure-hold must therefore close *past* contact by a preload and stop; a
-  literal stop-at-contact gives zero penetration and zero force.
+  an 11-point slab where the object is ~50 mm. Not sparsity -- at 512 px that
+  slab has 108 points and still reads 21.3 mm -- the cameras see a crescent and
+  the object continues behind it. `by_jaw_width` now gives three verdicts and
+  **drops** what it cannot measure; the funnel's own fallback stops that
+  emptying the set, and `flags["cloud_too_sparse_for_jaw_width"]` reaches
+  `ObjectPlacement.metadata` so the cell reads as a *perception* fault. On both
+  can cells this is **behaviourally neutral** -- everything becomes unverified,
+  the stage falls back, the same grasp runs. Widest-chord and slab-disagreement
+  were measured as replacements and both over-reject a legitimate grasp. `§7.36`.
+- **Never conclude a hand cannot close from a declared aperture.** GraspGen-X
+  declares the yumi at 50.0 mm and the can measures 50.0 mm, and that coincidence
+  was written up as physical impossibility. It is wrong: the registry's measured
+  `spread_open` for that hand is **58.39 mm**, taken from `geom_xpos` -- finger
+  geom *centres*, not inner faces -- so the declared aperture, the measured
+  spread and the inner gap are three different quantities. The cell succeeds,
+  placing at **2.29 mm**. `§7.36`.
+- **`JAW_MARGIN = 0.005` would have rejected a grasp that works.** With the width
+  measured correctly at 50 mm the rule `50 + 5 <= 50` fails, yet the cell places
+  at 2.29 mm. It is also 10% of the yumi's 50 mm opening against 4% of the
+  robotiq140's 125 mm, so one absolute clearance across nine hands is suspect.
+  One data point, so this is an open question, not a licence to change it.
+- **A scratch diagnostic that produces a number worth quoting is a campaign.**
+  Four hours of physics traces were withdrawn because their scripts do not
+  reproduce them: `HEAD` never moved, that commit reproduces the *current*
+  answer, the grasp is identical to 0.00 mm, the replay is deterministic to
+  0.00 mm and the cache was untouched -- so the run used an uncommitted tree
+  state that cannot be identified even from the reflog. `provenance` and
+  `--require-clean` only cover *campaigns*; a scratchpad script has no
+  provenance at all. Stamp `git rev-parse HEAD` and `git status --porcelain`
+  into the output file, or refuse to run dirty. **And run the reshelving gate
+  before attributing causes** -- it is what distinguishes "twelve cells with
+  interesting individual explanations" from a regression in the map. `§7.37`.
 - **Two capabilities exist in the policy and are never used at runtime.**
   `prediction.reference` — the regressed attractor position, the paper's own
   Sec. V formulation and the policy's only restoring term — is fitted and never
