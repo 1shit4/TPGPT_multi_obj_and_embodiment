@@ -351,6 +351,26 @@ Each of these cost real debugging time. Full detail in `ROBOTICS_NOTES.md`.
   `orientation_transport_error` applies it unconditionally, so every orientation
   figure for those two hands, including their rows in `§7.29`'s nine-hand table,
   used a symmetry they do not have. **Not yet fixed.** `§7.34`.
+- **`stage_outcome`'s `grasped` flag misses a slow-closing hand.** It looks for
+  contact within twelve waypoints either side of the commanded close. A Robotiq
+  2F-140 has 125 mm jaws against a 66 mm can, so each finger travels ~30 mm
+  before touching anything and first contact came at waypoint **65** against a
+  close at 50. The cell is scored "never grasped" while the can is caught and
+  carried to 1.266 m. The gripper schedule is inherited from a Panda
+  demonstration whose narrower jaws close much sooner -- so this is the
+  cross-hand closing schedule (open item 2) surfacing as a *measurement* fault.
+- **A grasp can be unreachable because the object itself is in the way.** The
+  hand strikes the object on its approach and topples it before the fingers
+  close: `xarm/cereal` starts moving four waypoints *before* the commanded
+  close, slides 21.9 mm, and the jaws then shut on air (reading 1.00). Nothing
+  caught it because the approach-angle filter has no collision stage -- this is
+  what `filters="full"` and the new `arm_collides` exist for.
+- **A Robotiq flicks the object sideways as it opens.** Its finger pads swing
+  inward while parting, so an object between them is nudged rather than let go:
+  72.8 mm and 81.9 mm of post-release travel on two cells that fouled nothing
+  and were released only 21-40 mm above the board. The sibling project measured
+  the same on the same family of hand and saw a mug carried back up 12.9 cm by
+  fingers that had correctly opened. A Panda does not do this.
 - **The plan commands the hand through the shelf, and `solve_ik` cannot see it.**
   The default scene is the **cubby** variant, so the top slot is a **78 mm gap
   in x** between the bottom cubby's back panel (which rises 20 mm *above* the

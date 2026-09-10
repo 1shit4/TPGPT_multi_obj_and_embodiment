@@ -1965,33 +1965,59 @@ the object 71 mm, past the 60 mm pass mark.
 
 ### Why each of the five grasp-pose cube failures failed
 
-| hand | object | observed | grasped | cause |
-|---|---|---|---|---|
-| xarm | cereal | 218 mm | **no** | **the grasp does not hold.** 7 mm of lift, 9 control steps of contact. Also Experiment K's single failure, where no map is in the loop, so it fails under every protocol tried |
-| robotiq140 | can | 217 mm | **no** | the jaws never take it: contact only from waypoint 66, 5 mm of lift. The hand is commanded **40.0 mm inside** the shelf's back wall and stalls 119 mm short of the release |
-| robotiq140 | bread | 235 mm | yes | carried correctly, then **dropped from 150 mm above the board**. The hand is 45.0 mm inside the back wall; the object bounces off and falls 435 mm to the table |
-| robotiq140 | milk | 110 mm | yes | carried correctly, released 40 mm high, then moves **72.8 mm** after the jaws open |
-| robotiq85 | milk | 62 mm | yes | carried correctly, released 21 mm high, then moves **81.9 mm** after the jaws open. Two millimetres past the 60 mm gate |
+Three different things go wrong, and none of them is the map.
 
-**Three of the five are the shelf collision** (§7.35): the hand is commanded
-through the cubby's back wall, jams, and lets go with the object still in the
-air. That is a scene-and-executor problem, not a keypoint one — the plan asks
-for a pose that is correct and unreachable in practice.
+**The hand knocks the object over before it can close on it** — `xarm/cereal`.
+Watching the object rather than the arm: it starts shifting at waypoint 46,
+*four waypoints before the jaws are told to close*, and by the time they do
+close it has already slid 21.9 mm and is toppling. The fingers then shut on
+empty air — the jaw reading goes straight to 1.00, which is what closing on
+nothing looks like — and the cereal box ends up lying 104 mm from where it
+started. The hand did not miss the box; it hit it on the way in.
 
-**One is a bad grasp** — `xarm/cereal`, which fails identically with no map in
-the loop.
+The underlying reason is that **nothing checked whether the hand could get to
+that grasp**. This run used the approach-angle filter alone, which has no
+collision stage, so a candidate whose approach corridor is blocked by the object
+it is reaching for passes straight through. That the grasp itself is the problem
+rather than the plan is confirmed by Experiment K, which drives the arm to the
+same candidate with no map at all and also fails.
 
-**One is the release itself.** `robotiq85/milk` fouls nothing and is released
-only 21 mm high, yet the object travels 81.9 mm after the jaws open. The sibling
-project measured this effect independently on the same family of hand: a Robotiq
-2F-85's pads rotate inward as they open, so an object set down over a surface can
-catch on the opening fingers (`6dof_GraspMAS/docs/simulation.md`).
+**The jaws are still closing when the demonstration says to lift** —
+`robotiq140/can`. The Robotiq 2F-140 has the widest jaws in the registry, 125 mm
+against a 66 mm can, so each finger has some 30 mm to travel before it touches
+anything. It takes fifteen waypoints to get there: the jaws begin closing at
+waypoint 50 and first touch the can at waypoint 65. The gripper schedule is
+inherited from a Panda demonstration whose narrower jaws close much sooner, so
+the lift begins before this hand has hold of anything.
 
-**The two regressions against Experiment L are both in that last group** —
-`robotiq140/bread` and `robotiq85/milk` — and neither is a new defect. Release
-height and tracking error at the release are the same in both runs (median 39.6
-against 44.4 mm, and 51.8 against 69.4 mm), so what changed is which side of the
-gate a drop happened to land on.
+It recovers — the can is caught and carried to 1.266 m — and then fails at the
+shelf for the reason below. **The `grasped` flag saying "no" is wrong**, and
+that is a defect in the measurement rather than in the run: `stage_outcome`
+looks for contact within twelve waypoints either side of the commanded close,
+and this contact begins at fifteen.
+
+**The hand jams on the shelf and lets go in mid-air** — `robotiq140/bread`, and
+the placement half of `robotiq140/can`. The arm is driven into the cubby's back
+wall, 45.0 mm and 40.0 mm inside it respectively, stalls there, and opens its
+fingers with the object still 150 mm and 87 mm above the board. The bread bounces
+off the shelf and falls 435 mm to the table. This is the collision described
+below, and it is a property of the scene and the executor rather than of the
+keypoints.
+
+**The object is flicked out of the opening fingers** — `robotiq140/milk` and
+`robotiq85/milk`. Neither fouls the shelf, and both are released low: 40 mm and
+21 mm above the board. Yet the object travels **72.8 mm and 81.9 mm after the
+jaws open**. A Robotiq's finger pads swing inward as they part, so an object
+resting between them gets nudged sideways on release rather than simply let go.
+The sibling project measured the same effect on the same family of hand and
+recorded a mug being carried back up 12.9 cm by fingers that had correctly opened
+(`6dof_GraspMAS/docs/simulation.md`). `robotiq85/milk` misses the 60 mm gate by
+two millimetres because of it.
+
+**Both regressions against Experiment L are in that last group**, and neither is
+a new defect: the release height and the tracking error at the release are the
+same in both runs — a median 39.6 against 44.4 mm, and 51.8 against 69.4 mm.
+What changed is which side of the gate a dropped object happened to land on.
 
 ### Two claims this retires
 
