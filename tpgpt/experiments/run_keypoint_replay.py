@@ -454,6 +454,7 @@ def main(
     grippers=REPLAY_GRIPPERS,
     filters: str = "approach",
     rank_by: str = "auto",
+    variant_names=REPLAY_VARIANTS,
 ) -> dict:
     """Replay every construction on every hand and object.
 
@@ -473,6 +474,11 @@ def main(
             median of 3.2 degrees to 13.8. So a run that changes this *and*
             anything else measures neither. Hold it fixed to compare
             constructions; vary it alone to ask what the funnel is worth.
+
+        variant_names: Keypoint constructions to replay. Defaults to both of
+            :data:`REPLAY_VARIANTS`. Restrict it when the question is about
+            grasp selection rather than construction -- running both doubles
+            the cost and answers nothing extra.
 
         rank_by: Which surviving candidate is executed --
             ``"demonstration"``, ``"score"``, or ``"auto"`` to keep the
@@ -552,7 +558,7 @@ def main(
         flush=True,
     )
     rows = []
-    variants = [v for v in VARIANTS if v.name in REPLAY_VARIANTS]
+    variants = [v for v in VARIANTS if v.name in variant_names]
     print(f"\n{'variant':20}{'hand':11}{'object':8}{'reach':>7}{'trackmm':>9}"
           f"{'slip':>7}{'held':>6}{'shut@lift':>10}{'shutMax':>8}{'place':>8}"
           f"{'worst seg':>11}{'ok':>4}")
@@ -679,7 +685,8 @@ def main(
             "policy is the executor's."
         ),
         settings={
-            "varied": {"variant": list(REPLAY_VARIANTS), "object": list(REPLAY_OBJECTS)},
+            "varied": {"variant": [v.name for v in variants],
+                       "object": list(REPLAY_OBJECTS)},
             "fixed": {
                 "source": "reshelving seed 0, one demonstration",
                 "slot": slot,
