@@ -53,7 +53,28 @@ from tpgpt.utils.rotations import rotation_geodesic
 #: World "up" -- the support normal used throughout ``tpgpt.sim.keypoints``.
 UP = np.array([0.0, 0.0, 1.0])
 
-#: The parallel jaw's own symmetry: a half turn about the approach axis.
+#: A half turn about the approach axis, as a matrix.
+#:
+#: **Named, but never forgiven.** ``orientation_transport_error`` used to
+#: minimise over this and no longer offers the option, because a half turn is
+#: *not* the same grasp:
+#:
+#: * the wrist is somewhere else, which is a different joint configuration and
+#:   may not be reachable;
+#: * GraspGen-X's own config declares ``symmetric`` **per gripper**, and it is
+#:   ``False`` for both three-finger hands in this registry -- rolling those over
+#:   puts the fingers somewhere else entirely
+#:   (:func:`~tpgpt.grasp.grippers.declared_symmetric`);
+#: * and forgiving it concealed the half turn of 7.33 for the life of the
+#:   project, reporting 0.2 to 4.5 degrees for a plan that was 179 wrong.
+#:
+#: Measured after the frames were fixed, the minimisation changed the answer on
+#: **0 of 20** cells when compared against the grasp actually executed. So it
+#: was inert as well as dangerous.
+#:
+#: The matrix itself stays, because the *rotation* is a real object: it is what
+#: ``scene_keypoints`` applies when it chooses the other roll, and what a test
+#: needs to construct a rolled case.
 #:
 #: In the ``Grasp6D`` convention a grasp rotation's columns are
 #: ``(closing, jaw, approach)``, so the approach is the local ``z`` and the
@@ -68,7 +89,6 @@ def orientation_transport_error(
     X: np.ndarray,
     R_source: np.ndarray,
     R_target: np.ndarray,
-    symmetric: bool = False,
 ) -> np.ndarray:
     """How far Eq. 11 leaves the transported hand from the orientation it needs.
 
@@ -88,25 +108,6 @@ def orientation_transport_error(
             source grasp and release points.
         R_source: ``(n, 3, 3)`` or ``(3, 3)`` source hand orientations.
         R_target: ``(n, 3, 3)`` or ``(3, 3)`` orientations the hand must reach.
-        symmetric: Minimise over :data:`JAW_SYMMETRY`. **Off by default, and
-            the default changed on a measurement.** Compared against the grasp
-            actually *executed* -- ``scene_keypoints``' diagnostics report it as
-            ``target_grasp``, which is the planner's grasp after the roll choice
-            -- the minimisation changes the answer on **0 of 20** cells. It is
-            inert, so all it can do is hide a regression.
-
-            It used to be on, and it was hiding one: the 13 cells where it still
-            alters the reading are all comparisons against the grasp the planner
-            *emitted* rather than the one executed, where it turns 179 degrees
-            into 1. That is a reference mismatch, not a symmetry, and forgiving
-            it concealed the half turn of 7.33 for the life of the project.
-
-            Turn it on only to ask "could this hand form this grasp at all",
-            where the roll genuinely does not matter -- and never for a hand
-            GraspGen-X declares asymmetric
-            (:func:`~tpgpt.grasp.grippers.declared_symmetric` is ``False`` for
-            both three-finger hands in the registry).
-
     Returns:
         ``(n,)`` angles in **degrees**.
     """
@@ -121,11 +122,7 @@ def orientation_transport_error(
     )
     transported = np.einsum("nij,njk->nik", J_perp, R_source)
 
-    angle = rotation_geodesic(transported, R_target)
-    if symmetric:
-        flipped = np.einsum("nij,jk->nik", R_target, JAW_SYMMETRY)
-        angle = np.minimum(angle, rotation_geodesic(transported, flipped))
-    return np.degrees(angle)
+    return np.degrees(rotation_geodesic(transported, R_target))
 
 
 def carry_orientation_error(

@@ -119,28 +119,35 @@ class TestJawSymmetry:
         assert np.allclose(JAW_SYMMETRY @ np.array([0, 0, 1.0]), [0, 0, 1.0])
         assert np.allclose(JAW_SYMMETRY @ np.array([1.0, 0, 0]), [-1.0, 0, 0])
 
-    def test_a_grasp_rolled_over_is_the_same_grasp(self):
-        """Without this, a perfectly correct grasp scores 180 degrees wrong.
+    def test_a_half_turn_is_reported_and_not_forgiven(self):
+        """The forgiveness is gone, and its removal is the assertion.
 
-        A parallel jaw closing along ``+c`` and along ``-c`` is one physical
-        grasp. ``task_frame`` carries the same lesson for the keypoint frame.
+        ``orientation_transport_error`` used to minimise over
+        :data:`JAW_SYMMETRY`, on the reasoning that a parallel jaw grips the
+        same either way round. Three things say otherwise: the wrist ends up in
+        a different configuration that may not be reachable, GraspGen-X declares
+        ``symmetric`` **False** for both three-finger hands in this registry,
+        and forgiving it concealed the half turn of §7.33 for the life of the
+        project -- reporting 0.2 to 4.5 degrees for a plan that was 179 wrong.
+
+        Measured after the frames were fixed it was also *inert*: against the
+        grasp actually executed it changed the answer on 0 of 20 cells.
         """
-        target = rot("z", 20.0)
-        rolled = target @ JAW_SYMMETRY
         m = rigid_map(np.eye(3))
+        target = rot("y", 25.0)
+        rolled = target @ JAW_SYMMETRY
         assert orientation_transport_error(
-            m, np.zeros((1, 3)), target, rolled, symmetric=True
-        )[0] == pytest.approx(0.0, abs=1e-6)
-        assert orientation_transport_error(
-            m, np.zeros((1, 3)), target, rolled, symmetric=False
-        )[0] == pytest.approx(180.0, abs=1e-6)
+            m, np.zeros((1, 3)), target, rolled
+        )[0] == pytest.approx(180.0, abs=1e-3)
+        with pytest.raises(TypeError):
+            orientation_transport_error(
+                m, np.zeros((1, 3)), target, rolled, symmetric=True
+            )
 
 
 class TestTiltProfile:
-    def _path(self, n=40):
-        return np.column_stack(
-            [np.linspace(0, 0.2, n), np.zeros(n), np.linspace(0, 0.1, n)]
-        )
+    def _path(self):
+        return np.stack([np.linspace(0, 0.3, 12), np.zeros(12), np.zeros(12)], axis=1)
 
     def test_an_untilted_map_reports_zero_everywhere(self):
         out = tilt_profile(rigid_map(np.eye(3), (0.1, 0.1, 0)), self._path())
