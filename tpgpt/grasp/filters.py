@@ -496,17 +496,39 @@ def by_demonstration_consistency(
     reference_approach: np.ndarray,
     max_angle_deg: float = MAX_APPROACH_MISMATCH_DEG,
 ) -> np.ndarray:
-    """Keep grasps the transported policy could actually carry out.
+    """Keep grasps the transportation map can carry, which is not the same as good grasps.
 
-    The policy reproduces the demonstration's approach direction, warped. A
-    candidate that disagrees with it is not a grasp the robot will perform; it
-    is a grasp the robot will *appear* to perform while the hand comes in from
-    somewhere else entirely.
+    **This is a constraint of the method, not a property of a good grasp**, and
+    the distinction matters because everything else in this funnel is the
+    latter. Whether a grasp holds depends on the object, the gripper and the
+    scene; the demonstration has nothing to do with it. What the demonstration
+    constrains is the *map*.
 
-    This is the filter that separates "the generator proposes 6-DoF grasps" from
-    "the policy executes one demonstrated approach". Removing the tension by
-    filtering is the cheap answer; the expensive one is a demonstration per
-    approach direction.
+    ``phi`` must carry the source keypoint cube onto the target one, so the
+    angle between the two grasp frames is a rotation the warp has to realise,
+    and it degrades with that angle. Measured across 20 cells:
+
+    ========================  ==============
+    source-to-target rotation ``min det(J)``
+    ========================  ==============
+    3 - 19 deg                0.94 - 0.99
+    74 - 135 deg              0.33 - 0.79
+    149 - 179 deg             **-0.06 - 0.16**
+    ========================  ==============
+
+    Past about 145 degrees the map turns inside out. Section 8g measured the
+    consequence of dropping this filter: the grasp-pose cube produced a valid
+    map in only **7 of 16** cells, at a median ``min det`` of **-0.031**, with a
+    median transported orientation error of 116.5 degrees.
+
+    So the filter earns its place, but as a *feasibility bound on the warp*. It
+    must not be read as a quality criterion and must not be used to rank: a
+    candidate 6 degrees off the demonstration is not a better **grasp** than one
+    40 degrees off, it is merely one the map can transport. Ranking is
+    :func:`filter_grasps`' job and it uses the discriminator's score.
+
+    The cheap answer to the tension is this filter; the expensive one is a
+    demonstration per approach direction.
     """
     reference = np.asarray(reference_approach, dtype=float)
     reference = reference / np.linalg.norm(reference)
@@ -529,21 +551,25 @@ def suppress_duplicates(
     them keeps the surviving set *diverse*, which is what lets a later filter
     reject one candidate and still leave somewhere to go.
 
-    **"Best" is the caller's to define, and defaulting it to the score was
-    costing candidates.** A cluster is anything within
-    :data:`DUPLICATE_POSITION` (20 mm) and :data:`DUPLICATE_ANGLE_DEG`
-    (**20 degrees**), which is a wide net: two members can differ by 20 degrees
-    of approach, and this used to keep whichever GraspGen-X scored higher.
-    Section 8h found no evidence that score predicts anything, while agreement
-    with the demonstration demonstrably matters to a method whose job is to
-    reproduce a demonstrated approach. Measured: on 4 of 20 cells this stage was
-    the one that discarded the best-aligned candidate.
+    **"Best" means the discriminator's score, and that is deliberate.** A
+    cluster is anything within :data:`DUPLICATE_POSITION` (20 mm) and
+    :data:`DUPLICATE_ANGLE_DEG` (20 degrees), so two members can differ by
+    20 degrees of approach and the choice between them is not cosmetic. It is
+    still a *grasp quality* choice, which is a property of the object, the
+    gripper and the scene -- so the score is the right key and the
+    demonstration is not.
+
+    A previous version keyed this on agreement with the demonstration, on the
+    grounds that it discarded the best-aligned candidate on 4 of 20 cells. That
+    was a mistake: keeping the better-quality member of a cluster is this
+    function's job, and "it dropped the one that best matched the source" is not
+    evidence of a fault.
 
     Args:
         key: ``key(index) -> float``, smaller is better, deciding which member
-            of a cluster survives. Defaults to the planner's score, for callers
-            with nothing better; :func:`filter_grasps` passes approach agreement
-            when it has a reference to compare against.
+            of a cluster survives. Defaults to the planner's score. Exposed so a
+            caller with a genuinely better quality estimate can supply one --
+            not so that a *task* criterion can be smuggled in here.
     """
     key = key if key is not None else (lambda i: -grasps[i].score)
     order = sorted(indices, key=key)
@@ -641,21 +667,27 @@ def filter_grasps(
             "approach corridors into both",
             survivors, indices,
         )
-    # **Rank by agreement with the demonstration when there is one**, both for
-    # thinning duplicates and for the final order. The planner's confidence is
-    # the only ranking available without a reference, but it is not the right
-    # one here: a transported policy reproduces a demonstrated approach, so a
-    # candidate 40 degrees off is worse than one 6 degrees off whatever the
-    # discriminator thinks, and 8h found no evidence the score predicts
-    # anything. Measured with score as the key: the chosen candidate's approach
-    # mismatch runs at a median of 13.8 degrees against 3.2, its TCP sits a
-    # median 15.7 mm away, and 39 of 40 cells execute a different grasp.
-    if reference_approach is not None:
-        unit = np.asarray(reference_approach, dtype=float)
-        unit = unit / np.linalg.norm(unit)
-        rank = lambda i: -float(grasps[i].approach @ unit)  # noqa: E731
-    else:
-        rank = lambda i: -grasps[i].score  # noqa: E731
+    # **Rank by the discriminator's score.** Whether a grasp is good is a
+    # property of the object, the gripper and the scene -- nothing about the
+    # demonstration enters it -- and the score is the one estimate of it we
+    # have: GraspGenX's discriminator is trained on a simulated grasp dataset
+    # of some two billion grasps across 32 grippers and 8000+ objects, so it is
+    # a learned grasp-quality signal by construction, not an arbitrary number.
+    #
+    # A previous version of this ranked by agreement with the demonstration
+    # instead, and that was wrong in principle: it subordinates grasp quality to
+    # an artefact of the transport method. Where the demonstration legitimately
+    # enters is ``by_demonstration_consistency`` above, as a hard **constraint**
+    # -- see that function for why the map, not the grasp, needs it.
+    #
+    # The two attempts to validate the score in this project both lacked the
+    # power to say anything. 8h had 19 of 20 grasps lift, so there was no
+    # variance to correlate, and it reported exactly that; quoting it as "the
+    # score predicts nothing" was a misuse of an underpowered null. The sibling
+    # project's measurement is real but small (4 of 6 and 3 of 8 held, and the
+    # score did not order them) and was taken in a different simulator on
+    # cluttered mesh scenes.
+    rank = lambda i: -grasps[i].score  # noqa: E731
 
     indices = stage(
         "distinct", f"duplicates within {DUPLICATE_POSITION * 100:.0f} cm thinned out",
@@ -663,7 +695,5 @@ def filter_grasps(
     )
 
     funnel.survivors = np.array(sorted(indices, key=rank), dtype=int)
-    funnel.flags["ranked_by"] = (
-        "approach agreement" if reference_approach is not None else "planner score"
-    )
+    funnel.flags["ranked_by"] = "discriminator score"
     return funnel
