@@ -2289,7 +2289,7 @@ it turns each placement into a partial lottery.
 | 1e | **Experiments A to F have no corrected equivalent** | All six are withdrawn and none re-run. `GRASP_CUBE_HALF_EXTENT = 0.02` in particular rests on a withdrawn sweep read through a metric blind to the half turn (§10) |
 | 1d | **`robotiq140` is now the weakest hand at 1/4**, having been 2/4 | Different from where the investigation started, and undiagnosed. Its two clean failures carry the object faithfully and misplace it |
 | 2 | ~~Cross-hand closing schedule~~ — **measured, see below.** Only the robotiq140 is affected: median 5 waypoints of delay before the fingers touch anything, worst **15**. The other four hands: 0 | Caused `robotiq140/can`'s failure in §8j and its false `grasped: no`. **Not fixed** — nothing in the codebase gates on closure or scales the dwell |
-| 3 | **Contact-gated closing.** The rule must be closure-**rate** based: a box arrests the jaws dead (milk, +0.010 over the dwell) while a cylinder keeps yielding (can, +0.080) and never stalls | Needs 2. Also needs the phase to wait for the grasp event — a rollout change in the dynamics thread |
+| 3 | **Contact-gated closing.** ~~The rule must be closure-**rate** based~~ — **a rate rule does not work on this signal**, and the reason is not object shape. See below | Gating on the `held` channel works and is exact but simulation-only; a rate rule needs closure sampled per control step, not per waypoint |
 | 4 | **Per-hand dwell scaling**, the cheaper alternative to 3, needing no new sensing | Derivable from the finger-travel calibration in `gripper_frames.json` |
 | 5 | **Objects are still dropped ~25 mm** at placement, landing at 0.7 m/s | Seating them at rest height was attempted and reverted: the arithmetic verified correct in isolation but produced floor-level escapes. The settle absorbs the bounce, so this is now cosmetic rather than corrupting |
 | 6 | **Whether `object_keypoints` should default to the grasp cube** | Now clearly favoured: **15/20 against 10/20** on the corrected code (§8j), 18/20 grasped against 14/20, and better conditioned. The 67%-against-83% conversion gap that argued against it was the half turn, which only the cube carried. Still its own commit |
@@ -2317,6 +2317,34 @@ it 426 mm anyway, and is scored as never having grasped.
 **The problem is one hand, not the fleet**, which was not obvious beforehand and
 makes the cheap fix viable: scale the dwell per hand from the finger-travel
 figures already in `gripper_frames.json` rather than sensing anything.
+
+### Why a closure-rate rule does not detect contact
+
+The intuition is sound: jaws close fast in free space, slow when they meet
+something, so a drop in rate marks contact. What the traces show is that it does
+not work here, for two reasons, and **neither is the object's shape** — an
+earlier version of this document said a box arrests the jaws while a cylinder
+keeps yielding, which described a symptom and misattributed it.
+
+**The rate drops well before contact.** On `robotiq140/can` it falls from 0.343
+to 0.012 per waypoint by waypoint 52 and stays there, while contact is not
+registered until waypoint **65**. A rate rule would declare contact thirteen
+waypoints early. The signal is the fingers' *position*, and the gripper is
+position-commanded — `+1` means "go to fully closed" — so the closure asymptotes
+toward its commanded value whether or not anything is between the jaws. The rate
+drop marks the jaws **arriving**, not touching. At waypoint 65 the rate then
+jumps back to 0.148, which is the real contact event and the opposite of a
+stall.
+
+**And on four of the five hands the close finishes inside a single waypoint.**
+The panda moves 0.383 in one sample and is flat afterwards. One sample carries
+no rate. `closure` is recorded once per waypoint — eight control steps — so the
+whole transient is below the sampling resolution.
+
+**What works instead:** gate on the `held` contact channel, which already exists
+per step and marks the event exactly, at the cost of being simulation-only; or
+sample closure per control step and give a rate rule something to see, which
+would still need the commanded position to tell "arrived" from "obstructed".
 
 ### Grey areas — recorded because they are *not* solid
 

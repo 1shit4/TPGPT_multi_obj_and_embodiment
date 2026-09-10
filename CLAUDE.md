@@ -351,6 +351,16 @@ Each of these cost real debugging time. Full detail in `ROBOTICS_NOTES.md`.
   `orientation_transport_error` applies it unconditionally, so every orientation
   figure for those two hands, including their rows in `§7.29`'s nine-hand table,
   used a symmetry they do not have. **Not yet fixed.** `§7.34`.
+- **A closure-*rate* rule cannot detect contact, and object shape is not why.**
+  The jaws are position-commanded (`+1` = "go to fully closed") and `closure`
+  reports where the fingers *are*, so it asymptotes toward the commanded value
+  whether or not anything is between them: on `robotiq140/can` the rate falls
+  from 0.343 to 0.012 per waypoint by waypoint 52 while contact is registered at
+  **65**, then jumps back to 0.148 *at* contact. The drop marks the jaws
+  arriving, not touching. And on four of five hands the close finishes inside a
+  single waypoint, so there is no rate to read at all -- `closure` is sampled
+  once per waypoint, eight control steps. Gate on the `held` contact channel, or
+  sample closure per control step first.
 - **`stage_outcome`'s `grasped` flag misses a slow-closing hand.** It looks for
   contact within twelve waypoints either side of the commanded close. A Robotiq
   2F-140 has 125 mm jaws against a 66 mm can, so each finger travels ~30 mm
