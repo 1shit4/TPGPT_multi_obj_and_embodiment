@@ -12,10 +12,33 @@ numbers are a scratch experiment, not evidence — that rule is `ROBOTICS_NOTES`
 
 ---
 
-> # ⚠ EVERY NUMBER IN EXPERIMENTS G, H AND I IS WITHDRAWN
+> # ⚠ STATUS OF EVERY EXPERIMENT — read this before quoting any number
 >
-> **The scene they were measured in was broken.** `ROBOTICS_NOTES.md` §7.32 has
-ame.> `TabletopShelf`:
+> Four defects have been found *since* these experiments were run, each of them
+> upstream of numbers already written down. An experiment is only as good as the
+> conditions it was measured under, so every section below carries a status here
+> rather than leaving the reader to work it out.
+>
+> | # | experiment | run before | status |
+> |---|---|---|---|
+> | A | §4 object size in the warp | scene fix, frame fixes | **withdrawn** |
+> | B | §5 four constructions on real grasps | scene fix, frame fixes | **withdrawn** |
+> | C | §6 the orientation trade | scene fix, frame fixes | **withdrawn** |
+> | D | §7 why the grasp filter is not optional | scene fix, frame fixes | **withdrawn**, but see note |
+> | E | §8 is a conditioned map executable | scene fix, frame fixes | **withdrawn**, superseded by M |
+> | F | §8c tilt stress test | scene fix, frame fixes | **withdrawn** |
+> | G | §8d nine hands, Tier 1 | scene fix | **withdrawn**, superseded by J |
+> | H | §8e Tier 2, six hands | scene fix | **withdrawn**, superseded by L then M |
+> | I | §8f grasp control | scene fix | **withdrawn**, superseded by K |
+> | J | §8g Tier 1 on the corrected scene | frame fixes | **numbers superseded, conclusions hold** — re-measured, see below |
+> | K | §8h grasp control on the corrected scene | — | **stands.** No map in the loop, so no frame defect can reach it |
+> | L | §8i Tier 2 on the corrected scene | frame fixes | **withdrawn as a result, kept as the failure analysis.** Superseded by M |
+> | M | §8j Tier 2 with the frame fixes | — | **stands**, with the caveat below |
+> | N | §8k the full funnel | — | **stands as data**, but confounded against L; see its own banner |
+>
+> ### The two corrections, and which numbers each reaches
+>
+> **The scene was broken** (`ROBOTICS_NOTES.md` §7.32). `TabletopShelf`:
 >
 > 1. **Objects were still falling at handover.** `SETTLE_STEPS = 60` is 0.12 s;
 >    the cereal needed up to 0.96 s. In four of six scenes a 150 mm box toppled
@@ -24,33 +47,61 @@ ame.> `TabletopShelf`:
 >    sampling region: 4.85 mm (yumi), 12.85 (robotiq85), 20.64 (xarm), 26.77
 >    (robotiq140) of interpenetration, ejected on the first physics step.
 > 3. **So the scene differed per gripper by up to 154 mm** from the same seed.
->    Every cross-gripper comparison below compared *different worlds*.
+>    Every cross-gripper comparison compared *different worlds*.
 >
 > And separately, **every `contact_offset` was wrong**. It derives from
-> `calibrated_depth`, which was itself calibrated against these moving objects;
+> `calibrated_depth`, itself calibrated against those moving objects;
 > re-measured, all seven hands moved by up to 30 mm. The Panda's
-> wrist-to-fingertip offset was 41.1 mm throughout these experiments and is
-> **11.1 mm**. That value converts the source demonstration's labels
-> (`_to_tool_frame`), so the label path — and the map fitted to it — shifts with
-> it. **This is why even Experiment G's pure geometry is withdrawn**, contrary to
-> what §8d's own text claims.
+> wrist-to-fingertip offset was 41.1 mm and is **11.1 mm**. That value converts
+> the source demonstration's labels (`_to_tool_frame`), so the label path — and
+> the map fitted to it — shifts with it. **This is why even a pure-geometry
+> experiment is withdrawn by it.**
 >
-> **What survives**, and is worth reading:
+> **The frames were wrong in three ways** (§7.33, §7.34), and this is the part
+> that was missed when the banner was first written — it withdrew G, H and I for
+> the scene and left A through F standing, although they were run *earlier
+> still* and are reached by both corrections:
+>
+> 1. the source's own pick and place task frames were **180 degrees apart**, so
+>    every carried object was reflected through its grasp point;
+> 2. the transported plan was computed in the grasp convention and commanded in
+>    the wrist convention with **no conversion** — 0.2 to 91 degrees of error
+>    depending on the hand;
+> 3. **`flip_target` was inert**, so every "try both rolls and keep the better"
+>    search in the codebase was scoring one option twice.
+>
+> Measured effect on the geometry, across the 136 cells of Experiment J: the
+> cloud box is untouched (every field within 2.3e-6), while all three cube
+> constructions move — `min det` by up to 0.104 and `tilt_mid_path` by up to
+> 7.1 degrees. Aim and keypoint residual are unchanged. **So J's conclusions
+> survive and its numbers do not**; the corrected table is in §8g.
+>
+> **Note on Experiment D.** Its finding is that dropping the approach filter
+> leaves the grasp-pose cube with 7 of 16 valid maps at a median `min det` of
+> −0.031. That is a statement about very large source-to-target rotations, which
+> the frame fixes do not change in kind, and it is corroborated independently by
+> the rotation-versus-determinant table in §8j. Treat the *direction* as
+> supported and the *numbers* as withdrawn.
+>
+> ### What survives everywhere
 >
 > * the **methods** — what was varied, what was held fixed, how each metric is
 >   defined and measured;
 > * the **withdrawn-claims record** in §9, which is the point of keeping this
 >   document rather than deleting it (§7.26);
 > * the observation that `aim` and `orient` are **~0 by construction** for the
->   cube variants and therefore were never evidence;
-> * the finding that the geometric metrics correlate with physical contact at
->   `r` between −0.07 and +0.02 — **geometry did not predict physics**, and that
->   conclusion does not depend on the scene being right.
+>   cube variants and therefore were never evidence.
 >
-> **Do not quote a number from §§8d, 8e or 8f.** The re-runs are on a corrected
-> scene, with fresh clouds, fresh grasps and fresh calibrations.
+> ### Two defects are still live, and they reach M and N
+>
+> * **The hand is commanded through the shelf** on 15 of 20 cells, by up to
+>   79.9 mm, so every placement is a drop rather than a set-down (§7.35). This
+>   affects M and N equally and is not corrected in either.
+> * **The half-turn jaw symmetry is applied to two hands that do not have it**
+>   (§8l). `robotiq3f` and `inspire` are `revolute_3f` with `symmetric: false`
+>   in GraspGen-X's own config. Neither appears in any Tier 2 run, so only the
+>   nine-hand geometry table of §8g is reached.
 
-## 1. Background: what a transportation map is, and what keypoints do
 
 The project transports **one** recorded demonstration onto new objects. The
 mechanism is a map `phi` that **warps space itself** — not the object, the space,
@@ -204,6 +255,14 @@ length scale (30 mm here) confines it.
 
 ## 4. Experiment A — does the object's size belong in the warp?
 
+> **WITHDRAWN.** Run before both the scene correction and the frame
+> corrections. Its `det(J)` numbers are measured through `scene_keypoints`,
+> which carried a 180-degree half turn between the source's own two frames,
+> and through a `contact_offset` since re-measured by up to 30 mm. Not
+> re-run. The *question* — does a cloud-fitted box inflate space when the
+> target is taller — is still a good one and is answered on corrected code
+> nowhere in this document.
+
 **Question.** The cloud box's extent *is* the object's. Does transporting onto a
 taller object then inflate space, and does that matter?
 
@@ -234,6 +293,12 @@ the cloud box remains a valid map here.
 ---
 
 ## 5. Experiment B — the four constructions on real objects and real grasps
+
+> **WITHDRAWN.** Run before both corrections. Every construction comparison
+> here is between a cloud box, which the frame defects leave untouched, and
+> cube variants, which they move by up to 0.104 of `min det` — so the
+> contrast is exactly the part that shifts. Not re-run; §8g is the nearest
+> corrected equivalent.
 
 **Question.** With real point clouds and real planner-chosen grasps, which
 construction produces the best-conditioned map, aims at the grasp, and carries
@@ -332,6 +397,11 @@ grasp's closing axis in-plane.
 
 ## 6. Experiment C — the orientation trade, isolated
 
+> **WITHDRAWN.** Run before both corrections. It isolates the two corner
+> orientations, and `orientation_transport_error` — the metric it turns on —
+> minimises over the very half turn the source frames carried, so it could
+> not have seen the defect. Not re-run.
+
 **Question.** Constructions 1 and 2 differ only in whether the cube's corners
 carry the grasp's out-of-plane tilt. What does carrying it buy, and what does it
 cost?
@@ -377,6 +447,12 @@ grasps are used throughout and the top-down recipe was abandoned.
 
 ## 7. Experiment D — why the grasp filter is not optional
 
+> **NUMBERS WITHDRAWN, DIRECTION SUPPORTED.** Run before both corrections, so
+> the figures below are not quotable. The finding itself — that dropping the
+> approach filter leaves large source-to-target rotations and folds the map —
+> is corroborated independently on corrected code by the rotation-versus-
+> determinant table in §8j, which measures folding past about 145 degrees.
+
 **Question.** Section 2.2 filters candidates to within 45 degrees of the
 demonstration's approach. What happens without it?
 
@@ -410,6 +486,11 @@ here.
 ---
 
 ## 8. Experiment E — is a well-conditioned map actually executable?
+
+> **WITHDRAWN, SUPERSEDED BY EXPERIMENT M (§8j).** Run before both
+> corrections. As a physics replay it carries the third frame defect as well:
+> the transported plan was commanded in the wrong frame, by 0.2 to 91 degrees
+> depending on the hand.
 
 **Question.** Everything above is map geometry. A construction that produces a
 beautifully conditioned map through poses the arm cannot hold has bought nothing.
@@ -522,6 +603,9 @@ failure is characterised but not localised.
 ---
 
 ## 8c. Experiment F — stress-testing the tilt: does it alter the trajectory too much?
+
+> **WITHDRAWN.** Run before both corrections, and it sweeps approach tilt —
+> the axis along which the frame defects act. Not re-run.
 
 **Question.** Experiment C established that the grasp-pose cube buys its
 orientation by rotating world-up by the same angle, and Experiment D showed the
@@ -1487,6 +1571,18 @@ question, and §§8h and 8i are where it is asked.
 
 ## 8h. Experiment K — the grasp-quality control, on the corrected scene
 
+> **STANDS.** The only experiment here with **no map in the loop**, so none of
+> the three frame defects can reach it, and it postdates the scene
+> correction. It drives the arm to a GraspGen-X candidate through
+> `grasp_to_eef_pose`, which applies the per-hand `alignment_rotation` the
+> Tier 2 driver was missing.
+>
+> Its one weakness is **statistical, not procedural**: 19 of 20 grasps lift,
+> so there is no variance to correlate the discriminator score against. That
+> is a null with no power, and quoting it as "the score predicts nothing"
+> — as this document previously did — is reading absence of evidence as
+> evidence of absence.
+
 **Supersedes Experiment I (§8f).** Same question, same method, same code path: take
 the GraspGen-X candidate each cell would use, drive the arm straight to it along
 the grasp's own approach axis, close for the demonstration's own 15-waypoint
@@ -1546,6 +1642,13 @@ the arm cannot get there.
 ---
 
 ## 8i. Experiment L — Tier 2 on the corrected scene: grasped, traversed, placed
+
+> **WITHDRAWN AS A RESULT, KEPT AS THE FAILURE ANALYSIS.** Superseded by
+> Experiment M (§8j), which re-ran these exact cells with the same grasp
+> selection and the three frame defects fixed: the grasp-pose cube goes from
+> 12/20 to **15/20**. Do not quote the success rates below. The per-cell
+> failure attribution *is* the evidence for what the defects cost, and that
+> is why the section stays.
 
 **Supersedes Experiment H (§8e).** The transported path followed pose by pose
 under stiff position control — no policy, no attractor integration, no lag gate —
@@ -1771,7 +1874,61 @@ along world `+y`", a question about the object's yaw with nothing to do with the
 gripper; this asks "does this grip the object the way the demonstration gripped
 its object".
 
-### Result
+### Every cell
+| hand | object | variant | reach | track mm | held | shut@lift | lift mm | grasped | traversed | place mm | z final | worst seg | placed |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| panda | bread | cloud box | 100% | 24.0 | 18 | 0.54 | 0 | **no** | **no** | 315.8 | 0.822 | approach | no |
+| panda | bread | cube | 100% | 25.6 | 111 | 0.47 | 422 | yes | yes | 23.1 | 1.104 | approach | **yes** |
+| panda | can | cloud box | 76% | 16.3 | 18 | 0.43 | 3 | **no** | **no** | 343.9 | 0.840 | retreat | no |
+| panda | can | cube | 72% | 19.9 | 138 | 0.37 | 415 | yes | yes | 14.9 | 1.121 | retreat | **yes** |
+| panda | cereal | cloud box | 70% | 15.5 | 0 | 0.63 | -0 | **no** | **no** | 321.2 | 0.875 | retreat | no |
+| panda | cereal | cube | 77% | 8.1 | 119 | 0.57 | 424 | yes | yes | 14.2 | 1.156 | place | **yes** |
+| panda | milk | cloud box | 70% | 18.2 | 0 | 0.63 | -0 | **no** | **no** | 392.6 | 0.861 | retreat | no |
+| panda | milk | cube | 74% | 8.5 | 132 | 0.47 | 424 | yes | yes | 5.3 | 1.142 | place | **yes** |
+| robotiq140 | bread | cloud box | 100% | 20.3 | 110 | 0.76 | 442 | yes | yes | 225.6 | 0.822 | approach | no |
+| robotiq140 | bread | cube | 70% | 25.2 | 101 | 0.55 | 433 | yes | yes | 235.3 | 0.822 | place | no |
+| robotiq140 | can | cloud box | 62% | 21.0 | 110 | 0.75 | 411 | yes | yes | 245.5 | 0.839 | place | no |
+| robotiq140 | can | cube | 97% | 24.6 | 95 | 0.31 | 426 | **no** | **no** | 216.9 | 0.824 | retreat | no |
+| robotiq140 | cereal | cloud box | 60% | 24.6 | 110 | 0.67 | 454 | yes | yes | 41.4 | 1.176 | place | **yes** |
+| robotiq140 | cereal | cube | 62% | 16.4 | 130 | 0.66 | 412 | yes | yes | 9.7 | 1.168 | place | **yes** |
+| robotiq140 | milk | cloud box | 60% | 35.4 | 110 | 0.74 | 376 | yes | yes | 142.5 | 0.941 | place | no |
+| robotiq140 | milk | cube | 74% | 19.7 | 110 | 0.74 | 405 | yes | yes | 109.6 | 0.984 | retreat | no |
+| robotiq85 | bread | cloud box | 100% | 20.1 | 110 | 0.66 | 419 | yes | yes | 44.3 | 1.111 | approach | **yes** |
+| robotiq85 | bread | cube | 91% | 25.0 | 110 | 0.65 | 403 | yes | yes | 40.4 | 1.101 | place | **yes** |
+| robotiq85 | can | cloud box | 73% | 19.0 | 132 | 0.61 | 403 | yes | yes | 8.1 | 1.125 | retreat | **yes** |
+| robotiq85 | can | cube | 86% | 22.0 | 142 | 0.60 | 410 | yes | yes | 9.9 | 1.125 | retreat | **yes** |
+| robotiq85 | cereal | cloud box | 62% | 19.6 | 110 | 0.68 | 421 | yes | yes | 13.5 | 1.156 | place | **yes** |
+| robotiq85 | cereal | cube | 70% | 14.3 | 110 | 0.66 | 405 | yes | yes | 32.9 | 1.156 | retreat | **yes** |
+| robotiq85 | milk | cloud box | 61% | 23.7 | 128 | 0.64 | 410 | yes | yes | 10.6 | 1.155 | place | **yes** |
+| robotiq85 | milk | cube | 60% | 24.0 | 121 | 0.62 | 391 | yes | yes | 62.3 | 1.105 | place | no |
+| xarm | bread | cloud box | 100% | 24.3 | 26 | 0.55 | 19 | **no** | **no** | 429.4 | 0.822 | approach | no |
+| xarm | bread | cube | 100% | 24.0 | 116 | 0.55 | 438 | yes | yes | 56.9 | 1.124 | approach | **yes** |
+| xarm | can | cloud box | 76% | 19.4 | 110 | 0.54 | 414 | yes | yes | 17.2 | 1.127 | retreat | **yes** |
+| xarm | can | cube | 93% | 16.1 | 110 | 0.53 | 430 | yes | yes | 6.9 | 1.121 | retreat | **yes** |
+| xarm | cereal | cloud box | 62% | 20.5 | 17 | 0.32 | 1 | **no** | **no** | 306.3 | 0.875 | place | no |
+| xarm | cereal | cube | 60% | 34.3 | 9 | 0.49 | 7 | **no** | **no** | 218.0 | 0.811 | place | no |
+| xarm | milk | cloud box | 60% | 28.7 | 35 | 0.57 | 131 | yes | **no** | 530.9 | 0.818 | place | no |
+| xarm | milk | cube | 77% | 15.8 | 123 | 0.53 | 403 | yes | yes | 8.4 | 1.142 | retreat | **yes** |
+| yumi | bread | cloud box | 100% | 4.8 | 115 | 0.23 | 426 | yes | yes | 6.5 | 1.104 | approach | **yes** |
+| yumi | bread | cube | 100% | 4.9 | 139 | 0.21 | 428 | yes | yes | 16.4 | 1.104 | approach | **yes** |
+| yumi | can | cloud box | 74% | 12.2 | 114 | 0.13 | 419 | yes | yes | 12.0 | 1.121 | retreat | **yes** |
+| yumi | can | cube | 88% | 14.8 | 125 | 0.13 | 413 | yes | yes | 8.3 | 1.121 | retreat | **yes** |
+| yumi | cereal | cloud box | 62% | 16.2 | 110 | 0.40 | 422 | yes | yes | 12.8 | 1.156 | place | **yes** |
+| yumi | cereal | cube | 62% | 15.0 | 125 | 0.37 | 400 | yes | yes | 14.4 | 1.156 | place | **yes** |
+| yumi | milk | cloud box | 61% | 20.6 | 130 | 0.28 | 411 | yes | yes | 7.9 | 1.154 | place | **yes** |
+| yumi | milk | cube | 78% | 11.8 | 116 | 0.26 | 403 | yes | yes | 9.6 | 1.142 | retreat | **yes** |
+
+**cloud box**: grasped 14/20, traversed 13/20, placed **10/20**, median error on success 12.4 mm, `min det` median 0.527.
+
+**grasp-pose cube**: grasped 18/20, traversed 18/20, placed **15/20**, median error on success 14.2 mm, `min det` median 0.944.
+
+`reach` is the fraction of waypoints whose commanded pose IK could hold to 5 mm;
+it is a property of the whole path and a poor predictor of anything (§8z).
+`shut@lift` is the calibrated jaw closure at the first commanded close, 0 open
+and 1 closed on air. `worst seg` names the segment with the largest unreachable
+share, and reads "approach" whenever *nothing* was unreachable.
+
+### Result, against Experiment L
 
 | | Experiment M | Experiment L | change |
 |---|---|---|---|
@@ -1942,6 +2099,58 @@ construction and the grasp selection together and measured neither. Its numbers
 This is the failure mode §7.26 exists to prevent, committed while the document
 that forbids it was open.
 
+### Every cell
+
+Recorded so the run can be analysed rather than only dismissed. **Read against
+the caveat above**: these grasps are not Experiment M's, so a cell-by-cell
+comparison is between two different grasps as well as two filter settings.
+| hand | object | variant | reach | track mm | held | shut@lift | lift mm | grasped | traversed | place mm | z final | worst seg | placed |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| panda | bread | cloud box | 100% | 21.7 | 18 | 0.49 | 1 | **no** | **no** | 321.6 | 0.822 | approach | no |
+| panda | bread | cube | 100% | 22.8 | 19 | 0.43 | 3 | **no** | **no** | 333.0 | 0.822 | approach | no |
+| panda | can | cloud box | 78% | 15.7 | 17 | 0.43 | 2 | **no** | **no** | 343.1 | 0.840 | retreat | no |
+| panda | can | cube | 80% | 17.7 | 135 | 0.38 | 421 | yes | yes | 27.3 | 1.121 | retreat | **yes** |
+| panda | cereal | cloud box | 72% | 12.7 | 0 | 0.63 | -0 | **no** | **no** | 321.2 | 0.875 | retreat | no |
+| panda | cereal | cube | 74% | 8.2 | 112 | 0.39 | 418 | yes | yes | 20.3 | 1.156 | place | **yes** |
+| panda | milk | cloud box | 70% | 18.2 | 0 | 0.63 | -0 | **no** | **no** | 392.6 | 0.861 | retreat | no |
+| panda | milk | cube | 74% | 8.5 | 132 | 0.47 | 424 | yes | yes | 5.3 | 1.142 | place | **yes** |
+| robotiq140 | bread | cloud box | 100% | 21.4 | 113 | 0.76 | 434 | yes | yes | 45.3 | 1.112 | approach | **yes** |
+| robotiq140 | bread | cube | 100% | 30.2 | 101 | 0.38 | 411 | yes | yes | 141.3 | 0.946 | approach | no |
+| robotiq140 | can | cloud box | 62% | 22.9 | 110 | 0.74 | 405 | yes | yes | 179.2 | 0.824 | place | no |
+| robotiq140 | can | cube | 62% | 25.9 | 7 | 0.68 | 6 | **no** | **no** | 407.3 | 0.824 | place | no |
+| robotiq140 | cereal | cloud box | 60% | 25.9 | 114 | 0.68 | 415 | yes | yes | 46.0 | 1.169 | place | **yes** |
+| robotiq140 | cereal | cube | 80% | 12.8 | 40 | 0.70 | 131 | yes | **no** | 277.4 | 0.811 | retreat | no |
+| robotiq140 | milk | cloud box | 60% | 33.9 | 110 | 0.75 | 392 | yes | yes | 231.2 | 0.818 | place | no |
+| robotiq140 | milk | cube | 79% | 20.8 | 110 | 0.77 | 401 | yes | yes | 294.6 | 0.867 | retreat | no |
+| robotiq85 | bread | cloud box | 100% | 19.0 | 110 | 0.58 | 412 | yes | yes | 50.5 | 1.113 | approach | **yes** |
+| robotiq85 | bread | cube | 88% | 20.5 | 15 | 0.60 | 6 | **no** | **no** | 315.7 | 0.822 | retreat | no |
+| robotiq85 | can | cloud box | 76% | 17.1 | 131 | 0.60 | 405 | yes | yes | 3.4 | 1.127 | retreat | **yes** |
+| robotiq85 | can | cube | 72% | 20.8 | 25 | 0.59 | 43 | yes | **no** | 352.1 | 0.840 | retreat | no |
+| robotiq85 | cereal | cloud box | 62% | 18.3 | 118 | 0.52 | 419 | yes | yes | 3.8 | 1.156 | place | **yes** |
+| robotiq85 | cereal | cube | 76% | 11.1 | 110 | 0.45 | 398 | yes | yes | 25.7 | 1.156 | retreat | **yes** |
+| robotiq85 | milk | cloud box | 61% | 24.8 | 128 | 0.63 | 407 | yes | yes | 10.8 | 1.155 | place | **yes** |
+| robotiq85 | milk | cube | 84% | 13.9 | 135 | 0.62 | 405 | yes | yes | 26.0 | 1.154 | retreat | **yes** |
+| xarm | bread | cloud box | 100% | 24.3 | 29 | 0.56 | 33 | yes | **no** | 1049.4 | 0.020 | approach | no |
+| xarm | bread | cube | 100% | 19.0 | 110 | 0.55 | 460 | yes | yes | 121.0 | 1.104 | approach | no |
+| xarm | can | cloud box | 72% | 22.1 | 108 | 0.54 | 399 | yes | **no** | 224.4 | 0.839 | retreat | no |
+| xarm | can | cube | 62% | 27.8 | 110 | 0.53 | 410 | yes | yes | 51.5 | 1.141 | place | **yes** |
+| xarm | cereal | cloud box | 62% | 19.4 | 16 | 0.58 | 1 | **no** | **no** | 240.7 | 0.811 | place | no |
+| xarm | cereal | cube | 60% | 31.5 | 51 | 0.51 | 195 | yes | **no** | 283.5 | 0.811 | place | no |
+| xarm | milk | cloud box | 60% | 26.8 | 129 | 0.57 | 388 | yes | yes | 344.8 | 0.846 | place | no |
+| xarm | milk | cube | 76% | 17.9 | 134 | 0.55 | 397 | yes | yes | 61.7 | 1.142 | retreat | no |
+| yumi | bread | cloud box | 100% | 6.5 | 111 | 0.37 | 420 | yes | yes | 15.1 | 1.104 | approach | **yes** |
+| yumi | bread | cube | 100% | 23.9 | 22 | 0.36 | 8 | **no** | **no** | 336.4 | 0.822 | approach | no |
+| yumi | can | cloud box | 74% | 12.2 | 114 | 0.13 | 417 | yes | yes | 11.0 | 1.121 | retreat | **yes** |
+| yumi | can | cube | 79% | 17.4 | 26 | 0.18 | 0 | **no** | **no** | 342.3 | 0.840 | retreat | no |
+| yumi | cereal | cloud box | 62% | 16.1 | 111 | 0.39 | 421 | yes | yes | 12.5 | 1.156 | place | **yes** |
+| yumi | cereal | cube | 73% | 9.5 | 136 | 0.23 | 406 | yes | yes | 7.5 | 1.156 | place | **yes** |
+| yumi | milk | cloud box | 61% | 21.1 | 130 | 0.25 | 410 | yes | yes | 8.4 | 1.154 | place | **yes** |
+| yumi | milk | cube | 88% | 10.1 | 139 | 0.18 | 401 | yes | yes | 31.4 | 1.142 | retreat | **yes** |
+
+**cloud box**: grasped 15/20, traversed 13/20, placed **10/20**, median error on success 11.8 mm, `min det` median 0.548.
+
+**grasp-pose cube**: grasped 15/20, traversed 12/20, placed **8/20**, median error on success 25.8 mm, `min det` median 0.880.
+
 ### What is worth keeping from it
 
 Two things, neither of which needed the physics:
@@ -2095,6 +2304,20 @@ of true height and each object's base lands within 1.8 mm of the board).
 
 ## 10. Why the cube's size matters, and which metric should set it
 
+> **NUMBERS WITHDRAWN, MECHANISM SUPPORTED.** The size sweep was measured before
+> both corrections, and its orientation column is read through
+> `orientation_transport_error`, which minimises over the half turn the source
+> frames carried — so it is precisely the metric that could not see the defect.
+>
+> The *mechanism* does not depend on that. `phi` interpolates keypoint positions
+> exactly at any size, while Eq. 11 reads `J_perp`, a derivative estimated over
+> the cube's own corner spacing, so the size is a stencil width and a wide
+> stencil dilutes the grasp's rotation with the affine far field. That argument
+> is geometric and stands. **What is not currently supported is the choice of
+> 20 mm**, which rests on the table below. `GRASP_CUBE_HALF_EXTENT` has not been
+> re-swept on corrected code.
+
+
 `phi` interpolates keypoint **positions** exactly at any cube size, so `aim_map`
 is 0.0 mm at 5 mm and at 60 mm alike — it cannot choose between them. But Eq. 11
 reads `J_perp`, a **derivative**, and the cube's eight corners are the only thing
@@ -2128,20 +2351,31 @@ the 355 mm pick-to-place distance.
 
 ## 11. What would make these conclusions false
 
-- **Answered on one hand, then answered again on six, and the second answer is
-  different.** Experiment E gave the grasp-pose cube 3 of 4 against the cloud
-  box's 2 of 4 on a Panda. Experiment H (§8e) runs the same comparison across six
-  hands and the two **tie at 4/23 and 5/23**. The cube's advantage is real on the
-  source hand and does not transfer. Worse, §8e shows the geometric metrics that
-  rank the constructions — `min det`, `aim`, `orient` — correlate with physical
-  contact at `r` between −0.07 and +0.02, i.e. not at all. **No conclusion in
-  §§4–8c about which construction is better should be read as a claim about
-  execution.**
+- ~~**Answered on one hand, then answered again on six, and the second answer is
+  different.**~~ **Both halves of this were measured under withdrawn conditions**
+  — Experiment E before the scene and frame corrections, Experiment H before the
+  scene correction — so neither the "3 of 4 against 2 of 4" nor the "tie at 4/23
+  and 5/23" is quotable. On corrected code the cube leads clearly and across five
+  hands: **15/20 against 10/20** (§8j).
+
+  What survives, and it is the useful part, is the *shape* of the warning: **no
+  conclusion in §§4–8c about which construction is better should be read as a
+  claim about execution.** Those sections are geometry, they are withdrawn, and
+  the geometric metrics were separately measured as not predicting physical
+  contact.
 - **A different grasp filter.** Construction 2 depends on the 45-degree approach
-  filter, for its orientation (Experiment D) *and* for its path shape
-  (Experiment F): at the limit the path already deviates 80 mm and the
-  determinant has fallen from 0.950 to 0.714. Widen the filter and both degrade
-  without bound — 0.134 at 90°.
+  filter. The supporting numbers came from Experiments D and F and are
+  withdrawn, but the dependence is corroborated on corrected code: `min det`
+  falls from 0.94-0.99 at 3-19 degrees of source-to-target rotation to **-0.06
+  to 0.16 past 145 degrees** (§8j). The filter is a **bound on what the warp can
+  carry**, not a statement about grasp quality — see
+  `by_demonstration_consistency`, which now says so.
+- **Which grasp is chosen at all.** Holding the construction fixed and changing
+  only the grasp *selection* moves the result from 15/20 to 8/20 (§8j against
+  §8k). The traverse and placement differences are significant at p ≈ 0.03
+  paired; the **grasping** difference is not (p = 0.375). No mechanism for this
+  has survived testing — six candidate grasp properties were measured and none
+  separates the cells that hold from the cells that slip.
 - **A source demonstration that is not top-down.** Every result here uses one
   demonstration whose approach is straight down. A tilted source would change the
   relationship between the task frame and the grasp pose throughout.
