@@ -336,6 +336,67 @@ LIFT_HEIGHT = 0.08
 LIFT_FRACTIONS = (0.5, 1.0)
 
 
+def arm_collides(env, qpos, arm: str = "right", ignore: tuple = ()) -> str | None:
+    """What the arm or hand is inside, at this joint configuration.
+
+    **Why this exists.** ``solve_ik`` is joint angles and a Jacobian: it has no
+    collision model at all. A pose can solve to 3 mm and be physically
+    unreachable because a shelf is in the way, and nothing in the funnel used to
+    notice. Measured on the tabletop scene's top cubby, whose slot is a 78 mm
+    gap in ``x`` between the lower cubby's back panel and the upper one's
+    180 mm back wall: **15 of 20 transported plans command the hand inside that
+    wall**, by 4.8 to 79.9 mm. In physics the arm jams against it, stalls at
+    1 mm per waypoint against the 5.3 commanded, and opens its jaws with the
+    object still 4 to 15 cm above the board. `ROBOTICS_NOTES.md` 7.35.
+
+    Uses MuJoCo's own narrowphase on the real geometry rather than a point-cloud
+    proxy, because the shelf *is* real geometry here and a cloud of it would be
+    both slower and less exact.
+
+    Args:
+        env: The live environment. Its state is saved and restored, so this is a
+            query.
+        qpos: Arm joint configuration to test.
+        arm: Which arm.
+        ignore: Substrings naming geoms whose contacts do not count -- the
+            target object above all, since the fingers are *meant* to close
+            around it.
+
+    Returns:
+        ``"<robot geom> <-> <scene geom>"`` for the deepest offending contact,
+        or ``None`` when the configuration is clear.
+    """
+    import mujoco
+
+    model, data = env.sim.model, env.sim.data
+    controller = env.robots[0].composite_controller.part_controllers[arm]
+    qpos_index = np.asarray(controller.qpos_index)
+    saved = np.array(data.qpos)
+    try:
+        data.qpos[qpos_index] = np.asarray(qpos, dtype=float)
+        mujoco.mj_forward(model._model, data._data)
+        worst, worst_depth = None, 0.0
+        for c in range(data._data.ncon):
+            contact = data._data.contact[c]
+            a = model.geom_id2name(contact.geom1) or ""
+            b = model.geom_id2name(contact.geom2) or ""
+            robot = [n for n in (a, b) if n.startswith(("robot0", "gripper0"))]
+            other = [n for n in (a, b) if not n.startswith(("robot0", "gripper0"))]
+            # Both robot, or neither: self-collision and scene-on-scene are not
+            # this function's business.
+            if len(robot) != 1 or len(other) != 1:
+                continue
+            if any(token and token in other[0] for token in ignore):
+                continue
+            if contact.dist < worst_depth:
+                worst_depth = float(contact.dist)
+                worst = f"{robot[0]} <-> {other[0]}"
+        return worst
+    finally:
+        data.qpos[:] = saved
+        mujoco.mj_forward(model._model, data._data)
+
+
 def by_reachability(
     env,
     grasps: list[Grasp6D],
@@ -346,6 +407,8 @@ def by_reachability(
     retreat: float = RETREAT_DISTANCE,
     tolerance: float = REACH_TOLERANCE,
     arm: str = "right",
+    check_collision: bool = True,
+    ignore_collisions_with: tuple = (),
 ) -> tuple[np.ndarray, dict]:
     """Keep grasps the arm can reach, at the pick and the place *and around them*.
 
@@ -359,13 +422,32 @@ def by_reachability(
     The poses are ``grip_site`` poses, which is the frame the IK solves in and
     the frame the controller is commanded in.
 
-    Returns the survivors and a per-stage tally of where reachability failed,
+    **Reachable is not the same as clear, and until 7.35 only the first was
+    checked.** ``solve_ik`` is joint angles and a Jacobian with no collision
+    model, so a pose inside a shelf solves happily. With ``check_collision`` the
+    IK solution for every corridor pose is additionally put into the model and
+    tested with MuJoCo's own narrowphase (:func:`arm_collides`). Measured cost
+    of not doing it: 15 of 20 transported plans command the hand inside the top
+    cubby's back wall by up to 79.9 mm, the arm jams, and every placement
+    becomes a drop from up to 15 cm.
+
+    Args:
+        check_collision: Also reject a pose whose IK solution puts the arm or
+            hand inside scene geometry.
+        ignore_collisions_with: Substrings naming geoms whose contacts do not
+            count. **The target object belongs here**: the fingers are meant to
+            close around it, so its contacts are the grasp, not a fault.
+
+    Returns the survivors and a per-stage tally of where the candidate failed,
     which is what distinguishes "the object is out of reach" from "the shelf
-    is".
+    is". A pose rejected for collision rather than for reach is tallied under
+    ``"<segment>_collision"``, so the two causes stay separable -- they need
+    completely different fixes.
     """
     from tpgpt.sim.kinematics import reachable
 
     failures = {"pre_grasp": 0, "grasp": 0, "lift": 0, "place": 0, "retreat": 0}
+    failures.update({f"{k}_collision": 0 for k in list(failures)})
     keep = []
     for i in indices:
         grasp = grasps[i]
@@ -396,6 +478,12 @@ def by_reachability(
         for name, result in zip(names, results):
             if not result.reachable:
                 failures[name] += 1
+                ok = False
+                break
+            if check_collision and arm_collides(
+                env, result.qpos, arm=arm, ignore=ignore_collisions_with
+            ):
+                failures[f"{name}_collision"] += 1
                 ok = False
                 break
         keep.append(ok)
@@ -432,6 +520,7 @@ def suppress_duplicates(
     indices: np.ndarray,
     position_tolerance: float = DUPLICATE_POSITION,
     angle_tolerance_deg: float = DUPLICATE_ANGLE_DEG,
+    key=None,
 ) -> np.ndarray:
     """Keep the best of each cluster of near-identical grasps.
 
@@ -439,8 +528,25 @@ def suppress_duplicates(
     of each other, so an argmax picks an arbitrary member of a cluster. Thinning
     them keeps the surviving set *diverse*, which is what lets a later filter
     reject one candidate and still leave somewhere to go.
+
+    **"Best" is the caller's to define, and defaulting it to the score was
+    costing candidates.** A cluster is anything within
+    :data:`DUPLICATE_POSITION` (20 mm) and :data:`DUPLICATE_ANGLE_DEG`
+    (**20 degrees**), which is a wide net: two members can differ by 20 degrees
+    of approach, and this used to keep whichever GraspGen-X scored higher.
+    Section 8h found no evidence that score predicts anything, while agreement
+    with the demonstration demonstrably matters to a method whose job is to
+    reproduce a demonstrated approach. Measured: on 4 of 20 cells this stage was
+    the one that discarded the best-aligned candidate.
+
+    Args:
+        key: ``key(index) -> float``, smaller is better, deciding which member
+            of a cluster survives. Defaults to the planner's score, for callers
+            with nothing better; :func:`filter_grasps` passes approach agreement
+            when it has a reference to compare against.
     """
-    order = sorted(indices, key=lambda i: -grasps[i].score)
+    key = key if key is not None else (lambda i: -grasps[i].score)
+    order = sorted(indices, key=key)
     limit = np.cos(np.radians(angle_tolerance_deg))
     kept: list[int] = []
     for i in order:
@@ -466,6 +572,7 @@ def filter_grasps(
     place_pose: tuple[np.ndarray, np.ndarray] | None = None,
     held_points: np.ndarray | None = None,
     reference_approach: np.ndarray | None = None,
+    target_name: str | None = None,
 ) -> FilterFunnel:
     """Run the whole funnel, recording what each stage cost.
 
@@ -476,6 +583,12 @@ def filter_grasps(
     Every stage that would empty the set instead passes its input through and
     raises a flag. That keeps a hard scene answering "here is the least bad
     grasp, and here is what is wrong with it" rather than "no grasp exists".
+
+    Args:
+        target_name: The object being picked, so the reachability stage can
+            tell the fingers closing around it -- which is the grasp -- from
+            the hand fouling the shelf, which is not. Without it a legitimate
+            grasp is rejected for touching its own target.
     """
     pair = gripper if isinstance(gripper, GripperPair) else resolve_pair(gripper)
     funnel = FilterFunnel()
@@ -514,7 +627,13 @@ def filter_grasps(
             indices,
         )
     if env is not None:
-        survivors, failures = by_reachability(env, grasps, indices, pair, place_pose)
+        survivors, failures = by_reachability(
+            env, grasps, indices, pair, place_pose,
+            # The fingers are *meant* to close around the target, so its
+            # contacts are the grasp rather than a fault. Everything else --
+            # the shelf above all -- counts.
+            ignore_collisions_with=tuple(t for t in (target_name,) if t),
+        )
         funnel.flags["reach_failures"] = failures
         indices = stage(
             "reachable",
@@ -522,10 +641,29 @@ def filter_grasps(
             "approach corridors into both",
             survivors, indices,
         )
+    # **Rank by agreement with the demonstration when there is one**, both for
+    # thinning duplicates and for the final order. The planner's confidence is
+    # the only ranking available without a reference, but it is not the right
+    # one here: a transported policy reproduces a demonstrated approach, so a
+    # candidate 40 degrees off is worse than one 6 degrees off whatever the
+    # discriminator thinks, and 8h found no evidence the score predicts
+    # anything. Measured with score as the key: the chosen candidate's approach
+    # mismatch runs at a median of 13.8 degrees against 3.2, its TCP sits a
+    # median 15.7 mm away, and 39 of 40 cells execute a different grasp.
+    if reference_approach is not None:
+        unit = np.asarray(reference_approach, dtype=float)
+        unit = unit / np.linalg.norm(unit)
+        rank = lambda i: -float(grasps[i].approach @ unit)  # noqa: E731
+    else:
+        rank = lambda i: -grasps[i].score  # noqa: E731
+
     indices = stage(
         "distinct", f"duplicates within {DUPLICATE_POSITION * 100:.0f} cm thinned out",
-        suppress_duplicates(grasps, indices), indices,
+        suppress_duplicates(grasps, indices, key=rank), indices,
     )
 
-    funnel.survivors = np.array(sorted(indices, key=lambda i: -grasps[i].score), dtype=int)
+    funnel.survivors = np.array(sorted(indices, key=rank), dtype=int)
+    funnel.flags["ranked_by"] = (
+        "approach agreement" if reference_approach is not None else "planner score"
+    )
     return funnel

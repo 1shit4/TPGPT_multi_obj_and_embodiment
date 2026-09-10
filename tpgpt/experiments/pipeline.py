@@ -312,6 +312,7 @@ def run(
             grasp_set.grasps, gripper, cloud.points, scene_points=scene,
             camera_positions=cloud.camera_positions, env=env, place_pose=provisional,
             reference_approach=_demonstrated_approach(labels),
+            target_name=result.object_name,
         )
         result.funnel = funnel
         if not len(funnel.survivors):

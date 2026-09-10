@@ -362,6 +362,7 @@ def target_placement(
                 grasp_set.grasps, gripper, cloud.points, scene_points=scene,
                 camera_positions=cloud.camera_positions, env=env,
                 place_pose=provisional, reference_approach=reference,
+                target_name=instance,
             )
             if not len(funnel.survivors):
                 raise RuntimeError(
