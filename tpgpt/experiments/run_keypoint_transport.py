@@ -299,6 +299,8 @@ def target_placement(
     """
     cloud = object_point_cloud(env, instance, obs=obs)
     support = table_surface(env)
+    #: Empty unless the full funnel runs; only it produces flags.
+    funnel_flags: dict = {}
     if grasp_source == "recipe":
         grasp = top_down_grasp(cloud.points, height_fraction=height_fraction)
     elif grasp_source == "graspgen":
@@ -370,6 +372,11 @@ def target_placement(
                     f"filters, mostly by {funnel.rejected_by}"
                 )
             order = np.asarray(funnel.survivors, dtype=int)
+            # The funnel's flags are the only record of *why* a grasp was
+            # chosen, and one of them names a perception failure rather than a
+            # grasping one: a cloud too thin to verify the object fits the jaws.
+            # Kept so a cell can be reported as a point-cloud fault.
+            funnel_flags = dict(funnel.flags)
         elif filters == "approach":
             # Best-aligned first, then by rank within that.
             order = keep[np.argsort(angles[keep])]
@@ -400,6 +407,10 @@ def target_placement(
         support_height=support,
         destination=destination,
         destination_height=float(destination[2]),
+        metadata={
+            "grasp_funnel_flags": funnel_flags,
+            "cloud_points": int(len(cloud.points)),
+        },
     )
     return placement, cloud.points
 

@@ -459,6 +459,26 @@ Each of these cost real debugging time. Full detail in `ROBOTICS_NOTES.md`.
   a median of 3.2 to 13.8 degrees and its TCP moves a median 15.7 mm, so
   **39 of 40 cells execute a different grasp**. A run that varies this and
   anything else measures neither. `§8k` in `outputs/keypoints_sweep/FINDINGS.md`.
+- **A cloud's extent is a *lower bound* on an object's width, so the jaw-width
+  check can prove "too wide" and can never prove "fits".** It read 5.9 mm from
+  11 slab points across a 50.0 mm can and passed it to a hand whose jaws open to
+  exactly 50.0 mm; the fingers then travelled **39.6 mm through the can**,
+  wedging it 16.1 mm sideways while the grip bled from 20.3 N to 0.6 N. Not
+  sparsity -- at 512 px that slab has 108 points and still reads 21.3 mm -- the
+  cameras see a crescent and the object continues behind it. `by_jaw_width` now
+  gives three verdicts and **drops** what it cannot measure; the funnel's own
+  fallback stops that emptying the set, and `flags["cloud_too_sparse_for_jaw_width"]`
+  reaches `ObjectPlacement.metadata` so the cell reads as a *perception* fault,
+  not a grasping one. Widest-chord and slab-disagreement were both measured as
+  replacements and both over-reject a legitimate grasp. `§7.36`.
+- **The object is the gripper's only end-stop, and `+1` is a position command.**
+  In the one cell that holds, the object arrests the jaws after **0.9 mm** and
+  the force sits flat at 18.7 N for a hundred waypoints. In every failing cell
+  they keep travelling -- 6.3, 8.0, 9.6, 39.6 mm -- and the force *decays* as
+  they go, so a decaying grip force means contact is being dismantled, not that
+  the hand is too weak: peak forces are **394x to 8957x** the object's weight.
+  A closure-hold must therefore close *past* contact by a preload and stop; a
+  literal stop-at-contact gives zero penetration and zero force.
 - **Two capabilities exist in the policy and are never used at runtime.**
   `prediction.reference` — the regressed attractor position, the paper's own
   Sec. V formulation and the policy's only restoring term — is fitted and never
@@ -635,7 +655,7 @@ offset is the only one in the registry with a large lateral component
 (`[0.0, -0.035, -0.112]`) and which §7.2 measured as tolerating only 15 mm of
 depth error against 120-135 mm for the parallel jaws.
 
-**590 tests pass** in ~5 min; the unit suite alone is 492 in ~17 s. The suite
+**607 tests pass** in ~4 min; the unit suite alone is 509 in ~16 s. The suite
 was unaffected by the campaign deletion, because it tests mechanisms rather than
 campaign outcomes — but note that it also failed to catch the three frame
 defects of `§7.33`-`§7.34` for the life of the project, and one of its tests

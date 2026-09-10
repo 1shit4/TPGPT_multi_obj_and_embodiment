@@ -60,6 +60,39 @@ APPROACH_SAMPLES = 4
 #: Clearance the object's width must leave inside the jaws, in metres.
 JAW_MARGIN = 0.005
 
+#: Cloud points the jaws' slab needs before the width it measures means anything.
+#:
+#: An observed cloud is a **lower bound** on an object's width: the camera sees
+#: the near surface and the object continues behind it. So "measured width fits"
+#: is never a sound conclusion, while "measured width already exceeds the
+#: aperture" is. This threshold marks the cases where the measurement is too
+#: thin to act on at all, so they can be reported as a perception failure rather
+#: than silently accepted as a fit.
+#:
+#: Measured on the tabletop scene at the default 256 px, three fused cameras,
+#: one pixel of mask erosion, comparing the slab's extent along each grasp's own
+#: closing axis against the object's true width from its mesh vertices:
+#:
+#: =============  =========  ==============  ============  ============
+#: cell           slab pts   slab measured   true width    under-read
+#: =============  =========  ==============  ============  ============
+#: ``yumi/can``   11          5.9 mm         52.8 mm       **46.9 mm**
+#: robotiq85/can  13         27.0 mm         55.4 mm       **28.4 mm**
+#: yumi/bread     100        38.4 mm         41.8 mm       3.4 mm
+#: xarm/bread     97         44.2 mm         53.5 mm       9.3 mm
+#: panda/bread    89         44.2 mm         53.0 mm       8.8 mm
+#: =============  =========  ==============  ============  ============
+#:
+#: The can is 57 cloud points in total, so no grasp on it can populate a slab;
+#: the bread is 167 and every grasp on it can. Set to match the pipeline's own
+#: ``MIN_CLOUD_POINTS`` of 40, which draws the same line for the same reason.
+#:
+#: **This does not make the check sound**, and the limit is not sparsity. At
+#: 512 px ``yumi/can`` has 108 points in its slab and still measures 21.3 mm
+#: against 52.8 mm, because the cloud is a partial view and no density fixes
+#: that. See ``ROBOTICS_NOTES.md`` for the open item.
+MIN_JAW_WIDTH_POINTS = 40
+
 #: How far a candidate's approach may differ from the demonstration's.
 #:
 #: The transported policy executes the *demonstrated* motion warped into the new
@@ -211,6 +244,60 @@ def by_target(
 
 
 # ---------------------------------------------------------------- jaw width
+def jaw_width_verdicts(
+    grasps: list[Grasp6D],
+    indices: np.ndarray,
+    target_points: np.ndarray,
+    pair: GripperPair,
+    margin: float = JAW_MARGIN,
+    slab: float = 0.012,
+    min_points: int = MIN_JAW_WIDTH_POINTS,
+) -> dict[int, str]:
+    """Per-grasp verdict on whether the object fits between the jaws.
+
+    Three outcomes, because two are not enough:
+
+    ``"too_wide"``
+        The cloud *already* spans more than the hand can open. Sound whatever
+        the point count, because the observed extent is a lower bound on the
+        object: if the lower bound does not fit, neither does the object.
+    ``"unverified"``
+        Fewer than ``min_points`` in the slab the jaws sweep. The extent such a
+        slab reports is not a measurement of the object -- on ``yumi/can`` it
+        read 5.9 mm across a 52.8 mm can -- so nothing may be concluded from it
+        in either direction.
+    ``"fits"``
+        Enough cloud to measure, and the measurement leaves ``margin``.
+
+    Note what ``"fits"`` does **not** mean. The cloud is a partial view, so its
+    extent under-reads the object and this verdict stays optimistic; it says the
+    evidence available does not forbid the grasp, not that the grasp is possible.
+    Making it sound needs an *upper* bound on the object, which a depth cloud
+    cannot provide -- see ``ROBOTICS_NOTES.md`` for the visual-hull open item.
+    """
+    aperture = gripper_geometry(pair.graspgen).aperture
+    points = np.asarray(target_points, dtype=float)
+    verdicts: dict[int, str] = {}
+    for i in indices:
+        key = int(i)
+        if len(points) == 0:
+            verdicts[key] = "unverified"
+            continue
+        grasp = grasps[key]
+        held = _held_point(grasp, pair)
+        along = (points - held) @ grasp.approach
+        slice_points = points[np.abs(along) <= slab]
+        if len(slice_points) >= 2:
+            width = float(np.ptp(slice_points @ grasp.closing))
+            # A lower bound that already exceeds the aperture settles it, and
+            # needs no minimum point count to do so.
+            if width + margin > aperture:
+                verdicts[key] = "too_wide"
+                continue
+        verdicts[key] = "unverified" if len(slice_points) < min_points else "fits"
+    return verdicts
+
+
 def by_jaw_width(
     grasps: list[Grasp6D],
     indices: np.ndarray,
@@ -218,31 +305,35 @@ def by_jaw_width(
     pair: GripperPair,
     margin: float = JAW_MARGIN,
     slab: float = 0.012,
+    min_points: int = MIN_JAW_WIDTH_POINTS,
 ) -> np.ndarray:
-    """Drop grasps where the object is wider than the hand can open.
+    """Keep only grasps whose fit between the jaws was actually verified.
 
-    Measures the object's width along that grasp's own closing axis, in the
-    slab of cloud the jaws would travel through, rather than using a global
-    bounding box: a bottle is narrow at the neck and wide at the base, and which
-    one matters depends on where the grasp sits.
+    Measures the object's width along that grasp's own closing axis, in the slab
+    of cloud the jaws would travel through, rather than using a global bounding
+    box: a bottle is narrow at the neck and wide at the base, and which one
+    matters depends on where the grasp sits.
+
+    A grasp whose width could not be measured is dropped rather than waved
+    through. It used to be waved through, on the reasoning that absence of
+    evidence is not evidence of a wide object -- which is true, and was the
+    wrong action to take on it. ``yumi/can`` is the case that settled it: an
+    11-point slab reported 5.9 mm across a 50.0 mm can, the check
+    ``5.9 + 5 <= 50`` passed, and the yumi's jaws open to exactly 50.0 mm, so
+    the hand could only ever touch the can tangentially. In physics the jaws
+    then travelled 39.6 mm *through* it, wedging it 16.1 mm sideways while the
+    grip force bled from 20.3 N to 0.6 N.
+
+    Dropping them is safe because the funnel never returns an empty set: if this
+    stage removes everything, ``filter_grasps`` restores its input and raises
+    ``jaw width_fell_back``, and the unverified count reaches the report either
+    way. So the effect is to *prefer* a grasp whose fit is known whenever one
+    exists, and to say so plainly when none does.
     """
-    aperture = gripper_geometry(pair.graspgen).aperture
-    points = np.asarray(target_points, dtype=float)
-    if len(points) == 0:
-        return np.asarray(indices)
-
-    keep = []
-    for i in indices:
-        grasp = grasps[i]
-        held = _held_point(grasp, pair)
-        along = (points - held) @ grasp.approach
-        slice_points = points[np.abs(along) <= slab]
-        if len(slice_points) < 4:
-            keep.append(True)  # too little cloud to judge; not the same as too wide
-            continue
-        projected = slice_points @ grasp.closing
-        keep.append(bool(float(np.ptp(projected)) + margin <= aperture))
-    return _keep(indices, keep)
+    verdicts = jaw_width_verdicts(
+        grasps, indices, target_points, pair, margin, slab, min_points
+    )
+    return _keep(indices, [verdicts[int(i)] == "fits" for i in indices])
 
 
 # ---------------------------------------------------------------- collision
@@ -642,10 +733,24 @@ def filter_grasps(
         "on target", f"the held object lands within {MAX_TARGET_DISTANCE * 100:.0f} cm of the cloud",
         by_target(grasps, indices, target_points, pair), indices,
     )
+    # Recorded before the stage runs, because the stage may fall back and
+    # restore exactly the candidates whose width could not be measured. A cell
+    # that ends up executing one of those has a *perception* fault, not a
+    # grasping one, and the report must be able to tell them apart.
+    verdicts = jaw_width_verdicts(grasps, indices, target_points, pair)
+    tally = {v: sum(1 for x in verdicts.values() if x == v)
+             for v in ("fits", "too_wide", "unverified")}
+    funnel.flags["jaw_width"] = tally
+    if tally["unverified"]:
+        funnel.flags["jaw_width_unverified"] = tally["unverified"]
     indices = stage(
         "jaw width", "the object fits between the jaws at the grasp height",
         by_jaw_width(grasps, indices, target_points, pair), indices,
     )
+    if tally["fits"] == 0 and tally["unverified"]:
+        # Nothing was verifiable, so whatever survives here was chosen without a
+        # width check. Named for the cause, which is the cloud.
+        funnel.flags["cloud_too_sparse_for_jaw_width"] = True
     if scene_points is not None and len(scene_points):
         indices = stage(
             "collision", "the hand and its approach are clear of the rest of the scene",

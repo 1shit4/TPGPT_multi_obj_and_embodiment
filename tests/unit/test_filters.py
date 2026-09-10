@@ -18,6 +18,7 @@ from tpgpt.grasp.filters import (
     FilterFunnel,
     by_collision,
     by_jaw_width,
+    jaw_width_verdicts,
     by_target,
     by_visibility,
     filter_grasps,
@@ -133,11 +134,69 @@ class TestJawWidth:
         assert fits is True and does_not is False
 
     def test_too_little_cloud_is_not_treated_as_too_wide(self):
-        """Absence of evidence is not evidence of a wide object; a sparse cloud
-        is a perception problem and belongs in a different report line."""
+        """Absence of evidence is not evidence of a wide object.
+
+        It is not evidence of a *narrow* one either, which is what the previous
+        version of this test asserted by requiring the grasp to be kept. The
+        distinction it was protecting is preserved and now explicit: the verdict
+        is ``"unverified"``, never ``"too_wide"``, so the report can name a
+        perception failure instead of a grasping one -- the "different report
+        line" this docstring always asked for, which did not exist until it was
+        built.
+        """
         pair = resolve_pair(PAIR)
         grasp = grasp_at([0, 0, 0.9])
-        assert len(by_jaw_width([grasp], np.array([0]), np.zeros((2, 3)), pair)) == 1
+        verdicts = jaw_width_verdicts([grasp], np.array([0]), np.zeros((2, 3)), pair)
+        assert verdicts[0] == "unverified"
+
+    def test_an_unverifiable_grasp_is_not_certified_as_fitting(self):
+        """The measured case: ``yumi/can``.
+
+        An 11-point slab reported 5.9 mm across a 50.0 mm can, whose hand opens
+        to exactly 50.0 mm. Waving it through on "absence of evidence" is what
+        sent the arm to a grasp that cannot exist, and the jaws then travelled
+        39.6 mm through the can while the grip force bled from 20.3 N to 0.6 N.
+        """
+        pair = resolve_pair(PAIR)
+        grasp = grasp_at([0, 0, 0.9])
+        sparse = np.zeros((2, 3))
+        assert len(by_jaw_width([grasp], np.array([0]), sparse, pair)) == 0
+
+    def test_a_lower_bound_that_already_exceeds_the_aperture_needs_no_quorum(self):
+        """A sparse cloud can still prove an object too wide.
+
+        The observed extent is a *lower bound* on the object, so if the bound
+        alone does not fit the jaws, neither does the object -- and that holds
+        however few points drew it. Only the positive verdict needs a quorum.
+        """
+        pair = resolve_pair(PAIR)
+        aperture = gripper_geometry("franka_panda").aperture
+        depth = gripper_geometry("franka_panda").tcp_depth
+        grasp = grasp_at([0, 0, 0.85 + depth])
+        # Four points, fewer than MIN_JAW_WIDTH_POINTS, spanning more than the
+        # hand can open along this grasp's own closing axis.
+        span = aperture * 1.5
+        pts = np.array([grasp.closing * s + [0, 0, 0.85] for s in (-span / 2, span / 2)])
+        verdicts = jaw_width_verdicts([grasp], np.array([0]), pts, pair)
+        assert verdicts[0] == "too_wide"
+        assert len(by_jaw_width([grasp], np.array([0]), pts, pair)) == 0
+
+    def test_the_funnel_marks_a_cell_whose_width_could_not_be_verified(self):
+        """The mark is the point of the change.
+
+        Dropping unverifiable grasps would be useless on its own, because the
+        funnel restores them when the stage empties the set -- so the run still
+        goes ahead. What makes it honest is that the flag says the grasp was
+        chosen without a width check, and names the cloud as the reason.
+        """
+        pair = resolve_pair(PAIR)
+        grasp = grasp_at([0, 0, 0.9])
+        funnel = filter_grasps([grasp], pair, np.zeros((2, 3)))
+        assert funnel.flags["jaw_width"]["unverified"] == 1
+        assert funnel.flags["jaw_width"]["fits"] == 0
+        assert funnel.flags["cloud_too_sparse_for_jaw_width"] is True
+        # and it did not come back empty
+        assert len(funnel.survivors) == 1
 
 
 class TestCollision:
