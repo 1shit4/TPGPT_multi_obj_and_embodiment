@@ -227,6 +227,7 @@ def target_placement(
     reference_approach: np.ndarray | None = None,
     filters: str = "approach",
     slot_for_filters: str | None = None,
+    rank_by: str = "auto",
 ) -> tuple[ObjectPlacement, np.ndarray]:
     """Describe an object in the scene and where the task wants it.
 
@@ -235,6 +236,23 @@ def target_placement(
             natural narrow direction. The keypoint box is built in a frame
             derived from the closing axis, so the closing *direction* changes the
             keypoints while the grasp's height does not.
+        rank_by: Which surviving candidate is executed. Independent of
+            ``filters``, because "which candidates are allowed" and "which
+            allowed one is used" are separate decisions.
+
+            ``"demonstration"`` takes the smallest approach mismatch from the
+            source; ``"score"`` takes GraspGen-X's highest confidence;
+            ``"auto"`` (the default) keeps the historical pairing --
+            demonstration for ``filters="approach"``, score for ``"full"`` --
+            so every existing caller is unaffected.
+
+            Vary this **alone** to ask what the ranking is worth, and hold it
+            fixed to ask anything else. Experiment N moved it together with the
+            filter set and could measure neither (`FINDINGS.md` 8k): the chosen
+            candidate's approach mismatch went from a median 3.2 to 13.8 degrees
+            and its TCP moved a median 15.7 mm, so 39 of 40 cells executed a
+            different grasp.
+
         tilt_offset_deg: Tilt the grasp's **approach** out of the plane, about
             its own closing axis.
 
@@ -371,19 +389,47 @@ def target_placement(
                     f"every candidate for {instance!r} was rejected by the grasp "
                     f"filters, mostly by {funnel.rejected_by}"
                 )
-            order = np.asarray(funnel.survivors, dtype=int)
+            survivors = np.asarray(funnel.survivors, dtype=int)
+            default_rank = "score"
             # The funnel's flags are the only record of *why* a grasp was
             # chosen, and one of them names a perception failure rather than a
             # grasping one: a cloud too thin to verify the object fits the jaws.
             # Kept so a cell can be reported as a point-cloud fault.
             funnel_flags = dict(funnel.flags)
         elif filters == "approach":
-            # Best-aligned first, then by rank within that.
-            order = keep[np.argsort(angles[keep])]
+            survivors = np.asarray(keep, dtype=int)
+            default_rank = "demonstration"
         else:
             raise ValueError(
                 f"unknown filters {filters!r}; expected 'approach' or 'full'"
             )
+
+        # Which candidates survive and which survivor is executed are two
+        # separate decisions, and they used to be welded together: asking for
+        # the light filter forced "closest to the demonstration", asking for the
+        # whole funnel forced "highest score". So the combination of light
+        # filtering with the planner's score -- the run that isolates the
+        # *ranking* -- could not be expressed at all, and any comparison between
+        # the two settings moved both decisions at once. That is what made
+        # Experiment N unreadable (`FINDINGS.md` 8k).
+        chosen_rank = default_rank if rank_by == "auto" else rank_by
+        if chosen_rank == "demonstration":
+            # A map constraint, not a grasp criterion: the warp degrades with
+            # the source-to-target frame rotation. Ranking on it says "the map
+            # carries this one most comfortably", never "this is a better grasp".
+            key = np.asarray(angles, dtype=float)[survivors]
+        elif chosen_rank == "score":
+            key = np.array([-grasp_set.grasps[int(i)].score for i in survivors])
+        else:
+            raise ValueError(
+                f"unknown rank_by {rank_by!r}; expected 'auto', "
+                "'demonstration' or 'score'"
+            )
+        # Stable, so ties keep the planner's own order rather than falling out
+        # of quicksort arbitrarily -- the previous sort was unstable and its
+        # comment claimed a secondary key it did not have.
+        order = survivors[np.argsort(key, kind="stable")]
+        funnel_flags["ranked_by"] = chosen_rank
         grasp = GraspFrame.from_grasp(
             grasp_set.grasps[order[min(grasp_rank, len(order) - 1)]]
         )

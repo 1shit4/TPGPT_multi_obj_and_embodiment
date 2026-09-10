@@ -34,7 +34,7 @@ numbers are a scratch experiment, not evidence — that rule is `ROBOTICS_NOTES`
 > | K | §8h grasp control on the corrected scene | — | **stands.** No map in the loop, so no frame defect can reach it |
 > | L | §8i Tier 2 on the corrected scene | frame fixes | **withdrawn as a result, kept as the failure analysis.** Superseded by M |
 > | M | §8j Tier 2 with the frame fixes | — | **stands**, with the caveat below |
-> | N | §8k the full funnel | — | **stands as data**, but confounded against L; its per-cell diagnosis is **withdrawn** (§7.37) |
+> | N | §8k the full funnel | — | **confounded against M**, its intended baseline; its per-cell diagnosis is **withdrawn** (§7.37). It was the botched first attempt at M, not a later experiment |
 >
 > ### The two corrections, and which numbers each reaches
 >
@@ -2087,6 +2087,15 @@ from 4 cm usually works.
 
 **Recorded so the mistake is not repeated, not because it measured anything.**
 `outputs/keypoint_replay_v3_FULLFILTER_CONFOUNDED/`, commit `9894bd6`.
+
+> **The baseline here is M, not L.** This experiment was the *first attempt* at
+> §8j's run and was thrown away for changing the filters at the same time as
+> the frame fixes; M is the one that held the grasp selection fixed. Earlier
+> versions of this banner said "confounded against L", which is doubly wrong:
+> L is itself **withdrawn** (it predates the frame fixes), so comparing against
+> it settles nothing either way. M uses the same approach-only filtering and
+> approach-closeness ranking that L did, so the confound below applies against
+> M identically -- the filter set *and* the ranking both moved.
 
 > **The per-cell diagnosis of this experiment is withdrawn.** A later attempt to
 > attribute each of the twelve failing cells to a physical cause was built on a

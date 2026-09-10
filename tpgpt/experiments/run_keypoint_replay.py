@@ -453,6 +453,7 @@ def main(
     seed: int = 0,
     grippers=REPLAY_GRIPPERS,
     filters: str = "approach",
+    rank_by: str = "auto",
 ) -> dict:
     """Replay every construction on every hand and object.
 
@@ -472,6 +473,12 @@ def main(
             median of 3.2 degrees to 13.8. So a run that changes this *and*
             anything else measures neither. Hold it fixed to compare
             constructions; vary it alone to ask what the funnel is worth.
+
+        rank_by: Which surviving candidate is executed --
+            ``"demonstration"``, ``"score"``, or ``"auto"`` to keep the
+            historical pairing with ``filters``. Separating the two is what
+            makes the filter set and the ranking independently measurable;
+            see :func:`~tpgpt.experiments.run_keypoint_transport.target_placement`.
     """
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -613,6 +620,7 @@ def main(
                         # the placement, which is where most of the failures
                         # turned out to be.
                         filters=filters,
+                        rank_by=rank_by,
                         slot_for_filters=slot,
                     )
                     target.metadata["object_name"] = name
@@ -742,6 +750,17 @@ if __name__ == "__main__":
         ),
     )
     parser.add_argument(
+        "--rank-by", default="auto",
+        choices=("auto", "demonstration", "score"),
+        help=(
+            "Which surviving candidate is executed. Independent of --filters: "
+            "'demonstration' takes the smallest approach mismatch from the "
+            "source, 'score' takes GraspGen-X's highest confidence, 'auto' "
+            "keeps the historical pairing. Vary this alone to measure what the "
+            "ranking is worth."
+        ),
+    )
+    parser.add_argument(
         "--filters", default="approach", choices=("approach", "full"),
         help=(
             "Grasp selection. 'approach' matches the historic runs and is what "
@@ -756,4 +775,5 @@ if __name__ == "__main__":
         grippers=tuple(args.grippers.split(",")) if args.grippers
         else REPLAY_GRIPPERS,
         filters=args.filters,
+        rank_by=args.rank_by,
     )
