@@ -466,7 +466,7 @@ def replay_variant(env, labels, source_placement, target, variant,
                      # run cannot say whether a new filter did anything at all,
                      # which is the check that has to precede believing it did.
                      "place_approach_blocked_by", "path_check",
-                     "path_check_fell_back")
+                     "path_check_fell_back", "stages", "jaw_width")
         },
         "cloud_points": target.metadata.get("cloud_points"),
         # **Grasped, traversed, placed** -- the three questions that are not
@@ -518,6 +518,7 @@ def main(
     path_check: bool = False,
     ik_stride: int = 4,
     max_path_candidates: int = 25,
+    select_only: bool = False,
 ) -> dict:
     """Replay every construction on every hand and object.
 
@@ -603,6 +604,26 @@ def main(
         ik_stride: Waypoint stride for that kinematic pass.
         max_path_candidates: How far down the ranked list the path check looks
             before falling back to the top-ranked candidate.
+
+        select_only: Stop after choosing the grasp. No physics is stepped, so a
+            cell costs seconds instead of a minute and a half, and the answer is
+            *which candidate each cell would execute and what each filter stage
+            cost to get there*.
+
+            **This exists to answer "is the change inert" before an hour is
+            spent measuring it.** Two filter settings that pick the same
+            candidate on a cell make that cell the same run twice, carrying no
+            information about either setting; ``flip_target`` was inert for the
+            life of the project for want of exactly this check
+            (`ROBOTICS_NOTES.md` 7.34), and Experiment N was unreadable because
+            nobody knew until afterwards that 39 of its 40 cells had executed a
+            different grasp from their baseline (`FINDINGS.md` 8k).
+
+            It runs through the driver rather than through a script of its own,
+            deliberately. A standalone script that rebuilds the selection picks
+            *different grasps from the driver*, so it analyses cells the
+            campaign never ran -- which has cost this project hours and two
+            retracted conclusions.
     """
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -781,10 +802,20 @@ def main(
                                 f"rebuilds: {name}'s grasp TCP moved "
                                 f"{np.linalg.norm(target.grasp.tcp - reference_tcp) * 1000:.1f} mm"
                             )
-                    row = replay_variant(
-                        env, labels, source_placement, target, variant,
-                        gripper=gripper, force_target=force_target,
-                    )
+                    if select_only:
+                        row = {
+                            "variant": variant.name,
+                            "gripper": gripper,
+                            "selected_only": True,
+                            "cloud_points": target.metadata.get("cloud_points"),
+                            **{f"grasp_{k}": v for k, v in
+                               (target.metadata.get("grasp_funnel_flags") or {}).items()},
+                        }
+                    else:
+                        row = replay_variant(
+                            env, labels, source_placement, target, variant,
+                            gripper=gripper, force_target=force_target,
+                        )
                 # **Both, and deliberately.** ``ValueError`` is "too little
                 # cloud to describe the object"; ``RuntimeError`` is "every
                 # candidate is beyond the approach filter". Both are the
@@ -833,6 +864,10 @@ def main(
                                 "max_path_candidates": int(max_path_candidates)},
             "cells": None if cells is None else sorted(wanted),
             "gripper_command": {"force_target": force_target},
+            # A selection-only run has no success column at all. Recorded at the
+            # top of the manifest so it can never be read as a campaign whose
+            # cells all failed.
+            "select_only": bool(select_only),
             "fixed": {
                 "source": "reshelving seed 0, one demonstration",
                 "slot": slot,
@@ -866,6 +901,24 @@ def main(
 
 
 def _replay_line(row: dict) -> str:
+    if row.get("selected_only"):
+        stages = row.get("grasp_stages") or []
+        trail = " -> ".join(
+            f"{name}:{survived}" + ("!" if fell_back else "")
+            for name, _entered, survived, fell_back in stages
+        )
+        check = row.get("grasp_path_check") or {}
+        return (
+            f"{row.get('variant', '?'):18}{row.get('gripper', '?'):11}"
+            f"{row.get('object', '?'):8}"
+            f" #{row.get('grasp_chosen_index', -1):<4}"
+            f" score {row.get('grasp_chosen_score', float('nan')):.3f}"
+            f" gap {row.get('grasp_chosen_approach_mismatch_deg', float('nan')):5.1f}"
+            f" off {row.get('grasp_offset_mm', float('nan')):5.1f}mm"
+            f" tried {check.get('rank_examined', 0):2d}"
+            + ("  FELL BACK" if check.get("fell_back") else "")
+            + f"   {trail}"
+        )
     if "failed" in row or "skipped" in row:
         note = row.get("failed") or row.get("skipped")
         # The hand, too. With one gripper it was inferable from context; with
@@ -968,6 +1021,15 @@ if __name__ == "__main__":
     )
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument(
+        "--select-only", action="store_true",
+        help=(
+            "Choose the grasp for every cell and stop -- no physics. Says "
+            "which candidate each cell would execute and what each filter "
+            "stage cost, in seconds per cell rather than minutes. Run it "
+            "before a campaign to check the change is not inert."
+        ),
+    )
+    parser.add_argument(
         "--ik-stride", type=int, default=4,
         help="Waypoint stride for the path check's inverse-kinematics pass.",
     )
@@ -994,4 +1056,5 @@ if __name__ == "__main__":
         path_check=args.path_check,
         ik_stride=args.ik_stride,
         max_path_candidates=args.max_path_candidates,
+        select_only=args.select_only,
     )

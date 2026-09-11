@@ -1438,4 +1438,13 @@ def filter_grasps(
 
     funnel.survivors = np.array(sorted(indices, key=rank), dtype=int)
     funnel.flags["ranked_by"] = "discriminator score"
+    # **What each stage cost, carried into the flags and so into every row.**
+    # The funnel prints this, and a campaign throws the print away. Without it
+    # a run that ends with two survivors out of a hundred cannot say whether a
+    # new stage did that or whether the stages that were always there did, and
+    # "check a change is not inert before spending an hour measuring it" is not
+    # answerable after the fact.
+    funnel.flags["stages"] = [
+        [s.name, s.entered, s.survived, bool(s.fallback)] for s in funnel.stages
+    ]
     return funnel
