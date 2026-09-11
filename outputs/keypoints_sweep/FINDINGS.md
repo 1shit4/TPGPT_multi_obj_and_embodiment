@@ -2273,12 +2273,194 @@ choice of §8j — for any hand that declares itself asymmetric.
 
 ---
 
+## 8m. Experiment O — what the grasp filters and the ranking are each worth
+
+**The first run that varies grasp selection one thing at a time.** Experiment N
+changed the filter set and the ranking together and could measure neither
+(§8k); this separates them. `outputs/sel_i`, `sel_ii`, `sel_iii`, commit
+`47b21a5`, clean tree.
+
+### Conditions, held fixed
+
+Five hands (yumi, xarm, panda, robotiq85, robotiq140) times four objects
+(cereal, milk, can, bread), one seed, the **grasp-pose cube only**, the whole
+seven-stage funnel, position-control replay with no policy. **The gripper was
+commanded shut throughout** -- the plain `+1` of every earlier run. Anything
+measured after the gripper changes of 2026-09-12 is not comparable with these.
+
+Two settings were varied, and only these:
+
+* **approach filter** -- whether the 45 degree test against the demonstration's
+  approach direction runs, both inline and as the funnel's "demonstrated" stage;
+* **ranking** -- whether the executed candidate is the one closest to the
+  demonstration's approach, or GraspGen-X's highest scoring.
+
+Separating them needed a code change: the two used to be welded together, so
+"light filtering with the planner's score" could not be expressed at all
+(`04322fd`, `e4c28a3`).
+
+### Results
+
+| run | placed | grasped | traversed | min det (median) | folded | chosen grasp's approach gap |
+|---|---|---|---|---|---|---|
+| **i** no filter, by score | **0/20** | 8/20 | 6/20 | 0.485 | 0 | **90.9°** |
+| **ii** filter, by score | 10/20 | 16/20 | 12/20 | 0.823 | 0 | 14.5° |
+| **iii** no filter, by demo | **11/20** | 15/20 | 14/20 | 0.940 | 0 | 5.1° |
+
+### What it says
+
+**The filter is not what matters. The resulting approach gap is.** Run iii
+applies **no** approach filter at all and is the best of the three: ranking on
+the demonstration reaches a median gap of 5.1 degrees without rejecting
+anything, because it simply picks a well-aligned candidate when one exists.
+
+Pooled over all 60 cells, that gap separates cleanly:
+
+* **21 cells placed** -- median gap 6.1 degrees, **maximum 37.8**
+* **39 cells missed** -- median 73.9 degrees, minimum 2.8
+
+No successful cell exceeded 37.8 degrees. A large gap is reliably fatal; a small
+one is necessary and not sufficient.
+
+**No map folded in any run**, so none of this is map degradation -- which is
+what the filter's own docstring claims it prevents.
+
+**Run i fails because the planner's best grasps are side grasps.** With the
+filter off, the top-scoring candidate is about 90 degrees from the
+demonstration on 18 of 20 cells, and that is a reasonable grasp: taking a
+cereal box from the side is better than pinching its top. But the pipeline
+executes the *demonstrated* motion warped into the new scene, and the
+demonstration is top-down, so the hand descends while the grasp demands a side
+approach. Eq. 11 then rotates the commanded gripper orientation by that 90
+degrees along the whole path, and the arm cannot hold it: reachability collapses
+to a median of about 0.5 with tracking errors of 300-400 mm.
+
+### Separating the kinematic failures
+
+A cell whose plan the arm cannot follow is not a grasping result, so the same
+counts with those excluded:
+
+| run | placed / all | rate | kinematic failures | placed / attempted | rate on the rest |
+|---|---|---|---|---|---|
+| i no filter, by score | 0/20 | 0% | 17 | 0/3 | 0% |
+| ii filter, by score | 10/20 | 50% | 8 | 10/12 | **83%** |
+| iii no filter, by demo | 11/20 | 55% | 6 | 11/14 | **79%** |
+
+**All 14 of those failures are at the placement**, seven at `place` and seven at
+`retreat`, and **none at the pick**. The arm reaches every object and runs out
+putting it away. `ROBOTICS_NOTES.md` §7.38 has what that is.
+
+### What this does not settle
+
+**10 versus 11 is not a difference** at n = 20, and the two runs chose different
+grasps on 17 of the 20 cells, so they are not even measuring the same thing cell
+by cell.
+
+**Both surviving configurations depend on the demonstration** -- ii filters by
+it, iii ranks by it -- and run i, the only one that uses it nowhere in
+selection, places nothing. That dependence is not the filter's fault: the
+executed approach is always the demonstrated one, because the pipeline warps the
+demonstrated motion. A grasp specifying a 90 degree different approach cannot be
+executed however it was chosen. The route to grasp selection that owes nothing
+to the source is a demonstration per approach family, not a better filter.
+
+### Decisions taken from it
+
+The demonstration is dropped from grasp selection entirely -- as a filter and as
+a ranking. It was never requested and entered the code in a bulk commit
+(`a89f0e3`); 45 degrees has no measurement behind it; and the quantity it tests,
+the approach direction, is not the one measured to fold maps, which is the full
+source-to-target frame rotation including a roll this test cannot see.
+
+Replacing it needs a constraint derived from the **scene** rather than the
+source: no-approach zones at the pick (nothing through the table) and at the
+place (nothing through the shelf's back, sides or roof), plus a collision and
+reachability check on the **transported path** rather than the 13-pose sample
+`by_reachability` currently takes. Not yet built.
+
+
+## 8n. Experiment P — is it the gripper, or the grasp?
+
+**The study that should have been run before a day and a half was spent on the
+gripper.** `outputs/graspstudy_r0` to `_r3`, commit `cccac31`, clean tree.
+
+### Why
+
+Tier 2 cells were failing at the grasp, and the gripper mechanism was assumed to
+be at fault. Nothing had tested that assumption: every observation came from
+runs aimed at something else, on one grasp pose per pair, so "this pair failed"
+and "this grasp failed" could not be told apart.
+
+### Conditions
+
+Five pairs -- panda/can, panda/cereal, robotiq85/can, xarm/milk, yumi/bread --
+each at **four different grasp poses** (`grasp_rank` 0 to 3, so the first four
+ranked survivors). Full funnel, ranked by GraspGen-X's score, grasp-pose cube,
+one seed, position-control replay. **The gripper commanded shut with plain
+`+1`** -- no force control, no feedback -- which is what the source
+demonstration and every robosuite benchmark task use.
+
+Also recorded per grasp: the horizontal distance from the object's centre of
+mass to the grasp point.
+
+### Results
+
+| cell | rank 0 | rank 1 | rank 2 | rank 3 |
+|---|---|---|---|---|
+| `panda/can` | grip 414 mm | grip 135 mm | grip 432 mm | grip 426 mm |
+| `panda/cereal` | grip 418 mm | grip 61 mm | **no** 1 mm | grip 173 mm |
+| `robotiq85/can` | grip 43 mm | grip 408 mm | grip 355 mm | grip 397 mm |
+| `xarm/milk` | grip 397 mm | grip 407 mm | grip 397 mm | grip 403 mm |
+| **`yumi/bread`** | **no** 8 mm | **no** 3 mm | **no** 0 mm | **no** 0 mm |
+
+### What it says
+
+**The gripper works. 16 of 20 grasps gripped**, and four of the five pairs
+gripped at every pose tried. So the grasping failures are not the mechanism, and
+the force-control work that preceded this was aimed at a problem that does not
+exist.
+
+**The grasp pose decides the outcome, not the pair.** Same pair, different
+grasp: ``robotiq85/can`` lifts **43 mm** at one pose and **408 mm** at another;
+``panda/cereal`` runs 418, 61, 1, 173 mm across four. The spread *within* a pair
+is larger than the spread between pairs, which is why one pose per pair could
+never have separated them.
+
+**Distance from the centre of mass predicts, but not completely.** Sorted over
+all twenty grasps, the eleven that carried past 200 mm have a median offset of
+**6.3 mm** against **19.1 mm** for the rest, and **every grasp under 10 mm
+carried** bar one. But two cells contradict it outright: ``panda/cereal``
+**failed at 6.2 mm** and **carried 418 mm at 23.4 mm**, and still lifted 173 mm
+from **51.7 mm** off centre. So an offset criterion is worth having and cannot
+be the only one.
+
+**``yumi/bread`` is a pair, not a grasp.** Zero grips in four attempts, the
+object never moving. Its 50 mm jaws against bread's 40.2 mm narrow dimension
+leave 10 mm of total clearance, and all four offsets (13.3 to 24.2 mm) exceed
+half of it, so the fingers straddle an edge rather than the body. No grasp
+selection fixes that; the pair should be excluded or approached differently.
+
+### Consequences
+
+* the gripper stays as it was -- commanded shut, no force control. The
+  mechanism was never the fault;
+* an offset-from-centre criterion joins the filter work, justified by this
+  rather than asserted;
+* the grasping failures are relocated to grasp *selection*, which is what the
+  filters address.
+
+**What it does not establish.** Five pairs and four poses show that pose
+dominates and that the gripper works. They do not show that every Tier 2 grasp
+failure is pose-related, and the two contradicting cells mean an offset filter
+will pass some bad grasps and reject some good ones.
+
+
 ## 8z. Open items, blocked work, and grey areas
 
 > **Updated after Experiment O (2026-09-12).** Three things changed status.
 >
-> **The 78 mm slot reading is withdrawn.** §8z below records the top slot as a
-> 78 mm gap between two walls. Measured from the model, the space above
+> **The 78 mm slot reading is withdrawn.** This section used to record the top
+> slot as a 78 mm gap between two walls. Measured from the model, the space above
 > ``shelf_top_board`` is **open** -- no roof, and nothing at the slot's ``y``
 > except the back panel at ``x`` 0.258-0.270, with the slot centre 38 mm in
 > front of it. The placement failures are still real; the cause is not a tight
@@ -2477,200 +2659,14 @@ That is worth stating because the gripper was extensively reworked on
   every robosuite benchmark with these objects. So the mechanism is not broken
   in general.
 
-The open question is whether the Tier 2 grasping failures are the gripper at
-all, or the grasp poses the funnel selects. That is being measured by running
-the same pairs at several different grasp poses; until it reports, no claim
-about grasping in this document should be read as settled.
+**That question is now answered — see §8n.** Five pairs at four grasp poses
+each: **16 of 20 grasps gripped** with plain `+1`, and four of the five pairs
+gripped at every pose. The gripper was never the fault. What decides the outcome
+is the grasp pose — the same pair lifts 43 mm at one pose and 408 mm at another
+— so the grasping failures belong to grasp *selection*, which is what the filter
+work addresses.
 
-
-## 8m. Experiment O — what the grasp filters and the ranking are each worth
-
-**The first run that varies grasp selection one thing at a time.** Experiment N
-changed the filter set and the ranking together and could measure neither
-(§8k); this separates them. `outputs/sel_i`, `sel_ii`, `sel_iii`, commit
-`47b21a5`, clean tree.
-
-### Conditions, held fixed
-
-Five hands (yumi, xarm, panda, robotiq85, robotiq140) times four objects
-(cereal, milk, can, bread), one seed, the **grasp-pose cube only**, the whole
-seven-stage funnel, position-control replay with no policy. **The gripper was
-commanded shut throughout** -- the plain `+1` of every earlier run. Anything
-measured after the gripper changes of 2026-09-12 is not comparable with these.
-
-Two settings were varied, and only these:
-
-* **approach filter** -- whether the 45 degree test against the demonstration's
-  approach direction runs, both inline and as the funnel's "demonstrated" stage;
-* **ranking** -- whether the executed candidate is the one closest to the
-  demonstration's approach, or GraspGen-X's highest scoring.
-
-Separating them needed a code change: the two used to be welded together, so
-"light filtering with the planner's score" could not be expressed at all
-(`04322fd`, `e4c28a3`).
-
-### Results
-
-============================  ========  =========  ===========  ==========  =======  ==============
-run                           placed    grasped    traversed    min det     folded   chosen grasp's
-                                                                (median)             approach gap
-============================  ========  =========  ===========  ==========  =======  ==============
-**i** no filter, by score     **0/20**  8/20       6/20         0.485       0        **90.9 deg**
-**ii** filter, by score       10/20     16/20      12/20        0.823       0        14.5 deg
-**iii** no filter, by demo    **11/20** 15/20      14/20        0.940       0        5.1 deg
-============================  ========  =========  ===========  ==========  =======  ==============
-
-### What it says
-
-**The filter is not what matters. The resulting approach gap is.** Run iii
-applies **no** approach filter at all and is the best of the three: ranking on
-the demonstration reaches a median gap of 5.1 degrees without rejecting
-anything, because it simply picks a well-aligned candidate when one exists.
-
-Pooled over all 60 cells, that gap separates cleanly:
-
-* **21 cells placed** -- median gap 6.1 degrees, **maximum 37.8**
-* **39 cells missed** -- median 73.9 degrees, minimum 2.8
-
-No successful cell exceeded 37.8 degrees. A large gap is reliably fatal; a small
-one is necessary and not sufficient.
-
-**No map folded in any run**, so none of this is map degradation -- which is
-what the filter's own docstring claims it prevents.
-
-**Run i fails because the planner's best grasps are side grasps.** With the
-filter off, the top-scoring candidate is about 90 degrees from the
-demonstration on 18 of 20 cells, and that is a reasonable grasp: taking a
-cereal box from the side is better than pinching its top. But the pipeline
-executes the *demonstrated* motion warped into the new scene, and the
-demonstration is top-down, so the hand descends while the grasp demands a side
-approach. Eq. 11 then rotates the commanded gripper orientation by that 90
-degrees along the whole path, and the arm cannot hold it: reachability collapses
-to a median of about 0.5 with tracking errors of 300-400 mm.
-
-### Separating the kinematic failures
-
-A cell whose plan the arm cannot follow is not a grasping result, so the same
-counts with those excluded:
-
-=========================  =============  =======  ===================  =====
-run                        placed / all   rate     kinematic failures   rate on the rest
-=========================  =============  =======  ===================  =====
-i no filter, by score      0/20           0%       17                   0/3    0%
-ii filter, by score        10/20          50%      8                    10/12  **83%**
-iii no filter, by demo     11/20          55%      6                    11/14  **79%**
-=========================  =============  =======  ===================  =====
-
-**All 14 of those failures are at the placement**, seven at `place` and seven at
-`retreat`, and **none at the pick**. The arm reaches every object and runs out
-putting it away. `ROBOTICS_NOTES.md` §7.38 has what that is.
-
-### What this does not settle
-
-**10 versus 11 is not a difference** at n = 20, and the two runs chose different
-grasps on 17 of the 20 cells, so they are not even measuring the same thing cell
-by cell.
-
-**Both surviving configurations depend on the demonstration** -- ii filters by
-it, iii ranks by it -- and run i, the only one that uses it nowhere in
-selection, places nothing. That dependence is not the filter's fault: the
-executed approach is always the demonstrated one, because the pipeline warps the
-demonstrated motion. A grasp specifying a 90 degree different approach cannot be
-executed however it was chosen. The route to grasp selection that owes nothing
-to the source is a demonstration per approach family, not a better filter.
-
-### Decisions taken from it
-
-The demonstration is dropped from grasp selection entirely -- as a filter and as
-a ranking. It was never requested and entered the code in a bulk commit
-(`a89f0e3`); 45 degrees has no measurement behind it; and the quantity it tests,
-the approach direction, is not the one measured to fold maps, which is the full
-source-to-target frame rotation including a roll this test cannot see.
-
-Replacing it needs a constraint derived from the **scene** rather than the
-source: no-approach zones at the pick (nothing through the table) and at the
-place (nothing through the shelf's back, sides or roof), plus a collision and
-reachability check on the **transported path** rather than the 13-pose sample
-`by_reachability` currently takes. Not yet built.
-
-
-## 8n. Experiment P — is it the gripper, or the grasp?
-
-**The study that should have been run before a day and a half was spent on the
-gripper.** `outputs/graspstudy_r0` to `_r3`, commit `cccac31`, clean tree.
-
-### Why
-
-Tier 2 cells were failing at the grasp, and the gripper mechanism was assumed to
-be at fault. Nothing had tested that assumption: every observation came from
-runs aimed at something else, on one grasp pose per pair, so "this pair failed"
-and "this grasp failed" could not be told apart.
-
-### Conditions
-
-Five pairs -- panda/can, panda/cereal, robotiq85/can, xarm/milk, yumi/bread --
-each at **four different grasp poses** (`grasp_rank` 0 to 3, so the first four
-ranked survivors). Full funnel, ranked by GraspGen-X's score, grasp-pose cube,
-one seed, position-control replay. **The gripper commanded shut with plain
-`+1`** -- no force control, no feedback -- which is what the source
-demonstration and every robosuite benchmark task use.
-
-Also recorded per grasp: the horizontal distance from the object's centre of
-mass to the grasp point.
-
-### Results
-
-=================  ============  ============  ============  ============
-cell               rank 0        rank 1        rank 2        rank 3
-=================  ============  ============  ============  ============
-panda/can          grip 414 mm   grip 135 mm   grip 432 mm   grip 426 mm
-panda/cereal       grip 418 mm   grip  61 mm   **no** 1 mm   grip 173 mm
-robotiq85/can      grip  43 mm   grip 408 mm   grip 355 mm   grip 397 mm
-xarm/milk          grip 397 mm   grip 407 mm   grip 397 mm   grip 403 mm
-``yumi/bread``     **no** 8 mm   **no** 3 mm   **no** 0 mm   **no** 0 mm
-=================  ============  ============  ============  ============
-
-### What it says
-
-**The gripper works. 16 of 20 grasps gripped**, and four of the five pairs
-gripped at every pose tried. So the grasping failures are not the mechanism, and
-the force-control work that preceded this was aimed at a problem that does not
-exist.
-
-**The grasp pose decides the outcome, not the pair.** Same pair, different
-grasp: ``robotiq85/can`` lifts **43 mm** at one pose and **408 mm** at another;
-``panda/cereal`` runs 418, 61, 1, 173 mm across four. The spread *within* a pair
-is larger than the spread between pairs, which is why one pose per pair could
-never have separated them.
-
-**Distance from the centre of mass predicts, but not completely.** Sorted over
-all twenty grasps, the eleven that carried past 200 mm have a median offset of
-**6.3 mm** against **19.1 mm** for the rest, and **every grasp under 10 mm
-carried** bar one. But two cells contradict it outright: ``panda/cereal``
-**failed at 6.2 mm** and **carried 418 mm at 23.4 mm**, and still lifted 173 mm
-from **51.7 mm** off centre. So an offset criterion is worth having and cannot
-be the only one.
-
-**``yumi/bread`` is a pair, not a grasp.** Zero grips in four attempts, the
-object never moving. Its 50 mm jaws against bread's 40.2 mm narrow dimension
-leave 10 mm of total clearance, and all four offsets (13.3 to 24.2 mm) exceed
-half of it, so the fingers straddle an edge rather than the body. No grasp
-selection fixes that; the pair should be excluded or approached differently.
-
-### Consequences
-
-* the gripper stays as it was -- commanded shut, no force control. The
-  mechanism was never the fault;
-* an offset-from-centre criterion joins the filter work, justified by this
-  rather than asserted;
-* the grasping failures are relocated to grasp *selection*, which is what the
-  filters address.
-
-**What it does not establish.** Five pairs and four poses show that pose
-dominates and that the gripper works. They do not show that every Tier 2 grasp
-failure is pose-related, and the two contradicting cells mean an offset filter
-will pass some bad grasps and reject some good ones.
-
+The gripper is therefore left as it was, and `force_target` stays `None`.
 
 ## 9. Failures, and what caused each
 
