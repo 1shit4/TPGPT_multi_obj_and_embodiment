@@ -3503,6 +3503,178 @@ first is cheap and partial, the second is the real answer and is not this
 thread's, and the third changes what the experiments claim and is a decision
 for the project owner, not for the code.
 
+### 7.39 What a filter that never consults the demonstration can and cannot do
+
+Experiment Q (`FINDINGS.md` §8o) replaced the 45 degree approach test against the
+source demonstration with constraints read off the scene, and added the two
+checks that need the transported trajectory rather than the grasp pose. Five
+things came out of it that outlive the success rate, and they are recorded here
+rather than only in the experiment because each of them changes how some other
+measurement should be read.
+
+#### The 37.8 degree boundary is withdrawn
+
+Experiment O pooled sixty cells and found the chosen grasp's approach mismatch
+from the demonstration separating cleanly: 21 cells placed at a median of 6.1
+degrees with a **maximum of 37.8**, and 39 missed at a median of 73.9. That read
+as a hard ceiling, and it was the strongest single argument for keeping the
+demonstration somewhere in grasp selection.
+
+It is a property of O's three grasp sets, not of the method. In Q,
+``panda/milk`` placed at **65.3 degrees** and ``robotiq85/milk`` at **47.6**, and
+across the whole run the gap separates nothing:
+
+=========  ===  ============================
+outcome    n    approach gap, min-median-max
+=========  ===  ============================
+placed      7   3.3 - 12.5 - **65.3** deg
+missed     13   3.6 - 15.3 - 84.5 deg
+=========  ===  ============================
+
+Split at O's own boundary the rates are indistinguishable -- 2 of 6 placed above
+37.8 degrees against 5 of 14 below. This was **registered as a prediction before
+the run** (`outputs/expQ_select/PREDICTION.md`, written from a physics-free
+selection pass so it could not be written afterwards), predicting all six
+large-gap cells would fail. Two placed, so the prediction is half falsified, and
+the falsified half is worth more than the confirmed half.
+
+**What this does not say.** It does not say the approach direction is irrelevant
+-- Experiment O run i, ranking by the planner's score with no constraint at all,
+chose candidates about 90 degrees out on 18 of 20 cells and placed **nothing**.
+The direction still has to be constrained. What is withdrawn is the claim that
+it must be constrained *by resemblance to the source*, and the specific figure
+of 37.8 degrees.
+
+#### `by_reachability` is inert: it falls back on 20 of 20 cells
+
+With the funnel's per-stage tally now recorded in every row, this is visible for
+the first time. On every single cell of Experiment Q the reachability stage
+rejected **every** remaining candidate, and the funnel -- correctly, by its own
+fallback rule -- passed them all through. So the stage costs thirteen inverse
+kinematics solves per candidate and contributes nothing except a flag saying it
+gave up.
+
+This is 7.38 arriving as a measurement rather than as an argument. That section
+established that 423 of 473 unreachable waypoints are the hand's body inside
+scene geometry, so once ``check_collision`` was added at ``c73f67a`` the stage
+began rejecting essentially everything, and "reject the colliding ones" became
+"reject all of them".
+
+It is also the stage ``path_clearance`` is meant to replace, since the sample it
+takes -- five poses down the approach, two on the lift, five at the placement --
+is exactly the 13-of-200 proxy 7.38 indicts. So it is redundant and inert at the
+same time, and retiring it is its own commit with its own before and after.
+
+**Read anything attributed to "reachability" in an earlier run with this in
+mind.** A funnel flag saying the stage fell back is not the stage doing nothing
+harmful; it is the stage doing nothing at all, at the cost of most of the
+selection's wall clock.
+
+#### The replay is bit-exact across commits, and that is what makes a comparison legitimate
+
+Seven commits touched ``sim/replay.py`` between Experiment O (``47b21a5``) and
+Experiment Q (``286ca1c``), all of them the grip-force work that 8n retired. If
+any had changed the default execution path the two runs would not be comparable,
+and the whole experiment would be unreadable -- which is 7.26's failure wearing
+a new costume, and it would not have announced itself.
+
+Checked instead of assumed. On the **six cells where Q happened to execute the
+same candidate** as run ii or run iii, every recorded field is identical to full
+floating-point precision: ``min_det``, ``aim_map``, ``reachable_fraction``,
+``tracking_error_mean``, ``placement_error_xy``, ``held_steps``, ``slip_max``,
+``lift_height`` and ``success``. Not close -- bit for bit, on ``panda/bread``,
+``panda/can``, ``robotiq140/milk``, ``robotiq140/bread``, ``robotiq85/can`` and
+``yumi/bread``.
+
+Independently, ``panda/cereal`` executed candidate #76 and reproduced Experiment
+P's rank-2 grasp on that pair to the digit: 6.2 mm off centre, no grasp, a
+1.0 mm lift against P's 1 mm, a 320.8 mm placement error against P's 321.
+
+**This is a cheap and general check and it should be run before any cross-run
+comparison.** Find the cells where two runs chose the same candidate and diff
+every field. If they match, the comparison is of the thing that changed; if they
+do not, the comparison is of that *plus* whatever else moved, and the totals mean
+nothing. It costs one script and no physics, because both runs are already on
+disk.
+
+#### The camera-built scene cloud cannot see the shelf, and a cloud cannot report depth
+
+``scene_point_cloud`` is the right representation for objects, whose shape is not
+known in advance. It is the wrong one for the shelf, and the shelf is what 7.35
+and 7.38 are both about.
+
+Measured on the default tabletop scene at 256 px with three cameras: the column
+of space directly above the ``top_middle`` slot -- the column every placement
+descends through -- holds **76 points** out of a scene cloud capped at 8192. A
+hand 10 cm across passes between them. And the nearest-neighbour test in
+``by_collision`` answers "is a scene point within 10 mm of the hand", which
+cannot distinguish a finger grazing a wall from a wrist buried 80 mm inside it.
+
+Neither limit has to be lived with, because of what the obstacles are. **Every
+immovable solid in this scene is a box, a cylinder or a plane** -- the table top,
+the twelve shelf panels, the robot's pedestal and its controller box. Each has a
+closed-form signed distance, so "how far is this point inside that" is exact,
+costs a few arithmetic operations, has no sampling density to choose and nothing
+hidden behind anything else. ``perception/obstacles.py`` reads them straight out
+of the model. The movable objects stay as the oriented bounding boxes MuJoCo
+already stores for their mesh geoms, which over-estimate the object and so err
+towards reporting *less* clearance than there is.
+
+One trap inside this, and it is silent: **MuJoCo's ray caster intersects
+everything that is drawn, including geoms with collision switched off.** This
+scene puts a translucent marker box at every shelf slot, so an unguarded cast
+downwards from a slot reports an obstruction 58 mm away that a hand goes straight
+through -- a plausible number, in the right units, for a surface that is not
+there. ``first_obstruction`` steps past any hit whose ``contype`` and
+``conaffinity`` are both zero and casts again.
+
+#### Depth is the wrong statistic, and a bounded quantity is why
+
+7.38 already concluded that *sustained* penetration separates outcomes and
+maximum depth does not, from one cell placing through a 50.5 mm transient clip
+while another failed with none at all. Re-measuring the same twenty cells with
+the analytic instrument shows the sharper reason:
+
+**``max_depth`` reads exactly 6.0 mm on fourteen of the twenty cells.** That is
+not a coincidence and it is not a bug. ``shelf_top_back`` is a 12 mm slab, and
+6 mm is as far inside a 12 mm slab as any point can be. The statistic is bounded
+by the thinnest obstacle the path happens to meet, so it saturates and stops
+ordering anything. How *long* the hand stays inside is unbounded, and does.
+
+The recalibration itself is worth recording as a method note. 7.38's threshold
+was measured with MuJoCo's narrowphase applied to inverse-kinematics solutions;
+the new check uses analytic distances on the commanded path. **A number carried
+between two instruments is an assumption, not a measurement**, so the twenty
+cells of Experiment O run iii were re-measured with the new one before it was
+used to select anything (``outputs/path_study_iii``). That cost minutes and
+corrected both thresholds, each of which was going the wrong way: sustained
+penetration would have been set at 0.30, which rejects two cells that placed,
+and path reachability at 0.90, which would have rejected **6 of the 11 cells that
+worked** because ``reachable_fraction`` is a property of the whole path and reads
+low on trajectories the arm executes perfectly well.
+
+#### A note on the place-side corridor, which is the one stage to suspect
+
+``by_place_approach`` reads the shelf's blocked directions out of the model
+correctly -- it gives the cubby's three walls, the enclosed variant's roof and
+the open variant's nothing from the same code -- and it never emptied a cell's
+candidate set. It is nonetheless the reason to suspect the funnel is
+over-rejecting: it cuts 711 candidates to 296, the second largest cut of the ten
+stages, and Experiment Q left a median of **2.5** candidates reaching the ranking
+against 7 in O-ii and 14 in O-iii, with three cells reaching it with exactly one.
+
+The mechanism is specific rather than a matter of taste. The corridor is modelled
+as a **straight line** the full length of the hand's body behind its fingertips.
+The hand does not arrive along a straight line from 10 to 27 cm out; it arrives
+along the transported trajectory, which curves -- and ``path_clearance`` measures
+that same swept volume exactly, on the real path. So with the path check present
+the corridor is a cruder, more conservative duplicate of it.
+
+Shortening it or deleting the stage is the obvious next measurement, and it is
+**pure geometry**: transport the candidates the place zone rejected and ask
+whether the path check would have kept them. Seconds per cell, no physics, and it
+is the most informative unmeasured quantity left in this thread.
+
 ## 8. Open items
 
 > **Read 7.26 first.** Every end-to-end campaign has been deleted, so the items
@@ -3609,11 +3781,16 @@ rather than the difference of two separately-minimised distances.
   depth error against 120-135 mm for the parallel jaws. Both are properties of
   the hand, independent of any campaign, and both are worth checking before
   anything else about that gripper.
-- **Grasp filtering and selection.** Section 5.6 is the measured case. At
-  minimum this needs a visibility criterion (the cloud is one-sided, and
-  approaches from the unobserved side dominate), reachability, and collision
-  against the rest of the scene. Whether to filter, re-rank, or fuse more views
-  at source is the design question.
+- **Grasp filtering and selection.** Section 5.6 is the measured case, and 7.39
+  is where it now stands. Built and measured in Experiment Q: a visibility
+  criterion, scene-derived no-approach zones at the pick and the placement,
+  collision against the rest of the scene, and clearance plus kinematics on the
+  **transported path** rather than a 13-pose sample of it. What is open is not
+  *whether* to filter but **how hard**: the funnel now leaves a median of 2.5
+  candidates to rank, against 7 and 14 for the two demonstration-based rules,
+  and the place-side corridor is the stage to suspect. The next measurement is
+  geometric and takes seconds a cell -- transport the candidates the place zone
+  rejected and ask whether the whole-path check would have kept them.
 - ~~**Keypoint extraction for the new scene.**~~ Done; see section 6.
 
 **Deferred, and why:**

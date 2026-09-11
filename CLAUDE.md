@@ -516,6 +516,54 @@ Each of these cost real debugging time. Full detail in `ROBOTICS_NOTES.md`.
   geometry more than half the time failed (median 23.4–39.1 mm) and no
   successful cell exceeds 12.4 mm. Partial — it reaches 4 of 9 failures, and
   two failures involve zero penetration.
+- **A cloud is the wrong description of the shelf, and MuJoCo's ray caster hits
+  things that are not solid.** The camera-built scene cloud holds **76 points**
+  in the column above the `top_middle` slot -- the column every placement
+  descends through -- out of 8192, so a hand 10 cm across passes between them;
+  and a nearest-neighbour test cannot report *depth*, which is the quantity
+  §7.38 measured as discriminating. It does not have to: every immovable solid
+  here is a **box, a cylinder or a plane**, so an exact signed distance is a few
+  operations. `perception/obstacles.py` reads them from the model. Its one trap
+  is that `mj_ray` intersects everything *drawn*, including the translucent
+  marker box at every slot -- an unguarded cast reports an obstruction 58 mm
+  away that the hand goes straight through, which is a plausible number for a
+  surface that is not there. `§7.39`.
+- **`by_reachability` is inert: it falls back on 20 of 20 cells.** It rejects
+  every remaining candidate on every cell and the funnel passes them through, at
+  the cost of thirteen IK solves per candidate. This is §7.38 arriving as a
+  measurement -- the hand's body is inside scene geometry at the placement for
+  essentially every candidate, so "reject the colliding ones" rejects all of
+  them. It is also the stage `path_clearance` replaces, so it is redundant and
+  inert at once. **A funnel flag saying a stage fell back does not mean the
+  stage was harmless; it means it did nothing at all.** `§7.39`.
+- **Experiment O's 37.8 degree approach-gap ceiling is withdrawn.** A cell placed
+  at **65.3 degrees** in Experiment Q, and within that run the gap separates
+  nothing (placed 3.3-65.3, missed 3.6-84.5). The direction still has to be
+  constrained -- with *no* constraint the planner's best candidate approaches
+  from under the table on two of four objects and 0 of 20 cells place -- but not
+  by resemblance to the source, and not at 37.8 degrees. `§7.39`, `FINDINGS §8o`.
+- **Before comparing two runs, diff the cells where they chose the same grasp.**
+  Seven commits touched `sim/replay.py` between Experiments O and Q; on the six
+  cells that executed the same candidate, every recorded field matched **bit for
+  bit**, which is what makes the comparison a comparison of grasp selection and
+  nothing else. It costs no physics -- both runs are on disk -- and without it a
+  changed executor rides silently into the totals, which is `§7.26` in a new
+  costume. `§7.39`.
+- **A number carried between two instruments is an assumption.** §7.38's
+  penetration threshold was measured with MuJoCo's narrowphase on IK solutions;
+  re-measuring the same twenty cells with the analytic check **corrected both
+  new thresholds, each going the wrong way** -- 0.30 sustained penetration would
+  have rejected two cells that placed, and a 0.90 path-reachability bar would
+  have rejected **6 of the 11 that worked**. Note also that `max_depth` reads
+  exactly 6.0 mm on fourteen of twenty cells, because `shelf_top_back` is a
+  12 mm slab: a bounded statistic cannot order unbounded severity. `§7.39`.
+- **Run `--select-only` before any campaign.** It chooses the grasp for every
+  cell with no physics, in seconds rather than minutes, and answers the two
+  questions that have to be answered *before* an hour is spent: is the change
+  inert (14 of 20 cells executed a new candidate), and what did each stage cost
+  (the funnel left a median of **2.5** candidates to rank, against 7 and 14 for
+  the demonstration-based rules). It also makes a prediction registrable before
+  the outcome is known. `FINDINGS §8o`.
 - **Two capabilities exist in the policy and are never used at runtime.**
   `prediction.reference` — the regressed attractor position, the paper's own
   Sec. V formulation and the policy's only restoring term — is fitted and never
@@ -556,6 +604,7 @@ and git.
 | Sec. IV metrics | `tpgpt/metrics/` |
 | Grasp generation, gripper registry, frame contract | `tpgpt/grasp/` |
 | Object clouds and the scene graph | `tpgpt/perception/` |
+| The scene's solid geometry, as exact primitives | `tpgpt/perception/obstacles.py` |
 | Deterministic prompt parsing | `tpgpt/language/` |
 | Figs. 2, 4, 5 | `tpgpt/viz/`, `tpgpt/experiments/` |
 | Stage attribution and the reach/drift instruments | `tpgpt/experiments/diagnose.py` |
@@ -628,8 +677,26 @@ every stage rather than trading aim against conditioning.
 
 **Grasping, filtering and end-to-end physics (built end to end; reliability
 unmeasured).** Text prompt -> object and shelf -> cloud -> ranked 6-DoF grasps
--> seven filters -> keypoints -> transport -> policy -> execute -> scored, with
+-> filters -> keypoints -> transport -> policy -> execute -> scored, with
 per-run HTML reports. Nine gripper pairs registered, eight verified in physics.
+
+**Grasp selection no longer needs the demonstration, and that is measured.**
+Experiment Q (`FINDINGS.md` §8o) replaced the 45 degree resemblance test with
+constraints read off the scene -- the support's own normal at the pick, the
+shelf's own panels at the placement, both derived rather than listed so they
+hold across the open/cubby/enclosed variants -- plus clearance and kinematics on
+the **whole transported path** rather than the 13-pose sample `by_reachability`
+takes. Against the honest baseline of selecting without the demonstration at
+all, which places **0 of 20**, it places **7 of 20** (p = 0.016). Against the two
+demonstration-based rules at 10 and 11 it is behind on the point estimate and
+not distinguishable at n = 20 (p = 0.45, p = 0.29).
+
+The known weakness is **not** the idea but the aggregate strictness: the funnel
+now leaves a median of **2.5** candidates to rank against 7 and 14 before, three
+cells reach the ranking with one, and the whole deficit sits on the yumi, whose
+jaws are the narrowest and whose cells are starved hardest. The stage to suspect
+is `by_place_approach`, whose straight-line corridor duplicates, more crudely,
+what `path_clearance` measures exactly on the curved path actually flown.
 
 **The end-to-end numbers that exist are the Tier 2 replays**, which run under a
 stiff position controller with no policy and no attractor integration, so they

@@ -37,6 +37,7 @@ numbers are a scratch experiment, not evidence — that rule is `ROBOTICS_NOTES`
 > | N | §8k the full funnel | — | **confounded against M**, its intended baseline; its per-cell diagnosis is **withdrawn** (§7.37). It was the botched first attempt at M, not a later experiment |
 > | O | §8m filters vs ranking | — | **stands.** The first run to vary grasp selection one thing at a time. Gripper commanded shut, as all runs before 2026-09-12 |
 > | P | §8n gripper or grasp? | — | **stands.** 16 of 20 grasps grip with plain `+1`; the grasp pose decides the outcome, not the pair |
+> | Q | §8o scene-derived constraints | — | **stands.** Comparable with O to the last bit -- six cells that chose the same grasp reproduce every recorded field exactly across seven intervening commits |
 >
 > ### The two corrections, and which numbers each reaches
 >
@@ -98,7 +99,10 @@ numbers are a scratch experiment, not evidence — that rule is `ROBOTICS_NOTES`
 >
 > * **The hand is commanded through the shelf** on 15 of 20 cells, by up to
 >   79.9 mm, so every placement is a drop rather than a set-down (§7.35). This
->   affects M and N equally and is not corrected in either.
+>   affects M and N equally and is not corrected in either. Experiment Q adds a
+>   *filter* against it (the whole-path clearance check) and does not fix the
+>   underlying cause: five of Q's thirteen failures still carry the object
+>   faithfully and misplace it.
 > * **The half-turn jaw symmetry is applied to two hands that do not have it**
 >   (§8l). `robotiq3f` and `inspire` are `revolute_3f` with `symmetric: false`
 >   in GraspGen-X's own config. Neither appears in any Tier 2 run, so only the
@@ -2447,7 +2451,17 @@ Replacing it needs a constraint derived from the **scene** rather than the
 source: no-approach zones at the pick (nothing through the table) and at the
 place (nothing through the shelf's back, sides or roof), plus a collision and
 reachability check on the **transported path** rather than the 13-pose sample
-`by_reachability` currently takes. Not yet built.
+`by_reachability` currently takes.
+
+**Built and run -- see §8o, Experiment Q.** In short: the scene-derived zones do
+answer run i's collapse (0/20 to 7/20, p = 0.016), so the demonstration is not
+needed in selection; but Q's 7/20 against ii's 10 and iii's 11 is not a
+difference at this sample size (p = 0.45 and 0.29), and the *reason* offered
+here for the filter's value does not survive. **The approach gap separates
+nothing in Q** -- placed cells span 3.3 to 65.3 degrees and missed cells 3.6 to
+84.5 -- and one cell placed at **65.3 degrees**, past the 37.8 this section
+reports as the maximum among sixty cells. That boundary was a property of these
+three runs' grasp sets, not of the method.
 
 
 ## 8n. Experiment P — is it the gripper, or the grasp?
@@ -2555,6 +2569,597 @@ failure is pose-related, and the two contradicting cells mean an offset filter
 will pass some bad grasps and reject some good ones.
 
 
+## 8o. Experiment Q — can the scene replace the demonstration in grasp selection?
+
+**The follow-up Experiment O asked for.** `outputs/expQ` (the campaign),
+`outputs/expQ_select` (the selection, no physics), `outputs/path_study_iii` (the
+instrument, calibrated), commit `286ca1c`, clean tree, 68 minutes.
+
+### Why
+
+Experiment O ended by dropping the demonstration from grasp selection
+altogether, as a filter and as a ranking (§8m). Its reason was that the filter
+is a **resemblance test**: it keeps candidates whose approach direction is
+within 45 degrees of the one the source demonstration used, which ties every
+target scene to one recording and rejects perfectly good grasps for being unlike
+it. The 45 degrees had no measurement behind it, and the quantity it tests is
+not the quantity measured to fold maps.
+
+What O proposed instead was a set of constraints read off **the scene**, which
+is where physical impossibility actually lives:
+
+* nothing can reach an object from underneath the table it stands on;
+* nothing can arrive at a shelf slot through the shelf's own walls;
+* and the trajectory that gets checked should be the one the arm executes, not a
+  thirteen-pose sample of it — `ROBOTICS_NOTES.md` §7.38 measured candidates
+  passing `by_reachability`'s thirteen poses and then colliding at **79 to 162**
+  of the other 187.
+
+None of that was built. This builds it and runs it.
+
+### What was built
+
+Four constraints, plus one criterion carried over from Experiment P.
+
+**1. `by_support_approach` — the pick-side zone.** A grasp is rejected if its
+approach axis leans more than 85 degrees away from straight down. The angle is
+measured from vertical, so 0 is a pure descent, 90 is exactly horizontal, and
+anything past 90 points *upward* — a hand rising through the table top, which is
+not a grasp at all. The limit sits at 85 rather than the geometric 90 because a
+gripper's fingers hang below its tool centre point, so a hand held perfectly
+level still drags its fingertips through the surface the object rests on. The
+vector it tests against is the support's own outward normal, passed in rather
+than assumed, so a sloped or vertical support needs no new code.
+
+Measured over the 100 candidates GraspGen-X returns per object on seed 0 with a
+Panda:
+
+| object | median approach from vertical | within 85° | the planner's own top-scoring candidate |
+|---|---|---|---|
+| cereal | 89.3° | 42 of 100 | 19.0° |
+| milk | 92.8° | 27 of 100 | **101.8°** |
+| can | 88.5° | 39 of 100 | **100.7°** |
+| bread | 88.4° | 45 of 100 | 6.9° |
+
+Two things to read off that. The candidate set is **dominated by side grasps** —
+the median is essentially horizontal — which is not a defect in the planner:
+taking a cereal box from the side is a better grasp than pinching its top. And
+on two of the four objects the planner's *best* candidate approaches from
+**below the table**, which is impossible, and which is precisely why run i of
+Experiment O placed nothing in twenty cells.
+
+**2. `by_place_approach` — the place-side zones.** The pick side has one blocked
+direction and it never changes. The place side has as many as the destination
+has neighbours, and which ones they are is a property of the shelf: the default
+`cubby` variant walls a slot on three sides, the `open` variant on none, and the
+`enclosed` variant adds a roof that makes a top-down placement impossible
+outright. Listing them in code would bake one of those three in.
+
+So nothing is listed. For each candidate, a bundle of rays is cast **backwards
+from the release pose along the direction the hand came from**, spread over the
+hand's own lateral radius and run for the hand's own length behind its
+fingertips — both read from the gripper's published surface sample, so a 270 mm
+Robotiq 2F-140 is held to a longer clear run than a 97 mm Panda. Whatever the
+bundle meets is the answer. One ray down the centre line is not enough: it
+threads the gap between two fingers while the fingers are inside a panel.
+
+Probed at `top_middle` from 60 mm above the board, the same code reports the
+cubby's geometry back:
+
+| direction from the slot | first solid thing | distance |
+|---|---|---|
+| +x, away from the robot | `shelf_top_back` | **38 mm** |
+| +y / −y | `shelf_top_wall_l` / `_r` | 198 mm |
+| −z | `shelf_top_board` | 60 mm |
+| +z, up | nothing | — |
+| −x, towards the robot | nothing | — |
+
+On the `enclosed` variant the same probe finds `shelf_top_roof` overhead; on the
+`open` variant it finds nothing but the board. One subtlety it took a test to
+notice: MuJoCo's ray caster intersects everything that is *drawn*, and this scene
+carries a translucent marker box at every slot, so an unguarded cast downwards
+reports an obstruction 58 mm away that a hand passes straight through. The
+wrapper steps past any hit whose collision flags are off and casts again.
+
+**3. `path_clearance` — the whole executed path.** The gripper's own surface
+sample is placed at **every one of the 200 transported waypoints** and measured
+against the scene's solid geometry. No inverse kinematics is needed, and that is
+the point: the transported path *is* the hand's pose at each waypoint, so the
+check is pure arithmetic at about 1.5 ms a waypoint.
+
+The scene side of this is **not** a point cloud, and that is a deliberate
+departure. Two measurements forced it. The camera-built scene cloud holds
+**76 points** in the column of space directly above the `top_middle` slot — the
+column every placement descends through — out of a cloud capped at 8192, so a
+hand 10 cm across can pass between them. And a nearest-neighbour test answers
+"is a scene point within 10 mm of the hand", which cannot tell a finger grazing
+a wall from a wrist buried 80 mm inside it. Depth is the quantity the criterion
+turns on.
+
+It does not have to be a cloud, because of what the obstacles actually are:
+every immovable solid in this scene is a **box, a cylinder or a plane** — the
+table top, the twelve shelf panels, the robot's pedestal and its controller box.
+Each has a closed-form signed distance, so "how far is this point inside that"
+is exact, with no sampling density to choose and nothing hidden behind anything
+else. The movable objects are meshes and are handled by the oriented bounding
+boxes MuJoCo already stores for them, which over-estimate the object and so err
+towards reporting less clearance than there is.
+
+**4. `path_kinematics`.** Inverse kinematics solved down the same path, each
+solve seeded from the previous one. It runs **only on candidates that already
+passed the clearance sweep**, and that ordering is what makes the pair
+affordable: an isolated solve starts from the rest configuration and costs
+hundreds of milliseconds, while one seeded from a pose 5 mm away converges almost
+immediately. Seeding from the previous solution is also the *right* question,
+because it is the same computation the replay performs — it answers "can the arm
+move between these poses", which is what executing a trajectory requires.
+
+**5. `by_centre_offset` — Experiment P's criterion.** A late, loose stage
+rejecting grips more than 15 mm out from the object's centre of mass,
+horizontally. §8n measured the eleven grasps that carried past 200 mm sitting a
+median 6.3 mm out against 19.1 mm for the nine that did not, and a 15 mm cut
+reaches 6 of those 9 failures at a cost of 1 of the 11 successes. Two of its own
+cells contradict it, so it falls back rather than emptying the set.
+
+Where 3 and 4 live matters. They are **not** stages of `filter_grasps`, and the
+reason is not organisational. Every stage in that funnel judges a *pose*, because
+until a map has been fitted a candidate is nothing more than a pose. The
+trajectory the arm executes does not exist until the keypoints are built from
+that candidate and the demonstration is warped through them — a different
+trajectory for every candidate. So they live in `target_placement`, which walks
+the ranked list and takes the first candidate whose own transported path is clear
+and reachable. **The ranking is not touched**: this rejects, it does not
+re-score, which keeps "which candidates are allowed" separate from "which allowed
+one is used" — the separation §8k was unreadable for want of.
+
+### The threshold on sustained penetration was calibrated, not inherited
+
+§7.38 had already measured that a path sitting inside geometry for much of its
+length fails, but it measured that with a **different instrument** — MuJoCo's
+narrowphase applied to inverse-kinematics solutions — and a number carried
+between instruments is an assumption. So before the campaign, the twenty cells
+of Experiment O run iii were re-measured with *this* instrument
+(`outputs/path_study_iii`), against outcomes already known:
+
+| outcome | n | inside fraction, min – median – max | max depth, median |
+|---|---|---|---|
+| placed | 11 | 0.00 – 0.165 – **0.340** | 5.9 mm |
+| failed | 9 | 0.00 – 0.335 – **0.855** | 6.0 mm |
+
+The separation is **one-sided with a wide gap in it**. Nothing at all was
+observed between 0.34 and 0.70; every cell above 0.40 failed; no cell that placed
+went past 0.34. Any threshold inside that gap gives the identical answer on these
+cells — it rejects **4 of the 9 failures and 0 of the 11 successes** — so 0.40 is
+the conservative end of a flat region rather than a number fitted to a boundary.
+It is a partial criterion by construction: two of the nine failures involve no
+penetration at all.
+
+That study **corrected two defaults that were both going the wrong way**, which
+is the whole argument for running it first.
+
+*Sustained penetration was going to be 0.30*, which would have rejected two
+cells that placed.
+
+*Path reachability was going to be 0.90.* It **does not separate outcomes at
+all**: the eleven cells that placed span 0.62 to 1.00 with a median of 0.84, and
+the nine that failed span 0.56 to 1.00 with the *same* median of 0.84. A 0.9 bar
+would have rejected **6 of the 11 cells that worked**. This is CLAUDE.md's own
+warning about `reachable_fraction` arriving as a measurement: it is a property of
+the whole path rather than of any pose, so it reads low on trajectories the arm
+executes perfectly well. The only one-sided cut in the data is 0.60 — 2 of 9
+failures, none of the successes — and that is what it was set to.
+
+And the study shows why depth is the wrong statistic more sharply than §7.38
+could. `max_depth` reads **exactly 6.0 mm on fourteen of the twenty cells**,
+because `shelf_top_back` is a 12 mm slab and 6 mm is as far inside a 12 mm slab
+as a point can get. A bounded quantity cannot order unbounded severity; how
+*long* the hand stays inside is unbounded, and does.
+
+### Conditions, held fixed
+
+Five hands (yumi, xarm, panda, robotiq85, robotiq140) times four objects
+(cereal, milk, can, bread), one seed, slot `top_middle`, the **grasp-pose cube
+only**, position-control replay with no policy, and the **gripper commanded shut
+with plain `+1`** — `force_target=None`, which is what §8n concluded the gripper
+should stay as. Candidates ranked by **GraspGen-X's own score** throughout.
+
+### What was varied, against Experiment O run ii
+
+| | O-ii | Q |
+|---|---|---|
+| 45° approach test against the demonstration | **on** | **off** |
+| support-normal zone at the pick | — | **on, 85°** |
+| shelf-geometry zone at the placement | — | **on** |
+| clearance of the whole transported path | — | **on, 0.40 sustained** |
+| kinematics down the whole path | — | **on, 0.60, stride 4** |
+| centre-of-mass stage | — | **on, 15 mm** |
+| ranking | score | score |
+
+### The comparison is exact, and that was checked rather than assumed
+
+Seven commits touched `replay.py` between Experiment O's commit (`47b21a5`) and
+this one, all of them the grip-force work §8n retired. If any of them changed the
+default execution path, O and Q would not be comparable and the whole experiment
+would be unreadable — which is the §7.26 failure in a new costume.
+
+On the **six cells where Q happened to execute the same candidate as run ii or
+run iii**, every recorded field is identical to full floating-point precision:
+`min_det`, `aim_map`, `reachable_fraction`, `tracking_error_mean`,
+`placement_error_xy`, `held_steps`, `slip_max`, `lift_height` and `success`. Not
+"close" — bit for bit, on `panda/bread`, `panda/can`, `robotiq140/milk`,
+`robotiq140/bread`, `robotiq85/can` and `yumi/bread`. The force-control work is
+fully gated behind `force_target`, the replay is deterministic, and the
+comparison below is a comparison of grasp selection and nothing else.
+
+Independently, `panda/cereal` here executes candidate #76 and reproduces
+Experiment P's rank-2 grasp on that pair to the digit: offset 6.2 mm, no grasp,
+lift 1.0 mm against P's 1 mm, placement error 320.8 mm against P's 321 — two
+campaigns, different commits, different selection rules, same grasp, same
+outcome.
+
+### Results
+
+| run | placed | grasped | traversed | min det (median) | folded | approach gap of the chosen grasp |
+|---|---|---|---|---|---|---|
+| **O-i** no constraint, by score | **0/20** | 8/20 | 6/20 | 0.485 | 0 | 90.9° |
+| **O-ii** 45° filter, by score | **10/20** | 16/20 | 12/20 | 0.823 | 0 | 14.5° |
+| **O-iii** no filter, by demo | **11/20** | 15/20 | 14/20 | 0.940 | 0 | 5.1° |
+| **Q** scene zones + path, by score | **7/20** | 14/20 | 12/20 | 0.885 | 0 | 14.6° |
+
+Paired, cell by cell, with an exact two-sided McNemar test:
+
+| comparison | disagreeing cells | p |
+|---|---|---|
+| **Q against O-i** | Q alone 7, O-i alone 0 | **0.016** |
+| Q against O-ii | O-ii alone 5, Q alone 2 | 0.453 |
+| Q against O-iii | O-iii alone 6, Q alone 2 | 0.289 |
+
+### What it says
+
+**The scene-derived constraints fix the pathology, decisively.** Run i of
+Experiment O is the honest baseline for "select grasps without consulting the
+demonstration": it placed **nothing** in twenty cells, because ranking by score
+with no constraint picks a side or underneath grasp on 18 of 20 cells and the
+pipeline then executes the *demonstrated* top-down motion warped into the scene.
+Q is the same ranking with the demonstration still absent from selection, and it
+places **7 of 20** — p = 0.016, and the only significant result in the table. So
+the answer to "does the demonstration have to be in grasp selection at all" is
+**no**: the scene supplies enough to rule out the grasps that made run i
+collapse.
+
+**It does not beat the demonstration-based rules, and it does not clearly lose to
+them either.** 7 against 10 and 11 is a worse point estimate, and at n = 20 it is
+not a difference — p = 0.45 and p = 0.29. That has to be stated plainly rather
+than dressed either way: this run neither establishes that the scene-derived set
+is as good, nor that it is worse. What it *does* do is relocate the question,
+because the mechanism O proposed for the filter's value turns out not to be the
+mechanism.
+
+**Experiment O's 37.8 degree boundary is falsified.** O pooled 60 cells and found
+the chosen grasp's approach gap separating cleanly: 21 cells placed at a median
+6.1 degrees with a **maximum of 37.8**, and 39 missed at a median of 73.9. A
+prediction was registered before this run — from `outputs/expQ_select`, so it
+could not be written afterwards — that the six cells Q had selected at 47.6 to
+84.5 degrees would fail, and that the ceiling was therefore 14/20.
+
+**Two of the six placed.** `panda/milk` at **65.3 degrees**, placing 48.4 mm from
+the slot, and `robotiq85/milk` at **47.6 degrees**, placing 40.0 mm. So no cell
+in O's sixty exceeding 37.8 degrees was a property of O's grasp sets, not a
+property of the method.
+
+**And within this run the gap carries no signal at all:**
+
+| outcome | n | approach gap, min – median – max |
+|---|---|---|
+| placed | 7 | 3.3° – 12.5° – **65.3°** |
+| missed | 13 | 3.6° – 15.3° – 84.5° |
+
+The two distributions overlap almost entirely. Split at O's own boundary, the
+rates are indistinguishable — **2 of 6 placed above 37.8 degrees against 5 of 14
+below** (33% against 36%), and 3 of 6 grasped against 11 of 14. Q's median gap
+is 14.6 degrees, which is O-ii's 14.5 to within a tenth of a degree, so the two
+runs are choosing grasps of *the same* typical approach mismatch and differing by
+three placements. Whatever separates them, it is not the approach direction.
+
+**What separates them is that Q has almost nothing left to choose from.**
+
+| run | candidates reaching the ranking, min – median – max |
+|---|---|
+| O-ii 45° filter | 2 – **7** – 15 |
+| O-iii no filter | 1 – **14** – 38 |
+| **Q** scene zones | 1 – **2.5** – 12 |
+
+Three cells reach the ranking with **exactly one** candidate, where ranking is
+meaningless and the path check can only accept it or fall back. Pooled over the
+twenty cells, the funnel runs:
+
+| stage | entering | surviving | fell back on |
+|---|---|---|---|
+| generated | 2000 | 2000 | — |
+| visibility | 2000 | 1759 | 0/20 |
+| **support** | 1759 | **711** | 0/20 |
+| **place zone** | 711 | **296** | 0/20 |
+| on target | 296 | 296 | 0/20 |
+| jaw width | 296 | 258 | **6/20** |
+| collision | 258 | 197 | 0/20 |
+| reachable | 197 | 197 | **20/20** |
+| **centred** | 197 | **117** | 3/20 |
+| distinct | 117 | 78 | 0/20 |
+
+The two new zone stages remove **1463 of 1759** candidates between them, 83%.
+That is the mechanical explanation of the deficit, and it points at a specific
+stage rather than at the idea: see "what each stage was worth" below.
+
+**`by_reachability` is inert. It falls back on 20 of 20 cells.** It rejects every
+remaining candidate on every single cell, and the funnel — correctly, by its own
+fallback rule — passes them straight through. So the stage pays for thirteen
+inverse-kinematics solves per candidate and contributes nothing but a flag. This
+is §7.38 arriving as a measurement: with its collision check on, the hand's body
+is inside scene geometry at the placement for essentially every candidate, so
+"reject the colliding ones" rejects all of them. It is also the stage the
+whole-path check is meant to replace, so it is now redundant and inert at the
+same time.
+
+### Every cell
+
+`gap` is the chosen grasp's approach mismatch from the demonstration, recorded
+but **not used** in selection; `offset` its horizontal distance from the object's
+centre of mass; `surv` how many candidates reached the ranking; `tried` how many
+the path check examined before accepting one; `inside` the fraction of the
+executed path's waypoints sitting inside scene geometry; `reach` the fraction of
+waypoints the arm could hold; `track` the mean tracking error in mm; `place err`
+the lateral distance from the slot in mm.
+
+| hand | object | grasp | score | gap | offset | surv | tried | inside | min det | reach | track | grasped | traversed | place err | ok |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| yumi | cereal | #10 | 0.860 | 75.8° | 62.6 mm | 8 | 1 | 7% | 0.581 | 100% | 40.0 | no | no | 230 | no |
+| yumi | milk | #70 | 0.614 | 60.9° | 10.1 mm | 4 | 3 | 0% | 0.399 | 72% | 33.8 | no | no | 323 | no |
+| yumi | can | #95 | 0.449 | 84.5° | 9.2 mm | 1 | 1 (fell back) | 48% | 0.244 | 58% | 87.8 | no | no | 336 | no |
+| yumi | bread | #18 | 0.703 | 3.6° | 20.9 mm | 1 | 1 | 0% | 0.915 | 100% | 4.3 | no | no | 379 | no |
+| xarm | cereal | #72 | 0.688 | 12.5° | 11.4 mm | 2 | 1 | 11% | 0.987 | 73% | 12.6 | yes | yes | 14 | **yes** |
+| xarm | milk | #21 | 0.841 | 52.4° | 11.2 mm | 12 | 1 | 26% | 0.854 | 75% | 21.0 | yes | yes | 73 | no |
+| xarm | can | #35 | 0.774 | 17.6° | 14.9 mm | 3 | 2 | 21% | 0.895 | 60% | 34.0 | yes | yes | 160 | no |
+| xarm | bread | #79 | 0.603 | 3.9° | 12.6 mm | 2 | 1 | 30% | 0.907 | 100% | 14.9 | no | no | 1346 | no |
+| panda | cereal | #76 | 0.626 | 14.5° | 6.2 mm | 2 | 1 | 9% | 0.870 | 72% | 13.2 | no | no | 321 | no |
+| panda | milk | #34 | 0.715 | 65.3° | 14.4 mm | 6 | 2 | 32% | 0.740 | 72% | 22.7 | yes | yes | 48 | **yes** |
+| panda | can | #0 | 0.880 | 14.8° | 6.3 mm | 3 | 1 | 25% | 0.986 | 78% | 22.8 | yes | yes | 24 | **yes** |
+| panda | bread | #51 | 0.601 | 3.3° | 22.4 mm | 2 | 1 | 32% | 0.558 | 100% | 25.1 | yes | yes | 17 | **yes** |
+| robotiq85 | cereal | #65 | 0.681 | 30.3° | 10.8 mm | 2 | 1 | 10% | 0.875 | 100% | 6.1 | yes | yes | 187 | no |
+| robotiq85 | milk | #49 | 0.677 | 47.6° | 11.0 mm | 9 | 2 | 19% | 0.909 | 76% | 28.6 | yes | yes | 40 | **yes** |
+| robotiq85 | can | #0 | 0.936 | 5.6° | 14.5 mm | 2 | 1 | 22% | 0.982 | 72% | 20.8 | yes | no | 351 | no |
+| robotiq85 | bread | #70 | 0.579 | 6.7° | 9.1 mm | 1 | 1 | 31% | 0.898 | 100% | 19.9 | yes | yes | 24 | **yes** |
+| robotiq140 | cereal | #24 | 0.844 | 7.7° | 12.6 mm | 4 | 1 | 0% | 0.775 | 62% | 18.4 | yes | yes | 11 | **yes** |
+| robotiq140 | milk | #24 | 0.903 | 7.2° | 9.9 mm | 9 | 1 | 8% | 0.997 | 79% | 20.8 | yes | yes | 337 | no |
+| robotiq140 | can | #31 | 0.849 | 15.3° | 2.7 mm | 3 | 1 | 10% | 0.911 | 62% | 21.8 | yes | yes | 305 | no |
+| robotiq140 | bread | #9 | 0.781 | 9.9° | 14.6 mm | 2 | 1 | 36% | 0.639 | 100% | 21.6 | yes | no | 225 | no |
+
+### The failures, and what caused each
+
+Attributed by the stage a run stopped at, the same way for all four runs:
+
+| run | placed | never grasped | grasped, lost on the way | carried, misplaced |
+|---|---|---|---|---|
+| O-i | 0 | 12 | 2 | 6 |
+| O-ii | 10 | 4 | 4 | 2 |
+| O-iii | 11 | 5 | 1 | 3 |
+| **Q** | **7** | **6** | **2** | **5** |
+
+So Q's thirteen failures are not concentrated anywhere new — six at the pick,
+two losing the object mid-carry, five carrying it faithfully and putting it in
+the wrong place. That last column is the largest of the three surviving runs, and
+it is the §7.35 drop: the arm stops short of the commanded release pose because
+the plan commands the hand through the shelf, and the object falls from a median
+4 cm. Among cells with any unreachable waypoint, the worst segment is `retreat`
+on 8 and `place` on 5 — again the placement end, never the pick.
+
+Cell by cell, with the mechanism where one is established:
+
+* **`yumi/cereal`** — never grasped; the box is pushed **down 63.9 mm** and the
+  fingers never take hold. The chosen grasp is **62.6 mm off the box's centre of
+  mass** at a 75.8 degree approach, and it survived only because the
+  centre-of-mass stage **emptied and fell back** on this cell. This is the one
+  cell where the new filter set clearly picked something indefensible.
+* **`yumi/milk`, `yumi/can`** — never grasped, at 60.9 and 84.5 degrees. Both
+  reached the ranking with 4 and **1** candidate respectively; `yumi/can`'s
+  single candidate was inadmissible on the path check (47.5% of its waypoints
+  inside geometry) and ran anyway under the fallback.
+* **`yumi/bread`** — never grasped, and this is **a pair, not a grasp**. §8n
+  measured zero grips in four attempts at four different poses: the yumi's 50 mm
+  jaws against bread's 40.2 mm narrow dimension leave 10 mm of total clearance,
+  and the grasp here sits 20.9 mm off centre, so the fingers straddle an edge.
+  It failed in O-ii and O-iii too. No selection rule fixes it.
+* **`xarm/bread`** — never grasped, and the bread ends **1346 mm** away, i.e. off
+  the table. A 3.9 degree approach and a 12.6 mm offset, so neither of the new
+  criteria has anything to say about it; the object is knocked rather than
+  gripped.
+* **`panda/cereal`** — never grasped, at a 14.5 degree approach and 6.2 mm off
+  centre, which are *good* numbers on both counts. It is candidate #76, and
+  Experiment P had already measured exactly this grasp failing at exactly this
+  pose. It is P's own counter-example to the centre-of-mass criterion,
+  re-selected here by the score ranking.
+* **`robotiq85/can`, `robotiq140/bread`** — grasped and then lost. Both are
+  Robotiq hands and both released above the board; §7.35 records the same family
+  of hand flicking an object sideways as its pads swing inward while parting,
+  72.8 and 81.9 mm of post-release travel on two cells that fouled nothing.
+* **`xarm/milk` (73 mm), `xarm/can` (160 mm), `robotiq85/cereal` (187 mm),
+  `robotiq140/milk` (337 mm), `robotiq140/can` (305 mm)** — carried faithfully
+  and misplaced. All five held the object through the carry and all five are the
+  §7.35 drop; `xarm/milk` at 73 mm is a near miss and the other four are not.
+
+### What each new stage was worth
+
+**`by_support_approach`: it is what fixes run i, and it is cheap.** It removes 60%
+of the candidates that reach it, including the planner's own top-scoring
+candidate on two of four objects, and it is one dot product against a vector the
+scene supplies. Nothing in the results argues against it. It is also strictly
+weaker than the 45 degree test it replaces — 85 degrees against 45 — yet Q's
+*chosen* grasps have the same median gap as O-ii's, which means the later stages,
+not this one, are doing the narrowing.
+
+**`by_place_approach`: it works, and it is over-strict, and the reason is
+specific.** It correctly reads the cubby's three walls, the enclosed variant's
+roof and the open variant's nothing out of the model, and it never emptied a
+cell's candidate set. But it is the second largest cut in the funnel, 711 down to
+296, and its model of the arrival is a **straight corridor** the full length of
+the hand's body. The hand does not arrive along a straight line from 10 to 27 cm
+out; it arrives along the transported trajectory, which curves. So this is a
+conservative proxy for a swept volume — and `path_clearance` measures that same
+swept volume exactly, on the real path. With the path check present, the corridor
+is partly redundant and is the cruder of the two. Shortening it, or deleting the
+stage and letting the path check carry the place side, is the obvious next thing
+to measure and is **not** something this run measured.
+
+**The whole-path check intervened on five cells, and the evidence is favourable
+and thin.** It rejected six candidates in total — five for sustained penetration,
+one for kinematics — and on four cells it moved the selection to a
+lower-ranked candidate:
+
+| cell | candidates it walked | outcome |
+|---|---|---|
+| `yumi/milk` | #1 rejected (44% inside), #20 rejected (43%), **#70 taken** (0%) | failed |
+| `xarm/can` | #10 rejected (41%), **#35 taken** (21%) | failed |
+| `panda/milk` | #1 rejected (43.5%), **#34 taken** (31.5%) | **placed** |
+| `robotiq85/milk` | #31 rejected (reachable 0%), **#49 taken** (19%) | **placed** |
+| `yumi/can` | #95 rejected (47.5%), nothing else — **fell back onto it** | failed |
+
+Two of the four re-selections placed. What makes that more than a coin flip is
+*which* two: `panda/milk` and `robotiq85/milk` are **exactly the two cells that
+falsified the registered prediction**, the ones that placed at 65.3 and 47.6
+degrees of approach gap. On both, the check discarded the top-ranked candidate
+for a path that spent 43% of its length inside geometry and took one that spent
+19–32%. That is the mechanism argument doing visible work: the constraint that
+matters is on the path the hand sweeps, not on the angle the grasp approaches at.
+Five interventions is not a result, and it is the most encouraging thing in the
+run.
+
+**`by_centre_offset` did not reproduce as a selection criterion.**
+
+| outcome | n | offset from the centre of mass, min – median – max |
+|---|---|---|
+| placed | 7 | 6.3 – **11.4 mm** – 22.4 |
+| missed | 13 | 2.7 – **11.2 mm** – 62.6 |
+
+The medians are 0.2 mm apart. That is not a refutation of Experiment P, and the
+distinction matters: this is a **restricted range**, because the stage had already
+removed everything past 15 mm except on the three cells where it emptied and fell
+back. Within the band it leaves, the offset orders nothing. And it fails exactly
+where it would have mattered most — the 62.6 mm grasp on `yumi/cereal` got through
+*because* the stage fell back, and that cell is the clearest grasp-selection
+failure in the run. A criterion whose whole value is rejecting outliers, which
+surrenders precisely when only outliers remain, is not much of a criterion in this
+funnel. It stays available and stays off by default.
+
+**`jaw width` fell back on 6 of 20 cells** — all five can cells and
+`yumi/cereal`. That is §7.36 reproducing on a new run: a one-sided cloud is a
+*lower bound* on an object's width, and the can's cloud is too thin for the jaws'
+slab to measure anything, so every candidate comes back unverified and the stage
+drops the constraint rather than emptying the set. Worth noting that all five can
+cells are affected and only one of the five placed.
+
+### Cell by cell against Experiment O
+
+| hand | object | O-ii | O-iii | Q | grasp Q executed |
+|---|---|---|---|---|---|
+| yumi | cereal | yes | yes | no | new |
+| yumi | milk | yes | yes | no | new |
+| yumi | can | no | yes | no | new |
+| yumi | bread | no | no | no | same as run iii |
+| xarm | cereal | no | yes | **yes** | new |
+| xarm | milk | no | yes | no | new |
+| xarm | can | yes | no | no | new |
+| xarm | bread | no | no | no | new |
+| panda | cereal | yes | yes | no | new |
+| panda | milk | yes | yes | **yes** | new |
+| panda | can | yes | no | **yes** | same as run ii |
+| panda | bread | yes | yes | **yes** | same as run ii/iii |
+| robotiq85 | cereal | yes | yes | no | new |
+| robotiq85 | milk | yes | no | **yes** | new |
+| robotiq85 | can | no | no | no | same as run ii |
+| robotiq85 | bread | yes | yes | **yes** | new |
+| robotiq140 | cereal | no | yes | **yes** | new |
+| robotiq140 | milk | no | no | no | same as run ii/iii |
+| robotiq140 | can | no | no | no | new |
+| robotiq140 | bread | no | no | no | same as run ii |
+
+Fourteen of the twenty cells execute a candidate neither of O's surviving runs
+chose, which is what makes this a different selection rule rather than the same
+one renamed. It also means the totals are the only fair comparison: on the six
+cells that do share a grasp, both runs are the same run twice and carry no
+information about either rule.
+
+Against O-ii the ledger is **5 regressions and 2 gains**. All five regressions
+are cells where Q executed a new grasp: `yumi/cereal`, `yumi/milk`,
+`panda/cereal`, `robotiq85/cereal` and `xarm/can`. Both gains are too:
+`xarm/cereal` and `robotiq140/cereal`.
+
+Per hand, the entire deficit is one gripper:
+
+| hand | O-ii | O-iii | **Q** | candidates reaching the ranking in Q |
+|---|---|---|---|---|
+| **yumi** | 2/4 | 3/4 | **0/4** | 8, 4, **1**, **1** |
+| xarm | 1/4 | 2/4 | **1/4** | 2, 12, 3, 2 |
+| panda | 4/4 | 3/4 | **3/4** | 2, 6, 3, 2 |
+| robotiq85 | 3/4 | 2/4 | **2/4** | 2, 9, 2, 1 |
+| robotiq140 | 0/4 | 1/4 | **1/4** | 4, 9, 3, 2 |
+
+The yumi loses two against O-ii and three against O-iii and takes the whole
+difference with it. It is also the hand the funnel starves hardest — two of its
+four cells reach the ranking with a single candidate — and the hand with the
+narrowest jaws in the set at 50 mm, so it has the least margin for a grasp chosen
+from a thin set. On the other four hands Q is within one cell of O-ii everywhere
+and ahead of it on the robotiq140.
+
+### What this does not settle
+
+**7 against 10 is not a difference at n = 20**, p = 0.45, and neither is 7
+against 11. Nothing here licenses "the scene-derived set is worse", only "it is
+not yet shown to be as good".
+
+**The funnel was changed in five places at once.** Support zone, place zone, path
+clearance, path kinematics and the centre-of-mass stage all went on together, and
+the approach filter went off. The per-stage tallies and the path check's own
+record separate *what each stage rejected*, and the cells where the path check
+moved the selection are identified — but the run cannot attribute the three
+missing placements to one of the five. `--scene-zones`, `--centre-filter` and
+`--path-check` are separate flags precisely so the next run can vary one.
+
+**The place-zone corridor has not been swept.** `PLACE_CORRIDOR_FRACTION` is 1.0
+on the argument that the wrist really does end up that far back, and the
+redundancy argument above says it should probably be shorter now that the path
+check exists. No number was measured either way.
+
+**Whether the path check would have kept candidates the place zone rejected** is
+the single most informative unmeasured quantity in this run, and it is pure
+geometry — no physics, seconds per cell.
+
+**One seed, one slot, one demonstration, one keypoint construction**, as
+everywhere in this document. And the replay is still position control with no
+policy, so every number is an upper bound on what the full pipeline does.
+
+### Decisions taken from it
+
+* **The demonstration can leave grasp selection.** Run i's collapse was the
+  argument for keeping it and the support-normal zone answers run i's collapse at
+  p = 0.016. The 45 degree test's stated justification -- that it bounds a
+  quantity which decides success -- does not survive: the gap does not separate
+  outcomes here at all, and a cell placed at 65.3 degrees.
+* **`by_reachability` should be retired or repaired, not left as it is.** It
+  falls back on every cell of every run it is measured on, it costs thirteen IK
+  solves per candidate for that, and the path check now does its job on the real
+  trajectory. Retiring it is its own commit and its own before/after.
+* **The place-side corridor should be shortened or dropped**, on the redundancy
+  argument, and measured geometrically before anything is executed.
+* **The centre-of-mass stage stays off by default.** It orders nothing inside the
+  band it leaves, and it surrenders on the cells where it would have mattered.
+* **`PATH_PENETRATION_FRACTION` stays at 0.40 and `min_reachable_fraction` at
+  0.60**, both calibrated on this instrument against known outcomes. Any future
+  change to either needs the same study re-run, not an argument.
+* **`--select-only` before every campaign.** It cost minutes, it proved the
+  change was not inert (14 of 20 cells), it made the prediction registrable, and
+  it is the only reason the starved funnel was visible as a mechanism rather than
+  guessed at afterwards.
+
+
 ## 8z. Open items, blocked work, and grey areas
 
 > **Updated after Experiment O (2026-09-12).** Three things changed status.
@@ -2573,10 +3178,23 @@ will pass some bad grasps and reject some good ones.
 > commanded orientation. §7.38.
 >
 > **The demonstration is dropped from grasp selection**, as filter and as
-> ranking, on Experiment O. What replaces it is not built: scene-derived
-> no-approach zones at pick and place, and a collision check on the transported
-> path rather than the 13 poses ``by_reachability`` samples -- a candidate can
-> pass its sample and collide at 79 to 162 of the other 187 waypoints.
+> ranking, on Experiment O. What replaces it is **now built and measured**
+> (§8o): scene-derived no-approach zones at pick and place, and clearance and
+> kinematic checks on the transported path rather than the 13 poses
+> ``by_reachability`` samples. It answers run i's collapse -- 0/20 to 7/20,
+> p = 0.016 -- so the demonstration is not required in selection. It does not
+> beat the demonstration-based rules and is not shown worse either (7 against 10
+> and 11, p = 0.45 and 0.29).
+>
+> **Experiment O's own 37.8 degree boundary is withdrawn.** A cell placed at
+> **65.3 degrees** of approach gap in Q, and within that run the gap does not
+> separate outcomes at all. The boundary described O's three grasp sets, not the
+> method.
+>
+> **``by_reachability`` is inert and now measured as such.** It falls back on
+> **20 of 20** cells -- it rejects every remaining candidate every time and the
+> funnel passes them through -- while costing thirteen IK solves per candidate.
+> §8o.
 >
 > **And every Tier 2 number in this document was measured with the gripper
 > commanded shut.** The gripper changed on 2026-09-12; nothing before and after
@@ -2617,6 +3235,8 @@ it turns each placement into a partial lottery.
 |---|---|---|
 | 1 | **The plan commands the hand through the shelf's back wall on 15 of 20 cells**, by 4.8 to 79.9 mm, so the arm jams and every placement becomes a drop from a median 40 mm (§8j, `ROBOTICS_NOTES.md` §7.35) | `solve_ik` has no collision model, which is why the pose "solves to 3-5 mm" while being physically unreachable, and `by_collision` only ever checks the grasp. Candidate fixes — a collision-aware reachability gate, a front approach, or standing the release off the board — are all untried |
 | 1b | ~~The half-turn symmetry is applied to two hands that declare themselves asymmetric~~ — **closed, and it turned out to be redundant.** Compared against the grasp actually *executed*, minimising over the symmetry changes the answer on **0 of 20** cells, so it is now off by default | It was inert and could only hide a regression. The 13 cells where it still altered the reading were all comparisons against the grasp the planner *emitted* rather than the one executed — a reference mismatch, and forgiving it is what concealed §7.33 |
+| 1f | **The candidate funnel is starved, and it is the place-side corridor that starves it** — a median of **2.5** candidates reach the ranking in Experiment Q against 7 in O-ii and 14 in O-iii, and three cells reach it with **one**. ``by_place_approach`` cuts 711 to 296 using a *straight* corridor the full length of the hand, while the hand actually arrives along the curved transported path -- which ``path_clearance`` already measures exactly (§8o) | Shortening the corridor, or deleting the stage and letting the path check carry the place side, is answerable as pure geometry in seconds per cell. The most informative unmeasured quantity: would the path check have kept candidates the place zone rejected? |
+| 1g | **``by_reachability`` falls back on 20 of 20 cells** and contributes nothing but a flag, at thirteen IK solves per candidate (§8o) | It is also the stage ``path_clearance`` replaces, so it is redundant and inert at once. Retiring it is its own commit and its own before/after |
 | 1c | **Why the funnel's grasps are lost during the carry** — six cells to zero, one-sided, p = 0.031 (§8k) | Six grasp properties measured, none separates them, and the *grasping* difference is not significant (p = 0.375). Re-running Tier 2 on the same filters would reproduce it: nothing upstream has changed since |
 | 1e | **Experiments A to F have no corrected equivalent** | All six are withdrawn and none re-run. `GRASP_CUBE_HALF_EXTENT = 0.02` in particular rests on a withdrawn sweep read through a metric blind to the half turn (§10) |
 | 1d | **`robotiq140` is now the weakest hand at 1/4**, having been 2/4 | Different from where the investigation started, and undiagnosed. Its two clean failures carry the object faithfully and misplace it |
