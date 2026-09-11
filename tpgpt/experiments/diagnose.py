@@ -339,6 +339,11 @@ def object_probe(env, object_name: str, gripper: str | None = None):
             "object_z": float(position[2]),
             "jaw": float(_jaw_opening(env_)),
             "held": float(_gripper_touches(env_, object_name)),
+            # **What the jaws are actually applying.** `closure` says where the
+            # fingers are; only this says whether they are gripping. A hand can
+            # be fully shut at zero force (nothing between them) or barely shut
+            # at 17 N, and the two look identical in `closure`.
+            "grip_force": float(grip_force(env_, object_name)),
         }
         if closure is not None:
             record["closure"] = float(closure())

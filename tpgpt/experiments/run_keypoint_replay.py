@@ -472,7 +472,8 @@ def replay_variant(env, labels, source_placement, target, variant,
     trace = (getattr(replay, "metadata", None) or {}).get("probe") or {}
     row["trace"] = {
         key: np.asarray(trace[key], dtype=float).tolist()
-        for key in ("object_x", "object_y", "object_z", "held", "closure")
+        for key in ("object_x", "object_y", "object_z", "held", "closure",
+                    "grip_force")
         if key in trace
     }
     for key in ("reachable_per_waypoint", "tracking_error_per_waypoint"):
@@ -494,6 +495,7 @@ def main(
     approach_filter: bool = True,
     variant_names=REPLAY_VARIANTS,
     force_target: float | None = None,
+    cells=None,
 ) -> dict:
     """Replay every construction on every hand and object.
 
@@ -517,6 +519,18 @@ def main(
         approach_filter: Whether the 45 degree approach test is applied.
             Independent of ``rank_by``, which is what makes the two measurable
             separately.
+
+        cells: Restrict the run to these ``"gripper/object"`` cells, e.g.
+            ``("yumi/cereal",)``. ``None`` runs all of them and is byte-identical
+            to not passing it.
+
+            **Why this exists.** Diagnosing one cell used to mean either
+            re-running all twenty through the driver, or writing a standalone
+            script that rebuilds the pipeline by hand -- and those scripts
+            select *different grasps from the driver*, so they analyse cells the
+            run never executed. That cost hours and produced at least two
+            retracted conclusions. The manifest records this filter so a partial
+            run can never be mistaken for a full one.
 
         force_target: Newtons of grip force to close to before freezing the
             jaws. ``None`` keeps the historical behaviour of commanding them
@@ -639,8 +653,11 @@ def main(
     #: scene difference baked into every cross-hand comparison, and it must not
     #: be reported as a reproducibility failure.
     object_reference: dict[tuple[str, str], np.ndarray] = {}
+    wanted = None if cells is None else {c.strip() for c in cells}
     for gripper in grippers:
         for name in REPLAY_OBJECTS:
+            if wanted is not None and f"{gripper}/{name}" not in wanted:
+                continue
             for variant in variants:
                 env = build_scene(
                     objects=REPLAY_OBJECTS, seed=seed, controller_config=config,
@@ -743,6 +760,7 @@ def main(
                        "object": list(REPLAY_OBJECTS)},
             "grasp_selection": {"filters": filters, "rank_by": rank_by,
                                 "approach_filter": bool(approach_filter)},
+            "cells": None if cells is None else sorted(wanted),
             "gripper_command": {"force_target": force_target},
             "fixed": {
                 "source": "reshelving seed 0, one demonstration",
@@ -814,6 +832,11 @@ if __name__ == "__main__":
         ),
     )
     parser.add_argument(
+        "--cells", default=None,
+        help=("Comma-separated 'gripper/object' cells to run, e.g. "
+              "'yumi/cereal,panda/bread'. Defaults to all."),
+    )
+    parser.add_argument(
         "--no-approach-filter", action="store_true",
         help=(
             "Drop the 45 degree approach test, inline and as the funnel's "
@@ -849,4 +872,5 @@ if __name__ == "__main__":
         filters=args.filters,
         rank_by=args.rank_by,
         approach_filter=not args.no_approach_filter,
+        cells=None if not args.cells else tuple(args.cells.split(",")),
     )

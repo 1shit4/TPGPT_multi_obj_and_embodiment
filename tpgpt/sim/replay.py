@@ -61,24 +61,44 @@ JOINT_ACTION_SCALE = 0.5
 #: exist. Requiring the contact to persist distinguishes "the fingers are around
 #: Grip force the jaws close to before they are frozen, in newtons.
 #:
-#: **Force, because that is the quantity that decides both failures.** Too
-#: little and the object slips; too much and it is extruded -- and robosuite's
-#: objects are rigid, so an over-squeezed object is not compressed, it is
-#: squirted out. Measured on bread: the cells that place arrest their jaws with
-#: the object still between them, while the failing ones finish fully shut
-#: holding nothing, having travelled 41-63 mm past first contact.
+#: **A mitigation for a simulation artefact, not a model of grasping.** Keep the
+#: expectations low and do not spend time tuning it.
 #:
-#: The window is wide. Holding a 0.07 kg bread needs about 0.7 N of friction,
-#: so roughly 1.4 N of squeeze at a friction coefficient of 0.5; a successful
-#: grip was measured applying 18.7 N, and grips that extruded their object
-#: applied 279-558 N. 10 N sits an order of magnitude above what is needed and
-#: an order of magnitude below what destroys the grasp.
+#: What it fixes: robosuite's grippers integrate the *sign* of the command, so
+#: "+1" means "keep closing" and nothing stops the fingers but the object. When
+#: the object cannot stop them -- and robosuite's objects are perfectly rigid,
+#: so they never deform to widen the contact -- it is extruded instead. Closing
+#: to a force and then freeing (commanding ``0.0``, the one "stay" instruction
+#: the interface offers) caps that. Measured over 20 cells on identical grasps,
+#: **13 placed against 10** for commanding the jaws shut, gaining five and
+#: losing two.
 #:
-#: **Why not close until contact.** The obvious trigger -- ramp until the
-#: fingers touch -- fires immediately, because they are already touching: the
-#: hand descends around the object and both fingers graze it before the close
-#: is commanded. Measured, that froze the jaws at 0.00-0.05 closure against a
-#: baseline of 0.38-0.71, a hand barely shut at all.
+#: **No single value works, measured.** The windows do not overlap:
+#:
+#: =================  ========  ======  ======  ======
+#: cell               shut      10 N    25 N    60 N
+#: =================  ========  ======  ======  ======
+#: ``yumi/bread``     fail      **ok**  fail    fail
+#: robotiq85/can      fail      **ok**  fail    fail
+#: ``yumi/cereal``    ok        fail    **ok**  **ok**
+#: robotiq85/cereal   ok        fail    fail    fail
+#: =================  ========  ======  ======  ======
+#:
+#: 10 N is chosen as the best of them, not as a right answer.
+#:
+#: **And it is not really force control.** One step of the integrator is 10% of
+#: the finger travel (robosuite's ``speed`` is 0.2 over a range of 2.0), so the
+#: force jumps discontinuously: on ``yumi/cereal`` a target of 25 N produced
+#: **164 N**. The loop is "close in 10% increments until the force exceeds the
+#: target", and it overshoots by up to 6x.
+#:
+#: **Why not to invest further.** The requirement is not set by the object's
+#: weight -- cereal needs 0.35 N to resist gravity and empirically 39-148 N to
+#: be carried, a factor of 110 -- so no mass-scaled rule works, and a per-object
+#: lookup table would not generalise to unseen objects, which is the point of
+#: the project. The pathology is specific to rigid bodies gripped by stiff
+#: position-controlled jaws with no compliant pads. Real hands take a width and
+#: a force directly and their pads conform.
 GRASP_FORCE_TARGET = 10.0
 
 #: Physics steps allowed at each rung of the search for the fingers to respond.
