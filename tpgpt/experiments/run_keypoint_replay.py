@@ -73,6 +73,7 @@ from tpgpt.experiments.pipeline import (
 from tpgpt.experiments.reshelving_pipeline import record_source_placement
 from tpgpt.experiments.run_keypoint_transport import (
     ABLATION_OBJECTS,
+    PathCheck,
     VARIANTS,
     build_scene,
     table_surface,
@@ -459,7 +460,13 @@ def replay_variant(env, labels, source_placement, target, variant,
             if k in ("chosen_index", "chosen_score",
                      "chosen_approach_mismatch_deg", "n_candidates",
                      "n_survivors", "ranked_by", "offset_mm", "height_mm",
-                     "cloud_too_sparse_for_jaw_width")
+                     "cloud_too_sparse_for_jaw_width",
+                     # Which stage rejected how many, and how far down the
+                     # ranked list the executed candidate sat. Without these a
+                     # run cannot say whether a new filter did anything at all,
+                     # which is the check that has to precede believing it did.
+                     "place_approach_blocked_by", "path_check",
+                     "path_check_fell_back")
         },
         "cloud_points": target.metadata.get("cloud_points"),
         # **Grasped, traversed, placed** -- the three questions that are not
@@ -506,6 +513,11 @@ def main(
     force_target: float | None = None,
     cells=None,
     grasp_rank: int = 0,
+    scene_zones: bool = False,
+    centre_filter: bool = False,
+    path_check: bool = False,
+    ik_stride: int = 4,
+    max_path_candidates: int = 25,
 ) -> dict:
     """Replay every construction on every hand and object.
 
@@ -567,6 +579,30 @@ def main(
             historical pairing with ``filters``. Separating the two is what
             makes the filter set and the ranking independently measurable;
             see :func:`~tpgpt.experiments.run_keypoint_transport.target_placement`.
+
+        scene_zones: Apply the two **scene-derived** no-approach zones -- the
+            support's own normal at the pick, the shelf's own panels at the
+            placement. These are what replaces ``approach_filter``: the same
+            pathology constrained by the geometry of the scene rather than by
+            resemblance to one recording. Default off, so every existing caller
+            is byte-identical to before.
+
+        centre_filter: Apply the loose centre-of-mass stage, justified by
+            Experiment P (`FINDINGS.md` 8n) and contradicted by two of its own
+            twenty cells. Default off, and separately switchable, so what it is
+            worth stays measurable.
+
+        path_check: Judge candidates by the **trajectory they produce** rather
+            than by their pose -- a clearance sweep of the whole transported
+            path against the scene's solid geometry, then a warm-started
+            inverse-kinematics pass down it. See
+            :class:`~tpgpt.experiments.run_keypoint_transport.PathCheck` for why
+            this cannot be a stage of ``filter_grasps``, and 7.38 for what
+            checking 13 poses of a 200-pose trajectory costs.
+
+        ik_stride: Waypoint stride for that kinematic pass.
+        max_path_candidates: How far down the ranked list the path check looks
+            before falling back to the top-ranked candidate.
     """
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -715,6 +751,19 @@ def main(
                         approach_filter=approach_filter,
                         grasp_rank=grasp_rank,
                         slot_for_filters=slot,
+                        scene_zones=scene_zones,
+                        centre_filter=centre_filter,
+                        # **Per variant, and that is not incidental.** The map
+                        # differs between keypoint constructions, so the path
+                        # the arm executes differs too; a check run against the
+                        # cloud box's path would not be checking the cube's.
+                        path_check=PathCheck(
+                            labels=labels,
+                            source=source_placement,
+                            variant=variant,
+                            ik_stride=ik_stride,
+                            max_candidates=max_path_candidates,
+                        ) if path_check else None,
                     )
                     target.metadata["object_name"] = name
                     # The rebuild is only sound if the seeded scene is
@@ -776,7 +825,12 @@ def main(
                        "object": list(REPLAY_OBJECTS)},
             "grasp_selection": {"filters": filters, "rank_by": rank_by,
                                 "approach_filter": bool(approach_filter),
-                                "grasp_rank": int(grasp_rank)},
+                                "grasp_rank": int(grasp_rank),
+                                "scene_zones": bool(scene_zones),
+                                "centre_filter": bool(centre_filter),
+                                "path_check": bool(path_check),
+                                "ik_stride": int(ik_stride),
+                                "max_path_candidates": int(max_path_candidates)},
             "cells": None if cells is None else sorted(wanted),
             "gripper_command": {"force_target": force_target},
             "fixed": {
@@ -880,14 +934,64 @@ if __name__ == "__main__":
             "funnel and picks different grasps."
         ),
     )
+    parser.add_argument(
+        "--scene-zones", action="store_true",
+        help=(
+            "Apply the scene-derived no-approach zones: the support's own "
+            "normal at the pick (nothing comes up through the table) and the "
+            "shelf's own panels at the placement (nothing arrives through a "
+            "wall). What replaces --no-approach-filter rather than joining it."
+        ),
+    )
+    parser.add_argument(
+        "--centre-filter", action="store_true",
+        help=(
+            "Apply the loose centre-of-mass stage: reject grips more than "
+            "15 mm out from the object's centre of mass, horizontally. "
+            "Justified by Experiment P and contradicted by two of its own "
+            "cells, so it falls back rather than emptying the set."
+        ),
+    )
+    parser.add_argument(
+        "--path-check", action="store_true",
+        help=(
+            "Judge candidates by the transported trajectory rather than by the "
+            "grasp pose: a clearance sweep of all 200 waypoints against the "
+            "scene's solid geometry, then a warm-started IK pass down the "
+            "survivors. by_reachability checks 13 poses of that same path."
+        ),
+    )
+    parser.add_argument(
+        "--variants", default=None,
+        help=("Comma-separated keypoint constructions, e.g. "
+              "'2_cube_grasp_pose'. Defaults to both of REPLAY_VARIANTS."),
+    )
+    parser.add_argument("--seed", type=int, default=0)
+    parser.add_argument(
+        "--ik-stride", type=int, default=4,
+        help="Waypoint stride for the path check's inverse-kinematics pass.",
+    )
+    parser.add_argument(
+        "--max-path-candidates", type=int, default=25,
+        help=("How far down the ranked list the path check looks before "
+              "falling back to the top-ranked candidate."),
+    )
     args = parser.parse_args()
     main(
         args.out,
         args.slot,
+        seed=args.seed,
         grippers=tuple(args.grippers.split(",")) if args.grippers
         else REPLAY_GRIPPERS,
         filters=args.filters,
         rank_by=args.rank_by,
         approach_filter=not args.no_approach_filter,
         cells=None if not args.cells else tuple(args.cells.split(",")),
+        variant_names=tuple(args.variants.split(",")) if args.variants
+        else REPLAY_VARIANTS,
+        scene_zones=args.scene_zones,
+        centre_filter=args.centre_filter,
+        path_check=args.path_check,
+        ik_stride=args.ik_stride,
+        max_path_candidates=args.max_path_candidates,
     )

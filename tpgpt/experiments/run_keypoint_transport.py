@@ -213,6 +213,214 @@ def rotate_about(axis: np.ndarray, angle: float) -> np.ndarray:
     return np.eye(3) + np.sin(angle) * K + (1 - np.cos(angle)) * (K @ K)
 
 
+@dataclass(frozen=True)
+class PathCheck:
+    """Everything needed to judge a candidate by the trajectory it produces.
+
+    **What this is for.** Every stage of
+    :func:`~tpgpt.grasp.filters.filter_grasps` judges a grasp *pose*, because
+    until a map is fitted a candidate is nothing more than a pose. The thing the
+    arm actually executes is a 200-waypoint trajectory, and there is a different
+    one for every candidate: the keypoints are built from that candidate, the
+    demonstration is warped through them, and the result is the plan. 7.38
+    measured what judging the proxy costs -- ``by_reachability`` validates 13
+    poses per candidate, and a candidate that passes those 13 goes on to collide
+    at **79 to 162** of the other 187.
+
+    Checking the real thing turns out to be cheap, because **no inverse
+    kinematics is needed to know where the hand is**: the transported path *is*
+    the hand's pose at every waypoint. Placing the gripper's own surface sample
+    at each of them and measuring how far it lies inside the scene's solid
+    geometry costs about a millisecond a waypoint.
+
+    Attributes:
+        labels: The source demonstration, already in the tool frame and the
+            grasp convention -- exactly the object the driver transports. Not a
+            copy of it: passing anything else here checks a path that will not
+            be executed.
+        source: The source :class:`~tpgpt.sim.keypoints.ObjectPlacement`.
+        variant: Which keypoint construction to build the map with. The map, and
+            therefore the path, differs between constructions, so this has to be
+            the one being run.
+        max_candidates: How far down the ranked list to look before giving up.
+            Every candidate costs a map fit, a clearance sweep and -- if it gets
+            that far -- a warm-started inverse-kinematics pass, so this bounds
+            the work rather than expressing a belief about grasp quality.
+        check_kinematics: Run the warm-started IK pass as well. It is the
+            expensive half and it runs **only** on candidates that already
+            passed the clearance sweep, which is the ordering that makes the
+            pair affordable.
+        ik_stride: Take every n-th waypoint for the IK pass. Consecutive
+            waypoints are about 5 mm apart, so a stride of 4 still tests the
+            path every 2 cm and costs a quarter of the solves.
+        min_reachable_fraction: How much of the path the arm must be able to
+            hold before a candidate is accepted.
+        max_inside_fraction: How much of the path may sit inside scene geometry.
+            Defaults to
+            :data:`~tpgpt.grasp.filters.PATH_PENETRATION_FRACTION`; see there
+            for why the criterion is *sustained* penetration and not the deepest.
+    """
+
+    labels: object
+    source: ObjectPlacement
+    variant: "KeypointVariant"
+    max_candidates: int = 25
+    check_kinematics: bool = True
+    ik_stride: int = 4
+    min_reachable_fraction: float = 0.9
+    max_inside_fraction: float | None = None
+
+
+def _select_by_path(
+    env,
+    grasp_set,
+    order,
+    instance: str,
+    slot: str,
+    cloud,
+    gripper: str,
+    support: float,
+    yaw_offset_deg: float,
+    tilt_offset_deg: float,
+    check: PathCheck,
+    funnel_flags: dict,
+) -> tuple[int, dict]:
+    """The first ranked candidate whose transported path is clear and reachable.
+
+    Walks the ranked list in order, and for each candidate:
+
+    1. builds the keypoints and fits the map, exactly as the driver will;
+    2. transports the demonstration through it, giving the hand's pose at every
+       waypoint with no inverse kinematics involved;
+    3. measures how far inside the scene's solid geometry the hand -- and, over
+       the interval it is actually held, the object -- ends up
+       (:func:`~tpgpt.grasp.filters.path_clearance`);
+    4. only if that passes, solves IK down the path warm-started from the
+       previous waypoint (:func:`~tpgpt.grasp.filters.path_kinematics`).
+
+    **The ranking is not touched.** Candidates are considered in the order they
+    were ranked and the first admissible one wins, so this rejects rather than
+    re-scores. That keeps "which candidates are allowed" and "which allowed one
+    is used" separate, which is the separation `FINDINGS.md` 8k was unreadable
+    for want of.
+
+    **It falls back rather than refusing**, like every stage of the funnel: if
+    no candidate inside ``max_candidates`` is admissible, the top-ranked one is
+    used and a flag says so. A cell that executes under that flag is reporting
+    "the least bad plan, and here is what is wrong with it" rather than "no
+    grasp exists", and the flag reaches the manifest.
+
+    Returns:
+        ``(chosen index, flags)``.
+    """
+    from tpgpt.grasp.filters import PATH_PENETRATION_FRACTION, path_clearance, path_kinematics
+    from tpgpt.grasp.grippers import resolve_pair
+    from tpgpt.perception.obstacles import scene_obstacles
+    from tpgpt.sim.keypoints import carry_indices
+
+    pair = resolve_pair(gripper)
+    max_inside = (
+        check.max_inside_fraction
+        if check.max_inside_fraction is not None
+        else PATH_PENETRATION_FRACTION
+    )
+    # Built once. The scene does not move while candidates are being compared,
+    # and rebuilding it per candidate would be most of the cost.
+    obstacles = scene_obstacles(env, exclude=(instance,))
+    grasp_index, release_index = carry_indices(check.labels)
+
+    order = [int(i) for i in order][: max(int(check.max_candidates), 1)]
+    examined = []
+    for candidate in order:
+        grasp = _apply_grasp_offsets(
+            GraspFrame.from_grasp(grasp_set.grasps[candidate]),
+            yaw_offset_deg,
+            tilt_offset_deg,
+        )
+        placement = _placement_for(env, cloud, grasp, slot, support, funnel_flags)
+        try:
+            result = transport(
+                check.labels, check.source, placement, variant=check.variant
+            )
+        except (ValueError, RuntimeError) as exc:
+            # A map this candidate's keypoints cannot produce -- degenerate
+            # keypoints, a collapsed box. Recorded, not swallowed: a candidate
+            # that cannot be transported is exactly as unusable as one that
+            # collides, and the reason belongs in the report.
+            examined.append({"index": candidate, "rejected": f"{type(exc).__name__}: {exc}"})
+            continue
+        rotations = result["warped_rotations"]
+        clearance = path_clearance(
+            env,
+            result["warped"],
+            rotations,
+            pair,
+            carried_points=placement.points,
+            carry_span=(grasp_index, release_index),
+            obstacles=obstacles,
+        )
+        record = {
+            "index": candidate,
+            "inside_fraction": round(clearance["inside_fraction"], 4),
+            "max_depth_mm": round(clearance["max_depth"] * 1000, 2),
+            "median_inside_depth_mm": round(clearance["median_inside_depth"] * 1000, 2),
+            "culprits": clearance["culprits"],
+        }
+        if clearance["inside_fraction"] > max_inside:
+            record["rejected"] = "path_collision"
+            examined.append(record)
+            continue
+        if check.check_kinematics:
+            kinematics = path_kinematics(
+                env, result["warped"], rotations, pair, stride=check.ik_stride,
+            )
+            record["reachable_fraction"] = round(kinematics["reachable_fraction"], 3)
+            if kinematics["reachable_fraction"] < check.min_reachable_fraction:
+                record["rejected"] = "path_kinematics"
+                examined.append(record)
+                continue
+        examined.append(record)
+        return candidate, {
+            "path_check": {
+                "chosen": candidate,
+                "rank_examined": len(examined),
+                "fell_back": False,
+                "examined": examined,
+            }
+        }
+
+    return order[0], {
+        "path_check": {
+            "chosen": order[0],
+            "rank_examined": len(examined),
+            "fell_back": True,
+            "examined": examined,
+        },
+        "path_check_fell_back": True,
+    }
+
+
+def object_centre_of_mass(env, instance: str):
+    """World centre of mass of a named object, or ``None`` if it cannot be read.
+
+    ``None`` rather than a plausible default, on the rule that cost this project
+    a 41 mm frame error: a zero or a centroid substituted silently for a missing
+    measurement is indistinguishable from a real one, and the filter that
+    consumes it would then be measuring nothing while reporting a number.
+
+    In simulation this is exact -- MuJoCo carries each body's inertial frame. A
+    real system has no such thing and would have to substitute the fitted box's
+    centre, which is biased by the cloud being one-sided; the filter that uses
+    this says so.
+    """
+    try:
+        return np.asarray(
+            env.sim.data.xipos[env.object_body_ids[instance]], dtype=float
+        )
+    except (KeyError, AttributeError, IndexError):
+        return None
+
+
 def target_placement(
     env,
     instance: str,
@@ -229,6 +437,9 @@ def target_placement(
     slot_for_filters: str | None = None,
     rank_by: str = "auto",
     approach_filter: bool = True,
+    path_check: "PathCheck | None" = None,
+    scene_zones: bool = True,
+    centre_filter: bool = True,
 ) -> tuple[ObjectPlacement, np.ndarray]:
     """Describe an object in the scene and where the task wants it.
 
@@ -316,6 +527,34 @@ def target_placement(
             placement pose exists to test reachability against.
         slot_for_filters: Destination slot, needed by ``filters="full"`` to
             derive the placement pose the reachability stage checks.
+        scene_zones: Apply the two scene-derived no-approach zones inside the
+            full funnel -- :func:`~tpgpt.grasp.filters.by_support_approach` at
+            the pick and :func:`~tpgpt.grasp.filters.by_place_approach` at the
+            placement. Separately switchable from ``approach_filter`` because
+            they are meant to *replace* it: one is a constraint read off the
+            table and the shelf, the other a resemblance to a recording, and a
+            run that moved both at once could not say which mattered.
+        centre_filter: Apply the loose centre-of-mass stage
+            (:func:`~tpgpt.grasp.filters.by_centre_offset`). Separate again, and
+            for the same reason: it rests on twenty grasps from one study and
+            two of them contradict it, so its contribution has to stay
+            separable from the rest.
+        path_check: Run the two stages that can only be run **after** the
+            transport, on the candidates the funnel has already passed. See
+            :class:`PathCheck`. ``None`` leaves selection exactly as it was, so
+            every existing caller is unaffected.
+
+            These cannot live in
+            :func:`~tpgpt.grasp.filters.filter_grasps`, and the reason is not
+            organisational. Every stage in that funnel judges a *pose*, or a
+            short corridor around one, because a pose is all a candidate is
+            until a map has been fitted to it. The trajectory the arm actually
+            executes does not exist until the keypoints are built from that
+            candidate and the demonstration is warped through them -- a
+            different trajectory for every candidate. 7.38 measured the cost of
+            judging the proxy instead: ``by_reachability`` validates 13 poses
+            while the replay executes 200, so a candidate passes its sample and
+            then collides at 79 to 162 of the other 187.
         gripper: Registry short name, when ``grasp_source="graspgen"``.
         grasp_rank: Which ranked candidate to take.
 
@@ -414,6 +653,13 @@ def target_placement(
                 grasp_set.grasps, gripper, cloud.points, scene_points=scene,
                 camera_positions=cloud.camera_positions, env=env,
                 place_pose=provisional,
+                # Read off the scene, not off the demonstration: the table's
+                # own outward normal at the pick, and the shelf's own panels at
+                # the placement. ``None`` switches the stage off entirely.
+                support_normal=(0.0, 0.0, 1.0) if scene_zones else None,
+                check_place_approach=bool(scene_zones),
+                centre_of_mass=object_centre_of_mass(env, instance)
+                if centre_filter else None,
                 # None disables the funnel's own "demonstrated" stage, which is
                 # how the approach test is switched off inside the full funnel.
                 # The reference is still held above for ranking and the roll.
@@ -466,7 +712,18 @@ def target_placement(
         # comment claimed a secondary key it did not have.
         order = survivors[np.argsort(key, kind="stable")]
         funnel_flags["ranked_by"] = chosen_rank
-        chosen = int(order[min(grasp_rank, len(order) - 1)])
+        if path_check is not None:
+            # The two stages that need the trajectory rather than the pose. They
+            # walk the ranked list in order and take the first candidate whose
+            # *transported path* is clear and reachable, so the ranking is
+            # untouched and only inadmissible candidates are skipped.
+            chosen, path_flags = _select_by_path(
+                env, grasp_set, order, instance, slot, cloud, gripper, support,
+                yaw_offset_deg, tilt_offset_deg, path_check, funnel_flags,
+            )
+            funnel_flags.update(path_flags)
+        else:
+            chosen = int(order[min(grasp_rank, len(order) - 1)])
         grasp = GraspFrame.from_grasp(grasp_set.grasps[chosen])
         # Which candidate was executed, and why. Recorded because a comparison
         # of selection rules is only informative on cells where the rules
@@ -484,7 +741,9 @@ def target_placement(
         # rather than asserted -- and it has been asserted, on evidence that
         # came from a sample of failures only.
         try:
-            com = np.asarray(env.sim.data.xipos[env.object_body_ids[instance]], dtype=float)
+            com = object_centre_of_mass(env, instance)
+            if com is None:
+                raise KeyError(instance)
             tcp = np.asarray(grasp.tcp, dtype=float)
             funnel_flags["offset_mm"] = float(np.linalg.norm((tcp - com)[:2]) * 1000)
             funnel_flags["height_mm"] = float((tcp - com)[2] * 1000)
@@ -497,6 +756,19 @@ def target_placement(
         raise ValueError(
             f"unknown grasp_source {grasp_source!r}; expected 'recipe' or 'graspgen'"
         )
+    grasp = _apply_grasp_offsets(grasp, yaw_offset_deg, tilt_offset_deg)
+    placement = _placement_for(env, cloud, grasp, slot, support, funnel_flags)
+    return placement, cloud.points
+
+
+def _apply_grasp_offsets(grasp, yaw_offset_deg: float, tilt_offset_deg: float):
+    """The swept yaw and tilt offsets, applied in that order.
+
+    Factored out so the grasp whose path is checked is bit for bit the grasp
+    that is executed. Applying them in only one of the two places would mean
+    checking a trajectory nobody runs, which is the whole failure this checking
+    exists to prevent.
+    """
     if yaw_offset_deg:
         rotation = rotate_about([0.0, 0.0, 1.0], np.radians(yaw_offset_deg))
         grasp = GraspFrame(grasp.tcp, grasp.approach, rotation @ grasp.closing)
@@ -505,9 +777,13 @@ def target_placement(
         # therefore the task frame -- is untouched and only the approach moves.
         rotation = rotate_about(grasp.closing, np.radians(tilt_offset_deg))
         grasp = GraspFrame(grasp.tcp, rotation @ grasp.approach, grasp.closing)
+    return grasp
 
+
+def _placement_for(env, cloud, grasp, slot: str, support: float, funnel_flags: dict):
+    """Assemble the :class:`ObjectPlacement` for one grasp on one object."""
     destination = env.slot_poses()[slot]
-    placement = ObjectPlacement(
+    return ObjectPlacement(
         points=cloud.points,
         grasp=grasp,
         support_height=support,
@@ -518,7 +794,6 @@ def target_placement(
             "cloud_points": int(len(cloud.points)),
         },
     )
-    return placement, cloud.points
 
 
 def corresponding_point(world_point, source_meta: dict, target_meta: dict) -> np.ndarray:
@@ -598,6 +873,12 @@ def transport(
         "diagnostics": diagnostics,
         "map": transport_map,
         "warped": warped,
+        # The transported orientations, in the **grasp** convention -- the same
+        # one the labels arrive in. Returned rather than left to be recomputed,
+        # because every caller that wants the hand's pose at a waypoint needs
+        # both halves and recomputing one of them is how two callers end up
+        # measuring two different trajectories.
+        "warped_rotations": warped_rotations,
         "grasp_index": grasp_index,
         "release_index": release_index,
         "n_keypoints": len(S),

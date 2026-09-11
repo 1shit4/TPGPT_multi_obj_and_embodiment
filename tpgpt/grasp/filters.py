@@ -107,6 +107,110 @@ MIN_JAW_WIDTH_POINTS = 40
 #: nothing.
 MAX_APPROACH_MISMATCH_DEG = 45.0
 
+#: How far a grasp's approach may lean away from straight down, in degrees.
+#:
+#: **This is the table talking, not the demonstration.** The support surface has
+#: an outward normal -- straight up on a table -- and a hand cannot arrive from
+#: the far side of it, because the far side is solid. So an approach direction
+#: with an *upward* component describes a hand rising through the table top,
+#: which is not a grasp at all.
+#:
+#: The angle is measured from straight down, so 0 degrees is a purely top-down
+#: descent, 90 is exactly horizontal, and anything past 90 points upward. The
+#: limit is set slightly under the geometric bound (85 rather than 90) because
+#: the fingers hang *below* the tool centre point: a hand held exactly level
+#: still has finger tips grazing the surface the object stands on.
+#:
+#: Measured on the default tabletop scene, seed 0, Panda, over the 100
+#: candidates GraspGen-X returns per object:
+#:
+#: ========  ==============  ================  ===============
+#: object    median approach within 85 deg     top-scoring one
+#: ========  ==============  ================  ===============
+#: cereal    89.3 deg        42 of 100         19.0 deg
+#: milk      92.8 deg        27 of 100         **101.8 deg**
+#: can       88.5 deg        39 of 100         **100.7 deg**
+#: bread     88.4 deg        45 of 100         6.9 deg
+#: ========  ==============  ================  ===============
+#:
+#: So the candidate set is dominated by side grasps, and on two of the four
+#: objects the planner's own best candidate approaches from **underneath**.
+#: That is the run-i failure of `FINDINGS.md` 8m -- ranking by score with no
+#: constraint placed nothing in twenty cells -- and this rejects those two
+#: without consulting the source demonstration at all.
+SUPPORT_APPROACH_MAX_DEG = 85.0
+
+#: How much of the arrival corridor must be clear, as a multiple of the hand's
+#: own length behind the grasp point.
+#:
+#: The hand does not arrive as a point. It arrives as a body roughly
+#: ``tcp_depth`` long trailing behind the fingertips -- 103 to 195 mm across the
+#: registry -- so the corridor it sweeps to reach a release pose is at least
+#: that long. Taking the full length is the honest figure; taking a fraction of
+#: it would be asserting that the wrist may end up inside a wall.
+PLACE_CORRIDOR_FRACTION = 1.0
+
+#: Rays cast across the hand's cross-section when testing an arrival corridor.
+#:
+#: One central ray is not enough: it passes through the gap between two fingers
+#: while the fingers themselves are inside a panel. These are spread over a disc
+#: of the hand's own lateral radius, so the bundle covers the swept cross
+#: section rather than its centre line.
+PLACE_CORRIDOR_RAYS = 9
+
+#: Penetration beyond which a waypoint counts as inside scene geometry, metres.
+#:
+#: Not zero, and the reason is 7.38: **contact is normal in this scene**. A
+#: placement ends with the object resting on the board and the fingers within a
+#: millimetre of it; a pick begins with the fingers straddling an object that is
+#: itself touching the table. A rule that fired on literal overlap would fire on
+#: every candidate. 2 mm is below the thickness of anything that matters and
+#: above the incidental contact of a set-down, whose measured depth on cells
+#: that succeed is 0.05 to 0.17 mm.
+PATH_PENETRATION_TOLERANCE = 0.002
+
+#: Fraction of a path's waypoints that may sit inside scene geometry.
+#:
+#: **Sustained penetration, not the deepest.** 7.38 measured both against known
+#: outcomes on twenty cells: maximum depth separates nothing -- one cell placed
+#: successfully through a 50.5 mm transient clip while another failed with no
+#: penetration at all -- while every cell whose path sat inside geometry for
+#: more than half its length failed, and no successful cell exceeded a median
+#: depth of 12.4 mm. A brief deep clip is survivable because the controller
+#: pushes through it; a wall the hand leans on for a hundred waypoints is not.
+PATH_PENETRATION_FRACTION = 0.30
+
+#: How far from an object's centre of mass a grip may be taken, in metres.
+#:
+#: **Measured, and deliberately loose.** Experiment P (`FINDINGS.md` 8n) ran
+#: five hand/object pairs at four grasp poses each -- twenty grasps -- and
+#: recorded the horizontal distance from the object's centre of mass to the
+#: grasp point alongside how far the object was actually carried:
+#:
+#: =========================  ===========  ===============
+#: outcome                    n            median offset
+#: =========================  ===========  ===============
+#: carried past 200 mm        11           **6.3 mm**
+#: did not                     9           **19.1 mm**
+#: =========================  ===========  ===============
+#:
+#: and every grasp under 10 mm carried, bar one. The mechanism is a lever arm:
+#: the object's weight acting this far from the grip applies a moment that
+#: rotates it in the jaws, and a hand that pinches near an edge lets it pivot
+#: out.
+#:
+#: 15 mm rejects **6 of the 9** grasps that failed to carry and costs **1 of
+#: the 11** that succeeded -- ``panda/cereal``, which carried 418 mm from
+#: 23.4 mm off centre. That one cell, and ``panda/cereal`` again *failing* at
+#: 6.2 mm, are why this is a loose filter that falls back rather than a gate:
+#: the criterion is real and it is not sufficient. Whether the object slips
+#: also depends on friction, on finger area and on how much of the body is
+#: between the jaws, none of which this sees.
+#:
+#: One study of twenty grasps set this number, so treat it as an operating
+#: point rather than a constant of nature.
+MAX_CENTRE_OFFSET = 0.015
+
 #: How close IK must get for a pose to count as reachable, in metres.
 #:
 #: Matched to what the impedance controller achieves, not to solver precision.
@@ -627,6 +731,464 @@ def by_demonstration_consistency(
     return _keep(indices, [float(grasps[i].approach @ reference) >= limit for i in indices])
 
 
+# ------------------------------------------------------- scene-derived zones
+def by_support_approach(
+    grasps: list[Grasp6D],
+    indices: np.ndarray,
+    support_normal: np.ndarray = (0.0, 0.0, 1.0),
+    max_angle_deg: float = SUPPORT_APPROACH_MAX_DEG,
+) -> np.ndarray:
+    """Drop grasps that would have the hand come up through the table.
+
+    **The pick-side no-approach zone, derived from the scene rather than from
+    the demonstration.** Every object in this task stands on a surface, and that
+    surface is solid: a hand cannot reach the object from below it. The
+    constraint is therefore a half space, fixed by the support's own outward
+    normal, and it holds whatever was demonstrated and whatever the object is.
+
+    Contrast :func:`by_demonstration_consistency`, which this is meant to
+    replace. That one asks whether a candidate resembles the *source*, which
+    ties every target scene to one recorded motion and rejects perfectly good
+    grasps for being unlike it. This asks whether the hand could physically be
+    where the candidate says it is.
+
+    The test is one dot product: the angle between the candidate's approach axis
+    and straight down, capped at :data:`SUPPORT_APPROACH_MAX_DEG`. See that
+    constant for the measured candidate distributions and for why the cap sits
+    at 85 rather than at the geometric 90.
+
+    Args:
+        support_normal: Outward normal of the surface the object rests on --
+            ``+z`` for a table. Taken as an argument rather than assumed,
+            because the same rule is what a sloped or vertical support would
+            need and the only thing that changes is this vector.
+
+    Returns:
+        The surviving indices.
+    """
+    normal = np.asarray(support_normal, dtype=float).reshape(3)
+    normal = normal / np.linalg.norm(normal)
+    limit = float(np.cos(np.radians(max_angle_deg)))
+    return _keep(
+        indices, [float(grasps[i].approach @ (-normal)) >= limit for i in indices]
+    )
+
+
+def hand_envelope(pair: GripperPair, n: int = 1024) -> tuple[float, float]:
+    """How far a hand reaches behind its grasp point, and how wide it is.
+
+    Both read off the gripper's own published surface sample rather than
+    assumed, so they are per-hand facts: the registry spans 103 to 195 mm of
+    fingertip depth and the bodies differ far more than that.
+
+    Returns:
+        ``(length, radius)`` in metres -- how far the body extends back along
+        the approach axis from the fingertip point, and the largest distance of
+        any part of it from that axis.
+    """
+    points = gripper_points(pair.graspgen, n=n)
+    depth = float(gripper_geometry(pair.graspgen).tcp_depth)
+    # The sample is in the gripper base frame: +Z the approach, origin at the
+    # base. The fingertip point sits ``depth`` along +Z, so measuring from it
+    # means shifting the sample back by that much.
+    behind = float(np.max(depth - points[:, 2]))
+    radius = float(np.max(np.linalg.norm(points[:, :2], axis=1)))
+    return max(behind, 0.0), radius
+
+
+def free_corridor(
+    env,
+    point: np.ndarray,
+    arrival: np.ndarray,
+    length: float,
+    radius: float,
+    exclude: tuple[str, ...] = (),
+    rays: int = PLACE_CORRIDOR_RAYS,
+) -> str | None:
+    """What, if anything, blocks a hand arriving at ``point`` along ``arrival``.
+
+    Casts a bundle of rays **backwards** from the destination along the
+    direction the hand came from, spread over a disc of the hand's own lateral
+    radius so the bundle covers the cross section the body sweeps rather than
+    its centre line. One central ray is not enough: it threads the gap between
+    two fingers while the fingers are inside a panel.
+
+    Uses :func:`~tpgpt.perception.obstacles.first_obstruction`, which skips
+    geoms that are drawn but not solid -- this scene puts a translucent marker
+    box at every shelf slot, and an unguarded cast reports it as an obstacle.
+
+    Args:
+        point: Where the hand ends up, world coordinates.
+        arrival: Unit direction the hand travels along to get there, i.e. the
+            grasp's approach axis.
+        length: How far back the corridor must be clear.
+        radius: Half width of the bundle.
+        exclude: Substrings naming geoms that do not count -- the object being
+            carried belongs here.
+
+    Returns:
+        The name of the first blocking geom, or ``None`` when the corridor is
+        clear.
+    """
+    from tpgpt.perception.obstacles import first_obstruction
+
+    point = np.asarray(point, dtype=float).reshape(3)
+    arrival = np.asarray(arrival, dtype=float).reshape(3)
+    arrival = arrival / np.linalg.norm(arrival)
+
+    # Any two axes perpendicular to the arrival direction will do; what matters
+    # is that the offsets span the disc rather than lie along one line.
+    reference = np.array([0.0, 0.0, 1.0])
+    if abs(float(arrival @ reference)) > 0.9:
+        reference = np.array([1.0, 0.0, 0.0])
+    u = np.cross(arrival, reference)
+    u /= np.linalg.norm(u)
+    v = np.cross(arrival, u)
+
+    offsets = [np.zeros(3)]
+    for k in range(max(rays - 1, 0)):
+        angle = 2.0 * np.pi * k / max(rays - 1, 1)
+        offsets.append(radius * (np.cos(angle) * u + np.sin(angle) * v))
+
+    for offset in offsets:
+        _, name = first_obstruction(
+            env, point + offset, -arrival, max_distance=length, exclude=exclude
+        )
+        if name is not None:
+            return name
+    return None
+
+
+def by_place_approach(
+    grasps: list[Grasp6D],
+    indices: np.ndarray,
+    env,
+    pair: GripperPair,
+    release_positions,
+    exclude: tuple[str, ...] = (),
+    corridor_fraction: float = PLACE_CORRIDOR_FRACTION,
+) -> tuple[np.ndarray, dict]:
+    """Drop grasps whose release would have the hand arrive through a wall.
+
+    **The place-side no-approach zone.** The pick side has one blocked
+    direction, downwards, and it never changes. The place side has as many as
+    the destination has neighbours, and which ones they are is a property of the
+    shelf: the default ``cubby`` variant walls a slot on three sides, the
+    ``open`` variant on none, and the ``enclosed`` variant adds a roof that
+    makes a top-down placement impossible outright. Hand-listing them would
+    encode one of those three into the code.
+
+    So the blocked set is **not listed anywhere**. It is measured, per
+    candidate, by asking the model whether the corridor the hand would sweep to
+    reach its release pose is clear (:func:`free_corridor`). The corridor's
+    length and width come from the hand's own published geometry
+    (:func:`hand_envelope`), so a 270 mm-deep Robotiq 2F-140 is held to a longer
+    clear run than a 97 mm Panda, which is the physical truth.
+
+    Measured on the default scene at ``top_middle``, casting along the six world
+    axes from 60 mm above the board: ``+x`` is blocked by ``shelf_top_back`` at
+    **38 mm**, ``+/-y`` by the two side walls at **198 mm**, ``-z`` by the board
+    itself at 60 mm, and ``+z`` and ``-x`` are open. That is the cubby's own
+    geometry, read out rather than written down; on the ``open`` variant the
+    same probe finds only the board.
+
+    **The grasp does not change orientation between pick and place.** Once the
+    jaws shut the object is rigid with the hand, so the release pose inherits
+    the pick's rotation and the arrival direction is the grasp's own approach
+    axis. That is the same assumption :func:`by_reachability` already makes
+    through :func:`~tpgpt.experiments.pipeline.place_pose_for`, so the two
+    stages agree about where the hand ends up.
+
+    Args:
+        release_positions: Where the hand's fingertip point must be at release,
+            one per entry of ``indices`` or one shared position. Derived from
+            the slot and the object's height, not chosen.
+        exclude: Substrings naming geoms that do not count. The object being
+            carried belongs here: it arrives with the hand.
+
+    Returns:
+        ``(survivors, blocked_by)`` -- the surviving indices, and a tally of
+        which geom blocked how many candidates, so a cell rejected here can be
+        attributed to a named panel rather than to "the shelf".
+    """
+    indices = np.asarray(indices)
+    length, radius = hand_envelope(pair)
+    length *= float(corridor_fraction)
+    positions = np.atleast_2d(np.asarray(release_positions, dtype=float))
+    if len(positions) == 1:
+        positions = np.repeat(positions, len(indices), axis=0)
+    if len(positions) != len(indices):
+        raise ValueError(
+            f"{len(positions)} release positions for {len(indices)} candidates; "
+            "pass one per candidate or exactly one shared position"
+        )
+
+    blocked_by: dict = {}
+    keep = []
+    for position, i in zip(positions, indices):
+        name = free_corridor(
+            env, position, grasps[i].approach, length, radius, exclude=exclude
+        )
+        if name is not None:
+            blocked_by[name] = blocked_by.get(name, 0) + 1
+        keep.append(name is None)
+    return _keep(indices, keep), blocked_by
+
+
+# --------------------------------------------------- the executed trajectory
+def path_clearance(
+    env,
+    positions: np.ndarray,
+    rotations: np.ndarray,
+    pair: GripperPair,
+    exclude: tuple[str, ...] = (),
+    carried_points: np.ndarray | None = None,
+    carry_span: tuple[int, int] | None = None,
+    obstacles=None,
+    n_points: int = 512,
+) -> dict:
+    """How far inside scene geometry a transported path puts the hand, waypoint by waypoint.
+
+    **Why the funnel needs this and why nothing already did it.**
+    :func:`by_reachability` validates **13 poses** per candidate -- five down the
+    approach, two on the lift, five at the placement and retreat -- while the
+    replay executes **200**. Measured in 7.38, a candidate passes that sample and
+    then collides at 79 to 162 of the other 187 waypoints. The thing checked and
+    the thing executed are not the same trajectory.
+
+    This checks the whole thing, and it is cheap because it needs no inverse
+    kinematics: the hand's pose at every waypoint *is* the transported path.
+    The hand is its own published surface sample, placed at each pose; the
+    obstacles are the scene's solid primitives
+    (:func:`~tpgpt.perception.obstacles.scene_obstacles`), which give an exact
+    signed depth rather than a nearest-neighbour yes/no. Depth is the quantity
+    the criterion turns on -- see :data:`PATH_PENETRATION_FRACTION`.
+
+    **Frames.** ``positions`` are fingertip (TCP) positions and ``rotations``
+    are in the *grasp* convention, ``+Z`` the approach and ``+X`` the closing
+    direction -- which is what a transported label set is, and what the gripper's
+    surface sample is expressed in. The sample is in the gripper *base* frame,
+    so it is shifted back along the approach by the hand's own ``tcp_depth``
+    before being placed. That shift is exactly the one
+    :func:`~tpgpt.grasp.grasps.grasp_to_eef_pose` makes and unmakes, so the
+    hand lands where the replay actually drives it.
+
+    Args:
+        positions: ``(m, 3)`` fingertip positions along the path.
+        rotations: ``(m, 3, 3)`` grasp-convention orientations along the path.
+        pair: The hand being checked.
+        exclude: Substrings naming geoms that are not obstacles -- the object
+            being carried, above all.
+        carried_points: ``(k, 3)`` world points of the held object, given in the
+            pose it has at waypoint ``carry_span[0]`` -- which is where the jaws
+            shut. From there it is rigid with the hand, so its pose at every
+            later waypoint follows from the hand's. Passing it asks whether the
+            hand *plus its load* fits, which is what the place side needs.
+        carry_span: ``(grasp, release)`` waypoint indices bounding the interval
+            the object is actually held over. Outside it the object is standing
+            on a surface and is not attached to the hand at all, so checking it
+            there would report the object colliding with the table it is resting
+            on. Comes from
+            :func:`~tpgpt.sim.keypoints.carry_indices`, which reads the
+            demonstration's own gripper channel.
+        obstacles: Pre-built obstacle list, to avoid rebuilding it per candidate.
+        n_points: Hand surface samples. 512 puts the samples about 10 mm apart
+            on a Panda, fine enough that a 12 mm shelf panel cannot pass between
+            them.
+
+    Returns:
+        A dict with ``depth`` (per waypoint, metres), ``depth_object`` (likewise
+        for the carried load, or ``None``), ``inside_fraction`` (share of
+        waypoints deeper than :data:`PATH_PENETRATION_TOLERANCE`),
+        ``max_depth``, ``median_inside_depth`` (median depth over the waypoints
+        that are inside, which is 7.38's discriminating statistic), and
+        ``culprits`` (a tally of which geom was deepest, by waypoint).
+    """
+    from tpgpt.perception.obstacles import deepest_penetration, scene_obstacles
+
+    if obstacles is None:
+        obstacles = scene_obstacles(env, exclude=exclude)
+    positions = np.atleast_2d(np.asarray(positions, dtype=float))
+    rotations = np.asarray(rotations, dtype=float).reshape(-1, 3, 3)
+    if len(positions) != len(rotations):
+        raise ValueError(
+            f"{len(positions)} positions against {len(rotations)} rotations"
+        )
+
+    hand = gripper_points(pair.graspgen, n=n_points)
+    depth_tcp = float(gripper_geometry(pair.graspgen).tcp_depth)
+
+    load_local, carry_from, carry_to = None, 0, len(positions)
+    if carried_points is not None and len(carried_points):
+        carry_from, carry_to = carry_span if carry_span else (0, len(positions))
+        carry_from = int(np.clip(carry_from, 0, len(positions) - 1))
+        carry_to = int(np.clip(carry_to, carry_from, len(positions) - 1))
+        # Held rigidly, so its pose in the hand's frame is fixed from the moment
+        # the jaws shut. Expressed there once rather than re-derived per step.
+        load_local = (
+            np.asarray(carried_points, dtype=float) - positions[carry_from]
+        ) @ rotations[carry_from]
+
+    depths = np.zeros(len(positions))
+    load_depths = np.zeros(len(positions)) if load_local is not None else None
+    culprits: dict = {}
+    for k, (p, R) in enumerate(zip(positions, rotations)):
+        base = p - R[:, 2] * depth_tcp
+        world = base + hand @ R.T
+        depth, name = deepest_penetration(world, obstacles)
+        depths[k] = depth
+        if name is not None and depth > PATH_PENETRATION_TOLERANCE:
+            culprits[name] = culprits.get(name, 0) + 1
+        if load_local is not None and carry_from <= k <= carry_to:
+            load_world = p + load_local @ R.T
+            load_depths[k], _ = deepest_penetration(load_world, obstacles)
+
+    inside = depths > PATH_PENETRATION_TOLERANCE
+    return {
+        "depth": depths,
+        "depth_object": load_depths,
+        "waypoints": int(len(depths)),
+        "inside_waypoints": int(inside.sum()),
+        "inside_fraction": float(inside.mean()) if len(depths) else 0.0,
+        "max_depth": float(depths.max()) if len(depths) else 0.0,
+        "median_inside_depth": float(np.median(depths[inside])) if inside.any() else 0.0,
+        "culprits": culprits,
+    }
+
+
+def path_kinematics(
+    env,
+    positions: np.ndarray,
+    rotations: np.ndarray,
+    pair: GripperPair,
+    arm: str = "right",
+    tolerance: float = REACH_TOLERANCE,
+    stride: int = 1,
+) -> dict:
+    """Can the arm hold every pose of a transported path, solving down the path?
+
+    The kinematic half of the same question :func:`path_clearance` asks
+    geometrically, and it runs **after** it for a reason: an isolated inverse
+    kinematics solve costs hundreds of milliseconds because it starts from the
+    rest configuration and has to walk all the way to the answer, while a solve
+    seeded from the previous waypoint's answer starts a few millimetres away and
+    converges almost immediately. Down a 200-pose trajectory that is the
+    difference between a minute and a second or two per candidate.
+
+    Seeding from the previous solution also makes this the *right* question.
+    ``reachable_fraction`` is a property of the whole path rather than of any
+    pose -- it answers "can the arm move **between** these poses" -- and the
+    replay itself solves the same way, so this is the same computation the
+    execution will perform.
+
+    **It is blind to collision**, deliberately and unavoidably: ``solve_ik`` is
+    joint angles and a Jacobian with no collision model, which is why a pose
+    inside a shelf solves happily to 3 mm (7.35). That is what
+    :func:`path_clearance` is for, and why both run.
+
+    Args:
+        positions: ``(m, 3)`` fingertip positions.
+        rotations: ``(m, 3, 3)`` grasp-convention orientations.
+        stride: Take every ``stride``-th waypoint. The path is smooth and
+            consecutive poses are about 5 mm apart, so a stride of 2 or 4 costs
+            little fidelity and the corresponding fraction of the time.
+
+    Returns:
+        ``reachable_fraction``, ``unreachable`` (count), ``tested``, and
+        ``worst_residual`` in metres.
+    """
+    from tpgpt.grasp.grasps import alignment_rotation
+    from tpgpt.sim.kinematics import solve_ik
+
+    positions = np.atleast_2d(np.asarray(positions, dtype=float))[::stride]
+    rotations = np.asarray(rotations, dtype=float).reshape(-1, 3, 3)[::stride]
+    # The path is a fingertip path in the grasp convention; IK aims this hand's
+    # ``grip_site``, which is a different frame by the measured, per-hand
+    # ``alignment_rotation`` -- 0.2 degrees on a Robotiq, 180 on a Panda -- and
+    # sits ``contact_offset`` behind the fingertip point. Both conversions are
+    # the ones the replay makes; omitting either was 7.34.
+    align = alignment_rotation(pair)
+    offset = contact_offset(pair)
+
+    seed, unreachable, worst = None, 0, 0.0
+    for p, R in zip(positions, rotations):
+        wrist = R @ align
+        target = p - wrist @ offset
+        result = solve_ik(
+            env, target, wrist, arm=arm, seed_qpos=seed,
+            position_tolerance=tolerance,
+        )
+        if result.reachable:
+            seed = result.qpos
+        else:
+            unreachable += 1
+        worst = max(worst, float(result.position_error))
+    tested = int(len(positions))
+    return {
+        "tested": tested,
+        "unreachable": int(unreachable),
+        "reachable_fraction": float(1.0 - unreachable / tested) if tested else 0.0,
+        "worst_residual": worst,
+    }
+
+
+def by_centre_offset(
+    grasps: list[Grasp6D],
+    indices: np.ndarray,
+    centre_of_mass: np.ndarray,
+    pair: GripperPair | None = None,
+    max_offset: float = MAX_CENTRE_OFFSET,
+) -> np.ndarray:
+    """Drop grips taken too far out from an object's centre of mass.
+
+    A thin wrapper on :func:`offset_from_centre`, which carries the measurement
+    this threshold rests on and the two cells that contradict it. Read that
+    first: this is a **loose** criterion and it is meant to run late, on
+    candidates that are already admissible, as a tie-break between them rather
+    than as a gate.
+
+    Args:
+        centre_of_mass: World position of the object's centre of mass. In
+            simulation that is exact; from perception alone the best available
+            proxy is the fitted box's centre, which is biased by the cloud being
+            one-sided -- so a real deployment would apply this with a wider
+            margin, not the same one.
+        pair: Measure from where *this hand* would hold the object rather than
+            from the grasp's own fingertip point. They differ by
+            ``contact_offset``, up to 60 mm across the registry.
+    """
+    return _keep(
+        indices,
+        [offset_from_centre(grasps[i], centre_of_mass, pair) <= max_offset
+         for i in indices],
+    )
+
+
+def offset_from_centre(grasp: Grasp6D, centre_of_mass: np.ndarray, pair=None) -> float:
+    """Horizontal distance from an object's centre of mass to where it is gripped.
+
+    **Measured, not asserted** (`FINDINGS.md` 8n, Experiment P). Twenty grasps
+    across five hand/object pairs, each pair tried at four different poses: the
+    eleven that carried the object past 200 mm sit a median **6.3 mm** from the
+    centre of mass, against **19.1 mm** for the nine that did not, and every
+    grasp under 10 mm carried bar one.
+
+    **And it is not decisive on its own**, which is why this returns a number
+    rather than a verdict. The same study found ``panda/cereal`` *failing* at
+    6.2 mm and carrying 418 mm at 23.4 mm. An off-centre grip makes the object
+    rotate in the jaws under its own weight -- the moment is the weight times
+    this lever arm -- but whether it slips also depends on the contact friction,
+    the finger area and how much of the object is between the jaws, none of
+    which this sees. So it is a tie-break and a diagnostic, not a gate.
+
+    Only the horizontal component counts: gravity acts vertically, so a grip
+    taken higher or lower on the object changes nothing about the moment.
+    """
+    tcp = grasp.tcp_position() if pair is None else _held_point(grasp, pair)
+    return float(np.linalg.norm((np.asarray(tcp, dtype=float) - np.asarray(
+        centre_of_mass, dtype=float))[:2]))
+
+
 # --------------------------------------------------------------- duplicates
 def suppress_duplicates(
     grasps: list[Grasp6D],
@@ -690,6 +1252,9 @@ def filter_grasps(
     held_points: np.ndarray | None = None,
     reference_approach: np.ndarray | None = None,
     target_name: str | None = None,
+    support_normal: np.ndarray | None = (0.0, 0.0, 1.0),
+    check_place_approach: bool = True,
+    centre_of_mass: np.ndarray | None = None,
 ) -> FilterFunnel:
     """Run the whole funnel, recording what each stage cost.
 
@@ -706,6 +1271,18 @@ def filter_grasps(
             tell the fingers closing around it -- which is the grasp -- from
             the hand fouling the shelf, which is not. Without it a legitimate
             grasp is rejected for touching its own target.
+        support_normal: Outward normal of the surface the object stands on,
+            driving :func:`by_support_approach`. ``None`` switches that stage
+            off. This is the **scene-derived** replacement for
+            ``reference_approach``: it rejects a hand rising through the table
+            rather than a hand unlike the demonstration, so it constrains the
+            same pathology without tying the target scene to one recording.
+        check_place_approach: Run :func:`by_place_approach`, which needs ``env``
+            and ``place_pose``. Off only to isolate what it is worth.
+        centre_of_mass: World centre of mass of the object being picked. Given,
+            :func:`by_centre_offset` runs as a late, loose stage; omitted, it
+            does not run at all. Late because it is a tie-break among grasps
+            that are already admissible, not a reason to reject one outright.
     """
     pair = gripper if isinstance(gripper, GripperPair) else resolve_pair(gripper)
     funnel = FilterFunnel()
@@ -728,6 +1305,36 @@ def filter_grasps(
             "demonstrated",
             f"approaches within {MAX_APPROACH_MISMATCH_DEG:.0f} deg of the demonstrated one",
             by_demonstration_consistency(grasps, indices, reference_approach), indices,
+        )
+    if support_normal is not None:
+        indices = stage(
+            "support",
+            f"approaches within {SUPPORT_APPROACH_MAX_DEG:.0f} deg of straight "
+            "down, so the hand does not come up through the support",
+            by_support_approach(grasps, indices, support_normal), indices,
+        )
+    if check_place_approach and env is not None and place_pose is not None:
+        # Where the fingertips must be at release. ``place_pose`` is a
+        # ``grip_site`` pose -- what IK is aimed at -- and the fingertip point
+        # sits ``contact_offset`` in front of it along this hand's own axes, so
+        # the corridor is anchored where the hand actually ends up rather than
+        # where its wrist does.
+        release = np.array([
+            np.asarray(place_pose[0], dtype=float)
+            + grasp_to_eef_pose(grasps[int(i)], pair)[1] @ contact_offset(pair)
+            for i in indices
+        ]) if len(indices) else np.empty((0, 3))
+        survivors, blocked = by_place_approach(
+            grasps, indices, env, pair, release,
+            exclude=tuple(t for t in (target_name,) if t),
+        )
+        if blocked:
+            funnel.flags["place_approach_blocked_by"] = blocked
+        indices = stage(
+            "place zone",
+            "the corridor the hand sweeps into the destination is clear of the "
+            "shelf's own geometry",
+            survivors, indices,
         )
     indices = stage(
         "on target", f"the held object lands within {MAX_TARGET_DISTANCE * 100:.0f} cm of the cloud",
@@ -794,6 +1401,13 @@ def filter_grasps(
     # cluttered mesh scenes.
     rank = lambda i: -grasps[i].score  # noqa: E731
 
+    if centre_of_mass is not None:
+        indices = stage(
+            "centred",
+            f"the grip is within {MAX_CENTRE_OFFSET * 1000:.0f} mm of the "
+            "object's centre of mass, horizontally",
+            by_centre_offset(grasps, indices, centre_of_mass, pair), indices,
+        )
     indices = stage(
         "distinct", f"duplicates within {DUPLICATE_POSITION * 100:.0f} cm thinned out",
         suppress_duplicates(grasps, indices, key=rank), indices,
