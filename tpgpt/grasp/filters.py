@@ -171,14 +171,37 @@ PATH_PENETRATION_TOLERANCE = 0.002
 
 #: Fraction of a path's waypoints that may sit inside scene geometry.
 #:
-#: **Sustained penetration, not the deepest.** 7.38 measured both against known
-#: outcomes on twenty cells: maximum depth separates nothing -- one cell placed
-#: successfully through a 50.5 mm transient clip while another failed with no
-#: penetration at all -- while every cell whose path sat inside geometry for
-#: more than half its length failed, and no successful cell exceeded a median
-#: depth of 12.4 mm. A brief deep clip is survivable because the controller
-#: pushes through it; a wall the hand leans on for a hundred waypoints is not.
-PATH_PENETRATION_FRACTION = 0.30
+#: **Sustained penetration, not the deepest**, and the threshold is calibrated
+#: on this instrument rather than inherited. 7.38 reached the same conclusion
+#: with a different one -- MuJoCo's narrowphase applied to inverse-kinematics
+#: solutions -- and a number carried between instruments is an assumption.
+#:
+#: Measured with *this* one (``outputs/path_study_iii``) over the twenty cells
+#: of Experiment O run iii, whose outcomes are already known:
+#:
+#: =========  ====  =============================  ===================
+#: outcome    n     inside fraction, min-med-max   max depth, med
+#: =========  ====  =============================  ===================
+#: placed     11    0.00 - **0.165** - **0.340**   5.9 mm
+#: failed      9    0.00 - 0.335 - **0.855**       6.0 mm
+#: =========  ====  =============================  ===================
+#:
+#: The separation is **one-sided and has a wide gap in it**: nothing was
+#: observed between 0.34 and 0.70, every cell above 0.40 failed, and no cell
+#: that placed went past 0.34. Any threshold in [0.35, 0.70] gives the identical
+#: answer on these cells -- it rejects **4 of the 9 failures and 0 of the 11
+#: successes** -- so 0.40 is the conservative end of a flat region rather than a
+#: number fitted to a boundary.
+#:
+#: **Depth is not the statistic**, and this data shows why more sharply than
+#: 7.38 did: ``max_depth`` saturates at 6.0 mm on fourteen of the twenty cells,
+#: because ``shelf_top_back`` is a 12 mm slab and 6 mm is as deep inside a 12 mm
+#: slab as a point can get. A bounded quantity cannot order unbounded severity.
+#: How *long* the hand stays inside is unbounded and does order it.
+#:
+#: It is a partial criterion, deliberately: it reaches 4 of the 9 failures and
+#: two of the rest involve no penetration at all.
+PATH_PENETRATION_FRACTION = 0.40
 
 #: How far from an object's centre of mass a grip may be taken, in metres.
 #:

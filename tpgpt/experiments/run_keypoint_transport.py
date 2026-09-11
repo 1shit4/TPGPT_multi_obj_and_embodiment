@@ -255,6 +255,23 @@ class PathCheck:
             path every 2 cm and costs a quarter of the solves.
         min_reachable_fraction: How much of the path the arm must be able to
             hold before a candidate is accepted.
+
+            **Low on purpose, and the default was corrected by measurement.**
+            The obvious reading -- demand most of the path -- is wrong here,
+            because ``reachable_fraction`` is a property of the *whole path*
+            rather than of any pose: each solve is seeded from the previous
+            one, so it answers "can the arm move between these poses" and it
+            reads low on trajectories the arm executes perfectly well. Measured
+            over the twenty cells of Experiment O run iii
+            (``outputs/path_study_iii``), it does **not** separate outcomes at
+            all -- the eleven that placed span 0.62 to 1.00 with a median of
+            0.84, and the nine that failed span 0.56 to 1.00 with the same
+            median of 0.84. A bar at 0.9 would have rejected **6 of the 11
+            cells that worked**.
+            The only one-sided cut in the data is at 0.60: it rejects 2 of the
+            9 failures and none of the 11 successes. So this stage is set to
+            catch a path the arm plainly cannot follow and to keep out of the
+            way otherwise.
         max_inside_fraction: How much of the path may sit inside scene geometry.
             Defaults to
             :data:`~tpgpt.grasp.filters.PATH_PENETRATION_FRACTION`; see there
@@ -267,7 +284,7 @@ class PathCheck:
     max_candidates: int = 25
     check_kinematics: bool = True
     ik_stride: int = 4
-    min_reachable_fraction: float = 0.9
+    min_reachable_fraction: float = 0.60
     max_inside_fraction: float | None = None
 
 
