@@ -493,6 +493,29 @@ Each of these cost real debugging time. Full detail in `ROBOTICS_NOTES.md`.
   into the output file, or refuse to run dirty. **And run the reshelving gate
   before attributing causes** -- it is what distinguishes "twelve cells with
   interesting individual explanations" from a regression in the map. `§7.37`.
+- **The placement failures are collision, not reach — 0 of 473 unreachable
+  waypoints are a position limit.** Re-solving position-only succeeds at every
+  one, including points 907 mm from a base rated for 855. **423 are the hand's
+  body inside scene geometry** and 50 are a pose reachable but not at the
+  *commanded orientation*. `solve_ik` is joint angles and a Jacobian with no
+  collision model, so it calls all of them reachable. Two plausible readings
+  were wrong first — "the shelf is out of reach" and "the 78 mm slot is too
+  tight"; the space above the top board is open except a back panel 38 mm
+  behind the slot. `§7.38`.
+- **The funnel validates 13 poses of a 200-pose trajectory.** `by_reachability`
+  checks five down the approach, two on the lift, five at place and retreat —
+  so a candidate passes its sample and then collides at 79 to 162 of the other
+  187. The thing checked is not the thing executed. Transporting all 25
+  top-scoring candidates gives **0 collision-free paths on every cell tried**,
+  hitting side walls, back panels, neighbouring objects, the table and the
+  robot's own pedestal.
+- **Contact is normal here, so "reject a colliding path" rejects everything.**
+  A cell places through a **50.5 mm** transient penetration while another fails
+  with none at all, so maximum depth is useless as a filter. What separates,
+  one-sidedly, is **sustained** penetration: every cell whose path sits inside
+  geometry more than half the time failed (median 23.4–39.1 mm) and no
+  successful cell exceeds 12.4 mm. Partial — it reaches 4 of 9 failures, and
+  two failures involve zero penetration.
 - **Two capabilities exist in the policy and are never used at runtime.**
   `prediction.reference` — the regressed attractor position, the paper's own
   Sec. V formulation and the policy's only restoring term — is fitted and never

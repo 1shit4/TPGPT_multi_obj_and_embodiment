@@ -3397,6 +3397,112 @@ the map, the policy and the rollout are intact and the damage was confined to
 this session's traces. Running it before attributing anything is the only reason
 that could be said rather than assumed.
 
+### 7.38 The placement failures are the hand inside the shelf, not the arm running out of reach
+
+Across runs i, ii and iii the dominant failure is the arm being unable to
+follow the transported path at the placement end -- 14 of the 19 failures in
+the two best runs, all of them at ``place`` or ``retreat`` and **none at the
+pick**, with 42 to 162 unreachable waypoints per cell. This records what that
+actually is, because two readings of it were wrong before the right measurement
+was made.
+
+#### Two wrong readings, recorded because both were plausible
+
+**"The shelf is beyond the arm's reach."** The transported path arcs to
+858-907 mm from the arm base while the Franka Panda is rated at about 855, so
+the plan looked like it was leaving the envelope. It is not: re-solving every
+unreachable waypoint with the orientation constraint dropped succeeds at
+**every single one**, including points 907 mm out. **Zero of 473 unreachable
+waypoints are a position limit.**
+
+**"The slot is too tight to enter."** ``7.35`` records the top slot as a 78 mm
+gap, which suggested the hands simply do not fit. Measured from the model, the
+space above ``shelf_top_board`` is **open** -- no roof and no obstruction at the
+slot's ``y`` except the back panel ``shelf_top_back`` at ``x`` in
+[0.258, 0.270], with the slot centre 38 mm in front of it. There is a clear way
+down.
+
+#### What it is
+
+Re-solving each unreachable waypoint position-only, then testing that solution
+for collision:
+
+=================  ===========  ==========  =============  =======
+cell               unreachable  position    orientation    shelf
+=================  ===========  ==========  =============  =======
+``xarm/can``       90           0           0              **90**
+robotiq140/can     162          0           0              **162**
+robotiq85/can      92           0           0              **92**
+``panda/can``      79           0           0              **79**
+``panda/milk``     31           0           **31**         0
+``yumi/cereal``    19           0           **19**         0
+**total**          473          **0**       50             **423**
+=================  ===========  ==========  =============  =======
+
+**89% is the hand's body driven into scene geometry**; 11% is a pose that is
+reachable and clear but not at the *commanded orientation*, which is the warp
+over-rotating. ``solve_ik`` reports all of them as reachable because it is
+joint angles and a Jacobian with no collision model.
+
+Note the fingertip is often clear while the hand is not: the path reaches
+``x`` about 0.25, which is 8 mm short of the back panel, and the gripper body
+extends around the tool centre. So a TCP-based check sees nothing wrong.
+
+#### Why the funnel let them through
+
+``by_reachability`` gained a collision check at ``c73f67a``, and it still
+missed all of this, because **it validates 13 poses per candidate** -- five
+down the approach, two on the lift, five at place and retreat -- while the
+replay executes **200**. A candidate passes on its sample and then collides at
+79 to 162 of the other 187. The thing checked and the thing executed are not
+the same trajectory.
+
+#### And it is not one obstacle
+
+Transporting all 25 top-scoring candidates on four cells and checking each
+resulting path: **0 of 25 are collision-free, on every cell.** The geometry hit
+is not only the back panel first blamed but the shelf's **side walls**
+(``shelf_top_wall_r`` 104 hits on one cell), its back panels, **neighbouring
+objects** (``milk_g0`` 98), the table, and the robot's own pedestal. The map is
+fitted to keypoints and knows nothing about any of it.
+
+#### Why a collision filter does not follow from that
+
+Contact is **normal** in this scene, and a binary "reject a colliding path"
+filter would reject every candidate, fall back, and change nothing. Measured
+against known outcomes on the twenty cells of run iii:
+
+===============  =================  ====================
+                 max penetration    **median** penetration
+===============  =================  ====================
+placed (11)      5.3 - 56.2 mm      0.0 mm, one at 12.4
+failed (9)       0.0 - 89.2 mm      0.0 mm, four at 23.4-39.1
+===============  =================  ====================
+
+**Maximum depth is useless**: ``panda/bread`` places through a 50.5 mm
+transient penetration while ``yumi/bread`` fails with none at all. A brief deep
+clip is survivable.
+
+**Sustained penetration is one-sidedly predictive.** Every cell whose path sits
+inside geometry more than half the time failed -- the four can cells, median
+23.4 to 39.1 mm -- and no successful cell exceeds 12.4 mm. So a filter on
+*median* depth would reject those four and harm none of the eleven that work.
+
+It is a partial fix and should be adopted knowingly: it reaches 4 of the 9
+failures, and two failures (``robotiq140/milk``, ``yumi/bread``) involve **zero**
+penetration, so collision is not their cause at all. ``yumi/bread`` never
+grasps -- its aim is 23.7 mm off on an object whose half width is 30.6 mm.
+
+#### What would actually fix it, none of it done
+
+Give the selection the *executed* trajectory rather than a 13-pose proxy and
+reject on sustained penetration; or give the executor obstacle avoidance, which
+is the dynamics thread and out of scope for the map; or simplify the scene --
+fewer objects, an opener shelf, a placement target with room around it. The
+first is cheap and partial, the second is the real answer and is not this
+thread's, and the third changes what the experiments claim and is a decision
+for the project owner, not for the code.
+
 ## 8. Open items
 
 > **Read 7.26 first.** Every end-to-end campaign has been deleted, so the items
