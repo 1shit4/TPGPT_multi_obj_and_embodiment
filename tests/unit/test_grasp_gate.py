@@ -348,3 +348,158 @@ class TestFingerGrouping:
         assert fingers_touching(Scene(), "thing", groups) == 2
         # both contacts on the *same* finger is one finger, not two
         assert fingers_touching(Scene(), "thing", [{5, 6}, {11}]) == 1
+
+
+class JawsThatCloseOnCommand:
+    """A jaw whose *position* tracks the command, which is what a real one does.
+
+    :class:`FakeArm` models contact as "N control steps of closing", which is
+    enough to test *when the gate stops waiting* but cannot test the preload:
+    the preload's whole point is that the command it settles on depends on how
+    far the fingers had to travel to reach the object, so contact has to be a
+    function of the commanded position rather than of elapsed time.
+
+    ``contact_at`` stands in for the object's width: the command at which the
+    closing fingers first touch it. ``None`` means nothing is between them.
+    """
+
+    def __init__(self, contact_at: float | None):
+        self.contact_at = contact_at
+        self.command = -1.0
+        self.commands: list[float] = []
+        self.action_dim = 8
+
+    @property
+    def robots(self):
+        return [self]
+
+    @property
+    def composite_controller(self):
+        return self
+
+    @property
+    def part_controllers(self):
+        return {"right": self}
+
+    @property
+    def qpos_index(self):
+        return np.arange(7)
+
+    @property
+    def eef_site_id(self):
+        return 0
+
+    @property
+    def sim(self):
+        return self
+
+    @property
+    def data(self):
+        return self
+
+    @property
+    def qpos(self):
+        return np.zeros(7)
+
+    @property
+    def site_xpos(self):
+        return np.zeros((1, 3))
+
+    @property
+    def site_xmat(self):
+        return np.eye(3).reshape(1, 9)
+
+    def step(self, action):
+        self.command = float(action[-1])
+        self.commands.append(self.command)
+
+    def holds(self) -> bool:
+        return self.contact_at is not None and self.command >= self.contact_at
+
+
+def run_preload(contact_at, preload=0.10, **kw):
+    env = JawsThatCloseOnCommand(contact_at)
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        result = replay_labels(
+            env, labels(), settle_steps=8,
+            grasp_gate=lambda e: e.holds(), preload=preload, **kw,
+        )
+    return env, result, [w for w in caught if w.category is RuntimeWarning]
+
+
+class TestPreloadAndHold:
+    """Closing to contact plus a preload, instead of commanding fully shut.
+
+    ``+1`` is a *position* target meaning "drive all the way closed", so the
+    only thing that stops the fingers is the object -- and when the object
+    cannot stop them, it is pushed out. Measured on the committed runs: the
+    bread cell that places arrests its jaws at a closure of 0.540 with the
+    object still between them, while every failing bread cell finishes at 1.0
+    or beyond, having travelled 41-63 mm past contact and holding nothing.
+    """
+
+    @pytest.mark.parametrize("contact_at", [-0.5, 0.0, 0.4])
+    def test_it_holds_just_past_contact_rather_than_fully_shut(self, contact_at):
+        env, result, warned = run_preload(contact_at)
+        held = result.metadata["grasp_hold_command"]
+        assert held == pytest.approx(contact_at + 0.10, abs=0.05), (
+            f"held at {held} for an object first touched at {contact_at}"
+        )
+        assert held < 1.0, "drove the jaws fully shut, which is the old behaviour"
+        assert not warned
+
+    def test_a_wider_object_is_held_at_a_looser_command(self):
+        """The point of closing to contact: the command adapts to the object.
+
+        A fixed command cannot do this, and a fixed *dwell* cannot either --
+        which is why the scaled-dwell alternative was rejected above.
+        """
+        narrow = run_preload(0.4)[1].metadata["grasp_hold_command"]
+        wide = run_preload(-0.5)[1].metadata["grasp_hold_command"]
+        assert wide < narrow, (
+            f"a wider object should stop the jaws sooner: {wide} vs {narrow}"
+        )
+
+    def test_it_differs_from_the_binary_command_it_replaces(self):
+        """The assertion `flip_target` needed and did not have (7.34).
+
+        A setting whose two branches produce identical behaviour is not a
+        setting, and nothing else in the suite would notice: `flip_target` was
+        inert for the life of the project because no test compared its
+        branches.
+        """
+        with_preload = run_preload(0.0)[1]
+        env = JawsThatCloseOnCommand(0.0)
+        without = replay_labels(
+            env, labels(), settle_steps=8,
+            grasp_gate=lambda e: e.holds(), preload=None,
+        )
+        assert without.metadata["grasp_hold_command"] is None
+        assert float(np.max(without.gripper)) == pytest.approx(1.0)
+        assert float(np.max(with_preload.gripper)) < 1.0
+        assert float(np.max(with_preload.gripper)) != pytest.approx(1.0)
+
+    def test_nothing_between_the_jaws_warns_and_shuts(self):
+        """Refusing to close would be worse: a missed grasp must still be
+        attempted and *reported*, not silently turned into a no-op."""
+        env, result, warned = run_preload(None)
+        assert warned, "closed on nothing without saying so"
+        assert result.metadata["grasp_hold_command"] == pytest.approx(1.0)
+
+    def test_opening_resets_the_hold_so_a_second_grasp_re_searches(self):
+        """A held command found for one object must not be reused for another."""
+        env = JawsThatCloseOnCommand(0.0)
+        grip = np.array([-1.0, 1.0, -1.0, 1.0])
+        two_grasps = PolicyLabels(
+            positions=np.zeros((4, 3)), velocities=np.zeros((4, 3)),
+            orientations=np.stack([np.eye(3)] * 4), gripper=grip,
+            time_belief=np.linspace(0, 1, 4),
+        )
+        with warnings.catch_warnings(record=True):
+            warnings.simplefilter("always")
+            replay_labels(env, two_grasps, settle_steps=4,
+                          grasp_gate=lambda e: e.holds(), preload=0.10)
+        # the ramp starts from fully open each time, so the command must have
+        # been driven back down to -1 between the two grasps
+        assert min(env.commands) == pytest.approx(-1.0)
