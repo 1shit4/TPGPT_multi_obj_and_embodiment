@@ -479,6 +479,17 @@ def target_placement(
         funnel_flags["chosen_approach_mismatch_deg"] = float(angles[chosen])
         funnel_flags["n_candidates"] = int(len(grasp_set.grasps))
         funnel_flags["n_survivors"] = int(len(survivors))
+        # Where this grasp sits on the object, horizontally, relative to its
+        # centre of mass. Recorded so "the grasp was off-centre" can be tested
+        # rather than asserted -- and it has been asserted, on evidence that
+        # came from a sample of failures only.
+        try:
+            com = np.asarray(env.sim.data.xipos[env.object_body_ids[instance]], dtype=float)
+            tcp = np.asarray(grasp.tcp, dtype=float)
+            funnel_flags["grasp_offset_mm"] = float(np.linalg.norm((tcp - com)[:2]) * 1000)
+            funnel_flags["grasp_height_mm"] = float((tcp - com)[2] * 1000)
+        except Exception:
+            pass
     else:
         raise ValueError(
             f"unknown grasp_source {grasp_source!r}; expected 'recipe' or 'graspgen'"

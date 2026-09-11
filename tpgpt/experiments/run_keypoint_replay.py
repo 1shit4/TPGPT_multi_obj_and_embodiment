@@ -85,7 +85,7 @@ from tpgpt.grasp.grasps import (
     to_wrist_convention,
 )
 from tpgpt.reporting.html import write_manifest
-from tpgpt.experiments.diagnose import grip_force
+from tpgpt.experiments.diagnose import grip_force, slip_probe
 from tpgpt.sim.replay import make_position_controller_config, replay_labels
 from tpgpt.sim.rollout import slot_score
 from tpgpt.transport.labels import PolicyLabels
@@ -409,6 +409,15 @@ def replay_variant(env, labels, source_placement, target, variant,
             (lambda e: grip_force(e, target.metadata["object_name"]) >= force_target)
             if force_target and target.metadata.get("object_name") else None
         ),
+        # **And tighten only if it actually slips.** A force threshold alone
+        # cannot work: bread and a can hold at 10 N and are destroyed at 30,
+        # cereal fails at 10 and needs 166, and the relationship is not even
+        # monotonic -- the same cereal cell succeeds at a 30 N target and fails
+        # at 60, reaching a lower peak force because closing further ejects it.
+        slip_of=(
+            slip_probe(env, target.metadata["object_name"])
+            if force_target and target.metadata.get("object_name") else None
+        ),
     )
     row = {
         "variant": variant.name,
@@ -449,7 +458,8 @@ def replay_variant(env, labels, source_placement, target, variant,
             for k, v in (target.metadata.get("grasp_funnel_flags") or {}).items()
             if k in ("chosen_index", "chosen_score",
                      "chosen_approach_mismatch_deg", "n_candidates",
-                     "n_survivors", "ranked_by",
+                     "n_survivors", "ranked_by", "grasp_offset_mm",
+                     "grasp_height_mm",
                      "cloud_too_sparse_for_jaw_width")
         },
         "cloud_points": target.metadata.get("cloud_points"),
@@ -496,6 +506,7 @@ def main(
     variant_names=REPLAY_VARIANTS,
     force_target: float | None = None,
     cells=None,
+    grasp_rank: int = 0,
 ) -> dict:
     """Replay every construction on every hand and object.
 
@@ -519,6 +530,11 @@ def main(
         approach_filter: Whether the 45 degree approach test is applied.
             Independent of ``rank_by``, which is what makes the two measurable
             separately.
+
+        grasp_rank: Which ranked survivor to execute -- 0 is the best, 1 the
+            next, and so on. Lets the *same* pair be run at several different
+            grasp poses, which is what separates "this grasp is bad" from "this
+            pair cannot be grasped".
 
         cells: Restrict the run to these ``"gripper/object"`` cells, e.g.
             ``("yumi/cereal",)``. ``None`` runs all of them and is byte-identical
@@ -698,6 +714,7 @@ def main(
                         filters=filters,
                         rank_by=rank_by,
                         approach_filter=approach_filter,
+                        grasp_rank=grasp_rank,
                         slot_for_filters=slot,
                     )
                     target.metadata["object_name"] = name
@@ -759,7 +776,8 @@ def main(
             "varied": {"variant": [v.name for v in variants],
                        "object": list(REPLAY_OBJECTS)},
             "grasp_selection": {"filters": filters, "rank_by": rank_by,
-                                "approach_filter": bool(approach_filter)},
+                                "approach_filter": bool(approach_filter),
+                                "grasp_rank": int(grasp_rank)},
             "cells": None if cells is None else sorted(wanted),
             "gripper_command": {"force_target": force_target},
             "fixed": {

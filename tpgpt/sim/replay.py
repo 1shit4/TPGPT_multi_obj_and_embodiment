@@ -109,6 +109,18 @@ GRASP_FORCE_TARGET = 10.0
 #: coarse enough that the search costs a few dozen physics steps.
 CLOSE_FRACTION_STEP = 0.01
 
+#: Object drift in the hand's frame, in metres, that counts as slipping.
+#:
+#: A held object is motionless in the hand's own frame **by definition**, so any
+#: persistent drift there is slip and nothing else. Measured on a cell that
+#: carries successfully, the object sits within 2.6 mm of where it was first
+#: gripped for a hundred waypoints; cells that lose their object drift 10-16 mm
+#: over the same span. 5 mm sits between those.
+SLIP_TOLERANCE = 0.005
+
+#: How much further the jaws close each time slip is detected.
+TIGHTEN_STEP = 0.02
+
 #: Physics steps allowed at each rung of the search for the fingers to respond.
 PRELOAD_SETTLE_STEPS = 2
 
@@ -197,6 +209,7 @@ def replay_labels(
     contact_steps: int = GRASP_CONTACT_STEPS,
     gate_max_steps: int = GRASP_GATE_MAX_STEPS,
     hold_when=None,
+    slip_of=None,
 ) -> ReplayResult:
     """Drive the arm along a label set pose by pose, under position control.
 
@@ -220,11 +233,26 @@ def replay_labels(
             behaviour of commanding them shut throughout, so every existing
             caller is unaffected.
 
+            Pair it with ``slip_of`` -- a force threshold alone cannot work,
+            because the usable window differs per object and hand and is not
+            even monotonic in force. The threshold's job is only to establish
+            *a* grip; keeping it is ``slip_of``'s.
+
             The intended predicate is a grip-force threshold --
             :func:`~tpgpt.experiments.diagnose.grip_force` against
             :data:`GRASP_FORCE_TARGET` -- because force is what separates a
             grip from a graze and from a crush. A contact test does not: the
             fingers are already touching before the close is commanded.
+
+        slip_of: ``slip_of(env) -> float``, the object's drift in the hand's
+            own frame in metres. While the hand is closed this is checked each
+            waypoint and the jaws are tightened by :data:`TIGHTEN_STEP`
+            whenever it exceeds :data:`SLIP_TOLERANCE`.
+
+            This is the feedback that makes the grasp work across objects
+            without a per-object constant: a held object is motionless in that
+            frame by definition, so an object that stays put is never squeezed
+            further, and one that slips is tightened until it stops.
 
     Returns:
         A :class:`ReplayResult`.
@@ -255,6 +283,8 @@ def replay_labels(
     hold_command = None
     preload_command = None
     close_direction = None
+    hold_fraction = 0.0
+    tightenings = 0
     reachable: list[bool] = []
     unreachable = 0
     seed = np.array(env.sim.data.qpos[qpos_index])
@@ -315,9 +345,32 @@ def replay_labels(
                     stacklevel=2,
                 )
             hold_command = 0.0
+            hold_fraction = float(fraction)
             preload_command = float(fraction)
             gate_steps = waited
             steps = max(0, settle_steps - waited)
+        elif closing and slip_of is not None and hold_command is not None:
+            # **Tighten only if the object is actually slipping.**
+            #
+            # A fixed force target cannot work: measured across three targets,
+            # bread and a can hold at 10 N and are destroyed at 30, while a
+            # cereal box fails at 10 and needs 166. Worse, the relationship is
+            # not even monotonic -- the same cereal cell succeeds at a 30 N
+            # target and fails at 60, reaching a *lower* peak force (39 N
+            # against 166), because closing further ejects the box and contact
+            # is lost. So there is a narrow closure window per object and hand,
+            # and no constant sits inside all of them.
+            #
+            # The window has an observable edge. A held object is motionless in
+            # the hand's own frame by definition, so drift there is slip and
+            # nothing else: a carrying cell stays within 2.6 mm of where it was
+            # first gripped, a failing one drifts 10-16 mm. Closing further only
+            # when that happens finds each window's lower edge without a
+            # constant, a table, or any reference to which object this is.
+            if slip_of(env) > SLIP_TOLERANCE and hold_fraction < 1.0:
+                hold_fraction = min(1.0, hold_fraction + TIGHTEN_STEP)
+                set_closure(_gripper_model(env, arm), close_direction, hold_fraction)
+                tightenings += 1
         gripper_command = (
             (hold_command if hold_command is not None else 1.0)
             if closing else -1.0
@@ -401,6 +454,8 @@ def replay_labels(
             # 1 shut. Recorded because "the jaws closed" and "the jaws gripped"
             # are different facts and only this separates them.
             "grasp_hold_fraction": preload_command,
+            "grasp_tightenings": tightenings,
+            "grasp_final_fraction": hold_fraction,
             "unreachable_waypoints": int(unreachable),
             "tracking_error_mean": float(tracking.mean()),
             "tracking_error_max": float(tracking.max()),

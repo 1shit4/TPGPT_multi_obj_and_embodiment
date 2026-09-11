@@ -511,6 +511,39 @@ def grip_force(env, object_name: str, arm: str = "right") -> float:
     return total
 
 
+def slip_probe(env, object_name: str, arm: str = "right"):
+    """``slip(env) -> metres`` the object has drifted in the hand's own frame.
+
+    A held object is motionless in that frame **by definition**, so drift there
+    is slip and cannot be anything else -- unlike world-frame motion, which is
+    dominated by the hand carrying the object about. Measured: a cell that
+    carries successfully keeps its object within 2.6 mm of where it was first
+    gripped over a hundred waypoints, while cells that lose theirs drift
+    10-16 mm.
+
+    The reference is taken lazily, at the first call after the jaws have
+    something in them, so it is the pose *as gripped* rather than wherever the
+    object happened to be while the hand was still approaching.
+    """
+    state = {"reference": None}
+
+    def local(e):
+        rotation = _eef_rotation(e)
+        site = e.robots[0].eef_site_id
+        site = site[arm] if isinstance(site, dict) else site
+        hand = np.array(e.sim.data.site_xpos[site])
+        return rotation.T @ (np.array(e.object_position(object_name)) - hand)
+
+    def slip(e) -> float:
+        here = local(e)
+        if state["reference"] is None:
+            state["reference"] = here
+            return 0.0
+        return float(np.linalg.norm(here - state["reference"]))
+
+    return slip
+
+
 def finger_groups(env, gripper: str, arm: str = "right") -> list[set[int]]:
     """The gripper's collision geoms, grouped one set per finger.
 
