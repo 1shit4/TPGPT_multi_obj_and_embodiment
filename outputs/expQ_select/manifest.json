@@ -1,0 +1,2465 @@
+{
+  "title": "Keypoint constructions under position-control replay",
+  "description": "Transported paths followed pose by pose under position control -- no policy, no attractor integration, no lag gate -- so every number is attributable to the keypoint construction alone. Answers whether a well-conditioned map is actually executable: reachability, tracking error split by whether IK could hold the pose, grasp slip, and task completion. Read as an upper bound: a failure here is the keypoints', a failure only under the policy is the executor's.",
+  "settings": {
+    "varied": {
+      "variant": [
+        "2_cube_grasp_pose"
+      ],
+      "object": [
+        "cereal",
+        "milk",
+        "can",
+        "bread"
+      ]
+    },
+    "grasp_selection": {
+      "filters": "full",
+      "rank_by": "score",
+      "approach_filter": false,
+      "grasp_rank": 0,
+      "scene_zones": true,
+      "centre_filter": true,
+      "path_check": true,
+      "ik_stride": 4,
+      "max_path_candidates": 25
+    },
+    "cells": null,
+    "gripper_command": {
+      "force_target": null
+    },
+    "select_only": true,
+    "fixed": {
+      "source": "reshelving seed 0, one demonstration",
+      "slot": "top_middle",
+      "seed": 0,
+      "scene": "rebuilt fresh for every replay, asserted reproducible",
+      "control": "JOINT_POSITION via solve_ik, no policy",
+      "grasp_source": "graspgen, filters='full' -- real GraspGen-X candidates for *this* hand. 'approach' keeps the 45 degree approach test and ranks by agreement with the demonstration; 'full' runs the whole funnel and ranks by the planner's score. They pick different grasps, so this must be held fixed to compare constructions.",
+      "labels": "tool frame -- converted by _to_tool_frame before transport",
+      "tool_offset": "contact_offset(<this hand>) -- per hand, not the source's",
+      "preconditions": "gripper_mounted, scene_unstepped, object_placement, closure_calibrated -- checked on every cell, campaign aborts on failure"
+    }
+  },
+  "rows": [
+    {
+      "variant": "2_cube_grasp_pose",
+      "gripper": "yumi",
+      "selected_only": true,
+      "cloud_points": 598,
+      "grasp_place_approach_blocked_by": {
+        "shelf_top_back": 27
+      },
+      "grasp_jaw_width": {
+        "fits": 0,
+        "too_wide": 12,
+        "unverified": 0
+      },
+      "grasp_jaw width_fell_back": true,
+      "grasp_reach_failures": {
+        "pre_grasp": 9,
+        "grasp": 0,
+        "lift": 1,
+        "place": 0,
+        "retreat": 1,
+        "pre_grasp_collision": 1,
+        "grasp_collision": 0,
+        "lift_collision": 0,
+        "place_collision": 0,
+        "retreat_collision": 0
+      },
+      "grasp_reachable_fell_back": true,
+      "grasp_centred_fell_back": true,
+      "grasp_ranked_by": "score",
+      "grasp_stages": [
+        [
+          "generated",
+          100,
+          100,
+          false
+        ],
+        [
+          "visibility",
+          100,
+          88,
+          false
+        ],
+        [
+          "support",
+          88,
+          39,
+          false
+        ],
+        [
+          "place zone",
+          39,
+          12,
+          false
+        ],
+        [
+          "on target",
+          12,
+          12,
+          false
+        ],
+        [
+          "jaw width",
+          12,
+          12,
+          true
+        ],
+        [
+          "collision",
+          12,
+          12,
+          false
+        ],
+        [
+          "reachable",
+          12,
+          12,
+          true
+        ],
+        [
+          "centred",
+          12,
+          12,
+          true
+        ],
+        [
+          "distinct",
+          12,
+          8,
+          false
+        ]
+      ],
+      "grasp_path_check": {
+        "chosen": 10,
+        "rank_examined": 1,
+        "fell_back": false,
+        "examined": [
+          {
+            "index": 10,
+            "inside_fraction": 0.07,
+            "max_depth_mm": 5.96,
+            "median_inside_depth_mm": 4.41,
+            "culprits": {
+              "shelf_top_wall_r": 14
+            },
+            "reachable_fraction": 1.0
+          }
+        ]
+      },
+      "grasp_chosen_index": 10,
+      "grasp_chosen_score": 0.860058069229126,
+      "grasp_chosen_approach_mismatch_deg": 75.8006517016601,
+      "grasp_n_candidates": 100,
+      "grasp_n_survivors": 8,
+      "grasp_offset_mm": 62.57990677562843,
+      "grasp_height_mm": -1.8267501132523956,
+      "object": "cereal"
+    },
+    {
+      "variant": "2_cube_grasp_pose",
+      "gripper": "yumi",
+      "selected_only": true,
+      "cloud_points": 279,
+      "grasp_place_approach_blocked_by": {
+        "shelf_top_back": 35
+      },
+      "grasp_jaw_width": {
+        "fits": 12,
+        "too_wide": 4,
+        "unverified": 1
+      },
+      "grasp_jaw_width_unverified": 1,
+      "grasp_reach_failures": {
+        "pre_grasp": 5,
+        "grasp": 0,
+        "lift": 0,
+        "place": 0,
+        "retreat": 1,
+        "pre_grasp_collision": 1,
+        "grasp_collision": 0,
+        "lift_collision": 0,
+        "place_collision": 0,
+        "retreat_collision": 0
+      },
+      "grasp_reachable_fell_back": true,
+      "grasp_ranked_by": "score",
+      "grasp_stages": [
+        [
+          "generated",
+          100,
+          100,
+          false
+        ],
+        [
+          "visibility",
+          100,
+          97,
+          false
+        ],
+        [
+          "support",
+          97,
+          52,
+          false
+        ],
+        [
+          "place zone",
+          52,
+          17,
+          false
+        ],
+        [
+          "on target",
+          17,
+          17,
+          false
+        ],
+        [
+          "jaw width",
+          17,
+          12,
+          false
+        ],
+        [
+          "collision",
+          12,
+          7,
+          false
+        ],
+        [
+          "reachable",
+          7,
+          7,
+          true
+        ],
+        [
+          "centred",
+          7,
+          5,
+          false
+        ],
+        [
+          "distinct",
+          5,
+          4,
+          false
+        ]
+      ],
+      "grasp_path_check": {
+        "chosen": 70,
+        "rank_examined": 3,
+        "fell_back": false,
+        "examined": [
+          {
+            "index": 1,
+            "inside_fraction": 0.44,
+            "max_depth_mm": 5.99,
+            "median_inside_depth_mm": 5.92,
+            "culprits": {
+              "shelf_top_wall_r": 15,
+              "shelf_top_back": 73
+            },
+            "rejected": "path_collision"
+          },
+          {
+            "index": 20,
+            "inside_fraction": 0.43,
+            "max_depth_mm": 6.0,
+            "median_inside_depth_mm": 5.84,
+            "culprits": {
+              "shelf_top_wall_r": 15,
+              "shelf_top_back": 71
+            },
+            "rejected": "path_collision"
+          },
+          {
+            "index": 70,
+            "inside_fraction": 0.0,
+            "max_depth_mm": 0.34,
+            "median_inside_depth_mm": 0.0,
+            "culprits": {},
+            "reachable_fraction": 0.86
+          }
+        ]
+      },
+      "grasp_chosen_index": 70,
+      "grasp_chosen_score": 0.6135383248329163,
+      "grasp_chosen_approach_mismatch_deg": 60.88939084970294,
+      "grasp_n_candidates": 100,
+      "grasp_n_survivors": 4,
+      "grasp_offset_mm": 10.07350532748846,
+      "grasp_height_mm": 9.107996840479583,
+      "object": "milk"
+    },
+    {
+      "variant": "2_cube_grasp_pose",
+      "gripper": "yumi",
+      "selected_only": true,
+      "cloud_points": 57,
+      "grasp_place_approach_blocked_by": {
+        "shelf_top_back": 28
+      },
+      "grasp_jaw_width": {
+        "fits": 0,
+        "too_wide": 3,
+        "unverified": 2
+      },
+      "grasp_jaw_width_unverified": 2,
+      "grasp_jaw width_fell_back": true,
+      "grasp_cloud_too_sparse_for_jaw_width": true,
+      "grasp_reach_failures": {
+        "pre_grasp": 0,
+        "grasp": 0,
+        "lift": 0,
+        "place": 0,
+        "retreat": 0,
+        "pre_grasp_collision": 3,
+        "grasp_collision": 0,
+        "lift_collision": 0,
+        "place_collision": 0,
+        "retreat_collision": 0
+      },
+      "grasp_reachable_fell_back": true,
+      "grasp_ranked_by": "score",
+      "grasp_stages": [
+        [
+          "generated",
+          100,
+          100,
+          false
+        ],
+        [
+          "visibility",
+          100,
+          92,
+          false
+        ],
+        [
+          "support",
+          92,
+          33,
+          false
+        ],
+        [
+          "place zone",
+          33,
+          5,
+          false
+        ],
+        [
+          "on target",
+          5,
+          5,
+          false
+        ],
+        [
+          "jaw width",
+          5,
+          5,
+          true
+        ],
+        [
+          "collision",
+          5,
+          3,
+          false
+        ],
+        [
+          "reachable",
+          3,
+          3,
+          true
+        ],
+        [
+          "centred",
+          3,
+          1,
+          false
+        ],
+        [
+          "distinct",
+          1,
+          1,
+          false
+        ]
+      ],
+      "grasp_path_check": {
+        "chosen": 95,
+        "rank_examined": 1,
+        "fell_back": true,
+        "examined": [
+          {
+            "index": 95,
+            "inside_fraction": 0.475,
+            "max_depth_mm": 8.61,
+            "median_inside_depth_mm": 5.85,
+            "culprits": {
+              "milk_g0": 11,
+              "shelf_top_wall_r": 19,
+              "shelf_top_back": 65
+            },
+            "rejected": "path_collision"
+          }
+        ]
+      },
+      "grasp_path_check_fell_back": true,
+      "grasp_chosen_index": 95,
+      "grasp_chosen_score": 0.44943639636039734,
+      "grasp_chosen_approach_mismatch_deg": 84.51837862463897,
+      "grasp_n_candidates": 100,
+      "grasp_n_survivors": 1,
+      "grasp_offset_mm": 9.178931018925866,
+      "grasp_height_mm": 17.835218175321298,
+      "object": "can"
+    },
+    {
+      "variant": "2_cube_grasp_pose",
+      "gripper": "yumi",
+      "selected_only": true,
+      "cloud_points": 167,
+      "grasp_place_approach_blocked_by": {
+        "shelf_top_board": 4,
+        "shelf_top_back": 12,
+        "shelf_bottom_back": 3
+      },
+      "grasp_jaw_width": {
+        "fits": 1,
+        "too_wide": 2,
+        "unverified": 0
+      },
+      "grasp_reach_failures": {
+        "pre_grasp": 0,
+        "grasp": 0,
+        "lift": 0,
+        "place": 0,
+        "retreat": 1,
+        "pre_grasp_collision": 0,
+        "grasp_collision": 0,
+        "lift_collision": 0,
+        "place_collision": 0,
+        "retreat_collision": 0
+      },
+      "grasp_reachable_fell_back": true,
+      "grasp_centred_fell_back": true,
+      "grasp_ranked_by": "score",
+      "grasp_stages": [
+        [
+          "generated",
+          100,
+          100,
+          false
+        ],
+        [
+          "visibility",
+          100,
+          78,
+          false
+        ],
+        [
+          "support",
+          78,
+          22,
+          false
+        ],
+        [
+          "place zone",
+          22,
+          3,
+          false
+        ],
+        [
+          "on target",
+          3,
+          3,
+          false
+        ],
+        [
+          "jaw width",
+          3,
+          1,
+          false
+        ],
+        [
+          "collision",
+          1,
+          1,
+          false
+        ],
+        [
+          "reachable",
+          1,
+          1,
+          true
+        ],
+        [
+          "centred",
+          1,
+          1,
+          true
+        ],
+        [
+          "distinct",
+          1,
+          1,
+          false
+        ]
+      ],
+      "grasp_path_check": {
+        "chosen": 18,
+        "rank_examined": 1,
+        "fell_back": false,
+        "examined": [
+          {
+            "index": 18,
+            "inside_fraction": 0.0,
+            "max_depth_mm": 0.0,
+            "median_inside_depth_mm": 0.0,
+            "culprits": {},
+            "reachable_fraction": 1.0
+          }
+        ]
+      },
+      "grasp_chosen_index": 18,
+      "grasp_chosen_score": 0.7030223608016968,
+      "grasp_chosen_approach_mismatch_deg": 3.571934771311645,
+      "grasp_n_candidates": 100,
+      "grasp_n_survivors": 1,
+      "grasp_offset_mm": 20.89444915578554,
+      "grasp_height_mm": 10.154545764165523,
+      "object": "bread"
+    },
+    {
+      "variant": "2_cube_grasp_pose",
+      "gripper": "xarm",
+      "selected_only": true,
+      "cloud_points": 587,
+      "grasp_place_approach_blocked_by": {
+        "shelf_top_back": 19
+      },
+      "grasp_jaw_width": {
+        "fits": 14,
+        "too_wide": 3,
+        "unverified": 0
+      },
+      "grasp_reach_failures": {
+        "pre_grasp": 1,
+        "grasp": 0,
+        "lift": 0,
+        "place": 0,
+        "retreat": 13,
+        "pre_grasp_collision": 0,
+        "grasp_collision": 0,
+        "lift_collision": 0,
+        "place_collision": 0,
+        "retreat_collision": 0
+      },
+      "grasp_reachable_fell_back": true,
+      "grasp_ranked_by": "score",
+      "grasp_stages": [
+        [
+          "generated",
+          100,
+          100,
+          false
+        ],
+        [
+          "visibility",
+          100,
+          83,
+          false
+        ],
+        [
+          "support",
+          83,
+          36,
+          false
+        ],
+        [
+          "place zone",
+          36,
+          17,
+          false
+        ],
+        [
+          "on target",
+          17,
+          17,
+          false
+        ],
+        [
+          "jaw width",
+          17,
+          14,
+          false
+        ],
+        [
+          "collision",
+          14,
+          14,
+          false
+        ],
+        [
+          "reachable",
+          14,
+          14,
+          true
+        ],
+        [
+          "centred",
+          14,
+          2,
+          false
+        ],
+        [
+          "distinct",
+          2,
+          2,
+          false
+        ]
+      ],
+      "grasp_path_check": {
+        "chosen": 72,
+        "rank_examined": 1,
+        "fell_back": false,
+        "examined": [
+          {
+            "index": 72,
+            "inside_fraction": 0.11,
+            "max_depth_mm": 2.47,
+            "median_inside_depth_mm": 2.0,
+            "culprits": {
+              "shelf_top_back": 22
+            },
+            "reachable_fraction": 0.8
+          }
+        ]
+      },
+      "grasp_chosen_index": 72,
+      "grasp_chosen_score": 0.6880730986595154,
+      "grasp_chosen_approach_mismatch_deg": 12.489818644800105,
+      "grasp_n_candidates": 100,
+      "grasp_n_survivors": 2,
+      "grasp_offset_mm": 11.428147241007105,
+      "grasp_height_mm": 84.67723755669232,
+      "object": "cereal"
+    },
+    {
+      "variant": "2_cube_grasp_pose",
+      "gripper": "xarm",
+      "selected_only": true,
+      "cloud_points": 279,
+      "grasp_place_approach_blocked_by": {
+        "shelf_top_back": 9
+      },
+      "grasp_jaw_width": {
+        "fits": 34,
+        "too_wide": 0,
+        "unverified": 2
+      },
+      "grasp_jaw_width_unverified": 2,
+      "grasp_reach_failures": {
+        "pre_grasp": 3,
+        "grasp": 0,
+        "lift": 0,
+        "place": 0,
+        "retreat": 18,
+        "pre_grasp_collision": 0,
+        "grasp_collision": 0,
+        "lift_collision": 0,
+        "place_collision": 0,
+        "retreat_collision": 5
+      },
+      "grasp_reachable_fell_back": true,
+      "grasp_ranked_by": "score",
+      "grasp_stages": [
+        [
+          "generated",
+          100,
+          100,
+          false
+        ],
+        [
+          "visibility",
+          100,
+          93,
+          false
+        ],
+        [
+          "support",
+          93,
+          45,
+          false
+        ],
+        [
+          "place zone",
+          45,
+          36,
+          false
+        ],
+        [
+          "on target",
+          36,
+          36,
+          false
+        ],
+        [
+          "jaw width",
+          36,
+          34,
+          false
+        ],
+        [
+          "collision",
+          34,
+          26,
+          false
+        ],
+        [
+          "reachable",
+          26,
+          26,
+          true
+        ],
+        [
+          "centred",
+          26,
+          22,
+          false
+        ],
+        [
+          "distinct",
+          22,
+          12,
+          false
+        ]
+      ],
+      "grasp_path_check": {
+        "chosen": 21,
+        "rank_examined": 1,
+        "fell_back": false,
+        "examined": [
+          {
+            "index": 21,
+            "inside_fraction": 0.26,
+            "max_depth_mm": 10.66,
+            "median_inside_depth_mm": 5.67,
+            "culprits": {
+              "cereal_g0": 5,
+              "shelf_top_back": 47
+            },
+            "reachable_fraction": 0.82
+          }
+        ]
+      },
+      "grasp_chosen_index": 21,
+      "grasp_chosen_score": 0.8411102890968323,
+      "grasp_chosen_approach_mismatch_deg": 52.361994899268694,
+      "grasp_n_candidates": 100,
+      "grasp_n_survivors": 12,
+      "grasp_offset_mm": 11.17816076703369,
+      "grasp_height_mm": 51.897255082133164,
+      "object": "milk"
+    },
+    {
+      "variant": "2_cube_grasp_pose",
+      "gripper": "xarm",
+      "selected_only": true,
+      "cloud_points": 57,
+      "grasp_place_approach_blocked_by": {
+        "shelf_top_back": 20,
+        "shelf_top_board": 3,
+        "shelf_bottom_back": 1
+      },
+      "grasp_jaw_width": {
+        "fits": 0,
+        "too_wide": 0,
+        "unverified": 14
+      },
+      "grasp_jaw_width_unverified": 14,
+      "grasp_jaw width_fell_back": true,
+      "grasp_cloud_too_sparse_for_jaw_width": true,
+      "grasp_reach_failures": {
+        "pre_grasp": 0,
+        "grasp": 0,
+        "lift": 0,
+        "place": 0,
+        "retreat": 7,
+        "pre_grasp_collision": 0,
+        "grasp_collision": 0,
+        "lift_collision": 0,
+        "place_collision": 0,
+        "retreat_collision": 0
+      },
+      "grasp_reachable_fell_back": true,
+      "grasp_ranked_by": "score",
+      "grasp_stages": [
+        [
+          "generated",
+          100,
+          100,
+          false
+        ],
+        [
+          "visibility",
+          100,
+          91,
+          false
+        ],
+        [
+          "support",
+          91,
+          38,
+          false
+        ],
+        [
+          "place zone",
+          38,
+          14,
+          false
+        ],
+        [
+          "on target",
+          14,
+          14,
+          false
+        ],
+        [
+          "jaw width",
+          14,
+          14,
+          true
+        ],
+        [
+          "collision",
+          14,
+          7,
+          false
+        ],
+        [
+          "reachable",
+          7,
+          7,
+          true
+        ],
+        [
+          "centred",
+          7,
+          6,
+          false
+        ],
+        [
+          "distinct",
+          6,
+          3,
+          false
+        ]
+      ],
+      "grasp_path_check": {
+        "chosen": 35,
+        "rank_examined": 2,
+        "fell_back": false,
+        "examined": [
+          {
+            "index": 10,
+            "inside_fraction": 0.41,
+            "max_depth_mm": 6.0,
+            "median_inside_depth_mm": 5.9,
+            "culprits": {
+              "milk_g0": 24,
+              "shelf_top_back": 58
+            },
+            "rejected": "path_collision"
+          },
+          {
+            "index": 35,
+            "inside_fraction": 0.21,
+            "max_depth_mm": 5.98,
+            "median_inside_depth_mm": 5.94,
+            "culprits": {
+              "shelf_top_back": 42
+            },
+            "reachable_fraction": 0.6
+          }
+        ]
+      },
+      "grasp_chosen_index": 35,
+      "grasp_chosen_score": 0.7741972208023071,
+      "grasp_chosen_approach_mismatch_deg": 17.563524444438816,
+      "grasp_n_candidates": 100,
+      "grasp_n_survivors": 3,
+      "grasp_offset_mm": 14.925260134748752,
+      "grasp_height_mm": 32.88230751362376,
+      "object": "can"
+    },
+    {
+      "variant": "2_cube_grasp_pose",
+      "gripper": "xarm",
+      "selected_only": true,
+      "cloud_points": 167,
+      "grasp_place_approach_blocked_by": {
+        "shelf_top_back": 21,
+        "shelf_bottom_back": 3,
+        "shelf_top_board": 2
+      },
+      "grasp_jaw_width": {
+        "fits": 5,
+        "too_wide": 0,
+        "unverified": 0
+      },
+      "grasp_reach_failures": {
+        "pre_grasp": 0,
+        "grasp": 0,
+        "lift": 0,
+        "place": 0,
+        "retreat": 4,
+        "pre_grasp_collision": 0,
+        "grasp_collision": 0,
+        "lift_collision": 0,
+        "place_collision": 0,
+        "retreat_collision": 1
+      },
+      "grasp_reachable_fell_back": true,
+      "grasp_ranked_by": "score",
+      "grasp_stages": [
+        [
+          "generated",
+          100,
+          100,
+          false
+        ],
+        [
+          "visibility",
+          100,
+          83,
+          false
+        ],
+        [
+          "support",
+          83,
+          31,
+          false
+        ],
+        [
+          "place zone",
+          31,
+          5,
+          false
+        ],
+        [
+          "on target",
+          5,
+          5,
+          false
+        ],
+        [
+          "jaw width",
+          5,
+          5,
+          false
+        ],
+        [
+          "collision",
+          5,
+          5,
+          false
+        ],
+        [
+          "reachable",
+          5,
+          5,
+          true
+        ],
+        [
+          "centred",
+          5,
+          4,
+          false
+        ],
+        [
+          "distinct",
+          4,
+          2,
+          false
+        ]
+      ],
+      "grasp_path_check": {
+        "chosen": 79,
+        "rank_examined": 1,
+        "fell_back": false,
+        "examined": [
+          {
+            "index": 79,
+            "inside_fraction": 0.305,
+            "max_depth_mm": 5.99,
+            "median_inside_depth_mm": 5.65,
+            "culprits": {
+              "shelf_top_back": 61
+            },
+            "reachable_fraction": 1.0
+          }
+        ]
+      },
+      "grasp_chosen_index": 79,
+      "grasp_chosen_score": 0.6029123663902283,
+      "grasp_chosen_approach_mismatch_deg": 3.9182664074690714,
+      "grasp_n_candidates": 100,
+      "grasp_n_survivors": 2,
+      "grasp_offset_mm": 12.598408424438015,
+      "grasp_height_mm": 25.775135020452034,
+      "object": "bread"
+    },
+    {
+      "variant": "2_cube_grasp_pose",
+      "gripper": "panda",
+      "selected_only": true,
+      "cloud_points": 602,
+      "grasp_place_approach_blocked_by": {
+        "shelf_top_back": 20
+      },
+      "grasp_jaw_width": {
+        "fits": 11,
+        "too_wide": 9,
+        "unverified": 2
+      },
+      "grasp_jaw_width_unverified": 2,
+      "grasp_reach_failures": {
+        "pre_grasp": 0,
+        "grasp": 0,
+        "lift": 0,
+        "place": 0,
+        "retreat": 10,
+        "pre_grasp_collision": 0,
+        "grasp_collision": 0,
+        "lift_collision": 0,
+        "place_collision": 0,
+        "retreat_collision": 0
+      },
+      "grasp_reachable_fell_back": true,
+      "grasp_ranked_by": "score",
+      "grasp_stages": [
+        [
+          "generated",
+          100,
+          100,
+          false
+        ],
+        [
+          "visibility",
+          100,
+          88,
+          false
+        ],
+        [
+          "support",
+          88,
+          42,
+          false
+        ],
+        [
+          "place zone",
+          42,
+          22,
+          false
+        ],
+        [
+          "on target",
+          22,
+          22,
+          false
+        ],
+        [
+          "jaw width",
+          22,
+          11,
+          false
+        ],
+        [
+          "collision",
+          11,
+          10,
+          false
+        ],
+        [
+          "reachable",
+          10,
+          10,
+          true
+        ],
+        [
+          "centred",
+          10,
+          3,
+          false
+        ],
+        [
+          "distinct",
+          3,
+          2,
+          false
+        ]
+      ],
+      "grasp_path_check": {
+        "chosen": 76,
+        "rank_examined": 1,
+        "fell_back": false,
+        "examined": [
+          {
+            "index": 76,
+            "inside_fraction": 0.09,
+            "max_depth_mm": 4.51,
+            "median_inside_depth_mm": 4.51,
+            "culprits": {
+              "shelf_top_back": 18
+            },
+            "reachable_fraction": 1.0
+          }
+        ]
+      },
+      "grasp_chosen_index": 76,
+      "grasp_chosen_score": 0.6257969737052917,
+      "grasp_chosen_approach_mismatch_deg": 14.48452568685601,
+      "grasp_n_candidates": 100,
+      "grasp_n_survivors": 2,
+      "grasp_offset_mm": 6.240675135330897,
+      "grasp_height_mm": 90.30943622421862,
+      "object": "cereal"
+    },
+    {
+      "variant": "2_cube_grasp_pose",
+      "gripper": "panda",
+      "selected_only": true,
+      "cloud_points": 279,
+      "grasp_place_approach_blocked_by": {
+        "shelf_top_back": 5
+      },
+      "grasp_jaw_width": {
+        "fits": 31,
+        "too_wide": 0,
+        "unverified": 4
+      },
+      "grasp_jaw_width_unverified": 4,
+      "grasp_reach_failures": {
+        "pre_grasp": 11,
+        "grasp": 0,
+        "lift": 0,
+        "place": 0,
+        "retreat": 11,
+        "pre_grasp_collision": 0,
+        "grasp_collision": 0,
+        "lift_collision": 0,
+        "place_collision": 0,
+        "retreat_collision": 2
+      },
+      "grasp_reachable_fell_back": true,
+      "grasp_ranked_by": "score",
+      "grasp_stages": [
+        [
+          "generated",
+          100,
+          100,
+          false
+        ],
+        [
+          "visibility",
+          100,
+          96,
+          false
+        ],
+        [
+          "support",
+          96,
+          40,
+          false
+        ],
+        [
+          "place zone",
+          40,
+          35,
+          false
+        ],
+        [
+          "on target",
+          35,
+          35,
+          false
+        ],
+        [
+          "jaw width",
+          35,
+          31,
+          false
+        ],
+        [
+          "collision",
+          31,
+          24,
+          false
+        ],
+        [
+          "reachable",
+          24,
+          24,
+          true
+        ],
+        [
+          "centred",
+          24,
+          11,
+          false
+        ],
+        [
+          "distinct",
+          11,
+          6,
+          false
+        ]
+      ],
+      "grasp_path_check": {
+        "chosen": 34,
+        "rank_examined": 2,
+        "fell_back": false,
+        "examined": [
+          {
+            "index": 1,
+            "inside_fraction": 0.435,
+            "max_depth_mm": 6.0,
+            "median_inside_depth_mm": 5.86,
+            "culprits": {
+              "shelf_bottom_wall_r": 2,
+              "shelf_top_back": 62,
+              "shelf_top_wall_r": 23
+            },
+            "rejected": "path_collision"
+          },
+          {
+            "index": 34,
+            "inside_fraction": 0.315,
+            "max_depth_mm": 6.0,
+            "median_inside_depth_mm": 5.46,
+            "culprits": {
+              "cereal_g0": 7,
+              "shelf_top_back": 56
+            },
+            "reachable_fraction": 0.8
+          }
+        ]
+      },
+      "grasp_chosen_index": 34,
+      "grasp_chosen_score": 0.7150383591651917,
+      "grasp_chosen_approach_mismatch_deg": 65.28558017721652,
+      "grasp_n_candidates": 100,
+      "grasp_n_survivors": 6,
+      "grasp_offset_mm": 14.441202497117795,
+      "grasp_height_mm": 55.19800731659208,
+      "object": "milk"
+    },
+    {
+      "variant": "2_cube_grasp_pose",
+      "gripper": "panda",
+      "selected_only": true,
+      "cloud_points": 57,
+      "grasp_place_approach_blocked_by": {
+        "shelf_top_back": 15,
+        "shelf_top_board": 2,
+        "shelf_bottom_back": 4
+      },
+      "grasp_jaw_width": {
+        "fits": 0,
+        "too_wide": 0,
+        "unverified": 12
+      },
+      "grasp_jaw_width_unverified": 12,
+      "grasp_jaw width_fell_back": true,
+      "grasp_cloud_too_sparse_for_jaw_width": true,
+      "grasp_reach_failures": {
+        "pre_grasp": 0,
+        "grasp": 0,
+        "lift": 0,
+        "place": 0,
+        "retreat": 3,
+        "pre_grasp_collision": 0,
+        "grasp_collision": 3,
+        "lift_collision": 0,
+        "place_collision": 0,
+        "retreat_collision": 1
+      },
+      "grasp_reachable_fell_back": true,
+      "grasp_ranked_by": "score",
+      "grasp_stages": [
+        [
+          "generated",
+          100,
+          100,
+          false
+        ],
+        [
+          "visibility",
+          100,
+          96,
+          false
+        ],
+        [
+          "support",
+          96,
+          33,
+          false
+        ],
+        [
+          "place zone",
+          33,
+          12,
+          false
+        ],
+        [
+          "on target",
+          12,
+          12,
+          false
+        ],
+        [
+          "jaw width",
+          12,
+          12,
+          true
+        ],
+        [
+          "collision",
+          12,
+          7,
+          false
+        ],
+        [
+          "reachable",
+          7,
+          7,
+          true
+        ],
+        [
+          "centred",
+          7,
+          4,
+          false
+        ],
+        [
+          "distinct",
+          4,
+          3,
+          false
+        ]
+      ],
+      "grasp_path_check": {
+        "chosen": 0,
+        "rank_examined": 1,
+        "fell_back": false,
+        "examined": [
+          {
+            "index": 0,
+            "inside_fraction": 0.25,
+            "max_depth_mm": 5.93,
+            "median_inside_depth_mm": 5.32,
+            "culprits": {
+              "milk_g0": 10,
+              "shelf_top_back": 40
+            },
+            "reachable_fraction": 0.86
+          }
+        ]
+      },
+      "grasp_chosen_index": 0,
+      "grasp_chosen_score": 0.8804072141647339,
+      "grasp_chosen_approach_mismatch_deg": 14.790756743458681,
+      "grasp_n_candidates": 100,
+      "grasp_n_survivors": 3,
+      "grasp_offset_mm": 6.311688932214153,
+      "grasp_height_mm": 27.354109366803712,
+      "object": "can"
+    },
+    {
+      "variant": "2_cube_grasp_pose",
+      "gripper": "panda",
+      "selected_only": true,
+      "cloud_points": 167,
+      "grasp_place_approach_blocked_by": {
+        "shelf_top_back": 13,
+        "shelf_bottom_back": 3
+      },
+      "grasp_jaw_width": {
+        "fits": 6,
+        "too_wide": 0,
+        "unverified": 0
+      },
+      "grasp_reach_failures": {
+        "pre_grasp": 1,
+        "grasp": 0,
+        "lift": 0,
+        "place": 0,
+        "retreat": 1,
+        "pre_grasp_collision": 0,
+        "grasp_collision": 0,
+        "lift_collision": 0,
+        "place_collision": 0,
+        "retreat_collision": 1
+      },
+      "grasp_reachable_fell_back": true,
+      "grasp_centred_fell_back": true,
+      "grasp_ranked_by": "score",
+      "grasp_stages": [
+        [
+          "generated",
+          100,
+          100,
+          false
+        ],
+        [
+          "visibility",
+          100,
+          88,
+          false
+        ],
+        [
+          "support",
+          88,
+          22,
+          false
+        ],
+        [
+          "place zone",
+          22,
+          6,
+          false
+        ],
+        [
+          "on target",
+          6,
+          6,
+          false
+        ],
+        [
+          "jaw width",
+          6,
+          6,
+          false
+        ],
+        [
+          "collision",
+          6,
+          3,
+          false
+        ],
+        [
+          "reachable",
+          3,
+          3,
+          true
+        ],
+        [
+          "centred",
+          3,
+          3,
+          true
+        ],
+        [
+          "distinct",
+          3,
+          2,
+          false
+        ]
+      ],
+      "grasp_path_check": {
+        "chosen": 51,
+        "rank_examined": 1,
+        "fell_back": false,
+        "examined": [
+          {
+            "index": 51,
+            "inside_fraction": 0.32,
+            "max_depth_mm": 6.0,
+            "median_inside_depth_mm": 5.72,
+            "culprits": {
+              "shelf_top_back": 64
+            },
+            "reachable_fraction": 1.0
+          }
+        ]
+      },
+      "grasp_chosen_index": 51,
+      "grasp_chosen_score": 0.600793182849884,
+      "grasp_chosen_approach_mismatch_deg": 3.275842708689319,
+      "grasp_n_candidates": 100,
+      "grasp_n_survivors": 2,
+      "grasp_offset_mm": 22.39653801466879,
+      "grasp_height_mm": 20.9589291135841,
+      "object": "bread"
+    },
+    {
+      "variant": "2_cube_grasp_pose",
+      "gripper": "robotiq85",
+      "selected_only": true,
+      "cloud_points": 602,
+      "grasp_place_approach_blocked_by": {
+        "shelf_top_back": 21
+      },
+      "grasp_jaw_width": {
+        "fits": 8,
+        "too_wide": 7,
+        "unverified": 0
+      },
+      "grasp_reach_failures": {
+        "pre_grasp": 0,
+        "grasp": 0,
+        "lift": 0,
+        "place": 0,
+        "retreat": 8,
+        "pre_grasp_collision": 0,
+        "grasp_collision": 0,
+        "lift_collision": 0,
+        "place_collision": 0,
+        "retreat_collision": 0
+      },
+      "grasp_reachable_fell_back": true,
+      "grasp_ranked_by": "score",
+      "grasp_stages": [
+        [
+          "generated",
+          100,
+          100,
+          false
+        ],
+        [
+          "visibility",
+          100,
+          91,
+          false
+        ],
+        [
+          "support",
+          91,
+          36,
+          false
+        ],
+        [
+          "place zone",
+          36,
+          15,
+          false
+        ],
+        [
+          "on target",
+          15,
+          15,
+          false
+        ],
+        [
+          "jaw width",
+          15,
+          8,
+          false
+        ],
+        [
+          "collision",
+          8,
+          8,
+          false
+        ],
+        [
+          "reachable",
+          8,
+          8,
+          true
+        ],
+        [
+          "centred",
+          8,
+          3,
+          false
+        ],
+        [
+          "distinct",
+          3,
+          2,
+          false
+        ]
+      ],
+      "grasp_path_check": {
+        "chosen": 65,
+        "rank_examined": 1,
+        "fell_back": false,
+        "examined": [
+          {
+            "index": 65,
+            "inside_fraction": 0.1,
+            "max_depth_mm": 5.86,
+            "median_inside_depth_mm": 5.76,
+            "culprits": {
+              "shelf_top_back": 20
+            },
+            "reachable_fraction": 1.0
+          }
+        ]
+      },
+      "grasp_chosen_index": 65,
+      "grasp_chosen_score": 0.6811133027076721,
+      "grasp_chosen_approach_mismatch_deg": 30.309892266972984,
+      "grasp_n_candidates": 100,
+      "grasp_n_survivors": 2,
+      "grasp_offset_mm": 10.813115279930729,
+      "grasp_height_mm": 73.96781067680958,
+      "object": "cereal"
+    },
+    {
+      "variant": "2_cube_grasp_pose",
+      "gripper": "robotiq85",
+      "selected_only": true,
+      "cloud_points": 279,
+      "grasp_place_approach_blocked_by": {
+        "shelf_top_back": 11
+      },
+      "grasp_jaw_width": {
+        "fits": 20,
+        "too_wide": 1,
+        "unverified": 0
+      },
+      "grasp_reach_failures": {
+        "pre_grasp": 3,
+        "grasp": 0,
+        "lift": 0,
+        "place": 0,
+        "retreat": 12,
+        "pre_grasp_collision": 1,
+        "grasp_collision": 0,
+        "lift_collision": 0,
+        "place_collision": 0,
+        "retreat_collision": 0
+      },
+      "grasp_reachable_fell_back": true,
+      "grasp_ranked_by": "score",
+      "grasp_stages": [
+        [
+          "generated",
+          100,
+          100,
+          false
+        ],
+        [
+          "visibility",
+          100,
+          91,
+          false
+        ],
+        [
+          "support",
+          91,
+          32,
+          false
+        ],
+        [
+          "place zone",
+          32,
+          21,
+          false
+        ],
+        [
+          "on target",
+          21,
+          21,
+          false
+        ],
+        [
+          "jaw width",
+          21,
+          20,
+          false
+        ],
+        [
+          "collision",
+          20,
+          16,
+          false
+        ],
+        [
+          "reachable",
+          16,
+          16,
+          true
+        ],
+        [
+          "centred",
+          16,
+          14,
+          false
+        ],
+        [
+          "distinct",
+          14,
+          9,
+          false
+        ]
+      ],
+      "grasp_path_check": {
+        "chosen": 49,
+        "rank_examined": 2,
+        "fell_back": false,
+        "examined": [
+          {
+            "index": 31,
+            "inside_fraction": 0.345,
+            "max_depth_mm": 6.0,
+            "median_inside_depth_mm": 5.72,
+            "culprits": {
+              "shelf_top_wall_r": 13,
+              "shelf_top_back": 56
+            },
+            "reachable_fraction": 0.0,
+            "rejected": "path_kinematics"
+          },
+          {
+            "index": 49,
+            "inside_fraction": 0.19,
+            "max_depth_mm": 6.0,
+            "median_inside_depth_mm": 5.43,
+            "culprits": {
+              "shelf_top_back": 38
+            },
+            "reachable_fraction": 0.78
+          }
+        ]
+      },
+      "grasp_chosen_index": 49,
+      "grasp_chosen_score": 0.6771510243415833,
+      "grasp_chosen_approach_mismatch_deg": 47.649292347596386,
+      "grasp_n_candidates": 100,
+      "grasp_n_survivors": 9,
+      "grasp_offset_mm": 11.01427638759047,
+      "grasp_height_mm": 43.014096398356294,
+      "object": "milk"
+    },
+    {
+      "variant": "2_cube_grasp_pose",
+      "gripper": "robotiq85",
+      "selected_only": true,
+      "cloud_points": 57,
+      "grasp_place_approach_blocked_by": {
+        "shelf_top_back": 17,
+        "shelf_bottom_back": 6
+      },
+      "grasp_jaw_width": {
+        "fits": 0,
+        "too_wide": 0,
+        "unverified": 9
+      },
+      "grasp_jaw_width_unverified": 9,
+      "grasp_jaw width_fell_back": true,
+      "grasp_cloud_too_sparse_for_jaw_width": true,
+      "grasp_reach_failures": {
+        "pre_grasp": 0,
+        "grasp": 0,
+        "lift": 0,
+        "place": 0,
+        "retreat": 3,
+        "pre_grasp_collision": 0,
+        "grasp_collision": 1,
+        "lift_collision": 0,
+        "place_collision": 0,
+        "retreat_collision": 0
+      },
+      "grasp_reachable_fell_back": true,
+      "grasp_ranked_by": "score",
+      "grasp_stages": [
+        [
+          "generated",
+          100,
+          100,
+          false
+        ],
+        [
+          "visibility",
+          100,
+          88,
+          false
+        ],
+        [
+          "support",
+          88,
+          32,
+          false
+        ],
+        [
+          "place zone",
+          32,
+          9,
+          false
+        ],
+        [
+          "on target",
+          9,
+          9,
+          false
+        ],
+        [
+          "jaw width",
+          9,
+          9,
+          true
+        ],
+        [
+          "collision",
+          9,
+          4,
+          false
+        ],
+        [
+          "reachable",
+          4,
+          4,
+          true
+        ],
+        [
+          "centred",
+          4,
+          3,
+          false
+        ],
+        [
+          "distinct",
+          3,
+          2,
+          false
+        ]
+      ],
+      "grasp_path_check": {
+        "chosen": 0,
+        "rank_examined": 1,
+        "fell_back": false,
+        "examined": [
+          {
+            "index": 0,
+            "inside_fraction": 0.22,
+            "max_depth_mm": 5.99,
+            "median_inside_depth_mm": 5.93,
+            "culprits": {
+              "shelf_top_back": 44
+            },
+            "reachable_fraction": 0.8
+          }
+        ]
+      },
+      "grasp_chosen_index": 0,
+      "grasp_chosen_score": 0.9360020160675049,
+      "grasp_chosen_approach_mismatch_deg": 5.626850468480501,
+      "grasp_n_candidates": 100,
+      "grasp_n_survivors": 2,
+      "grasp_offset_mm": 14.473830196425927,
+      "grasp_height_mm": 17.982880576520532,
+      "object": "can"
+    },
+    {
+      "variant": "2_cube_grasp_pose",
+      "gripper": "robotiq85",
+      "selected_only": true,
+      "cloud_points": 167,
+      "grasp_place_approach_blocked_by": {
+        "shelf_top_back": 21,
+        "shelf_bottom_back": 7,
+        "shelf_top_board": 2
+      },
+      "grasp_jaw_width": {
+        "fits": 4,
+        "too_wide": 0,
+        "unverified": 0
+      },
+      "grasp_reach_failures": {
+        "pre_grasp": 1,
+        "grasp": 0,
+        "lift": 0,
+        "place": 0,
+        "retreat": 1,
+        "pre_grasp_collision": 0,
+        "grasp_collision": 0,
+        "lift_collision": 0,
+        "place_collision": 0,
+        "retreat_collision": 2
+      },
+      "grasp_reachable_fell_back": true,
+      "grasp_ranked_by": "score",
+      "grasp_stages": [
+        [
+          "generated",
+          100,
+          100,
+          false
+        ],
+        [
+          "visibility",
+          100,
+          80,
+          false
+        ],
+        [
+          "support",
+          80,
+          34,
+          false
+        ],
+        [
+          "place zone",
+          34,
+          4,
+          false
+        ],
+        [
+          "on target",
+          4,
+          4,
+          false
+        ],
+        [
+          "jaw width",
+          4,
+          4,
+          false
+        ],
+        [
+          "collision",
+          4,
+          4,
+          false
+        ],
+        [
+          "reachable",
+          4,
+          4,
+          true
+        ],
+        [
+          "centred",
+          4,
+          1,
+          false
+        ],
+        [
+          "distinct",
+          1,
+          1,
+          false
+        ]
+      ],
+      "grasp_path_check": {
+        "chosen": 70,
+        "rank_examined": 1,
+        "fell_back": false,
+        "examined": [
+          {
+            "index": 70,
+            "inside_fraction": 0.31,
+            "max_depth_mm": 6.0,
+            "median_inside_depth_mm": 5.92,
+            "culprits": {
+              "shelf_top_back": 62
+            },
+            "reachable_fraction": 1.0
+          }
+        ]
+      },
+      "grasp_chosen_index": 70,
+      "grasp_chosen_score": 0.5789468288421631,
+      "grasp_chosen_approach_mismatch_deg": 6.695915782077123,
+      "grasp_n_candidates": 100,
+      "grasp_n_survivors": 1,
+      "grasp_offset_mm": 9.120432522163728,
+      "grasp_height_mm": 23.01741836472082,
+      "object": "bread"
+    },
+    {
+      "variant": "2_cube_grasp_pose",
+      "gripper": "robotiq140",
+      "selected_only": true,
+      "cloud_points": 601,
+      "grasp_place_approach_blocked_by": {
+        "shelf_top_back": 10
+      },
+      "grasp_jaw_width": {
+        "fits": 20,
+        "too_wide": 2,
+        "unverified": 0
+      },
+      "grasp_reach_failures": {
+        "pre_grasp": 3,
+        "grasp": 0,
+        "lift": 0,
+        "place": 0,
+        "retreat": 15,
+        "pre_grasp_collision": 2,
+        "grasp_collision": 0,
+        "lift_collision": 0,
+        "place_collision": 0,
+        "retreat_collision": 0
+      },
+      "grasp_reachable_fell_back": true,
+      "grasp_ranked_by": "score",
+      "grasp_stages": [
+        [
+          "generated",
+          100,
+          100,
+          false
+        ],
+        [
+          "visibility",
+          100,
+          86,
+          false
+        ],
+        [
+          "support",
+          86,
+          32,
+          false
+        ],
+        [
+          "place zone",
+          32,
+          22,
+          false
+        ],
+        [
+          "on target",
+          22,
+          22,
+          false
+        ],
+        [
+          "jaw width",
+          22,
+          20,
+          false
+        ],
+        [
+          "collision",
+          20,
+          20,
+          false
+        ],
+        [
+          "reachable",
+          20,
+          20,
+          true
+        ],
+        [
+          "centred",
+          20,
+          4,
+          false
+        ],
+        [
+          "distinct",
+          4,
+          4,
+          false
+        ]
+      ],
+      "grasp_path_check": {
+        "chosen": 24,
+        "rank_examined": 1,
+        "fell_back": false,
+        "examined": [
+          {
+            "index": 24,
+            "inside_fraction": 0.0,
+            "max_depth_mm": 1.06,
+            "median_inside_depth_mm": 0.0,
+            "culprits": {},
+            "reachable_fraction": 0.8
+          }
+        ]
+      },
+      "grasp_chosen_index": 24,
+      "grasp_chosen_score": 0.8438221216201782,
+      "grasp_chosen_approach_mismatch_deg": 7.728728090369448,
+      "grasp_n_candidates": 100,
+      "grasp_n_survivors": 4,
+      "grasp_offset_mm": 12.630463121819304,
+      "grasp_height_mm": 10.253788159605314,
+      "object": "cereal"
+    },
+    {
+      "variant": "2_cube_grasp_pose",
+      "gripper": "robotiq140",
+      "selected_only": true,
+      "cloud_points": 279,
+      "grasp_place_approach_blocked_by": {
+        "shelf_top_wall_l": 16,
+        "shelf_top_wall_r": 3,
+        "shelf_top_back": 6
+      },
+      "grasp_jaw_width": {
+        "fits": 16,
+        "too_wide": 0,
+        "unverified": 0
+      },
+      "grasp_reach_failures": {
+        "pre_grasp": 5,
+        "grasp": 0,
+        "lift": 0,
+        "place": 0,
+        "retreat": 9,
+        "pre_grasp_collision": 0,
+        "grasp_collision": 0,
+        "lift_collision": 0,
+        "place_collision": 0,
+        "retreat_collision": 1
+      },
+      "grasp_reachable_fell_back": true,
+      "grasp_ranked_by": "score",
+      "grasp_stages": [
+        [
+          "generated",
+          100,
+          100,
+          false
+        ],
+        [
+          "visibility",
+          100,
+          90,
+          false
+        ],
+        [
+          "support",
+          90,
+          41,
+          false
+        ],
+        [
+          "place zone",
+          41,
+          16,
+          false
+        ],
+        [
+          "on target",
+          16,
+          16,
+          false
+        ],
+        [
+          "jaw width",
+          16,
+          16,
+          false
+        ],
+        [
+          "collision",
+          16,
+          15,
+          false
+        ],
+        [
+          "reachable",
+          15,
+          15,
+          true
+        ],
+        [
+          "centred",
+          15,
+          13,
+          false
+        ],
+        [
+          "distinct",
+          13,
+          9,
+          false
+        ]
+      ],
+      "grasp_path_check": {
+        "chosen": 24,
+        "rank_examined": 1,
+        "fell_back": false,
+        "examined": [
+          {
+            "index": 24,
+            "inside_fraction": 0.085,
+            "max_depth_mm": 3.23,
+            "median_inside_depth_mm": 3.23,
+            "culprits": {
+              "shelf_top_back": 17
+            },
+            "reachable_fraction": 0.84
+          }
+        ]
+      },
+      "grasp_chosen_index": 24,
+      "grasp_chosen_score": 0.9026153087615967,
+      "grasp_chosen_approach_mismatch_deg": 7.19243853253781,
+      "grasp_n_candidates": 100,
+      "grasp_n_survivors": 9,
+      "grasp_offset_mm": 9.949564404929802,
+      "grasp_height_mm": 25.151391644480547,
+      "object": "milk"
+    },
+    {
+      "variant": "2_cube_grasp_pose",
+      "gripper": "robotiq140",
+      "selected_only": true,
+      "cloud_points": 57,
+      "grasp_place_approach_blocked_by": {
+        "shelf_top_back": 21,
+        "shelf_top_wall_l": 3,
+        "shelf_bottom_back": 1
+      },
+      "grasp_jaw_width": {
+        "fits": 0,
+        "too_wide": 0,
+        "unverified": 9
+      },
+      "grasp_jaw_width_unverified": 9,
+      "grasp_jaw width_fell_back": true,
+      "grasp_cloud_too_sparse_for_jaw_width": true,
+      "grasp_reach_failures": {
+        "pre_grasp": 0,
+        "grasp": 0,
+        "lift": 0,
+        "place": 0,
+        "retreat": 3,
+        "pre_grasp_collision": 0,
+        "grasp_collision": 0,
+        "lift_collision": 0,
+        "place_collision": 0,
+        "retreat_collision": 0
+      },
+      "grasp_reachable_fell_back": true,
+      "grasp_ranked_by": "score",
+      "grasp_stages": [
+        [
+          "generated",
+          100,
+          100,
+          false
+        ],
+        [
+          "visibility",
+          100,
+          80,
+          false
+        ],
+        [
+          "support",
+          80,
+          34,
+          false
+        ],
+        [
+          "place zone",
+          34,
+          9,
+          false
+        ],
+        [
+          "on target",
+          9,
+          9,
+          false
+        ],
+        [
+          "jaw width",
+          9,
+          9,
+          true
+        ],
+        [
+          "collision",
+          9,
+          3,
+          false
+        ],
+        [
+          "reachable",
+          3,
+          3,
+          true
+        ],
+        [
+          "centred",
+          3,
+          3,
+          false
+        ],
+        [
+          "distinct",
+          3,
+          3,
+          false
+        ]
+      ],
+      "grasp_path_check": {
+        "chosen": 31,
+        "rank_examined": 1,
+        "fell_back": false,
+        "examined": [
+          {
+            "index": 31,
+            "inside_fraction": 0.1,
+            "max_depth_mm": 5.94,
+            "median_inside_depth_mm": 5.94,
+            "culprits": {
+              "shelf_top_back": 20
+            },
+            "reachable_fraction": 0.76
+          }
+        ]
+      },
+      "grasp_chosen_index": 31,
+      "grasp_chosen_score": 0.8493924140930176,
+      "grasp_chosen_approach_mismatch_deg": 15.301865555433716,
+      "grasp_n_candidates": 100,
+      "grasp_n_survivors": 3,
+      "grasp_offset_mm": 2.74298969817037,
+      "grasp_height_mm": 33.37527678814467,
+      "object": "can"
+    },
+    {
+      "variant": "2_cube_grasp_pose",
+      "gripper": "robotiq140",
+      "selected_only": true,
+      "cloud_points": 167,
+      "grasp_place_approach_blocked_by": {
+        "shelf_top_back": 18,
+        "shelf_bottom_back": 2,
+        "shelf_top_board": 1
+      },
+      "grasp_jaw_width": {
+        "fits": 15,
+        "too_wide": 0,
+        "unverified": 1
+      },
+      "grasp_jaw_width_unverified": 1,
+      "grasp_reach_failures": {
+        "pre_grasp": 0,
+        "grasp": 0,
+        "lift": 0,
+        "place": 0,
+        "retreat": 1,
+        "pre_grasp_collision": 0,
+        "grasp_collision": 6,
+        "lift_collision": 0,
+        "place_collision": 0,
+        "retreat_collision": 1
+      },
+      "grasp_reachable_fell_back": true,
+      "grasp_ranked_by": "score",
+      "grasp_stages": [
+        [
+          "generated",
+          100,
+          100,
+          false
+        ],
+        [
+          "visibility",
+          100,
+          80,
+          false
+        ],
+        [
+          "support",
+          80,
+          37,
+          false
+        ],
+        [
+          "place zone",
+          37,
+          16,
+          false
+        ],
+        [
+          "on target",
+          16,
+          16,
+          false
+        ],
+        [
+          "jaw width",
+          16,
+          15,
+          false
+        ],
+        [
+          "collision",
+          15,
+          8,
+          false
+        ],
+        [
+          "reachable",
+          8,
+          8,
+          true
+        ],
+        [
+          "centred",
+          8,
+          2,
+          false
+        ],
+        [
+          "distinct",
+          2,
+          2,
+          false
+        ]
+      ],
+      "grasp_path_check": {
+        "chosen": 9,
+        "rank_examined": 1,
+        "fell_back": false,
+        "examined": [
+          {
+            "index": 9,
+            "inside_fraction": 0.36,
+            "max_depth_mm": 5.95,
+            "median_inside_depth_mm": 4.98,
+            "culprits": {
+              "shelf_top_back": 72
+            },
+            "reachable_fraction": 1.0
+          }
+        ]
+      },
+      "grasp_chosen_index": 9,
+      "grasp_chosen_score": 0.7814409136772156,
+      "grasp_chosen_approach_mismatch_deg": 9.937153947967904,
+      "grasp_n_candidates": 100,
+      "grasp_n_survivors": 2,
+      "grasp_offset_mm": 14.599511554652059,
+      "grasp_height_mm": 9.409785131650473,
+      "object": "bread"
+    }
+  ],
+  "created": "2026-09-12T03:45:11",
+  "provenance": {
+    "commit": "a91e48937fd87d1c81e146de026b9132a0f6d9dd",
+    "commit_short": "a91e489",
+    "branch": "keypoints-grasp-cube",
+    "committed": "2026-09-12T03:43:03+05:30",
+    "dirty": [],
+    "diff_stat": null,
+    "untracked_code": [],
+    "reproducible": true,
+    "python": "3.10.12",
+    "platform": "Linux-6.8.0-138-generic-x86_64-with-glibc2.35",
+    "packages": {
+      "numpy": "2.2.6",
+      "scipy": "1.15.3",
+      "mujoco": "3.7.0",
+      "robosuite": "1.5.2",
+      "similaritymeasures": "1.4.0"
+    }
+  }
+}
