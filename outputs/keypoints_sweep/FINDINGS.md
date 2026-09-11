@@ -2335,6 +2335,77 @@ approach. Eq. 11 then rotates the commanded gripper orientation by that 90
 degrees along the whole path, and the arm cannot hold it: reachability collapses
 to a median of about 0.5 with tracking errors of 300-400 mm.
 
+### Every cell
+
+All twenty cells in all three runs, so a later experiment can be compared cell
+by cell rather than only on the totals. `gap` is the chosen grasp's approach
+mismatch from the demonstration; `reach` the fraction of waypoints the arm could
+hold; `track` the mean tracking error in mm; `place err` the lateral distance
+from the slot in mm.
+
+| hand | object | run | gap | grasped | traversed | reach | track | min det | place err | ok |
+|---|---|---|---|---|---|---|---|---|---|---|
+| panda | bread | i no filter/score | 90° | no | no | 4% | 226.8 | 0.032 | 321 | no |
+| panda | bread | ii filter/score | 3° | yes | yes | 100% | 25.1 | 0.558 | 17 | **yes** |
+| panda | bread | iii no filter/demo | 3° | yes | yes | 100% | 25.1 | 0.558 | 17 | **yes** |
+| panda | can | i no filter/score | 105° | no | no | 14% | 236.8 | 0.394 | 352 | no |
+| panda | can | ii filter/score | 15° | yes | yes | 78% | 22.8 | 0.986 | 24 | **yes** |
+| panda | can | iii no filter/demo | 87° | no | no | 69% | 78.4 | 0.314 | 334 | no |
+| panda | cereal | i no filter/score | 91° | no | no | 20% | 184.7 | 0.379 | 321 | no |
+| panda | cereal | ii filter/score | 16° | yes | yes | 74% | 8.2 | 0.738 | 20 | **yes** |
+| panda | cereal | iii no filter/demo | 7° | yes | yes | 77% | 8.1 | 0.946 | 14 | **yes** |
+| panda | milk | i no filter/score | 92° | yes | yes | 50% | 148.5 | 0.727 | 267 | no |
+| panda | milk | ii filter/score | 3° | yes | yes | 74% | 8.5 | 0.998 | 5 | **yes** |
+| panda | milk | iii no filter/demo | 3° | yes | yes | 74% | 8.5 | 0.998 | 5 | **yes** |
+| robotiq140 | bread | i no filter/score | 84° | no | no | 50% | 125.6 | 0.051 | 429 | no |
+| robotiq140 | bread | ii filter/score | 10° | yes | no | 100% | 21.6 | 0.639 | 225 | no |
+| robotiq140 | bread | iii no filter/demo | 5° | no | no | 100% | 16.6 | 0.933 | 373 | no |
+| robotiq140 | can | i no filter/score | 74° | no | no | 60% | 184.4 | 0.703 | 352 | no |
+| robotiq140 | can | ii filter/score | 30° | no | no | 62% | 24.5 | 0.699 | 407 | no |
+| robotiq140 | can | iii no filter/demo | 74° | no | no | 60% | 184.4 | 0.703 | 352 | no |
+| robotiq140 | cereal | i no filter/score | 93° | yes | yes | 22% | 123.4 | 0.433 | 191 | no |
+| robotiq140 | cereal | ii filter/score | 14° | yes | no | 80% | 12.8 | 0.775 | 284 | no |
+| robotiq140 | cereal | iii no filter/demo | 4° | yes | yes | 62% | 16.4 | 0.993 | 10 | **yes** |
+| robotiq140 | milk | i no filter/score | 93° | yes | yes | 0% | 159.8 | 0.709 | 272 | no |
+| robotiq140 | milk | ii filter/score | 7° | yes | yes | 79% | 20.8 | 0.997 | 337 | no |
+| robotiq140 | milk | iii no filter/demo | 7° | yes | yes | 79% | 20.8 | 0.997 | 337 | no |
+| robotiq85 | bread | i no filter/score | 66° | yes | no | 34% | 153.2 | 0.557 | 243 | no |
+| robotiq85 | bread | ii filter/score | 11° | yes | yes | 100% | 18.8 | 0.588 | 22 | **yes** |
+| robotiq85 | bread | iii no filter/demo | 4° | yes | yes | 91% | 25.1 | 0.538 | 42 | **yes** |
+| robotiq85 | can | i no filter/score | 91° | yes | yes | 54% | 97.2 | 0.498 | 190 | no |
+| robotiq85 | can | ii filter/score | 6° | yes | no | 72% | 20.8 | 0.982 | 351 | no |
+| robotiq85 | can | iii no filter/demo | 83° | yes | yes | 56% | 93.0 | 0.373 | 230 | no |
+| robotiq85 | cereal | i no filter/score | 91° | yes | yes | 53% | 111.0 | 0.473 | 221 | no |
+| robotiq85 | cereal | ii filter/score | 13° | yes | yes | 76% | 11.1 | 0.724 | 26 | **yes** |
+| robotiq85 | cereal | iii no filter/demo | 6° | yes | yes | 62% | 16.5 | 0.963 | 6 | **yes** |
+| robotiq85 | milk | i no filter/score | 95° | no | no | 0% | 157.4 | 0.721 | 366 | no |
+| robotiq85 | milk | ii filter/score | 32° | yes | yes | 84% | 13.9 | 0.944 | 27 | **yes** |
+| robotiq85 | milk | iii no filter/demo | 30° | yes | no | 66% | 16.3 | 0.953 | 436 | no |
+| xarm | bread | i no filter/score | 86° | no | no | 50% | 132.8 | 0.011 | 278 | no |
+| xarm | bread | ii filter/score | 45° | no | no | 72% | 17.4 | 0.733 | 319 | no |
+| xarm | bread | iii no filter/demo | 5° | yes | yes | 100% | 18.4 | 0.938 | 94 | no |
+| xarm | can | i no filter/score | 92° | no | no | 33% | 189.5 | 0.499 | 352 | no |
+| xarm | can | ii filter/score | 21° | yes | yes | 62% | 27.8 | 0.689 | 52 | **yes** |
+| xarm | can | iii no filter/demo | 92° | no | no | 33% | 189.5 | 0.499 | 352 | no |
+| xarm | cereal | i no filter/score | 88° | yes | no | 54% | 58.5 | 0.298 | 246 | no |
+| xarm | cereal | ii filter/score | 17° | yes | no | 60% | 31.5 | 0.922 | 383 | no |
+| xarm | cereal | iii no filter/demo | 5° | yes | yes | 61% | 20.5 | 0.878 | 40 | **yes** |
+| xarm | milk | i no filter/score | 97° | yes | yes | 47% | 128.5 | 0.694 | 273 | no |
+| xarm | milk | ii filter/score | 40° | yes | yes | 76% | 17.9 | 0.892 | 62 | no |
+| xarm | milk | iii no filter/demo | 6° | yes | yes | 77% | 15.8 | 0.999 | 8 | **yes** |
+| yumi | bread | i no filter/score | 30° | no | no | 100% | 23.9 | 0.248 | 336 | no |
+| yumi | bread | ii filter/score | 30° | no | no | 100% | 23.9 | 0.248 | 336 | no |
+| yumi | bread | iii no filter/demo | 4° | no | no | 100% | 4.3 | 0.915 | 379 | no |
+| yumi | can | i no filter/score | 3° | no | no | 79% | 17.4 | 0.901 | 342 | no |
+| yumi | can | ii filter/score | 3° | no | no | 79% | 17.4 | 0.901 | 342 | no |
+| yumi | can | iii no filter/demo | 2° | yes | yes | 82% | 15.7 | 0.997 | 2 | **yes** |
+| yumi | cereal | i no filter/score | 91° | no | no | 52% | 74.2 | 0.386 | 409 | no |
+| yumi | cereal | ii filter/score | 14° | yes | yes | 73% | 9.5 | 0.870 | 8 | **yes** |
+| yumi | cereal | iii no filter/demo | 2° | yes | yes | 62% | 15.0 | 0.943 | 15 | **yes** |
+| yumi | milk | i no filter/score | 93° | no | no | 58% | 147.0 | 0.724 | 391 | no |
+| yumi | milk | ii filter/score | 38° | yes | yes | 88% | 10.1 | 0.944 | 31 | **yes** |
+| yumi | milk | iii no filter/demo | 1° | yes | yes | 78% | 11.8 | 0.996 | 10 | **yes** |
+
 ### Separating the kinematic failures
 
 A cell whose plan the arm cannot follow is not a grasping result, so the same
@@ -2412,6 +2483,35 @@ mass to the grasp point.
 | `robotiq85/can` | grip 43 mm | grip 408 mm | grip 355 mm | grip 397 mm |
 | `xarm/milk` | grip 397 mm | grip 407 mm | grip 397 mm | grip 403 mm |
 | **`yumi/bread`** | **no** 8 mm | **no** 3 mm | **no** 0 mm | **no** 0 mm |
+
+### Every grasp
+
+The summary above is grip-or-not and lift height; this is every grasp with the
+offset that the centre-of-mass question turns on, so the criterion can be
+re-derived or contradicted rather than taken on trust.
+
+| hand | object | rank | offset from CoM | grasped | lift | traversed | place err | ok |
+|---|---|---|---|---|---|---|---|---|
+| panda | can | 0 | 6.3 mm | yes | 414 mm | yes | 24 | **yes** |
+| panda | can | 1 | 18.9 mm | yes | 135 mm | no | 386 | no |
+| panda | can | 2 | 2.0 mm | yes | 432 mm | yes | 4 | **yes** |
+| panda | can | 3 | 4.8 mm | yes | 426 mm | yes | 31 | **yes** |
+| panda | cereal | 0 | 23.4 mm | yes | 418 mm | yes | 20 | **yes** |
+| panda | cereal | 1 | 19.1 mm | yes | 61 mm | no | 356 | no |
+| panda | cereal | 2 | 6.2 mm | **no** | 1 mm | no | 321 | no |
+| panda | cereal | 3 | 51.7 mm | yes | 173 mm | no | 306 | no |
+| robotiq85 | can | 0 | 14.5 mm | yes | 43 mm | no | 351 | no |
+| robotiq85 | can | 1 | 8.3 mm | yes | 408 mm | yes | 22 | **yes** |
+| robotiq85 | can | 2 | 4.1 mm | yes | 355 mm | no | 152 | no |
+| robotiq85 | can | 3 | 7.1 mm | yes | 397 mm | no | 114 | no |
+| xarm | milk | 0 | 13.9 mm | yes | 397 mm | yes | 62 | no |
+| xarm | milk | 1 | 8.7 mm | yes | 407 mm | yes | 13 | **yes** |
+| xarm | milk | 2 | 5.4 mm | yes | 397 mm | yes | 58 | **yes** |
+| xarm | milk | 3 | 0.5 mm | yes | 403 mm | yes | 8 | **yes** |
+| yumi | bread | 0 | 13.3 mm | **no** | 8 mm | no | 336 | no |
+| yumi | bread | 1 | 20.9 mm | **no** | 3 mm | no | 379 | no |
+| yumi | bread | 2 | 24.2 mm | **no** | 0 mm | no | 333 | no |
+| yumi | bread | 3 | 24.2 mm | **no** | 0 mm | no | 333 | no |
 
 ### What it says
 
