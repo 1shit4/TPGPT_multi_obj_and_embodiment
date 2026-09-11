@@ -355,23 +355,23 @@ class JawsThatIntegrate:
 
     Every ``format_action`` in the registry is
     ``current_action += speed * np.sign(action)``, so "+1" means "keep closing"
-    rather than "go to fully closed", and a command of ``0.0`` leaves the
-    fingers untouched. :class:`FakeArm` models contact as elapsed closing steps
-    and cannot express any of that, which is how the first version of the
-    preload passed its tests while being a no-op in the field.
+    rather than "go to fully closed", and ``0.0`` leaves the fingers untouched.
+    Grip force rises once the fingers are past the object's surface, which is
+    what makes a force threshold expressible and a *contact* test useless --
+    the fingers already touch before the close is commanded.
 
-    ``contact_after`` is how many closing steps it takes to reach the object --
-    a stand-in for how far the fingers must travel. ``None`` means nothing is
-    between them.
+    ``touches_at`` is how far the fingers travel before grazing the object;
+    ``force_per_step`` how fast force builds after that. ``None`` means nothing
+    is between them, so force never rises.
     """
 
     SPEED = 0.2
 
-    def __init__(self, contact_after: int | None):
-        self.contact_after = contact_after
-        self.position = 0.0          #: 0 fully open, ``limit`` fully shut
+    def __init__(self, touches_at=0.0, force_per_step=4.0):
+        self.touches_at = touches_at
+        self.force_per_step = force_per_step
+        self.position = 0.0
         self.limit = 2.0
-        self.closing_steps = 0
         self.history: list[float] = []
         self.action_dim = 8
 
@@ -416,102 +416,90 @@ class JawsThatIntegrate:
         return np.eye(3).reshape(1, 9)
 
     def step(self, action):
-        # the sign, and only the sign
         self.position = float(np.clip(
             self.position + self.SPEED * np.sign(action[-1]), 0.0, self.limit))
         self.history.append(self.position)
-        if np.sign(action[-1]) > 0:
-            self.closing_steps += 1
-        else:
-            self.closing_steps = 0
 
-    def holds(self) -> bool:
-        return (self.contact_after is not None
-                and self.closing_steps >= self.contact_after)
+    def touching(self) -> bool:
+        return self.touches_at is not None and self.position >= self.touches_at
+
+    def force(self) -> float:
+        if self.touches_at is None:
+            return 0.0
+        past = max(0.0, self.position - self.touches_at)
+        return past / self.SPEED * self.force_per_step
 
 
-def run_preload(contact_after, preload=2, **kw):
-    env = JawsThatIntegrate(contact_after)
+def run_force(touches_at=0.0, target=10.0, **kw):
+    env = JawsThatIntegrate(touches_at)
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always")
         result = replay_labels(
             env, labels(), settle_steps=8,
-            grasp_gate=lambda e: e.holds(), preload=preload, **kw,
+            hold_when=lambda e: e.force() >= target, **kw,
         )
     return env, result, [w for w in caught if w.category is RuntimeWarning]
 
 
-class TestPreloadAndHold:
-    """Close to contact, build a small preload, then freeze the fingers.
+class TestCloseToForceThenHold:
+    """Close until the grip is firm, then stay -- not until contact, and not
+    to a command magnitude.
 
-    **The first version of this was a no-op and the tests did not catch it.**
-    It commanded a *magnitude* below 1, on the assumption that the gripper is a
-    position target. It is not: every ``format_action`` in robosuite's registry
-    is ``current_action += speed * np.sign(action)``, so the sign is used and
-    the size discarded. Measured in a full run, 19 of 20 cells took a different
-    command and reached an *identical* closure, and not one outcome changed.
+    **Two earlier versions of this fix were inert or wrong, and the tests did
+    not catch either.** The first commanded a magnitude below 1, assuming a
+    position target; robosuite integrates the sign and discards the size, so 19
+    of 20 cells took a different command and reached an identical closure. The
+    second closed until first *contact*, which fires before the close is even
+    commanded because the fingers already straddle the object -- it froze the
+    jaws at 0.00-0.05 closure against a baseline of 0.38-0.71.
 
-    The double below models that integrator, which is what makes these tests
-    able to fail. The hold works because ``np.sign(0.0)`` is zero, so a command
-    of ``0.0`` leaves the fingers exactly where they are.
+    Both slipped through because the double shared the code's assumption. This
+    one models the sign integrator *and* a force that only rises once the
+    fingers are past the surface, so each wrong trigger fails a test here.
     """
 
-    def test_it_stops_closing_once_it_has_hold(self):
-        env, result, warned = run_preload(contact_after=6)
-        assert result.metadata["grasp_hold_command"] == pytest.approx(0.0), (
-            "a magnitude below 1 is not a hold: the gripper integrates the "
-            "sign and ignores the size"
-        )
+    def test_it_stops_once_the_grip_is_firm(self):
+        env, result, warned = run_force(touches_at=0.4, target=10.0)
+        assert result.metadata["grasp_hold_command"] == pytest.approx(0.0)
+        assert env.force() >= 10.0
         assert not warned
 
-    def test_the_fingers_stop_where_the_object_is(self):
-        """The point of the whole thing: the jaws end up against the object
-        rather than driven to fully shut."""
-        # 0.2 per step over a range of 2.0, so contact must be inside 10
-        # steps or the object is wider than the jaws open.
-        near = run_preload(contact_after=2)[0]
-        far = run_preload(contact_after=6)[0]
-        assert near.position < far.position, (
-            f"a sooner contact should stop the fingers sooner: "
-            f"{near.position} vs {far.position}"
+    def test_it_does_not_stop_at_first_contact(self):
+        """The trigger that failed in the field: the fingers are already
+        touching, so a contact test freezes a hand that has barely moved."""
+        env, _, _ = run_force(touches_at=0.4, target=10.0)
+        assert env.position > 0.4, (
+            f"froze at first contact ({env.position}) instead of closing to force"
         )
-        assert far.position < far.limit, "drove the jaws fully shut"
 
-    def test_it_keeps_closing_a_little_past_contact(self):
-        """Freezing *at* contact gives zero penetration and so zero grip."""
-        at_contact = run_preload(contact_after=6, preload=0)[0].position
-        with_preload = run_preload(contact_after=6, preload=2)[0].position
-        assert with_preload > at_contact
+    def test_a_firmer_target_closes_further(self):
+        """Force is adaptive in the way a command magnitude is not."""
+        soft = run_force(touches_at=0.4, target=4.0)[0].position
+        firm = run_force(touches_at=0.4, target=20.0)[0].position
+        assert firm > soft
 
-    def test_it_differs_from_the_binary_command_it_replaces(self):
-        """The assertion `flip_target` needed and did not have (7.34), and
-        which the first version of this fix failed in the field."""
-        held = run_preload(contact_after=6)[0]
-        plain = JawsThatIntegrate(6)
-        replay_labels(plain, labels(), settle_steps=8,
-                      grasp_gate=lambda e: e.holds(), preload=None)
-        assert plain.position == pytest.approx(plain.limit), (
-            "without the preload the fingers should reach fully shut"
-        )
+    def test_it_differs_from_commanding_the_jaws_shut(self):
+        """The assertion `flip_target` needed, and which the first fix passed
+        while being inert (7.34)."""
+        held = run_force(touches_at=0.4, target=10.0)[0]
+        plain = JawsThatIntegrate(0.4)
+        replay_labels(plain, labels(), settle_steps=8, hold_when=None)
+        assert plain.position == pytest.approx(plain.limit)
         assert held.position < plain.position
 
     def test_nothing_between_the_jaws_warns_and_shuts(self):
-        env, result, warned = run_preload(contact_after=None)
+        env, result, warned = run_force(touches_at=None)
         assert warned, "closed on nothing without saying so"
         assert result.metadata["grasp_hold_command"] == pytest.approx(1.0)
 
-    def test_opening_resets_the_hold_so_a_second_grasp_re_searches(self):
-        env = JawsThatIntegrate(3)
+    def test_opening_resets_the_hold(self):
+        env = JawsThatIntegrate(0.4)
         grip = np.array([-1.0, 1.0, -1.0, 1.0])
         two = PolicyLabels(
             positions=np.zeros((4, 3)), velocities=np.zeros((4, 3)),
             orientations=np.stack([np.eye(3)] * 4), gripper=grip,
             time_belief=np.linspace(0, 1, 4),
         )
-        with warnings.catch_warnings(record=True):
-            warnings.simplefilter("always")
-            replay_labels(env, two, settle_steps=4,
-                          grasp_gate=lambda e: e.holds(), preload=2)
-        assert min(env.history) == pytest.approx(0.0), (
-            "the fingers should have been driven fully open between grasps"
-        )
+        replay_labels(env, two, settle_steps=4,
+                      hold_when=lambda e: e.force() >= 10.0)
+        assert min(env.history) == pytest.approx(0.0)

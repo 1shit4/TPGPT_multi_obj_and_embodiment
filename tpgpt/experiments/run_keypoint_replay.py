@@ -85,6 +85,7 @@ from tpgpt.grasp.grasps import (
     to_wrist_convention,
 )
 from tpgpt.reporting.html import write_manifest
+from tpgpt.experiments.diagnose import grip_force
 from tpgpt.sim.replay import make_position_controller_config, replay_labels
 from tpgpt.sim.rollout import slot_score
 from tpgpt.transport.labels import PolicyLabels
@@ -338,7 +339,7 @@ def stage_outcome(replay, labels, target, env=None) -> dict:
 
 
 def replay_variant(env, labels, source_placement, target, variant,
-                   gripper="panda", preload=None) -> dict:
+                   gripper="panda", force_target=None) -> dict:
     """Transport under one construction, then follow the result under position control.
 
     ``labels`` **must already be in the tool frame**. See :func:`main`: passing
@@ -401,7 +402,13 @@ def replay_variant(env, labels, source_placement, target, variant,
         # on bread: the cells that place arrest their jaws at closures of 0.540
         # and 0.895 with the object still between them, the failing ones finish
         # at 1.0 or beyond having travelled 41-63 mm past contact.
-        preload=preload,
+        # Close until the grip is firm, then stay -- rather than commanding
+        # the jaws shut for the whole carry, which extrudes the object when it
+        # cannot stop the fingers itself.
+        hold_when=(
+            (lambda e: grip_force(e, target.metadata["object_name"]) >= force_target)
+            if force_target and target.metadata.get("object_name") else None
+        ),
     )
     row = {
         "variant": variant.name,
@@ -486,7 +493,7 @@ def main(
     rank_by: str = "auto",
     approach_filter: bool = True,
     variant_names=REPLAY_VARIANTS,
-    preload: int | None = None,
+    force_target: float | None = None,
 ) -> dict:
     """Replay every construction on every hand and object.
 
@@ -511,16 +518,15 @@ def main(
             Independent of ``rank_by``, which is what makes the two measurable
             separately.
 
-        preload: Control **steps** the jaws keep closing for past first
-            contact before being frozen, forwarded to
-            :func:`~tpgpt.sim.replay.replay_labels`. ``None`` keeps the
-            historical behaviour of driving them shut for the whole carry.
+        force_target: Newtons of grip force to close to before freezing the
+            jaws. ``None`` keeps the historical behaviour of commanding them
+            shut for the whole carry.
 
             **Any number measured with a different setting here is not
-            comparable**, because it changes when and how hard every hand
-            grips. Steps rather than a command magnitude because robosuite's
-            grippers integrate the sign and discard the size -- a magnitude
-            below 1 is not a weaker grip, it is the same grip, measured.
+            comparable**, because it changes how hard every hand grips. See
+            :data:`~tpgpt.sim.replay.GRASP_FORCE_TARGET` for why force rather
+            than a command magnitude (which does nothing) or first contact
+            (which fires before the close begins).
 
         variant_names: Keypoint constructions to replay. Defaults to both of
             :data:`REPLAY_VARIANTS`. Restrict it when the question is about
@@ -695,7 +701,7 @@ def main(
                             )
                     row = replay_variant(
                         env, labels, source_placement, target, variant,
-                        gripper=gripper, preload=preload,
+                        gripper=gripper, force_target=force_target,
                     )
                 # **Both, and deliberately.** ``ValueError`` is "too little
                 # cloud to describe the object"; ``RuntimeError`` is "every
@@ -737,7 +743,7 @@ def main(
                        "object": list(REPLAY_OBJECTS)},
             "grasp_selection": {"filters": filters, "rank_by": rank_by,
                                 "approach_filter": bool(approach_filter)},
-            "gripper_command": {"preload": preload},
+            "gripper_command": {"force_target": force_target},
             "fixed": {
                 "source": "reshelving seed 0, one demonstration",
                 "slot": slot,

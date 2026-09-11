@@ -468,6 +468,44 @@ def jaw_closure_probe(env, gripper: str):
     return closure
 
 
+def grip_force(env, object_name: str, arm: str = "right") -> float:
+    """Total normal force the hand is applying to one object, in newtons.
+
+    Summed over every contact between a gripper geom and the object, using
+    MuJoCo's own solver via ``mj_contactForce`` -- the first component of the
+    contact-frame force is the normal.
+
+    This is the quantity a real gripper is commanded in: a Panda takes a width
+    and a force, a Robotiq a position and a force limit. Simulated hands here
+    take neither -- ``format_action`` integrates the *sign* of the action, so
+    the only instructions expressible are "keep closing", "keep opening" and
+    (via ``np.sign(0)``) "stay". Closing until this reaches a target and then
+    staying is how that repertoire reproduces force control.
+    """
+    import mujoco
+
+    model, data = env.sim.model, env.sim.data
+    body = env.object_body_ids[object_name]
+    obj = {i for i in range(model.ngeom) if model.geom_bodyid[i] == body}
+    buf = np.zeros(6)
+    total = 0.0
+    for c in range(data.ncon):
+        con = data.contact[c]
+        g1, g2 = int(con.geom1), int(con.geom2)
+        if g1 in obj:
+            other = g2
+        elif g2 in obj:
+            other = g1
+        else:
+            continue
+        name = model.geom_id2name(other) or ""
+        if not name.startswith(("gripper0", "robot0")):
+            continue
+        mujoco.mj_contactForce(model._model, data._data, c, buf)
+        total += abs(float(buf[0]))
+    return total
+
+
 def finger_groups(env, gripper: str, arm: str = "right") -> list[set[int]]:
     """The gripper's collision geoms, grouped one set per finger.
 
