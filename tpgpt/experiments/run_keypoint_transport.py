@@ -486,10 +486,13 @@ def target_placement(
         try:
             com = np.asarray(env.sim.data.xipos[env.object_body_ids[instance]], dtype=float)
             tcp = np.asarray(grasp.tcp, dtype=float)
-            funnel_flags["grasp_offset_mm"] = float(np.linalg.norm((tcp - com)[:2]) * 1000)
-            funnel_flags["grasp_height_mm"] = float((tcp - com)[2] * 1000)
-        except Exception:
-            pass
+            funnel_flags["offset_mm"] = float(np.linalg.norm((tcp - com)[:2]) * 1000)
+            funnel_flags["height_mm"] = float((tcp - com)[2] * 1000)
+        except (KeyError, AttributeError) as exc:  # pragma: no cover
+            # Narrow, and it says what it lost. A bare `except: pass` here would
+            # have hidden the fact that the offset was missing at all, which is
+            # how a study measures nothing and looks fine.
+            funnel_flags["offset_mm_unavailable"] = repr(exc)
     else:
         raise ValueError(
             f"unknown grasp_source {grasp_source!r}; expected 'recipe' or 'graspgen'"

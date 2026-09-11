@@ -458,8 +458,7 @@ def replay_variant(env, labels, source_placement, target, variant,
             for k, v in (target.metadata.get("grasp_funnel_flags") or {}).items()
             if k in ("chosen_index", "chosen_score",
                      "chosen_approach_mismatch_deg", "n_candidates",
-                     "n_survivors", "ranked_by", "grasp_offset_mm",
-                     "grasp_height_mm",
+                     "n_survivors", "ranked_by", "offset_mm", "height_mm",
                      "cloud_too_sparse_for_jaw_width")
         },
         "cloud_points": target.metadata.get("cloud_points"),

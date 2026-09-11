@@ -61,6 +61,18 @@ JOINT_ACTION_SCALE = 0.5
 #: exist. Requiring the contact to persist distinguishes "the fingers are around
 #: Grip force the jaws close to before they are frozen, in newtons.
 #:
+#: **Not used, and not recommended.** ``force_target`` defaults to ``None``, so
+#: the jaws are commanded shut with plain ``+1`` -- what the source
+#: demonstration does at 17/20, and what every robosuite benchmark task does
+#: with these objects.
+#:
+#: The machinery below is kept because its findings are real, not because it
+#: should be switched on. Experiment P (`FINDINGS.md` §8n) settled the question
+#: it was built for: **the gripper was never the fault.** Across five pairs at
+#: four grasp poses each, **16 of 20 grasps gripped** with plain ``+1`` and four
+#: of the five pairs gripped at every pose. What decides the outcome is the
+#: grasp pose -- the same pair lifts 43 mm at one pose and 408 mm at another.
+#:
 #: **A mitigation for a simulation artefact, not a model of grasping.** Keep the
 #: expectations low and do not spend time tuning it.
 #:

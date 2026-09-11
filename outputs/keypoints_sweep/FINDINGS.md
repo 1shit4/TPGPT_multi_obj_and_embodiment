@@ -36,6 +36,7 @@ numbers are a scratch experiment, not evidence — that rule is `ROBOTICS_NOTES`
 > | M | §8j Tier 2 with the frame fixes | — | **stands**, with the caveat below |
 > | N | §8k the full funnel | — | **confounded against M**, its intended baseline; its per-cell diagnosis is **withdrawn** (§7.37). It was the botched first attempt at M, not a later experiment |
 > | O | §8m filters vs ranking | — | **stands.** The first run to vary grasp selection one thing at a time. Gripper commanded shut, as all runs before 2026-09-12 |
+> | P | §8n gripper or grasp? | — | **stands.** 16 of 20 grasps grip with plain `+1`; the grasp pose decides the outcome, not the pair |
 >
 > ### The two corrections, and which numbers each reaches
 >
@@ -2591,6 +2592,84 @@ source: no-approach zones at the pick (nothing through the table) and at the
 place (nothing through the shelf's back, sides or roof), plus a collision and
 reachability check on the **transported path** rather than the 13-pose sample
 `by_reachability` currently takes. Not yet built.
+
+
+## 8n. Experiment P — is it the gripper, or the grasp?
+
+**The study that should have been run before a day and a half was spent on the
+gripper.** `outputs/graspstudy_r0` to `_r3`, commit `cccac31`, clean tree.
+
+### Why
+
+Tier 2 cells were failing at the grasp, and the gripper mechanism was assumed to
+be at fault. Nothing had tested that assumption: every observation came from
+runs aimed at something else, on one grasp pose per pair, so "this pair failed"
+and "this grasp failed" could not be told apart.
+
+### Conditions
+
+Five pairs -- panda/can, panda/cereal, robotiq85/can, xarm/milk, yumi/bread --
+each at **four different grasp poses** (`grasp_rank` 0 to 3, so the first four
+ranked survivors). Full funnel, ranked by GraspGen-X's score, grasp-pose cube,
+one seed, position-control replay. **The gripper commanded shut with plain
+`+1`** -- no force control, no feedback -- which is what the source
+demonstration and every robosuite benchmark task use.
+
+Also recorded per grasp: the horizontal distance from the object's centre of
+mass to the grasp point.
+
+### Results
+
+=================  ============  ============  ============  ============
+cell               rank 0        rank 1        rank 2        rank 3
+=================  ============  ============  ============  ============
+panda/can          grip 414 mm   grip 135 mm   grip 432 mm   grip 426 mm
+panda/cereal       grip 418 mm   grip  61 mm   **no** 1 mm   grip 173 mm
+robotiq85/can      grip  43 mm   grip 408 mm   grip 355 mm   grip 397 mm
+xarm/milk          grip 397 mm   grip 407 mm   grip 397 mm   grip 403 mm
+``yumi/bread``     **no** 8 mm   **no** 3 mm   **no** 0 mm   **no** 0 mm
+=================  ============  ============  ============  ============
+
+### What it says
+
+**The gripper works. 16 of 20 grasps gripped**, and four of the five pairs
+gripped at every pose tried. So the grasping failures are not the mechanism, and
+the force-control work that preceded this was aimed at a problem that does not
+exist.
+
+**The grasp pose decides the outcome, not the pair.** Same pair, different
+grasp: ``robotiq85/can`` lifts **43 mm** at one pose and **408 mm** at another;
+``panda/cereal`` runs 418, 61, 1, 173 mm across four. The spread *within* a pair
+is larger than the spread between pairs, which is why one pose per pair could
+never have separated them.
+
+**Distance from the centre of mass predicts, but not completely.** Sorted over
+all twenty grasps, the eleven that carried past 200 mm have a median offset of
+**6.3 mm** against **19.1 mm** for the rest, and **every grasp under 10 mm
+carried** bar one. But two cells contradict it outright: ``panda/cereal``
+**failed at 6.2 mm** and **carried 418 mm at 23.4 mm**, and still lifted 173 mm
+from **51.7 mm** off centre. So an offset criterion is worth having and cannot
+be the only one.
+
+**``yumi/bread`` is a pair, not a grasp.** Zero grips in four attempts, the
+object never moving. Its 50 mm jaws against bread's 40.2 mm narrow dimension
+leave 10 mm of total clearance, and all four offsets (13.3 to 24.2 mm) exceed
+half of it, so the fingers straddle an edge rather than the body. No grasp
+selection fixes that; the pair should be excluded or approached differently.
+
+### Consequences
+
+* the gripper stays as it was -- commanded shut, no force control. The
+  mechanism was never the fault;
+* an offset-from-centre criterion joins the filter work, justified by this
+  rather than asserted;
+* the grasping failures are relocated to grasp *selection*, which is what the
+  filters address.
+
+**What it does not establish.** Five pairs and four poses show that pose
+dominates and that the gripper works. They do not show that every Tier 2 grasp
+failure is pose-related, and the two contradicting cells mean an offset filter
+will pass some bad grasps and reject some good ones.
 
 
 ## 9. Failures, and what caused each
