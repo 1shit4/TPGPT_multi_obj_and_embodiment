@@ -486,7 +486,7 @@ def main(
     rank_by: str = "auto",
     approach_filter: bool = True,
     variant_names=REPLAY_VARIANTS,
-    preload: float | None = None,
+    preload: int | None = None,
 ) -> dict:
     """Replay every construction on every hand and object.
 
@@ -511,12 +511,16 @@ def main(
             Independent of ``rank_by``, which is what makes the two measurable
             separately.
 
-        preload: Forwarded to :func:`~tpgpt.sim.replay.replay_labels`. ``None``
-            keeps the historical binary gripper command, so a run before and
-            after this is comparable; set it to hold the jaws just past contact
-            instead of driving them shut. **Any number measured with a
-            different setting here is not comparable**, because it changes when
-            and how hard every hand grips.
+        preload: Control **steps** the jaws keep closing for past first
+            contact before being frozen, forwarded to
+            :func:`~tpgpt.sim.replay.replay_labels`. ``None`` keeps the
+            historical behaviour of driving them shut for the whole carry.
+
+            **Any number measured with a different setting here is not
+            comparable**, because it changes when and how hard every hand
+            grips. Steps rather than a command magnitude because robosuite's
+            grippers integrate the sign and discard the size -- a magnitude
+            below 1 is not a weaker grip, it is the same grip, measured.
 
         variant_names: Keypoint constructions to replay. Defaults to both of
             :data:`REPLAY_VARIANTS`. Restrict it when the question is about
