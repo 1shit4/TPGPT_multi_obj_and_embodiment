@@ -35,6 +35,7 @@ numbers are a scratch experiment, not evidence — that rule is `ROBOTICS_NOTES`
 > | L | §8i Tier 2 on the corrected scene | frame fixes | **withdrawn as a result, kept as the failure analysis.** Superseded by M |
 > | M | §8j Tier 2 with the frame fixes | — | **stands**, with the caveat below |
 > | N | §8k the full funnel | — | **confounded against M**, its intended baseline; its per-cell diagnosis is **withdrawn** (§7.37). It was the botched first attempt at M, not a later experiment |
+> | O | §8m filters vs ranking | — | **stands.** The first run to vary grasp selection one thing at a time. Gripper commanded shut, as all runs before 2026-09-12 |
 >
 > ### The two corrections, and which numbers each reaches
 >
@@ -2273,6 +2274,31 @@ choice of §8j — for any hand that declares itself asymmetric.
 
 ## 8z. Open items, blocked work, and grey areas
 
+> **Updated after Experiment O (2026-09-12).** Three things changed status.
+>
+> **The 78 mm slot reading is withdrawn.** §8z below records the top slot as a
+> 78 mm gap between two walls. Measured from the model, the space above
+> ``shelf_top_board`` is **open** -- no roof, and nothing at the slot's ``y``
+> except the back panel at ``x`` 0.258-0.270, with the slot centre 38 mm in
+> front of it. The placement failures are still real; the cause is not a tight
+> gap. `ROBOTICS_NOTES.md` §7.38.
+>
+> **"The arm runs out of reach at the placement" is withdrawn.** Re-solving
+> every unreachable waypoint without the orientation constraint succeeds at
+> **all 473**, including points 907 mm from a base rated for 855. **423 are the
+> hand's body inside scene geometry** and 50 are a pose reachable but not at the
+> commanded orientation. §7.38.
+>
+> **The demonstration is dropped from grasp selection**, as filter and as
+> ranking, on Experiment O. What replaces it is not built: scene-derived
+> no-approach zones at pick and place, and a collision check on the transported
+> path rather than the 13 poses ``by_reachability`` samples -- a candidate can
+> pass its sample and collide at 79 to 162 of the other 187 waypoints.
+>
+> **And every Tier 2 number in this document was measured with the gripper
+> commanded shut.** The gripper changed on 2026-09-12; nothing before and after
+> is comparable. See the note at the end of this section.
+
 **Current as of commit `01db9d8`, after Experiments J, K and L.** Kept in this
 document rather than only in a conversation so the state of the investigation
 survives the people running it — the failure `ROBOTICS_NOTES.md` §7.26 is about.
@@ -2426,6 +2452,146 @@ clouds are short" (**withdrawn** — measured, the clouds capture 99.9 to 106.1%
 of true height and each object's base lands within 1.8 mm of the board).
 
 ---
+
+### A note on the gripper, and what it means for comparing runs
+
+Every Tier 2 number in this document up to and including Experiment O was
+measured with the gripper **commanded shut** for the whole carry -- the plain
+`+1` the source demonstration uses, and every robosuite benchmark task with
+these same objects.
+
+That is worth stating because the gripper was extensively reworked on
+2026-09-12 and the work is still open. What is settled:
+
+* a **fixed grip-force target cannot work**. Across three targets, bread and a
+  can hold at 10 N and are destroyed at 30, while a cereal box fails at 10 and
+  needs 166 -- and the relationship is not even monotonic, since the same cereal
+  cell succeeds at a 30 N target and fails at 60, reaching a *lower* peak force
+  because closing further ejects the box. There is a narrow closure window per
+  object and hand and no constant sits inside all of them;
+* **slip feedback** -- tighten only when the object drifts in the hand's own
+  frame -- rescues the cells that need more force and breaks the ones that
+  eject, because tightening increases slip on those and the loop runs away;
+* the **source demonstration grips reliably with plain `+1`**, at 17/20, as does
+  every robosuite benchmark with these objects. So the mechanism is not broken
+  in general.
+
+The open question is whether the Tier 2 grasping failures are the gripper at
+all, or the grasp poses the funnel selects. That is being measured by running
+the same pairs at several different grasp poses; until it reports, no claim
+about grasping in this document should be read as settled.
+
+
+## 8m. Experiment O — what the grasp filters and the ranking are each worth
+
+**The first run that varies grasp selection one thing at a time.** Experiment N
+changed the filter set and the ranking together and could measure neither
+(§8k); this separates them. `outputs/sel_i`, `sel_ii`, `sel_iii`, commit
+`47b21a5`, clean tree.
+
+### Conditions, held fixed
+
+Five hands (yumi, xarm, panda, robotiq85, robotiq140) times four objects
+(cereal, milk, can, bread), one seed, the **grasp-pose cube only**, the whole
+seven-stage funnel, position-control replay with no policy. **The gripper was
+commanded shut throughout** -- the plain `+1` of every earlier run. Anything
+measured after the gripper changes of 2026-09-12 is not comparable with these.
+
+Two settings were varied, and only these:
+
+* **approach filter** -- whether the 45 degree test against the demonstration's
+  approach direction runs, both inline and as the funnel's "demonstrated" stage;
+* **ranking** -- whether the executed candidate is the one closest to the
+  demonstration's approach, or GraspGen-X's highest scoring.
+
+Separating them needed a code change: the two used to be welded together, so
+"light filtering with the planner's score" could not be expressed at all
+(`04322fd`, `e4c28a3`).
+
+### Results
+
+============================  ========  =========  ===========  ==========  =======  ==============
+run                           placed    grasped    traversed    min det     folded   chosen grasp's
+                                                                (median)             approach gap
+============================  ========  =========  ===========  ==========  =======  ==============
+**i** no filter, by score     **0/20**  8/20       6/20         0.485       0        **90.9 deg**
+**ii** filter, by score       10/20     16/20      12/20        0.823       0        14.5 deg
+**iii** no filter, by demo    **11/20** 15/20      14/20        0.940       0        5.1 deg
+============================  ========  =========  ===========  ==========  =======  ==============
+
+### What it says
+
+**The filter is not what matters. The resulting approach gap is.** Run iii
+applies **no** approach filter at all and is the best of the three: ranking on
+the demonstration reaches a median gap of 5.1 degrees without rejecting
+anything, because it simply picks a well-aligned candidate when one exists.
+
+Pooled over all 60 cells, that gap separates cleanly:
+
+* **21 cells placed** -- median gap 6.1 degrees, **maximum 37.8**
+* **39 cells missed** -- median 73.9 degrees, minimum 2.8
+
+No successful cell exceeded 37.8 degrees. A large gap is reliably fatal; a small
+one is necessary and not sufficient.
+
+**No map folded in any run**, so none of this is map degradation -- which is
+what the filter's own docstring claims it prevents.
+
+**Run i fails because the planner's best grasps are side grasps.** With the
+filter off, the top-scoring candidate is about 90 degrees from the
+demonstration on 18 of 20 cells, and that is a reasonable grasp: taking a
+cereal box from the side is better than pinching its top. But the pipeline
+executes the *demonstrated* motion warped into the new scene, and the
+demonstration is top-down, so the hand descends while the grasp demands a side
+approach. Eq. 11 then rotates the commanded gripper orientation by that 90
+degrees along the whole path, and the arm cannot hold it: reachability collapses
+to a median of about 0.5 with tracking errors of 300-400 mm.
+
+### Separating the kinematic failures
+
+A cell whose plan the arm cannot follow is not a grasping result, so the same
+counts with those excluded:
+
+=========================  =============  =======  ===================  =====
+run                        placed / all   rate     kinematic failures   rate on the rest
+=========================  =============  =======  ===================  =====
+i no filter, by score      0/20           0%       17                   0/3    0%
+ii filter, by score        10/20          50%      8                    10/12  **83%**
+iii no filter, by demo     11/20          55%      6                    11/14  **79%**
+=========================  =============  =======  ===================  =====
+
+**All 14 of those failures are at the placement**, seven at `place` and seven at
+`retreat`, and **none at the pick**. The arm reaches every object and runs out
+putting it away. `ROBOTICS_NOTES.md` §7.38 has what that is.
+
+### What this does not settle
+
+**10 versus 11 is not a difference** at n = 20, and the two runs chose different
+grasps on 17 of the 20 cells, so they are not even measuring the same thing cell
+by cell.
+
+**Both surviving configurations depend on the demonstration** -- ii filters by
+it, iii ranks by it -- and run i, the only one that uses it nowhere in
+selection, places nothing. That dependence is not the filter's fault: the
+executed approach is always the demonstrated one, because the pipeline warps the
+demonstrated motion. A grasp specifying a 90 degree different approach cannot be
+executed however it was chosen. The route to grasp selection that owes nothing
+to the source is a demonstration per approach family, not a better filter.
+
+### Decisions taken from it
+
+The demonstration is dropped from grasp selection entirely -- as a filter and as
+a ranking. It was never requested and entered the code in a bulk commit
+(`a89f0e3`); 45 degrees has no measurement behind it; and the quantity it tests,
+the approach direction, is not the one measured to fold maps, which is the full
+source-to-target frame rotation including a roll this test cannot see.
+
+Replacing it needs a constraint derived from the **scene** rather than the
+source: no-approach zones at the pick (nothing through the table) and at the
+place (nothing through the shelf's back, sides or roof), plus a collision and
+reachability check on the **transported path** rather than the 13-pose sample
+`by_reachability` currently takes. Not yet built.
+
 
 ## 9. Failures, and what caused each
 
