@@ -337,7 +337,8 @@ def stage_outcome(replay, labels, target, env=None) -> dict:
     return out
 
 
-def replay_variant(env, labels, source_placement, target, variant, gripper="panda") -> dict:
+def replay_variant(env, labels, source_placement, target, variant,
+                   gripper="panda", preload=None) -> dict:
     """Transport under one construction, then follow the result under position control.
 
     ``labels`` **must already be in the tool frame**. See :func:`main`: passing
@@ -394,6 +395,13 @@ def replay_variant(env, labels, source_placement, target, variant, gripper="pand
             _fingers_gate(env, gripper, target.metadata["object_name"])
             if target.metadata.get("object_name") else None
         ),
+        # **Hold the jaws just past contact rather than driving them shut.**
+        # `+1` is a position target, so the only thing stopping the fingers is
+        # the object -- and when it cannot stop them it is extruded. Measured
+        # on bread: the cells that place arrest their jaws at closures of 0.540
+        # and 0.895 with the object still between them, the failing ones finish
+        # at 1.0 or beyond having travelled 41-63 mm past contact.
+        preload=preload,
     )
     row = {
         "variant": variant.name,
@@ -478,6 +486,7 @@ def main(
     rank_by: str = "auto",
     approach_filter: bool = True,
     variant_names=REPLAY_VARIANTS,
+    preload: float | None = None,
 ) -> dict:
     """Replay every construction on every hand and object.
 
@@ -501,6 +510,13 @@ def main(
         approach_filter: Whether the 45 degree approach test is applied.
             Independent of ``rank_by``, which is what makes the two measurable
             separately.
+
+        preload: Forwarded to :func:`~tpgpt.sim.replay.replay_labels`. ``None``
+            keeps the historical binary gripper command, so a run before and
+            after this is comparable; set it to hold the jaws just past contact
+            instead of driving them shut. **Any number measured with a
+            different setting here is not comparable**, because it changes when
+            and how hard every hand grips.
 
         variant_names: Keypoint constructions to replay. Defaults to both of
             :data:`REPLAY_VARIANTS`. Restrict it when the question is about
@@ -675,7 +691,7 @@ def main(
                             )
                     row = replay_variant(
                         env, labels, source_placement, target, variant,
-                        gripper=gripper,
+                        gripper=gripper, preload=preload,
                     )
                 # **Both, and deliberately.** ``ValueError`` is "too little
                 # cloud to describe the object"; ``RuntimeError`` is "every
@@ -717,6 +733,7 @@ def main(
                        "object": list(REPLAY_OBJECTS)},
             "grasp_selection": {"filters": filters, "rank_by": rank_by,
                                 "approach_filter": bool(approach_filter)},
+            "gripper_command": {"preload": preload},
             "fixed": {
                 "source": "reshelving seed 0, one demonstration",
                 "slot": slot,
