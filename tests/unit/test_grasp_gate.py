@@ -350,30 +350,51 @@ class TestFingerGrouping:
         assert fingers_touching(Scene(), "thing", [{5, 6}, {11}]) == 1
 
 
-class JawsThatIntegrate:
-    """A gripper that integrates the *sign* of the command, as robosuite's do.
+class FakeGripperModel:
+    """robosuite's gripper interface, modelled faithfully enough to fail.
 
-    Every ``format_action`` in the registry is
-    ``current_action += speed * np.sign(action)``, so "+1" means "keep closing"
-    rather than "go to fully closed", and ``0.0`` leaves the fingers untouched.
-    Grip force rises once the fingers are past the object's surface, which is
-    what makes a force threshold expressible and a *contact* test useless --
-    the fingers already touch before the close is commanded.
-
-    ``touches_at`` is how far the fingers travel before grazing the object;
-    ``force_per_step`` how fast force builds after that. ``None`` means nothing
-    is between them, so force never rises.
+    Two things matter and both bit this project. ``format_action`` moves
+    ``current_action`` by ``speed * np.sign(action)`` -- the sign only, so a
+    commanded 0.25 and a commanded 1.0 are the same instruction. And the two
+    finger elements carry **opposite** multipliers, which differ per hand, so
+    the closing direction has to be discovered rather than assumed.
     """
 
     SPEED = 0.2
 
-    def __init__(self, touches_at=0.0, force_per_step=4.0):
+    def __init__(self):
+        self.dof = 1
+        self.current_action = np.zeros(2)
+
+    def format_action(self, action):
+        self.current_action = np.clip(
+            self.current_action + np.array([-1.0, 1.0]) * self.SPEED * np.sign(action),
+            -1.0, 1.0,
+        )
+        return self.current_action
+
+
+class JawsThatIntegrate:
+    """A hand whose fingers track ``current_action``, and a force that only
+    rises once they are past the object's surface.
+
+    ``touches_at`` is the closure fraction at which the fingers first reach the
+    object; ``None`` means nothing is between them, so force never rises.
+    """
+
+    def __init__(self, touches_at=0.0, force_per_fraction=120.0):
         self.touches_at = touches_at
-        self.force_per_step = force_per_step
-        self.position = 0.0
-        self.limit = 2.0
+        self.force_per_fraction = force_per_fraction
+        self.gripper = FakeGripperModel()
         self.history: list[float] = []
         self.action_dim = 8
+
+    # --- the closure the fingers have actually reached ---------------------
+    @property
+    def fraction(self) -> float:
+        a = np.asarray(self.gripper.current_action, dtype=float)
+        direction = np.array([-1.0, 1.0])
+        return float(np.clip((float(a @ direction) / len(direction) + 1.0) / 2.0, 0.0, 1.0))
 
     @property
     def robots(self):
@@ -416,18 +437,13 @@ class JawsThatIntegrate:
         return np.eye(3).reshape(1, 9)
 
     def step(self, action):
-        self.position = float(np.clip(
-            self.position + self.SPEED * np.sign(action[-1]), 0.0, self.limit))
-        self.history.append(self.position)
-
-    def touching(self) -> bool:
-        return self.touches_at is not None and self.position >= self.touches_at
+        self.gripper.format_action(np.atleast_1d(action[-1]))
+        self.history.append(self.fraction)
 
     def force(self) -> float:
         if self.touches_at is None:
             return 0.0
-        past = max(0.0, self.position - self.touches_at)
-        return past / self.SPEED * self.force_per_step
+        return max(0.0, self.fraction - self.touches_at) * self.force_per_fraction
 
 
 def run_force(touches_at=0.0, target=10.0, **kw):
@@ -460,7 +476,8 @@ class TestCloseToForceThenHold:
 
     def test_it_stops_once_the_grip_is_firm(self):
         env, result, warned = run_force(touches_at=0.4, target=10.0)
-        assert result.metadata["grasp_hold_command"] == pytest.approx(0.0)
+        held = result.metadata["grasp_hold_fraction"]
+        assert 0.4 < held < 1.0, f"held at {held}: not past contact, or fully shut"
         assert env.force() >= 10.0
         assert not warned
 
@@ -468,14 +485,14 @@ class TestCloseToForceThenHold:
         """The trigger that failed in the field: the fingers are already
         touching, so a contact test freezes a hand that has barely moved."""
         env, _, _ = run_force(touches_at=0.4, target=10.0)
-        assert env.position > 0.4, (
-            f"froze at first contact ({env.position}) instead of closing to force"
+        assert env.fraction > 0.4, (
+            f"froze at first contact ({env.fraction}) instead of closing to force"
         )
 
     def test_a_firmer_target_closes_further(self):
         """Force is adaptive in the way a command magnitude is not."""
-        soft = run_force(touches_at=0.4, target=4.0)[0].position
-        firm = run_force(touches_at=0.4, target=20.0)[0].position
+        soft = run_force(touches_at=0.4, target=4.0)[0].fraction
+        firm = run_force(touches_at=0.4, target=20.0)[0].fraction
         assert firm > soft
 
     def test_it_differs_from_commanding_the_jaws_shut(self):
@@ -484,13 +501,13 @@ class TestCloseToForceThenHold:
         held = run_force(touches_at=0.4, target=10.0)[0]
         plain = JawsThatIntegrate(0.4)
         replay_labels(plain, labels(), settle_steps=8, hold_when=None)
-        assert plain.position == pytest.approx(plain.limit)
-        assert held.position < plain.position
+        assert plain.fraction == pytest.approx(1.0)
+        assert held.fraction < plain.fraction
 
     def test_nothing_between_the_jaws_warns_and_shuts(self):
         env, result, warned = run_force(touches_at=None)
         assert warned, "closed on nothing without saying so"
-        assert result.metadata["grasp_hold_command"] == pytest.approx(1.0)
+        assert result.metadata["grasp_hold_fraction"] == pytest.approx(1.0)
 
     def test_opening_resets_the_hold(self):
         env = JawsThatIntegrate(0.4)

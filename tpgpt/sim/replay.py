@@ -101,6 +101,14 @@ JOINT_ACTION_SCALE = 0.5
 #: a force directly and their pads conform.
 GRASP_FORCE_TARGET = 10.0
 
+#: Fraction of the finger travel each closing increment advances.
+#:
+#: The action interface's own step is a **tenth** of the travel, which made a
+#: 25 N target overshoot to 164 N. Setting ``current_action`` directly allows
+#: any resolution; this is fine enough that the force lands near the target and
+#: coarse enough that the search costs a few dozen physics steps.
+CLOSE_FRACTION_STEP = 0.01
+
 #: Physics steps allowed at each rung of the search for the fingers to respond.
 PRELOAD_SETTLE_STEPS = 2
 
@@ -246,6 +254,7 @@ def replay_labels(
     #: a value found for a different object.
     hold_command = None
     preload_command = None
+    close_direction = None
     reachable: list[bool] = []
     unreachable = 0
     seed = np.array(env.sim.data.qpos[qpos_index])
@@ -272,45 +281,41 @@ def replay_labels(
             # Re-search on the next grasp rather than reusing a hold found for
             # a different object.
             hold_command = None
+            if hold_when is not None and close_direction is not None:
+                set_closure(_gripper_model(env, arm), close_direction, 0.0)
         if closing and hold_when is not None and hold_command is None:
-            # **Close until the grip is firm enough, then stay there.**
+            # **Squeeze to a force, at the resolution the actuator allows.**
             #
-            # robosuite's grippers integrate the *sign* of the command --
-            # ``current_action += speed * np.sign(action)`` in every
-            # ``format_action`` in the registry -- so the only instructions
-            # that exist are "keep closing", "keep opening", and, because
-            # ``np.sign(0)`` is zero, "stay". "+1" therefore does not mean "go
-            # to fully closed"; it means "keep closing", and nothing stops the
-            # fingers but the object. When the object cannot stop them it is
-            # pushed out.
+            # Not through the action interface: ``format_action`` moves the
+            # gripper by ``speed * np.sign(action)``, discarding the magnitude,
+            # so the finest step it can take is a tenth of the travel. Measured,
+            # that made a 25 N target arrive at **164 N** -- a 6x overshoot that
+            # is a property of the interface, not of the grasp. Setting
+            # ``current_action`` directly gives continuous positioning, verified
+            # linear and monotonic on all five hands (:func:`set_closure`).
             #
-            # Two earlier triggers failed and are worth not repeating. A
-            # *command magnitude* below 1 does nothing at all, since the size
-            # is discarded -- 19 of 20 cells took a different command and
-            # reached an identical closure. And *first contact* fires
-            # immediately, because the fingers already straddle and graze the
-            # object before the close is commanded: that froze the jaws at
-            # 0.00-0.05 closure against a baseline of 0.38-0.71.
-            #
-            # Force is the quantity that actually distinguishes a grip from a
-            # graze and from a crush, and it is what a real hand is commanded
-            # in. See :data:`GRASP_FORCE_TARGET`.
-            waited = 0
-            while waited < gate_max_steps and not hold_when(env):
-                env.step(_joint_action(env, robot, arm, seed, 1.0))
-                waited += 1
+            # So: close in ``CLOSE_FRACTION_STEP`` increments until the grip is
+            # firm, then stop. What holds it there is leaving ``current_action``
+            # alone and commanding ``0.0``, since ``np.sign(0)`` is zero.
+            grip_model = _gripper_model(env, arm)
+            if close_direction is None:
+                close_direction = closing_direction(grip_model)
+            fraction, waited = 0.0, 0
+            while fraction < 1.0 and not hold_when(env):
+                fraction = min(1.0, fraction + CLOSE_FRACTION_STEP)
+                set_closure(grip_model, close_direction, fraction)
+                for _ in range(PRELOAD_SETTLE_STEPS):
+                    env.step(_joint_action(env, robot, arm, seed, 0.0))
+                    waited += 1
             if not hold_when(env):
                 warnings.warn(
-                    f"the jaws never reached the grip force within "
-                    f"{gate_max_steps} control steps at waypoint {i}; holding "
-                    "shut and the grasp is expected to fail",
+                    f"the jaws reached full closure without the grip becoming "
+                    f"firm at waypoint {i}; the grasp is expected to fail",
                     RuntimeWarning,
                     stacklevel=2,
                 )
-                hold_command = 1.0
-            else:
-                hold_command = 0.0
-            preload_command = hold_command
+            hold_command = 0.0
+            preload_command = float(fraction)
             gate_steps = waited
             steps = max(0, settle_steps - waited)
         gripper_command = (
@@ -392,7 +397,10 @@ def replay_labels(
             "grasp_gate_steps": gate_steps,
             # The command the jaws were held at, so a run can be read without
             # guessing whether the preload path was active.
-            "grasp_hold_command": preload_command,
+            # The fraction of its travel the hand was held at: 0 open,
+            # 1 shut. Recorded because "the jaws closed" and "the jaws gripped"
+            # are different facts and only this separates them.
+            "grasp_hold_fraction": preload_command,
             "unreachable_waypoints": int(unreachable),
             "tracking_error_mean": float(tracking.mean()),
             "tracking_error_max": float(tracking.max()),
@@ -431,6 +439,59 @@ def replay_labels(
             },
         },
     )
+
+
+
+def _gripper_model(env, arm: str = "right"):
+    """The mounted hand's model object, which owns ``current_action``."""
+    g = env.robots[0].gripper
+    return g[arm] if isinstance(g, dict) else g
+
+
+def closing_direction(grip) -> np.ndarray:
+    """Which way ``current_action`` moves to close this hand, per element.
+
+    **Read from the model, never assumed.** The multipliers differ across the
+    registry -- the Panda's is ``[-1, +1]``, the Robotiq 2F-140's ``[+1, -1]``,
+    the XArm's is a single element -- because the two finger joints have
+    opposite conventions in their respective models. Applies one closing
+    command, sees which way it moved, and puts the state back.
+    """
+    saved = np.array(grip.current_action, dtype=float)
+    grip.format_action(np.ones(grip.dof))
+    moved = np.array(grip.current_action, dtype=float)
+    base = saved if saved.shape == moved.shape else np.zeros_like(moved)
+    grip.current_action = base
+    direction = np.sign(moved - base)
+    return np.where(direction == 0.0, 1.0, direction)
+
+
+def set_closure(grip, direction: np.ndarray, fraction: float) -> None:
+    """Command the fingers to a fraction of their travel: 0 open, 1 shut.
+
+    **The action interface cannot express this.** ``format_action`` moves
+    ``current_action`` by ``speed * np.sign(action)``, so it discards the
+    magnitude -- a commanded 0.25 and a commanded 1.0 are the same instruction,
+    and the step is a tenth of the travel. But the controller maps
+    ``current_action`` linearly onto the actuator's ctrl range, so it *is* a
+    normalised position target and setting it directly gives continuous
+    control. Measured against :func:`~tpgpt.experiments.diagnose.jaw_closure_probe`
+    on all five hands, commanded fraction to achieved closure:
+
+    ==========  ======  ======  ======  ======  ======
+    hand        0.00    0.25    0.50    0.75    1.00
+    ==========  ======  ======  ======  ======  ======
+    panda       0.035   0.219   0.474   0.729   0.984
+    yumi        0.077   0.250   0.500   0.750   1.007
+    robotiq85   0.000   0.169   0.378   0.683   0.992
+    robotiq140  0.000   0.385   0.595   0.814   1.002
+    xarm        -0.079  0.221   0.452   0.708   0.980
+    ==========  ======  ======  ======  ======  ======
+
+    Linear and monotonic on every hand, so one fraction means the same thing
+    across embodiments -- which is what a cross-hand grasp controller needs.
+    """
+    grip.current_action = np.asarray(direction, dtype=float) * (2.0 * float(fraction) - 1.0)
 
 
 def _joint_action(env, robot, arm, qpos_target, gripper_command):
