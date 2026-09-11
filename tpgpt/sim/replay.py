@@ -59,37 +59,37 @@ JOINT_ACTION_SCALE = 0.5
 #: touches the box four waypoints before the jaws are told to close and shoves
 #: it 22.1 mm -- and a gate that fired on that would report a grasp that does not
 #: exist. Requiring the contact to persist distinguishes "the fingers are around
-#: How much further the jaws are driven past first contact, in command units.
+#: Control steps the jaws keep closing for after first contact, before freezing.
 #:
-#: A position-commanded finger makes force only from *penetration* -- how far
-#: past the object's surface its target sits. So stopping exactly at contact
-#: gives zero penetration and therefore zero grip, and the object falls out.
-#: Some preload is mandatory; the question is how much.
+#: **In steps, not in command units, because the command has no magnitude.**
+#: robosuite's grippers are *integrators*, not position targets: every
+#: ``format_action`` in the registry is
+#: ``current_action += speed * np.sign(action)``, so the sign is used and the
+#: magnitude discarded. Commanding 0.25 and commanding 1.0 are the same
+#: instruction -- measured, 19 of 20 cells took a different command and reached
+#: an identical closure, and not one outcome changed.
 #:
-#: Measured on the committed runs: the bread cell that places arrests its jaws
-#: at a closure of **0.540** with the object still between them, while every
+#: What that same arithmetic does give is a way to *hold*: ``np.sign(0.0)`` is
+#: zero, so commanding exactly ``0.0`` leaves ``current_action`` untouched and
+#: the fingers stay where they are. So the scheme is: close at full speed until
+#: opposing contact, keep closing for this many steps to build a preload, then
+#: command ``0.0`` for the rest of the carry.
+#:
+#: Some preload is mandatory -- a position-controlled finger makes force only
+#: from penetration, so freezing exactly at contact gives zero grip and the
+#: object drops. Each step advances the finger command by ``speed`` (0.2 on the
+#: Panda), and the full range is 2.0, so one step is a tenth of the travel.
+#:
+#: Why it is needed at all: the bread cells that place arrest their jaws at
+#: closures of 0.540 and 0.895 with the object still between them, while every
 #: failing bread cell finishes at **1.0 or beyond** -- fully shut, holding
-#: nothing. Since robosuite objects are rigid the jaws cannot have compressed
-#: anything, so the object was pushed out. The hands travelled 41-63 mm past
-#: contact to do it.
-#:
-#: The force needed is small: a 0.07 kg bread needs ~0.7 N of friction to hold,
-#: so ~1.4 N of squeeze at a friction coefficient of 0.5, against the 18.7 N a
-#: successful grip was measured to apply. So the window is wide and this is set
-#: low deliberately. Command units, not millimetres, because the mapping from
-#: command to finger travel differs per hand -- 0.10 of the range is 7.8 mm on
-#: a Panda and 2.9 mm on a Robotiq 2F-85.
-GRASP_PRELOAD = 0.10
+#: nothing -- having travelled 41 to 63 mm past contact. robosuite objects are
+#: rigid, so nothing was compressed; the bread was extruded.
+GRASP_PRELOAD_STEPS = 2
 
-#: Command increment while searching for first contact.
-#:
-#: Small enough that the jaws do not overshoot the object between samples, large
-#: enough that the search terminates: the full range is 2.0, so this is 40 steps
-#: worst case, each costing ``PRELOAD_SETTLE_STEPS`` of physics.
-CLOSE_RAMP_STEP = 0.05
-
-#: Physics steps allowed at each rung of the ramp for the fingers to respond.
+#: Physics steps allowed at each rung of the search for the fingers to respond.
 PRELOAD_SETTLE_STEPS = 2
+
 
 #: it" from "the hand knocked into it".
 GRASP_CONTACT_STEPS = 4
@@ -191,17 +191,17 @@ def replay_labels(
             immediately turns a position controller back into a velocity one.
         score: ``score(env) -> (succeeded, offset)``, as for
             :func:`~tpgpt.sim.rollout.rollout_policy`.
-        preload: Command units to drive the jaws past first contact, after
-            which they are **held** there rather than commanded fully shut for
-            the rest of the carry. ``None`` (the default) keeps the historical
-            binary command, so every existing caller is unaffected. Requires
-            ``grasp_gate`` to detect contact.
+        preload: Control **steps** the jaws keep closing for after first
+            contact, before being frozen for the rest of the carry. ``None``
+            (the default) keeps the historical behaviour, so every existing
+            caller is unaffected. Requires ``grasp_gate`` to detect contact.
 
-            ``+1`` is a position target meaning "drive all the way closed", so
-            the only thing that stops the fingers is the object -- and when the
-            object cannot stop them it is pushed out instead. Stopping *at*
-            contact is not the fix either, because a position-commanded finger
-            makes force only from penetration. See :data:`GRASP_PRELOAD`.
+            Steps rather than a command magnitude, because robosuite's grippers
+            integrate the *sign* of the command and discard its size: "+1" does
+            not mean "go to fully closed", it means "keep closing", and nothing
+            stops the fingers but the object. The hold works because
+            ``np.sign(0.0)`` is zero, so a command of ``0.0`` leaves them where
+            they are. See :data:`GRASP_PRELOAD_STEPS`.
 
     Returns:
         A :class:`ReplayResult`.
@@ -252,51 +252,54 @@ def replay_labels(
         seed = np.asarray(result.qpos, dtype=float)
 
         closing = grip[i] > 0
+        steps = settle_steps
         if not closing:
-            # Re-search on the next grasp rather than reusing a value found for
+            # Re-search on the next grasp rather than reusing a hold found for
             # a different object.
             hold_command = None
         if closing and preload is not None and hold_command is None:
-            # **Ramp to contact, then hold, instead of commanding "fully shut".**
+            # **Close to contact, build a small preload, then freeze.**
             #
-            # ``+1`` is a *position* target meaning "drive the fingers all the
-            # way closed", so the only thing that stops them is the object --
-            # and when the object cannot stop them it is pushed out instead.
-            # Measured on the committed runs: the bread cell that places
-            # arrests its jaws at closure 0.540 with the object still between
-            # them; every failing bread cell finishes at 1.0 or beyond, having
-            # travelled 41-63 mm past contact, holding nothing.
+            # robosuite's grippers integrate the *sign* of the command --
+            # ``current_action += speed * np.sign(action)`` in every
+            # ``format_action`` in the registry -- so "+1" does not mean "go to
+            # fully closed", it means "keep closing", and nothing stops the
+            # fingers but the object. When the object cannot stop them it is
+            # pushed out instead.
             #
-            # Stopping *at* contact is not the fix either: a position-commanded
-            # finger makes force from penetration, so zero penetration is zero
-            # grip. Hence contact, then a fixed preload, then hold.
-            #
-            # This is also how the real hands are driven -- a Panda takes a
-            # width and a force, a Robotiq a position and a force limit -- so
-            # ``+1`` was the unrealistic choice, not this.
-            c = -1.0
-            found = False
-            while c < 1.0 and not found:
-                c = min(1.0, c + CLOSE_RAMP_STEP)
-                for _ in range(PRELOAD_SETTLE_STEPS):
-                    env.step(_joint_action(env, robot, arm, seed, c))
+            # The same arithmetic gives the hold: ``np.sign(0.0)`` is zero, so
+            # commanding ``0.0`` leaves the fingers exactly where they are.
+            # A magnitude below 1 would *not* work and was measured not to:
+            # 19 of 20 cells took a different command and reached an identical
+            # closure.
+            waited = 0
+            while waited < gate_max_steps:
+                env.step(_joint_action(env, robot, arm, seed, 1.0))
+                waited += 1
                 if grasp_gate is not None and grasp_gate(env):
-                    found = True
-            if not found:
+                    break
+            if grasp_gate is not None and not grasp_gate(env):
                 warnings.warn(
-                    f"the jaws reached full closure without opposing contact at "
-                    f"waypoint {i}; holding shut and the grasp is expected to "
-                    "fail",
+                    f"the jaws never took hold within {gate_max_steps} control "
+                    f"steps at waypoint {i}; holding shut and the grasp is "
+                    "expected to fail",
                     RuntimeWarning,
                     stacklevel=2,
                 )
-            hold_command = float(np.clip(c + preload, -1.0, 1.0))
+                hold_command = 1.0
+            else:
+                # Freezing *at* contact gives zero penetration and so zero grip.
+                for _ in range(int(preload)):
+                    env.step(_joint_action(env, robot, arm, seed, 1.0))
+                    waited += 1
+                hold_command = 0.0
             preload_command = hold_command
+            gate_steps = waited
+            steps = max(0, settle_steps - waited)
         gripper_command = (
             (hold_command if hold_command is not None else 1.0)
             if closing else -1.0
         )
-        steps = settle_steps
         # **Wait for the jaws to actually have hold before moving on.**
         #
         # The gripper schedule comes from the demonstration, whose carry starts
