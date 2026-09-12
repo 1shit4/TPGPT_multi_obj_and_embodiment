@@ -342,7 +342,8 @@ def stage_outcome(replay, labels, target, env=None) -> dict:
 
 def replay_variant(env, labels, source_placement, target, variant,
                    gripper="panda", force_target=None,
-                   hold_at_contact: bool = False) -> dict:
+                   hold_at_contact: bool = False,
+                   hold_margin: float = 0.0) -> dict:
     """Transport under one construction, then follow the result under position control.
 
     ``labels`` **must already be in the tool frame**. See :func:`main`: passing
@@ -422,6 +423,9 @@ def replay_variant(env, labels, source_placement, target, variant,
         # §8z retired: no force is measured and no number is chosen. The jaws
         # close a step at a time until the fingers oppose the object, and then
         # the command is simply left alone.
+        # How far past first touch the jaws go before stopping. Zero is "stop at
+        # contact", which is too light on some hands; see ``replay_labels``.
+        hold_margin=hold_margin,
         hold_when=(
             (lambda e: grip_force(e, target.metadata["object_name"]) >= force_target)
             if force_target and target.metadata.get("object_name")
@@ -433,6 +437,13 @@ def replay_variant(env, labels, source_placement, target, variant,
         # cereal fails at 10 and needs 166, and the relationship is not even
         # monotonic -- the same cereal cell succeeds at a 30 N target and fails
         # at 60, reaching a lower peak force because closing further ejects it.
+        # **Slip feedback is deliberately not combined with the contact hold.**
+        # It looks like the obvious cure for contact-only being too light, and
+        # it is measured as the opposite: over the five bread cells it took the
+        # result from 2 of 5 to **0 of 5**, every hand tightening to a closure of
+        # 1.00 or beyond and ejecting the object. That is §8z's finding
+        # reproduced on the rebuilt scene -- tightening a grip that is already
+        # extruding the object increases the slip, so the loop runs away.
         slip_of=(
             slip_probe(env, target.metadata["object_name"])
             if force_target and target.metadata.get("object_name") else None
@@ -539,6 +550,8 @@ def main(
     max_path_candidates: int = 25,
     select_only: bool = False,
     hold_at_contact: bool = False,
+    hold_margin: float = 0.0,
+    grasp_from=None,
 ) -> dict:
     """Replay every construction on every hand and object.
 
@@ -625,6 +638,18 @@ def main(
         max_path_candidates: How far down the ranked list the path check looks
             before falling back to the top-ranked candidate.
 
+        grasp_from: Path to a previous run's ``rows.json``. Each cell then
+            executes **the candidate that run executed**, and selection is
+            skipped entirely.
+
+            Two reasons, and the second matters more. It is about twice as fast,
+            because the funnel plus the whole-path check costs roughly as much
+            as the replay. And it makes a comparison of anything *downstream* of
+            the grasp -- a closing rule, a controller -- exact rather than merely
+            reproducible: both runs execute the same grasp by construction, so a
+            difference between them cannot be a different grasp. `FINDINGS.md`
+            8k is what not having this costs -- 39 of 40 cells silently changed
+            grasp and the experiment could not be read.
         hold_at_contact: Close the jaws until the object is pinched and then
             leave them there, instead of commanding them fully shut for the
             whole carry. See :func:`replay_variant` for the measurement behind
@@ -752,6 +777,14 @@ def main(
     #: be reported as a reproducibility failure.
     object_reference: dict[tuple[str, str], np.ndarray] = {}
     wanted = None if cells is None else {c.strip() for c in cells}
+    forced: dict = {}
+    if grasp_from is not None:
+        for row in json.loads(Path(grasp_from).read_text()):
+            index = row.get("grasp_chosen_index")
+            if index is not None:
+                forced[(row.get("gripper"), row.get("object"))] = int(index)
+        print(f"  executing the grasps recorded in {grasp_from} "
+              f"({len(forced)} cells); selection is skipped", flush=True)
     for gripper in grippers:
         for name in REPLAY_OBJECTS:
             if wanted is not None and f"{gripper}/{name}" not in wanted:
@@ -808,6 +841,7 @@ def main(
                         # slot: the same descent fits one way round and sits
                         # 64 mm inside the back panel the other.
                         carry_rotation=carry_transform(labels)[0],
+                        forced_index=forced.get((gripper, name)),
                         # **Per variant, and that is not incidental.** The map
                         # differs between keypoint constructions, so the path
                         # the arm executes differs too; a check run against the
@@ -850,6 +884,7 @@ def main(
                             env, labels, source_placement, target, variant,
                             gripper=gripper, force_target=force_target,
                             hold_at_contact=hold_at_contact,
+                            hold_margin=hold_margin,
                         )
                 # **Both, and deliberately.** ``ValueError`` is "too little
                 # cloud to describe the object"; ``RuntimeError`` is "every
@@ -897,9 +932,11 @@ def main(
                                 "path_check": bool(path_check),
                                 "ik_stride": int(ik_stride),
                                 "max_path_candidates": int(max_path_candidates)},
-            "gripper_hold": ("closed until pinched, then held"
-                             if hold_at_contact else "commanded shut throughout"),
+            "gripper_hold": (
+                f"closed until pinched plus {hold_margin:.2f} of travel, then held"
+                if hold_at_contact else "commanded shut throughout"),
             "cells": None if cells is None else sorted(wanted),
+            "grasp_from": None if grasp_from is None else str(grasp_from),
             "gripper_command": {"force_target": force_target},
             # A selection-only run has no success column at all. Recorded at the
             # top of the manifest so it can never be read as a campaign whose
@@ -1058,6 +1095,18 @@ if __name__ == "__main__":
     )
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument(
+        "--grasp-from", default=None,
+        help=("A previous run's rows.json. Each cell executes the grasp that "
+              "run executed and selection is skipped -- about twice as fast, "
+              "and it makes a comparison of the closing rule exact."),
+    )
+    parser.add_argument(
+        "--hold-margin", type=float, default=0.0,
+        help=("How far past first touch the jaws close before stopping, as a "
+              "fraction of full travel. Same increment on every hand and every "
+              "object, so it is not a per-object constant."),
+    )
+    parser.add_argument(
         "--hold-at-contact", action="store_true",
         help=(
             "Close the jaws until the object is pinched, then stop, instead of "
@@ -1103,4 +1152,6 @@ if __name__ == "__main__":
         max_path_candidates=args.max_path_candidates,
         select_only=args.select_only,
         hold_at_contact=args.hold_at_contact,
+        hold_margin=args.hold_margin,
+        grasp_from=args.grasp_from,
     )

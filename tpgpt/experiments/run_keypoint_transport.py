@@ -473,6 +473,7 @@ def target_placement(
     scene_zones: bool = True,
     centre_filter: bool = True,
     carry_rotation: np.ndarray | None = None,
+    forced_index: int | None = None,
 ) -> tuple[ObjectPlacement, np.ndarray]:
     """Describe an object in the scene and where the task wants it.
 
@@ -560,6 +561,10 @@ def target_placement(
             placement pose exists to test reachability against.
         slot_for_filters: Destination slot, needed by ``filters="full"`` to
             derive the placement pose the reachability stage checks.
+        forced_index: Execute this candidate and skip selection altogether.
+            Use it to compare something downstream of the grasp -- a closing
+            rule, a controller -- where selection is a confound rather than a
+            variable, and where re-running it is most of the wall clock.
         carry_rotation: How the demonstration turns the hand between closing the
             jaws and opening them. Both place-side filter stages need it or they
             judge the wrong pose -- 35.5 degrees wrong on this demonstration, and
@@ -734,6 +739,34 @@ def target_placement(
         # *ranking* -- could not be expressed at all, and any comparison between
         # the two settings moved both decisions at once. That is what made
         # Experiment N unreadable (`FINDINGS.md` 8k).
+        if forced_index is not None:
+            # **Execute a named candidate and skip selection entirely.**
+            #
+            # For comparing anything *downstream* of the grasp -- a closing
+            # rule, a controller, a keypoint construction -- selection is a
+            # confound, not a variable. Re-running it is also most of the wall
+            # clock: the funnel plus the whole-path check is about 100 seconds a
+            # cell against 90 for the replay itself.
+            #
+            # Taking the index from a previous run's rows makes the comparison
+            # exact rather than merely reproducible: the two runs execute the
+            # same grasp by construction, so a difference between them cannot be
+            # a different grasp. `FINDINGS.md` 8k is the cost of not having
+            # this -- 39 of 40 cells silently changed grasp and the experiment
+            # could not be read.
+            chosen = int(forced_index)
+            grasp = GraspFrame.from_grasp(grasp_set.grasps[chosen])
+            funnel_flags.update(
+                ranked_by="forced", chosen_index=chosen,
+                chosen_score=float(grasp_set.grasps[chosen].score),
+                chosen_approach_mismatch_deg=float(angles[chosen]),
+                n_candidates=int(len(grasp_set.grasps)),
+            )
+            grasp = _apply_grasp_offsets(grasp, yaw_offset_deg, tilt_offset_deg)
+            return (
+                _placement_for(env, cloud, grasp, slot, support, funnel_flags),
+                cloud.points,
+            )
         chosen_rank = default_rank if rank_by == "auto" else rank_by
         if chosen_rank == "demonstration":
             # A map constraint, not a grasp criterion: the warp degrades with

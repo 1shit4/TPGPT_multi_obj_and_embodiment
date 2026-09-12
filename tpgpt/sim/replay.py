@@ -221,6 +221,7 @@ def replay_labels(
     contact_steps: int = GRASP_CONTACT_STEPS,
     gate_max_steps: int = GRASP_GATE_MAX_STEPS,
     hold_when=None,
+    hold_margin: float = 0.0,
     slip_of=None,
 ) -> ReplayResult:
     """Drive the arm along a label set pose by pose, under position control.
@@ -356,6 +357,20 @@ def replay_labels(
             fraction, waited = 0.0, 0
             while fraction < 1.0 and not hold_when(env):
                 fraction = min(1.0, fraction + CLOSE_FRACTION_STEP)
+                set_closure(grip_model, close_direction, fraction)
+                for _ in range(PRELOAD_SETTLE_STEPS):
+                    env.step(_joint_action(env, robot, arm, seed, 0.0))
+                    waited += 1
+            # **A little past first touch, then stop.** Stopping *at* first
+            # contact is measurably too light on some hands: on the bread it
+            # rescues the yumi and the robotiq85 and loses the panda, which
+            # holds the object under `+1` and drops it after 42 steps at a
+            # closure of 0.46 when told to stop at 0.46. A small fixed step past
+            # the pinch is not a force target and not a per-object constant --
+            # it is the same increment on every hand and every object, and the
+            # closure it lands at is wherever that hand's fingers happen to be.
+            if hold_margin:
+                fraction = min(1.0, fraction + float(hold_margin))
                 set_closure(grip_model, close_direction, fraction)
                 for _ in range(PRELOAD_SETTLE_STEPS):
                     env.step(_joint_action(env, robot, arm, seed, 0.0))
