@@ -3214,6 +3214,119 @@ work addresses.
 
 The gripper is therefore left as it was, and `force_target` stays `None`.
 
+### What closing the jaws on contact is worth, measured four ways
+
+**A fourth closing rule has now been tried and it fails the same way the first
+three did.** This is here rather than in an experiment section because it is
+about the gripper rather than about the keypoints, and because the shape of the
+answer has now repeated often enough to be the finding.
+
+#### Where the question came from
+
+On the rebuilt scene (§8p) the jaw closure separated the twenty cells
+**perfectly**. `closure` is a reading of where the fingers are, 0 fully open and
+1 fully shut, on a scale that means the same thing on every hand:
+
+| | n | closure reached, min – max |
+|---|---|---|
+| kept the object | 16 | 0.23 – **0.93** |
+| lost the object | 4 | **1.00** – 1.04 |
+
+No overlap. And `+1` is a **position** command meaning "drive the fingers to
+fully shut", so the only thing that can stop them is the object. All four losses
+were the bread — the lightest object at 4.1 g against 16 to 68 g, the shortest
+at 49 mm, and the only near-cubic one, so it can turn between the fingers and
+present a narrower face for them to close through.
+
+#### What the traces could not settle
+
+Whether the closing *caused* the loss or followed it. On three cells the closure
+completes at the same waypoint contact is lost, which fits the fingers squeezing
+the object out and fits equally well the object escaping and the fingers then
+closing on air. On `robotiq140/bread` the jaws read fully closed **fourteen
+waypoints before** the object left, which fits neither cleanly. `closure` is
+sampled once per waypoint — eight control steps — so the order of events is
+below the resolution of the record. It was settled by experiment instead.
+
+#### The three rules, on the five bread cells
+
+| rule | bread placed |
+|---|---|
+| commanded fully shut, `+1` | **1 of 5** — only the panda |
+| close to first contact, then stop | **2 of 5** — gains the yumi and the robotiq85, **loses the panda** |
+| close to contact, then tighten whenever the object slips | **0 of 5** |
+| close to contact, then 10% more travel, then stop | **3 of 5** |
+
+Two of those reproduce results the project already had and had not written down.
+
+**Stopping at first contact is a known-bad trigger.** Commit `4f5b59c` records
+it: contact "fires before the close is even commanded, because the fingers
+descend around the object and graze it on both sides", and measured, it froze
+the jaws at **0.00 to 0.05** closure against a baseline of 0.38 to 0.71 — a hand
+barely shut — and gave 9/15 against the baseline's identical 9/15. The run here
+reproduces that exactly: closures at lift of 0.05, 0.09, 0.05, 0.00 and −0.00.
+
+**Slip feedback runs away**, which is §8z's finding on a working scene. Closing
+further exactly when the object drifts in the hand sounds like the cure for a
+grip that is too light, and it is the opposite: tightening a grip that is
+already extruding the object increases the drift, so the loop chases itself. All
+five hands tightened to 1.00 or beyond and ejected.
+
+#### The fourth rule, on all twenty cells
+
+Contact plus a fixed 10% of travel was the best of the four on the bread, so it
+was run on everything — with **the same grasps as §8p**, forced by
+`--grasp-from`, so the only thing that differs between the two runs is the
+closing rule:
+
+| | `+1` | contact + 10% |
+|---|---|---|
+| **placed** | **16/20** | **16/20** |
+| cereal | 5/5 | **3/5** |
+| milk | 5/5 | 5/5 |
+| can | 5/5 | 5/5 |
+| bread | **1/5** | **3/5** |
+
+**A straight trade.** It gains `yumi/bread` and `xarm/bread` and loses
+`yumi/cereal` and `robotiq85/cereal`. The mechanism is visible in the closures:
+on the cells it loses, the margin stops the jaws *short* of where the object
+would have stopped them — `yumi/cereal` from 0.48 to **0.37**,
+`robotiq85/cereal` from 0.90 to **0.50** — and the cereal is the heaviest object
+at 67.5 g, so it is the one that most needs the firmer grip `+1` happens to give
+it. On the bread the same rule stops the jaws before they extrude it: 1.01 to
+0.28, 1.04 to 0.64.
+
+And the clean separation is destroyed. Under the new rule the cells that place
+reach 0.05 to 0.75 and the cells that fail reach 0.37 to 0.96 — overlapping, so
+closure no longer predicts anything. The rule moved every cell's grip without
+landing all of them inside their windows.
+
+#### What this establishes
+
+**The squeeze-out is real.** The bread was genuinely being extruded, and
+stopping the jaws early fixes those cells. That part of the diagnosis stands.
+
+**And no constant can serve all four objects**, because the grip window is
+per-object as well as per-hand: too light and the cereal slips, too firm and the
+bread is pushed out, and one number cannot sit inside both. That is exactly what
+§8z concluded about *force* targets — bread and a can hold at 10 N and are
+destroyed at 30, while a cereal box fails at 10 and needs 166 — now reproduced
+for *position* targets on a scene that works.
+
+**So `+1` stays**, and the four bread failures are recorded as a limitation of
+an open-loop gripper rather than as a transport result. What would actually
+close it is a loop with a reference the gripper does not currently have — a
+measurement of whether the object is *secure* rather than whether it is touched
+or slipping — and that belongs to the dynamics thread.
+
+**What is not established.** Only one margin was tried (10%), on one scene, with
+one grasp per cell. A different margin would trade the cells differently and
+might trade fewer; nothing here says 10% is the best fixed margin, only that a
+fixed margin trades rather than gains. And the bread is one object of four, so
+"no constant works" rests on the cereal and the bread disagreeing — two objects,
+not a survey.
+
+
 ## 9. Failures, and what caused each
 
 | what failed | cause | status |
