@@ -2793,35 +2793,41 @@ candidate was itself inadmissible, so the check fell back onto a path that spend
 
 ### Every cell
 
-`gap` is the chosen grasp's approach mismatch from the demonstration, **recorded
-but not used in selection**; `off` its horizontal distance from the object's
-centre of mass; `surv` how many candidates reached the ranking; `inside` the
-fraction of the executed path's waypoints sitting inside scene geometry; `reach`
-the fraction of waypoints the arm could hold; `held` the fraction of the carry the
-object stayed in the hand; `place err` the lateral distance from the slot in mm.
+The three columns that are not tautological are **grasped** (the jaws closed on
+the object with fingers opposing it from both sides), **traversed** (it was still
+in the hand at the end of the carry) and **placed** (it ended in the slot, within
+the 60 mm the scene counts as "in it").
 
-| hand | object | grasp | score | gap | off | surv | inside | min det | reach | held | lift | place err | ok |
-|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
-| yumi | cereal | #10 | 0.86 | 76° | 62.6 | 8 | 7% | 0.581 | 100% | 0.00 | -64 | 230 | no |
-| yumi | milk | #70 | 0.61 | 61° | 10.1 | 4 | 0% | 0.399 | 72% | 0.00 | -43 | 323 | no |
-| yumi | can | #95* | 0.45 | 85° | 9.2 | 1 | 48% | 0.244 | 58% | 0.21 | 3 | 336 | no |
-| yumi | bread | #18 | 0.70 | 4° | 20.9 | 1 | 0% | 0.915 | 100% | 0.16 | 3 | 379 | no |
-| xarm | cereal | #72 | 0.69 | 12° | 11.4 | 2 | 11% | 0.987 | 73% | 1.00 | 404 | 14 | **yes** |
-| xarm | milk | #21 | 0.84 | 52° | 11.2 | 12 | 26% | 0.854 | 75% | 1.00 | 370 | 73 | no |
-| xarm | can | #35 | 0.77 | 18° | 14.9 | 3 | 21% | 0.895 | 60% | 1.00 | 387 | 160 | no |
-| xarm | bread | #79 | 0.60 | 4° | 12.6 | 2 | 30% | 0.907 | 100% | 0.15 | 3 | 1346 | no |
-| panda | cereal | #76 | 0.63 | 14° | 6.2 | 2 | 9% | 0.870 | 72% | 0.16 | 1 | 321 | no |
-| panda | milk | #34 | 0.72 | 65° | 14.4 | 6 | 32% | 0.740 | 72% | 1.00 | 357 | 48 | **yes** |
-| panda | can | #0 | 0.88 | 15° | 6.3 | 3 | 25% | 0.986 | 78% | 1.00 | 414 | 24 | **yes** |
-| panda | bread | #51 | 0.60 | 3° | 22.4 | 2 | 32% | 0.558 | 100% | 1.00 | 418 | 17 | **yes** |
-| robotiq85 | cereal | #65 | 0.68 | 30° | 10.8 | 2 | 10% | 0.875 | 100% | 1.00 | 402 | 187 | no |
-| robotiq85 | milk | #49 | 0.68 | 48° | 11.0 | 9 | 19% | 0.909 | 76% | 1.00 | 350 | 40 | **yes** |
-| robotiq85 | can | #0 | 0.94 | 6° | 14.5 | 2 | 22% | 0.982 | 72% | 0.21 | 43 | 351 | no |
-| robotiq85 | bread | #70 | 0.58 | 7° | 9.1 | 1 | 31% | 0.898 | 100% | 1.00 | 454 | 24 | **yes** |
-| robotiq140 | cereal | #24 | 0.84 | 8° | 12.6 | 4 | 0% | 0.775 | 62% | 1.00 | 374 | 11 | **yes** |
-| robotiq140 | milk | #24 | 0.90 | 7° | 9.9 | 9 | 8% | 0.997 | 79% | 1.00 | 401 | 337 | no |
-| robotiq140 | can | #31 | 0.85 | 15° | 2.7 | 3 | 10% | 0.911 | 62% | 1.00 | 404 | 305 | no |
-| robotiq140 | bread | #9 | 0.78 | 10° | 14.6 | 2 | 36% | 0.639 | 100% | 0.68 | 419 | 225 | no |
+The rest: `gap` is the chosen grasp's approach mismatch from the demonstration,
+**recorded but not used in selection**; `off` its horizontal distance from the
+object's centre of mass; `surv` how many candidates reached the ranking; `inside`
+the fraction of the executed path's waypoints sitting inside scene geometry;
+`reach` the fraction of waypoints the arm could hold; `held` the fraction of the
+carry the object stayed in the hand; `lift` how far it left the table, in mm;
+`place err` the lateral distance from the slot in mm.
+
+| hand | object | grasp | gap | off | surv | inside | min det | reach | **grasped** | **traversed** | held | lift | **placed** | place err |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| yumi | cereal | #10 | 76° | 62.6 | 8 | 7% | 0.581 | 100% | no | no | 0.00 | -64 | no | 230 |
+| yumi | milk | #70 | 61° | 10.1 | 4 | 0% | 0.399 | 72% | no | no | 0.00 | -43 | no | 323 |
+| yumi | can | #95* | 85° | 9.2 | 1 | 48% | 0.244 | 58% | no | no | 0.21 | 3 | no | 336 |
+| yumi | bread | #18 | 4° | 20.9 | 1 | 0% | 0.915 | 100% | no | no | 0.16 | 3 | no | 379 |
+| xarm | cereal | #72 | 12° | 11.4 | 2 | 11% | 0.987 | 73% | **yes** | **yes** | 1.00 | 404 | **yes** | 14 |
+| xarm | milk | #21 | 52° | 11.2 | 12 | 26% | 0.854 | 75% | **yes** | **yes** | 1.00 | 370 | no | 73 |
+| xarm | can | #35 | 18° | 14.9 | 3 | 21% | 0.895 | 60% | **yes** | **yes** | 1.00 | 387 | no | 160 |
+| xarm | bread | #79 | 4° | 12.6 | 2 | 30% | 0.907 | 100% | no | no | 0.15 | 3 | no | 1346 |
+| panda | cereal | #76 | 14° | 6.2 | 2 | 9% | 0.870 | 72% | no | no | 0.16 | 1 | no | 321 |
+| panda | milk | #34 | 65° | 14.4 | 6 | 32% | 0.740 | 72% | **yes** | **yes** | 1.00 | 357 | **yes** | 48 |
+| panda | can | #0 | 15° | 6.3 | 3 | 25% | 0.986 | 78% | **yes** | **yes** | 1.00 | 414 | **yes** | 24 |
+| panda | bread | #51 | 3° | 22.4 | 2 | 32% | 0.558 | 100% | **yes** | **yes** | 1.00 | 418 | **yes** | 17 |
+| robotiq85 | cereal | #65 | 30° | 10.8 | 2 | 10% | 0.875 | 100% | **yes** | **yes** | 1.00 | 402 | no | 187 |
+| robotiq85 | milk | #49 | 48° | 11.0 | 9 | 19% | 0.909 | 76% | **yes** | **yes** | 1.00 | 350 | **yes** | 40 |
+| robotiq85 | can | #0 | 6° | 14.5 | 2 | 22% | 0.982 | 72% | **yes** | no | 0.21 | 43 | no | 351 |
+| robotiq85 | bread | #70 | 7° | 9.1 | 1 | 31% | 0.898 | 100% | **yes** | **yes** | 1.00 | 454 | **yes** | 24 |
+| robotiq140 | cereal | #24 | 8° | 12.6 | 4 | 0% | 0.775 | 62% | **yes** | **yes** | 1.00 | 374 | **yes** | 11 |
+| robotiq140 | milk | #24 | 7° | 9.9 | 9 | 8% | 0.997 | 79% | **yes** | **yes** | 1.00 | 401 | no | 337 |
+| robotiq140 | can | #31 | 15° | 2.7 | 3 | 10% | 0.911 | 62% | **yes** | **yes** | 1.00 | 404 | no | 305 |
+| robotiq140 | bread | #9 | 10° | 14.6 | 2 | 36% | 0.639 | 100% | **yes** | no | 0.68 | 419 | no | 225 |
 
 A `*` marks a cell where the whole-path check found nothing admissible and
 fell back onto the top-ranked candidate. `surv` counts candidates reaching

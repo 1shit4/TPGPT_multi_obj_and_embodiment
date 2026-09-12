@@ -42,6 +42,21 @@ def make_scene(shelf_variant="cubby"):
     return env
 
 
+
+def geom_box(env, name):
+    """World-frame ``(low, high)`` of a named geom, read from the model.
+
+    Tests that hard-code shelf coordinates break every time the shelf changes,
+    and then have to be re-derived by hand -- which is how a test ends up
+    asserting the geometry it was written against rather than the property it
+    was written for. These read the numbers back out.
+    """
+    model, data = env.sim.model, env.sim.data
+    gid = model.geom_name2id(name)
+    half = np.abs(np.array(data.geom_xmat[gid]).reshape(3, 3)) @ model.geom_size[gid]
+    centre = np.array(data.geom_xpos[gid])
+    return centre - half, centre + half
+
 def test_the_obstacle_set_is_the_solid_geometry_and_only_that():
     """Drawn is not solid. This scene puts a translucent marker at every shelf
     slot, and a geometric query that counts those reports obstacles a hand
@@ -63,12 +78,16 @@ def test_a_point_inside_the_back_panel_is_reported_inside_it_by_name():
     env = make_scene()
     try:
         obstacles = scene_obstacles(env)
-        # ``shelf_top_back`` spans x 0.258 to 0.270; its mid-plane is 0.264 and
-        # the panel is 12 mm thick, so the deepest any point can be is 6 mm.
-        depth, name = deepest_penetration(np.array([[0.264, 0.0, 1.15]]), obstacles)
+        lo, hi = geom_box(env, "shelf_top_back")
+        mid = (lo + hi) / 2.0
+        # The panel is a thin slab, so the deepest a point can be inside it is
+        # half its thickness -- which is also why depth saturates and cannot
+        # order severity (`ROBOTICS_NOTES.md` 7.39).
+        depth, name = deepest_penetration(mid[None], obstacles)
         assert name == "shelf_top_back"
-        assert np.isclose(depth, 0.006, atol=1e-6)
-        assert deepest_penetration(np.array([[0.10, 0.0, 1.15]]), obstacles) == (0.0, None)
+        assert np.isclose(depth, (hi[0] - lo[0]) / 2.0, atol=1e-6)
+        clear = np.array([[lo[0] - 0.10, 0.0, mid[2]]])
+        assert deepest_penetration(clear, obstacles) == (0.0, None)
     finally:
         env.close()
 
@@ -89,7 +108,13 @@ def test_the_blocked_directions_at_a_slot_are_read_from_the_shelf_not_listed():
             )
         }
         assert answers["+x"][1] == "shelf_top_back"
-        assert answers["+x"][0] < 0.05
+        # How far back it is depends on the board's depth, which is a design
+        # number; that it is the *back panel* and not something else is the
+        # property under test.
+        back, _ = geom_box(env, "shelf_top_back")
+        board_lo, _ = geom_box(env, "shelf_top_board")
+        assert np.isclose(answers["+x"][0], back[0] - origin[0], atol=1e-3)
+        assert back[0] - board_lo[0] > 0.20, "the cubby must be deeper than a hand"
         assert answers["+y"][1] == "shelf_top_wall_l"
         assert answers["-y"][1] == "shelf_top_wall_r"
         assert answers["-z"][1] == "shelf_top_board"       # not the slot marker
@@ -191,23 +216,32 @@ def test_the_place_zone_judges_the_hand_and_not_a_cylinder_around_it():
             pose[:3, 3] = np.asarray(position, dtype=float)
             return Grasp6D(pose=pose, score=0.9, gripper="franka_panda", width=0.08)
 
-        # Descending onto the slot with the jaws across the shelf: room to spare.
-        kept, blocked = by_place_approach(
-            [descending(release)], np.array([0]), env, pair, release[None]
-        )
-        assert kept.tolist() == [0] and blocked == {}
+        # Descending onto the middle slot: the cubby is now deep enough for the
+        # widest hand in the registry in either orientation, so both fit.
+        for closing in ((0.0, 1.0, 0.0), (1.0, 0.0, 0.0)):
+            kept, blocked = by_place_approach(
+                [descending(release, closing=closing)],
+                np.array([0]), env, pair, release[None],
+            )
+            assert kept.tolist() == [0] and blocked == {}
 
-        # The identical descent with the hand turned 90 degrees, so its wide
-        # axis points at the back panel 38 mm away: blocked, and named.
+        # Turned sideways against a **side wall**, which is where the 204 mm
+        # jaw axis still does not fit: the outer slot sits 65 mm from the wall.
+        wall_lo, _ = geom_box(env, "shelf_top_wall_l")
+        outer = np.asarray(env.slot_poses()["top_left"]) + [0, 0, 0.09]
+        assert wall_lo[1] - outer[1] < 0.10
         kept, blocked = by_place_approach(
-            [descending(release, closing=(1.0, 0.0, 0.0))],
-            np.array([0]), env, pair, release[None],
+            [descending(outer, closing=(0.0, 1.0, 0.0))],
+            np.array([0]), env, pair, outer[None],
         )
         assert kept.tolist() == []
-        assert "shelf_top_back" in blocked
+        assert "shelf_top_wall_l" in blocked
 
-        # Driven into the back panel: rejected, and the panel is named.
-        buried = np.array([0.264, 0.0, 1.15])
+        # Driven into the back panel: rejected, and the panel is named. Its
+        # position is read from the model, not written down, so deepening the
+        # shelf moves the test with it.
+        back_lo, back_hi = geom_box(env, "shelf_top_back")
+        buried = (back_lo + back_hi) / 2.0
         kept, blocked = by_place_approach(
             [descending(buried)], np.array([0]), env, pair, buried[None]
         )
@@ -247,8 +281,7 @@ def test_the_place_zone_judges_the_pose_the_hand_actually_arrives_in():
     env = make_scene("cubby")
     try:
         pair = resolve_pair("panda")
-        release = np.asarray(env.slot_poses()["top_middle"]) + [0, 0, 0.09]
-        # Picked with the jaws across the shelf, where the hand fits.
+        release = np.asarray(env.slot_poses()["top_left"]) + [0, 0, 0.09]
         approach = np.array([0.0, 0.0, -1.0])
         closing = np.array([0.0, 1.0, 0.0])
         pose = np.eye(4)
@@ -256,17 +289,20 @@ def test_the_place_zone_judges_the_pose_the_hand_actually_arrives_in():
         pose[:3, 3] = release
         grasp = Grasp6D(pose=pose, score=0.9, gripper="franka_panda", width=0.08)
 
-        # Judged in the pick orientation: clear, and that is the wrong answer.
-        kept, _ = by_place_approach([grasp], np.array([0]), env, pair, release[None])
-        assert kept.tolist() == [0]
+        # Judged in the pick orientation -- jaws pointing at the side wall,
+        # which the 204 mm axis cannot clear at this slot: blocked.
+        kept, blocked = by_place_approach(
+            [grasp], np.array([0]), env, pair, release[None]
+        )
+        assert kept.tolist() == [] and "shelf_top_wall_l" in blocked
 
         # Judged in the pose it actually arrives in -- a quarter turn about the
-        # approach, which swings the 204 mm axis into the 88 mm slot -- blocked.
+        # approach swings that axis front-to-back, where the deepened cubby has
+        # room: clear. The two answers are opposite, which is the point.
         quarter = Rotation.from_rotvec(np.pi / 2 * approach).as_matrix()
-        kept, blocked = by_place_approach(
+        kept, _ = by_place_approach(
             [grasp], np.array([0]), env, pair, release[None], carry_rotation=quarter
         )
-        assert kept.tolist() == []
-        assert "shelf_top_back" in blocked
+        assert kept.tolist() == [0]
     finally:
         env.close()

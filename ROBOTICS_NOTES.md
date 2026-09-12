@@ -3770,6 +3770,28 @@ rather than the difference of two separately-minimised distances.
 
 **Also open:**
 
+- **The whole scene is scaled down and the hand is not, and the proper
+  experiment has not been run.** robosuite's benchmark meshes are 1.4 to 2.5
+  times smaller than the articles they stand for -- the cereal box is
+  30 x 100 x 150 mm against a real 80 x 200 x 300, the loaf 40 x 48 x 49 against
+  a real 200 x 110 x 110 -- while the gripper is full size. The shelf was the
+  same: a 100 mm board with 88 mm of usable depth against hands that are 83 to
+  217 mm across their jaw axis.
+
+  The shelf has been deepened to 280 mm as a **clearance fix** (see
+  ``SHELF_BOARD_DEPTH``), which is not the same thing. What is still untested is
+  the case that matters for hardware: **real-sized objects admit far fewer
+  grasps**, because a 200 mm-wide cereal box can only be taken across its 80 mm
+  face by an 80 mm jaw. Every filter in the funnel is currently being exercised
+  on objects that can be grasped almost anywhere, so "the filter kept enough
+  candidates" means very little.
+
+  It is feasible: ``MujocoXMLObject`` takes a ``scale`` argument, which
+  robosuite's convenience classes simply do not expose. Uniform factors of
+  about 2.0 (cereal), 1.5 (milk), 1.4 (can) and 2.5 (bread) reach realistic
+  sizes. It is deliberately **a separate experiment**, because scaling changes
+  which grasps exist at all and would confound anything else measured with it,
+  and because it needs the robot placement re-verified the way `7.32` did.
 - **A front-approach demonstration** for a shelf with a roof. A top-down teach
   cannot solve one by construction: the approach direction is wrong, and no
   amount of warping fixes a direction the demonstration never contained. This is

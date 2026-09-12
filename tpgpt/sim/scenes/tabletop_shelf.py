@@ -62,7 +62,45 @@ SHELF_LEVELS = (
 #: Lateral slot labels and their y positions on every level.
 SHELF_SLOTS = (("left", 0.13), ("middle", 0.0), ("right", -0.13))
 
-SHELF_BOARD_DEPTH = 0.10
+#: How deep each board is, front to back, keyed by level.
+#:
+#: **Per level, and the top one is deep on purpose.** A shelf board only has to
+#: be as deep as the object it holds; the *cubby* around it has to be deep
+#: enough for the hand that puts the object there, and a hand is much bigger
+#: than a carton. Measured on robosuite's own models, the grippers in this
+#: registry are 83 to 204 mm across their jaw axis and 63 to 75 mm across the
+#: perpendicular:
+#:
+#: ============  ==================  ====================
+#: hand          across the jaws     across the other way
+#: ============  ==================  ====================
+#: yumi                     83 mm                   69 mm
+#: robotiq85               148 mm                   75 mm
+#: xarm                    172 mm                   75 mm
+#: robotiq140              202 mm                   75 mm
+#: panda                   204 mm                   63 mm
+#: ============  ==================  ====================
+#:
+#: At 100 mm the top cubby left **88 mm** of usable depth between the board's
+#: front edge and the back panel, so every hand fitted only when turned exactly
+#: sideways, and nothing at all fitted turned front-to-back. The hand is driven
+#: into the back panel on 16 of 20 cells of `FINDINGS.md` 8o, the arm jams, and
+#: the object is released 20 to 208 mm short of where it was commanded. That is
+#: the scene refusing the task, not the method failing it.
+#:
+#: 280 mm leaves **268 mm** of usable depth: the widest hand spans 202 mm and
+#: clears both the front edge and the back panel by about 30 mm in **either**
+#: orientation. The bottom level is left at 100 mm -- it is not used as a
+#: destination and deepening it would push its boards out over the table.
+#:
+#: **This is a clearance fix, not a realism fix.** The objects here are still
+#: robosuite's benchmark meshes, which are 1.4 to 2.5 times smaller than the
+#: articles they represent, and a shelf 280 mm deep is still shallower than a
+#: real one. Scaling the whole scene consistently is a separate experiment --
+#: see the open item in `ROBOTICS_NOTES.md` -- because real-sized objects change
+#: which grasps exist at all, and that has to be measured rather than mixed in
+#: here.
+SHELF_BOARD_DEPTH = {"bottom": 0.10, "top": 0.28}
 SHELF_BOARD_WIDTH = 0.42
 SHELF_THICKNESS = 0.012
 
@@ -76,7 +114,15 @@ SHELF_THICKNESS = 0.012
 #: A 15.4 cm cereal box does not fit the enclosed lower cubby with a hand
 #: around it. That is left as it is: it is a real constraint of a real shelf,
 #: and finding out what the system does about it is the point of the variant.
-CUBBY_HEIGHT = {"bottom": 0.18, "top": 0.18}
+#: **The bottom figure is 0.148, not 0.18, and that was a modelling defect.**
+#: A cubby's interior cannot extend past the shelf above it. The bottom board
+#: sits 90 mm above the table and the top board's underside 244 mm above it, so
+#: the space between them is 148 mm. At 180 the lower cubby's back panel and
+#: side walls poked **20 mm up through the top board**, which put a solid
+#: obstacle inside the slot the arm was trying to place into -- and it is what
+#: ``free_corridor`` kept reporting as ``shelf_bottom_back`` when asked whether
+#: a hand could arrive at ``top_middle`` from the front.
+CUBBY_HEIGHT = {"bottom": 0.148, "top": 0.18}
 ENCLOSED_HEIGHT = {"bottom": 0.14, "top": 0.22}
 
 #: Shelf variants.
@@ -265,7 +311,7 @@ class TabletopShelf(ManipulationEnv):
                 name=f"shelf_{level}",
                 pos=f"{x} 0 {self.table_top + height}",
             )
-            half_x, half_y = SHELF_BOARD_DEPTH / 2, SHELF_BOARD_WIDTH / 2
+            half_x, half_y = SHELF_BOARD_DEPTH[level] / 2, SHELF_BOARD_WIDTH / 2
             leg_half = height / 2
             panels = [
                 ("board", "0 0 0", f"{half_x} {half_y} {SHELF_THICKNESS / 2}"),
