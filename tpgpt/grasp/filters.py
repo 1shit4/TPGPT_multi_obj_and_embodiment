@@ -1840,6 +1840,7 @@ def filter_grasps(
     check_place_approach: bool = True,
     centre_of_mass: np.ndarray | None = None,
     carry_rotation: np.ndarray | None = None,
+    check_reachability: bool = False,
 ) -> FilterFunnel:
     """Run the whole funnel, recording what each stage cost.
 
@@ -1871,6 +1872,21 @@ def filter_grasps(
             orientation at the *release* position, which on this demonstration
             is 35.5 degrees from the pose actually commanded -- and orientation
             is what decides whether a 204 mm hand fits an 88 mm slot.
+        check_reachability: Run :func:`by_reachability`. **Off by default, and
+            it is a retirement rather than a preference.** That stage asks
+            whether the arm can hold a pose and whether it collides there, at
+            **13 sampled poses of a 200-waypoint trajectory** -- and 7.38
+            measured candidates passing that sample and then colliding at 79 to
+            162 of the other 187. :func:`path_feasibility_observed` asks the same
+            two questions at every waypoint, of the path that is actually flown,
+            for about the same money.
+
+            It was also doing nothing. Measured across the twenty cells of
+            `FINDINGS.md` 8o, it emptied the candidate set and fell back on
+            **20 of 20**, so it rejected everything, the funnel passed
+            everything through, and the only trace it left was a flag -- at the
+            cost of thirteen inverse-kinematics solves per candidate. Kept
+            behind this switch so that result stays reproducible.
         centre_of_mass: World centre of mass of the object being picked. Given,
             :func:`by_centre_offset` runs as a late, loose stage; omitted, it
             does not run at all. Late because it is a tie-break among grasps
@@ -1957,7 +1973,7 @@ def filter_grasps(
             by_collision(grasps, indices, scene_points, pair, extra_points=held_points),
             indices,
         )
-    if env is not None:
+    if env is not None and check_reachability:
         survivors, failures = by_reachability(
             env, grasps, indices, pair, place_pose,
             carry_rotation=carry_rotation,

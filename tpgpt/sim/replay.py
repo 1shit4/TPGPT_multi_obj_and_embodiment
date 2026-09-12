@@ -298,6 +298,16 @@ def replay_labels(
     hold_fraction = 0.0
     tightenings = 0
     reachable: list[bool] = []
+    #: What the arm was *actually* doing at each waypoint, not what it was told.
+    #:
+    #: Recorded because without it a stall cannot be diagnosed at all. On
+    #: ``panda/bread`` in `FINDINGS.md` 8o the object stopped moving at waypoint
+    #: 140 and the tracking error climbed to 117 mm while every *commanded* pose
+    #: was collision-free, inverse kinematics converged to 2.5 mm, the reach was
+    #: 801 mm against an 855 mm rating and no joint was at a limit. Asking what
+    #: the arm was touching needs the configuration it was in, and the trace
+    #: kept only the one it was aiming at.
+    achieved: list[np.ndarray] = []
     unreachable = 0
     seed = np.array(env.sim.data.qpos[qpos_index])
 
@@ -310,6 +320,7 @@ def replay_labels(
             position_tolerance=ik_tolerance, seed_qpos=seed,
         )
         reachable.append(bool(result.reachable))
+        achieved.append(np.array(env.sim.data.qpos[qpos_index], dtype=float))
         if not result.reachable:
             unreachable += 1
         # Even an unconverged solve is the closest the arm can get, so it is
@@ -496,6 +507,10 @@ def replay_labels(
             # which segment it was.
             "reachable_per_waypoint": np.asarray(reachable, dtype=bool),
             "tracking_error_per_waypoint": tracking,
+            # The joint configuration the arm was in when each waypoint began,
+            # so "what was it touching when it stalled" is answerable afterwards
+            # instead of needing the run repeated.
+            "qpos_per_waypoint": np.asarray(achieved, dtype=float),
             "position_control": True,
             "tool_offset": offset.tolist(),
             "placement_error_xy": float(np.linalg.norm(final[:2])),

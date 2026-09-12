@@ -243,9 +243,11 @@ class PathCheck:
             therefore the path, differs between constructions, so this has to be
             the one being run.
         max_candidates: How far down the ranked list to look before giving up.
-            Every candidate costs a map fit, a clearance sweep and -- if it gets
-            that far -- a warm-started inverse-kinematics pass, so this bounds
-            the work rather than expressing a belief about grasp quality.
+            **The whole set, by default.** A candidate that fails costs about
+            0.3 s to reject, because the sweep stops at its first fault, so
+            searching a hundred is seconds rather than the minutes an earlier
+            design would have taken -- and stopping at 25 was measured to leave
+            several cells with nothing admissible that a deeper search finds.
         check_kinematics: Run the warm-started IK pass as well. It is the
             expensive half and it runs **only** on candidates that already
             passed the clearance sweep, which is the ordering that makes the
@@ -281,7 +283,7 @@ class PathCheck:
     labels: object
     source: ObjectPlacement
     variant: "KeypointVariant"
-    max_candidates: int = 25
+    max_candidates: int = 100
     check_kinematics: bool = True
     ik_stride: int = 4
     min_reachable_fraction: float = 0.60
@@ -330,20 +332,26 @@ def _select_by_path(
     Returns:
         ``(chosen index, flags)``.
     """
-    from tpgpt.grasp.filters import PATH_PENETRATION_FRACTION, path_clearance, path_kinematics
+    from tpgpt.grasp.filters import path_feasibility_observed
     from tpgpt.grasp.grippers import resolve_pair
-    from tpgpt.perception.obstacles import scene_obstacles
+    from tpgpt.perception.cameras import scene_point_cloud
+    from tpgpt.perception.obstacles import robot_bodies, self_filtered
     from tpgpt.sim.keypoints import carry_indices
 
     pair = resolve_pair(gripper)
-    max_inside = (
-        check.max_inside_fraction
-        if check.max_inside_fraction is not None
-        else PATH_PENETRATION_FRACTION
+    # Built once each. Neither the scene nor the robot's own shape changes while
+    # candidates are compared, and rebuilding them per candidate would be most
+    # of the cost.
+    #
+    # **The scene is what the cameras saw, not what the simulator knows**, and
+    # the robot is subtracted from it -- a depth image of a workspace contains
+    # the arm, so without that the arm collides with its own reflection. The
+    # true geometry is available and is deliberately not used here: a filter
+    # that reads it is not one a real system could run.
+    bodies = robot_bodies(env)
+    scene = self_filtered(
+        env, scene_point_cloud(env, exclude=(instance,), obs=None), bodies
     )
-    # Built once. The scene does not move while candidates are being compared,
-    # and rebuilding it per candidate would be most of the cost.
-    obstacles = scene_obstacles(env, exclude=(instance,))
     grasp_index, release_index = carry_indices(check.labels)
 
     order = [int(i) for i in order][: max(int(check.max_candidates), 1)]
@@ -366,36 +374,29 @@ def _select_by_path(
             # collides, and the reason belongs in the report.
             examined.append({"index": candidate, "rejected": f"{type(exc).__name__}: {exc}"})
             continue
-        rotations = result["warped_rotations"]
-        clearance = path_clearance(
-            env,
-            result["warped"],
-            rotations,
-            pair,
-            carried_points=placement.points,
-            carry_span=(grasp_index, release_index),
-            obstacles=obstacles,
+        feasible = path_feasibility_observed(
+            env, result["warped"], result["warped_rotations"], pair,
+            scene, placement.points, grasp_index, release_index,
+            bodies=bodies, stride=check.ik_stride,
+            # Selection is decided by the first fault, so the rest of the sweep
+            # is wasted here. Diagnosis wants the whole tally and asks for it.
+            stop_early=True,
         )
         record = {
             "index": candidate,
-            "inside_fraction": round(clearance["inside_fraction"], 4),
-            "max_depth_mm": round(clearance["max_depth"] * 1000, 2),
-            "median_inside_depth_mm": round(clearance["median_inside_depth"] * 1000, 2),
-            "culprits": clearance["culprits"],
+            "violations": feasible["violations"],
+            "first_violation": feasible["first_violation"],
+            "reachable_fraction": round(feasible["reachable_fraction"], 3),
+            "faults": {k: v for k, v in list(feasible["faults"].items())[:4]},
         }
-        if clearance["inside_fraction"] > max_inside:
-            record["rejected"] = "path_collision"
+        if feasible["violations"]:
+            record["rejected"] = "collision"
             examined.append(record)
             continue
-        if check.check_kinematics:
-            kinematics = path_kinematics(
-                env, result["warped"], rotations, pair, stride=check.ik_stride,
-            )
-            record["reachable_fraction"] = round(kinematics["reachable_fraction"], 3)
-            if kinematics["reachable_fraction"] < check.min_reachable_fraction:
-                record["rejected"] = "path_kinematics"
-                examined.append(record)
-                continue
+        if feasible["reachable_fraction"] < check.min_reachable_fraction:
+            record["rejected"] = "kinematics"
+            examined.append(record)
+            continue
         examined.append(record)
         return candidate, {
             "path_check": {
@@ -406,11 +407,25 @@ def _select_by_path(
             }
         }
 
-    return order[0], {
+    # **Nothing was admissible, so take the least bad and say so.** Falling back
+    # to the *top-ranked* candidate would throw away everything the check just
+    # learned; the candidate that got furthest before its first fault is the one
+    # whose plan is wrong latest, and on a path that ends at a shelf that is the
+    # one most likely to have done the useful part of the task first. The flag
+    # reaches the manifest, so a cell that runs under it reads as "no admissible
+    # grasp exists here" rather than as an ordinary result.
+    ranked = sorted(
+        (e for e in examined if "rejected" in e),
+        key=lambda e: -(e.get("first_violation") if e.get("first_violation")
+                        is not None else -1),
+    )
+    best = ranked[0]["index"] if ranked else order[0]
+    return best, {
         "path_check": {
-            "chosen": order[0],
+            "chosen": best,
             "rank_examined": len(examined),
             "fell_back": True,
+            "fell_back_to": "the candidate that got furthest before its first fault",
             "examined": examined,
         },
         "path_check_fell_back": True,

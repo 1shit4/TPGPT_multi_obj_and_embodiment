@@ -493,7 +493,8 @@ def replay_variant(env, labels, source_placement, target, variant,
                     "grip_force")
         if key in trace
     }
-    for key in ("reachable_per_waypoint", "tracking_error_per_waypoint"):
+    for key in ("reachable_per_waypoint", "tracking_error_per_waypoint",
+                "qpos_per_waypoint"):
         if key in replay.metadata:
             row["trace"][key] = np.asarray(
                 replay.metadata[key], dtype=float
