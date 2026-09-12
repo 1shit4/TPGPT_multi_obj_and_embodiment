@@ -150,12 +150,18 @@ SUPPORT_APPROACH_MAX_DEG = 85.0
 #: it would be asserting that the wrist may end up inside a wall.
 PLACE_CORRIDOR_FRACTION = 1.0
 
-#: Rays cast across the hand's cross-section when testing an arrival corridor.
+#: Poses along the arrival at which the hand is tested against the scene.
 #:
-#: One central ray is not enough: it passes through the gap between two fingers
-#: while the fingers themselves are inside a panel. These are spread over a disc
-#: of the hand's own lateral radius, so the bundle covers the swept cross
-#: section rather than its centre line.
+#: The release pose plus four more backed off along the approach axis, so the
+#: last stretch of the arrival is covered rather than one pose. Five is enough
+#: because the hand is sampled at about 10 mm and the whole run is 100 to 200 mm.
+PLACE_CORRIDOR_SAMPLES = 5
+
+#: Rays cast across the hand's cross-section by :func:`free_corridor`.
+#:
+#: Kept for that function, which answers "is this *direction* open" for a
+#: diagnostic probe. It is no longer how candidates are filtered -- see
+#: :func:`by_place_approach` for the audit that retired it.
 PLACE_CORRIDOR_RAYS = 9
 
 #: Penetration beyond which a waypoint counts as inside scene geometry, metres.
@@ -890,6 +896,8 @@ def by_place_approach(
     release_positions,
     exclude: tuple[str, ...] = (),
     corridor_fraction: float = PLACE_CORRIDOR_FRACTION,
+    samples: int = PLACE_CORRIDOR_SAMPLES,
+    obstacles=None,
 ) -> tuple[np.ndarray, dict]:
     """Drop grasps whose release would have the hand arrive through a wall.
 
@@ -902,9 +910,23 @@ def by_place_approach(
     encode one of those three into the code.
 
     So the blocked set is **not listed anywhere**. It is measured, per
-    candidate, by asking the model whether the corridor the hand would sweep to
-    reach its release pose is clear (:func:`free_corridor`). The corridor's
-    length and width come from the hand's own published geometry
+    candidate, by putting **the hand itself** at the release pose and at four
+    points back along its own approach axis, and asking how far inside the
+    scene's solid geometry it ends up. "The hand itself" means its published
+    surface sample, the same one :func:`path_clearance` flies down the whole
+    trajectory, so the place side and the path are judged by one instrument.
+
+    **This used to cast a bundle of rays through a cylinder of the hand's own
+    radius and length, and that was close to useless.** A gripper is not a solid
+    cylinder; it is two fingers and a wrist with a great deal of air between
+    them, so a cylinder wrapped around it clips panels the hand misses and
+    misses gaps the hand fits through. Audited over the 2000 candidates of
+    Experiment Q (`FINDINGS.md` §8o), the ray bundle kept 489 where the hand
+    itself keeps 369, and **the two agreed on only 153**: it rejected 216
+    candidates the hand would have cleared -- 59% of the admissible set -- and
+    admitted 336 it would have fouled. The exact test costs about the same.
+
+    The corridor's length comes from the hand's own published geometry
     (:func:`hand_envelope`), so a 270 mm-deep Robotiq 2F-140 is held to a longer
     clear run than a 97 mm Panda, which is the physical truth.
 
@@ -929,13 +951,20 @@ def by_place_approach(
         exclude: Substrings naming geoms that do not count. The object being
             carried belongs here: it arrives with the hand.
 
+    Args:
+        samples: Poses tested along the arrival, from the release pose back
+            along the approach axis by the hand's own length.
+        obstacles: Pre-built obstacle list, to avoid rebuilding it per call.
+
     Returns:
         ``(survivors, blocked_by)`` -- the surviving indices, and a tally of
         which geom blocked how many candidates, so a cell rejected here can be
         attributed to a named panel rather than to "the shelf".
     """
+    from tpgpt.perception.obstacles import deepest_penetration, scene_obstacles
+
     indices = np.asarray(indices)
-    length, radius = hand_envelope(pair)
+    length, _ = hand_envelope(pair)
     length *= float(corridor_fraction)
     positions = np.atleast_2d(np.asarray(release_positions, dtype=float))
     if len(positions) == 1:
@@ -945,16 +974,29 @@ def by_place_approach(
             f"{len(positions)} release positions for {len(indices)} candidates; "
             "pass one per candidate or exactly one shared position"
         )
+    if obstacles is None:
+        obstacles = scene_obstacles(env, exclude=exclude)
+
+    hand = gripper_points(pair.graspgen, n=512)
+    depth_tcp = float(gripper_geometry(pair.graspgen).tcp_depth)
+    steps = np.linspace(0.0, length, max(int(samples), 1))
 
     blocked_by: dict = {}
     keep = []
     for position, i in zip(positions, indices):
-        name = free_corridor(
-            env, position, grasps[i].approach, length, radius, exclude=exclude
-        )
-        if name is not None:
-            blocked_by[name] = blocked_by.get(name, 0) + 1
-        keep.append(name is None)
+        rotation = grasps[int(i)].rotation
+        culprit = None
+        for step in steps:
+            # The hand's own base sits ``tcp_depth`` behind the fingertip point,
+            # and backing off along the approach is how it arrived.
+            base = position - rotation[:, 2] * (depth_tcp + step)
+            depth, name = deepest_penetration(base + hand @ rotation.T, obstacles)
+            if depth > PATH_PENETRATION_TOLERANCE:
+                culprit = name
+                break
+        if culprit is not None:
+            blocked_by[culprit] = blocked_by.get(culprit, 0) + 1
+        keep.append(culprit is None)
     return _keep(indices, keep), blocked_by
 
 

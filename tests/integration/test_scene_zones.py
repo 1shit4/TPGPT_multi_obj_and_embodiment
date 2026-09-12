@@ -151,3 +151,79 @@ def test_a_hand_arriving_from_above_is_clear_and_one_arriving_from_behind_is_not
                              length, radius) == "shelf_bottom_back"
     finally:
         env.close()
+
+
+def test_the_place_zone_judges_the_hand_and_not_a_cylinder_around_it():
+    """The bug the audit in `FINDINGS.md` 8o found.
+
+    A gripper is two fingers and a wrist with air in between. Testing a cylinder
+    of its own radius and length rejects candidates it would clear and admits
+    ones it would foul -- over 2000 candidates the two verdicts agreed on 153.
+    The filter now places the hand's own surface sample at the release pose, so
+    it answers the question it is asking.
+    """
+    from tpgpt.grasp.filters import by_place_approach, free_corridor, hand_envelope
+    from tpgpt.grasp.grasps import Grasp6D
+
+    env = make_scene("cubby")
+    try:
+        pair = resolve_pair("panda")
+        length, radius = hand_envelope(pair)
+        release = np.asarray(env.slot_poses()["top_middle"]) + [0, 0, 0.09]
+
+        def descending(position, closing=(0.0, 1.0, 0.0)):
+            """+Z the approach, pointing down; ``closing`` the jaw axis.
+
+            The jaw axis matters and is the point of the test. A Panda hand is
+            **204 mm across it** -- measured, and GraspGen's model agrees with
+            robosuite's to 8 mm -- while the usable depth in front of the top
+            cubby's back panel is about 88 mm. So the same descent onto the same
+            slot is clear with the hand turned across the shelf and blocked with
+            it turned front-to-back. A cylinder of the hand's radius cannot
+            express that difference at all; the hand itself can.
+            """
+            approach = np.array([0.0, 0.0, -1.0])
+            c = np.asarray(closing, dtype=float)
+            c = c - (c @ approach) * approach
+            c /= np.linalg.norm(c)
+            pose = np.eye(4)
+            pose[:3, :3] = np.column_stack([c, np.cross(approach, c), approach])
+            pose[:3, 3] = np.asarray(position, dtype=float)
+            return Grasp6D(pose=pose, score=0.9, gripper="franka_panda", width=0.08)
+
+        # Descending onto the slot with the jaws across the shelf: room to spare.
+        kept, blocked = by_place_approach(
+            [descending(release)], np.array([0]), env, pair, release[None]
+        )
+        assert kept.tolist() == [0] and blocked == {}
+
+        # The identical descent with the hand turned 90 degrees, so its wide
+        # axis points at the back panel 38 mm away: blocked, and named.
+        kept, blocked = by_place_approach(
+            [descending(release, closing=(1.0, 0.0, 0.0))],
+            np.array([0]), env, pair, release[None],
+        )
+        assert kept.tolist() == []
+        assert "shelf_top_back" in blocked
+
+        # Driven into the back panel: rejected, and the panel is named.
+        buried = np.array([0.264, 0.0, 1.15])
+        kept, blocked = by_place_approach(
+            [descending(buried)], np.array([0]), env, pair, buried[None]
+        )
+        assert kept.tolist() == []
+        assert "shelf_top_back" in blocked
+
+        # The ray bundle is blind to the orientation that decides it: a
+        # cylinder is the same shape however the hand is rolled inside it, so it
+        # returns the same verdict for both poses above, one of which fits and
+        # one of which does not.
+        assert radius > 0.05
+        for closing in ((0.0, 1.0, 0.0), (1.0, 0.0, 0.0)):
+            assert free_corridor(
+                env, release, np.array([0.0, 0.0, -1.0]), length, radius
+            ) == free_corridor(
+                env, release, np.array([0.0, 0.0, -1.0]), length, radius
+            )
+    finally:
+        env.close()

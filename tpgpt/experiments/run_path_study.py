@@ -306,6 +306,77 @@ def main(
                 "chosen_score_rank": int((scores > scores[chosen]).sum()) + 1,
             })
 
+            # --- is the transported path a descent, or does it follow the
+            # grasp's own approach axis? ------------------------------------
+            #
+            # The question behind the yumi's four failures. ``phi`` carries the
+            # source keypoint cube onto the target one, and if the two differ by
+            # a large rotation then Eq. 11 rotates the commanded *gripper*
+            # orientation by that much. What it does **not** necessarily do is
+            # bend the *path*: the positions are ``phi(x)``, which is close to
+            # rigid away from the keypoints, so a demonstration that descends
+            # still descends. If that is right, a side grasp gets a hand held
+            # sideways travelling straight down, and the fingers sweep through
+            # the object.
+            #
+            # Measured as the angle between the direction the path actually
+            # travels over its last 10 waypoints into the grasp and the grasp's
+            # own approach axis. Zero means the hand arrives the way the grasp
+            # asks; 90 means it arrives sideways to it.
+            span = max(grasp_index - 10, 0)
+            travel = np.asarray(result["warped"][grasp_index]) - np.asarray(
+                result["warped"][span])
+            norm = float(np.linalg.norm(travel))
+            record["path_travel_mm"] = round(norm * 1000, 2)
+            if norm > 1e-6:
+                record["path_vs_grasp_axis_deg"] = round(float(np.degrees(np.arccos(
+                    np.clip((travel / norm) @ np.asarray(grasp.approach), -1, 1)))), 1)
+                record["path_vs_vertical_deg"] = round(float(np.degrees(np.arccos(
+                    np.clip((travel / norm) @ np.array([0.0, 0.0, -1.0]), -1, 1)))), 1)
+
+            # --- how badly is the path warped? -----------------------------
+            #
+            # A map can be a perfectly valid diffeomorphism -- no fold anywhere,
+            # ``min det`` comfortably positive -- and still produce a path no
+            # arm should fly: stretched, kinked, or wandering far from the
+            # rigid motion the demonstration described. "It did not fold" is a
+            # validity check, not a quality one, and these are the quality ones.
+            src_path = np.asarray(labels.positions, dtype=float)
+            warped_path = np.asarray(result["warped"], dtype=float)
+            src_len = float(np.linalg.norm(np.diff(src_path, axis=0), axis=1).sum())
+            out_len = float(np.linalg.norm(np.diff(warped_path, axis=0), axis=1).sum())
+            steps = np.linalg.norm(np.diff(warped_path, axis=0), axis=1)
+            src_steps = np.linalg.norm(np.diff(src_path, axis=0), axis=1)
+            # Best-fit rigid motion of the source onto the warped path, so
+            # "how far from a rigid carry is this" is a number. A rigid carry is
+            # what the demonstration is; everything beyond it is the warp.
+            sc, wc = src_path.mean(0), warped_path.mean(0)
+            U, _, Vt = np.linalg.svd((src_path - sc).T @ (warped_path - wc))
+            R = U @ np.diag([1.0, 1.0, float(np.sign(np.linalg.det(U @ Vt)))]) @ Vt
+            rigid = (src_path - sc) @ R + wc
+            record.update({
+                "path_length_ratio": round(out_len / src_len, 3) if src_len else None,
+                "path_max_step_ratio": round(
+                    float(np.max(steps / np.maximum(src_steps, 1e-9))), 2),
+                "path_deviation_from_rigid_mm": round(
+                    float(np.linalg.norm(warped_path - rigid, axis=1).max()) * 1000, 1),
+            })
+
+            # --- which way is the hand turned when it enters the slot? -----
+            #
+            # A Panda hand is **204 mm across its jaw axis** -- measured on
+            # robosuite's own model, and GraspGen's agrees to 8 mm -- while the
+            # top cubby leaves about 88 mm of usable depth between the board's
+            # front edge and the back panel. So the hand only fits with its wide
+            # axis lying **across** the shelf. Which way it is turned is decided
+            # by the grasp taken at the pick, since the object is rigid with the
+            # hand from the moment the jaws close.
+            shelf_x = np.array([1.0, 0.0, 0.0])
+            closing_at_release = np.asarray(
+                result["warped_rotations"][release_index], dtype=float)[:, 0]
+            record["release_jaw_axis_vs_shelf_depth_deg"] = round(float(np.degrees(
+                np.arccos(np.clip(abs(closing_at_release @ shelf_x), -1, 1)))), 1)
+
             # --- is the place-side zone rejecting candidates the hand would
             # actually fit through? ----------------------------------------
             #
