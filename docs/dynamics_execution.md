@@ -1,13 +1,19 @@
 # How should a transported policy actually be executed?
 
+**The answer, for a reader who wants it first.** Query the policy at the
+**attractor**, not at the measured arm — decisively. And **switch the attractor
+law from the shipped integrator to a light anchor, `VR-a k=0.20`**: it is better
+at both poses that decide the task, in both conditions, at `p < 0.0001`, and it
+never stalls. Full reasoning in §12; the measurement that settles it is §10.
+
 **What this is.** A study of the **execution** half of the pipeline — the code
-that turns a fitted policy into motion — deciding between eight candidate rules
+that turns a fitted policy into motion — deciding between nine candidate rules
 for driving the robot. It is the companion to the keypoint study, which decides
 the *other* half: where the warped path goes. This one decides how faithfully
 the arm follows whatever path it is given.
 
-**Where the numbers come from.** `outputs/dynamics/rows.json` (352 runs,
-freely-tracking arm) and `outputs/dynamics_loaded/rows.json` (352 runs, loaded
+**Where the numbers come from.** `outputs/dynamics/rows.json` (396 runs,
+freely-tracking arm) and `outputs/dynamics_loaded/rows.json` (396 runs, loaded
 arm). Reproduce with
 `python -m tpgpt.experiments.sweep_execution --out outputs/dynamics [--load 0.08]`.
 Branch `dynamics-execution`, worktree `/home/ishita/TPGPT-dynamics`.
@@ -155,7 +161,7 @@ there.
 
 ### 2.1 Where these experiments run: a surrogate arm, not the simulator
 
-**No MuJoCo.** A real rollout costs 25–40 s; this study is 704 runs, and the
+**No MuJoCo.** A real rollout costs 25–40 s; this study is 792 runs, and the
 simulator is currently saturated by the parallel keypoint session. So the arm is
 replaced by its own equation.
 
@@ -216,12 +222,13 @@ execution law applies. Results are binned:
 
 ## 3. The laws being compared
 
-Eight, from two independent choices: **what moves the attractor**, and **where
+Nine, from two independent choices: **what moves the attractor**, and **where
 the policy is asked**.
 
 | id | queried at | what moves the attractor |
 |---|---|---|
 | **V** | attractor | `a += v·dt·gate`. Pure dead reckoning. **This is what ships.** |
+| **V-m** | **measured arm** | the same integration, but the velocity field is read where the arm actually is |
 | **VR-a k=0.20** | attractor | V, then pull 20% of the way toward `reference` |
 | **VR-a k=0.50** | attractor | the same at 50% |
 | **VR-sched** | attractor | the same, gain scheduled on commanded speed: strong when the policy commands a hold (k≈0.44), weak in transit (k≈0.08) |
@@ -237,6 +244,14 @@ the only absolute statement of where the hand should be. In transit `reference`
 is a *smoothed* version of a path the integrator is already following well, so
 pulling toward it fights the feed-forward. Hence: strong when slow, weak when
 moving.
+
+**Why `V-m` matters even though it has no restoring term.** It is the only
+pair in this table that isolates the **query site** with nothing else attached:
+`V` and `V-m` differ in exactly one thing. Every other `-m` comparison also
+carries an anchor or a reference, so a penalty there could always be blamed on
+the interaction rather than on the query. This cell was missing from the first
+version of the study, which meant the headline "query at the attractor"
+conclusion rested entirely on confounded comparisons.
 
 **`anchor_gated` is a real third axis, not a detail.** The velocity term is
 multiplied by `gate`; whether the anchor term is too changes what the law means.
@@ -338,7 +353,7 @@ invisible.*
 
 ---
 
-## 5. Experiment B — the eight laws on a freely-tracking arm
+## 5. Experiment B — the nine laws on a freely-tracking arm
 
 **Question.** Across the full range of map deformation, which law keeps the
 attractor closest to its intended path, and which puts the arm closest to where
@@ -347,7 +362,7 @@ the demonstrating arm actually was?
 **Conditions.** Demonstration of §2. 43 valid synthetic warps built as in §2.2,
 spanning `min det(J)` from 1.12 down to 0.05, plus one identity case. Surrogate
 arm, **no disturbance** — this is the nominal condition. Every law runs on
-**every warp**, so all comparisons are paired. 352 runs. No object, no contact,
+**every warp**, so all comparisons are paired. 396 runs. No object, no contact,
 no simulator.
 
 **Result.** Attractor drift, worst over each run, median [inter-quartile range]
@@ -409,22 +424,55 @@ rather than removing it, and it fights the velocity feed-forward that carries
 the demonstrated speed profile. The anchor is a solution to a problem that does
 not exist in this condition.
 
-*Why querying at the measured pose costs 8–27 mm.* The comparison is clean
-because the **only** difference between `R-a`/`R-m`, and between `VR-a
-k=0.50`/`VR-m k=0.50`, is the query site. The cause is Appendix A's zero-mean
-prior: away from the labels the velocity channel returns *no motion at all* —
-not "head back", nothing. An arm legitimately trailing by 24 mm is exactly such
-a state. Note that `reference` does **not** rescue it: `VR-m` has a restoring
-term and is still 10 mm worse than its attractor-queried twin. This is the first
-direct measurement behind a claim `tpgpt/sim/rollout.py`'s docstring has made
-since it was written.
+*Why querying at the measured pose costs 8–27 mm.* **The query leaves the ridge
+the policy was trained on.** The policy's inputs are `(position, phase)` pairs,
+and it only ever saw pairs that genuinely co-occur — a one-dimensional curve
+through a four-dimensional input space. The arm trails the attractor by
+`τv ≈ 20 mm`, so querying at the arm supplies a position saying "I am at phase
+`t − Δ`" alongside a phase input saying "`t`". **That combination appears nowhere
+in the training data**, and every output channel degrades there.
 
-*Why the reference-only laws have a tail reaching 72 mm.* Setting an **absolute**
-position means the attractor can land far from the arm, so the **clamp** fires
-and projects it onto a small sphere around the measured pose. "Reference
-position, then projected near the measurement" is arithmetically close to the
-very mode §2.8 records as failing at 0.29 m/s from a 24 mm deviation. The clamp,
-not the law, is then doing the driving.
+> **Two earlier explanations of this, both mine, were wrong and are withdrawn.**
+> The first blamed Appendix A's zero-mean prior on the *velocity* channel. That
+> cannot be the cause for `R-a` or `R-m`, which never read the velocity channel
+> at all — they set the attractor to `reference` outright. The second blamed the
+> attractor clamp. Instrumenting a run settles it: **the clamp fires on 0 of 209
+> steps** and moves the attractor by at most 0.35 mm. Neither mechanism is
+> operating.
+>
+> What the instrumented run shows instead, measuring `reference`'s output
+> against the label at the same phase:
+>
+> | queried at | median error | max error |
+> |---|---|---|
+> | the exact training labels | 0.39 mm | 5.99 mm |
+> | the attractor, during `R-a` | 1.45 mm | **17.0 mm** |
+> | the arm, during `R-m` | 3.45 mm | **41.4 mm** |
+>
+> The channel is excellent on the ridge and degrades off it, and the arm is
+> further off it than the attractor. That is the whole effect, and it is a
+> property of **every** channel rather than a quirk of the velocity prior.
+
+*Why `R-a` is worse than `V`, which is the harder question.* Both query at the
+attractor, so ridge-departure alone does not explain it. `R-a` is a **fixed-point
+iteration**: `a ← reference(a, t)`. A small error moves `a` off the ridge, so the
+next query is further off and returns a larger error, which moves it further
+still. The table above is that compounding, measured: querying at exact labels
+gives 0.39/5.99 mm, querying at the drifting attractor gives 1.45/17.0 mm.
+
+`V` does not compound, and the reason is worth stating because it is why the
+shipped law is not merely lucky. Its attractor is built by **accumulating the
+velocity field**, so the attractor advances at the same rate the phase advances.
+The `(position, phase)` pair therefore stays self-consistent by construction,
+and the query never leaves the ridge in the first place.
+
+**This also explains why an anchor helps where `R` hurts, which otherwise looks
+contradictory.** The anchor is `(1−k)·integrated + k·reference`: the integrated
+part keeps the query on the ridge, the reference part supplies the restoring
+pull. A small `k` buys restoring action without inheriting the full off-ridge
+error; `k = 1` inherits all of it and keeps none of the ridge-keeping. That
+predicts an optimum at intermediate `k`, and the loaded condition shows exactly
+that — `k=0.20` gives −1.32 mm while `k=0.50` gives +0.20 mm.
 
 *The floor.* At identity transport — no map at all — the shipped law's arm error
 is **5.32 mm**, against a demonstration whose own placement error is about
@@ -448,7 +496,7 @@ that query at the measured arm pose — the worst throughout.*
 
 ---
 
-## 6. Experiment C — the same eight laws with the lag gate engaged
+## 6. Experiment C — the same nine laws with the lag gate engaged
 
 **Question.** Experiment B measured the anchor laws on an arm that tracks so
 well the lag gate is almost never active. The anchor exists to supply a
@@ -457,7 +505,7 @@ what a shut gate causes. **Does the ranking change when the gate is doing its
 job?**
 
 **Conditions.** Identical to Experiment B — same demonstration, same 43 warps,
-same pairing, same 352 runs — with **one** change: a constant 0.08 m/s downward
+same pairing, same 396 runs — with **one** change: a constant 0.08 m/s downward
 velocity the arm cannot overcome, standing in for gravity on a held object or a
 push. This is fault injection in the surrogate plant, not a different plant.
 
@@ -543,7 +591,7 @@ conditions and would flatten the scale.*
 **Question.** Millimetres of drift are one thing; a run that stops moving is
 another. **Does any law fail outright, and how often?**
 
-**Conditions.** The same 352 + 352 runs as Experiments B and C, read for a
+**Conditions.** The same 396 + 396 runs as Experiments B and C, read for a
 different outcome: whether the stall watchdog declared the arm stuck, and
 whether the task clock reached 1.0. 44 cases per law per condition.
 
@@ -697,19 +745,129 @@ construction.
 Both settings are kept selectable and recorded in the run metadata, because a
 result whose configuration is not written down is not a result (§7.26 rule 2).
 
+
 ---
 
-## 10. Failures, and what caused each
+## 10. Experiment G — error at the two poses that actually decide the task
+
+**Question.** Everything so far is either *worst error anywhere on the run* or
+*net movement during a dwell*. Neither is the question a pick-and-place asks. The
+task is decided at **two instants** — when the jaws close and when they open —
+and between them the hand can be centimetres off at no cost. **How far is the
+arm from where it should be at those two moments, and on which axis?**
+
+**Conditions.** Identical runs to Experiments B and C — same demonstration, same
+43 warps, same pairing, both the undisturbed and loaded conditions — read at two
+specific labels instead of aggregated: the middle of the grasp dwell (phase
+≈ 0.28) and the middle of the release dwell (≈ 0.84). The target is
+`label − τ·v`, where the demonstrating arm actually was, not the label itself.
+Error decomposed into the hand's own axes at that label. 396 runs per condition.
+
+**Result.** Median over 44 cases, millimetres:
+
+| law | **grasp** total / closing | **release** total / closing | stalled |
+|---|---|---|---|
+| *undisturbed* | | | |
+| **V** (ships) | 0.91 / 0.35 | 2.89 / **1.83** | 0/44 |
+| **V-m** | 3.31 / **1.07** | 6.45 / **4.40** | 0/44 |
+| **VR-a k=0.20** | 1.58 / **0.10** | 0.60 / **0.15** | **0/44** |
+| VR-a k=0.50 | 0.64 / 0.14 | 0.27 / 0.24 | 1/44 |
+| **VR-sched** | 0.72 / 0.14 | 0.28 / 0.23 | **0/44** |
+| VR-m k=0.50 | 0.72 / 0.16 | 0.28 / 0.24 | 8/44 |
+| R-a | 0.69 / 0.18 | 0.30 / 0.27 | 6/44 |
+| R-m | 0.71 / 0.19 | 0.32 / 0.30 | 18/44 |
+| *loaded* | | | |
+| **V** (ships) | 4.87 / 0.35 | 8.98 / **2.41** | 0/44 |
+| **V-m** | 6.49 / **1.23** | 7.13 / **4.87** | 0/44 |
+| **VR-a k=0.20** | 3.38 / **0.21** | 4.27 / **0.23** | **0/44** |
+| **VR-sched** | 4.21 / 0.21 | 4.71 / 0.25 | **0/44** |
+| VR-m k=0.50 | 4.00 / 0.43 | 5.20 / 2.18 | 13/44 |
+| R-a | 4.26 / 0.23 | 4.77 / 0.25 | 6/44 |
+| **R-m** | 4.02 / 0.44 | **144.85 / 140.26** | **34/44** |
+
+Paired against V on the **release** closing-axis error — negative means better:
+
+| law | undisturbed | p | loaded | p |
+|---|---|---|---|---|
+| **V-m** | **+3.34** | <0.0001 | **+2.62** | 0.0006 |
+| **VR-a k=0.20** | **−1.66** | **<0.0001** | **−2.09** | **<0.0001** |
+| VR-a k=0.50 | −1.59 | <0.0001 | −2.16 | <0.0001 |
+| **VR-sched** | **−1.60** | **<0.0001** | **−2.16** | **<0.0001** |
+| VR-m k=0.50 | −1.30 | 0.047 | +0.58 | 0.007 |
+| R-a | −1.46 | 0.004 | −1.93 | 0.005 |
+| R-m | −0.81 | 0.094 | **+138.12** | <0.0001 |
+
+### What each column means
+
+| column | definition | why it is here |
+|---|---|---|
+| grasp / release | the run's arm position at the step whose phase is closest to that label's phase | the two instants the task is decided at. Everything between them is transit |
+| total | straight-line distance from the arm to `label − τ·v` | the headline, but see the next row for why it is the weaker number |
+| **closing** | that error's component along the axis the jaws travel | **the only axis that can lose the object**, ~15 mm of room |
+| stalled | watchdog declared the arm stuck | a law that aims well and stops moving has still failed |
+| paired difference | median of (law − V) on the same warp, on the **release** closing axis | the release is the discriminating pose — see below |
+
+### Results and why
+
+**This measurement reverses the conclusion Experiments B and C reached.** On
+worst-over-run drift the shipped law won. At the poses the task is decided at,
+**every anchor beats it, in both conditions, with `p < 0.0001`.**
+
+*Why the two metrics disagree.* Worst-over-run drift is dominated by the long
+transit segments, where the anchor fights the velocity feed-forward and loses —
+and where being wrong costs nothing. The task only cares about two instants, and
+there the anchor's restoring pull is exactly what is wanted. **An error summed
+over places that do not matter is not evidence about the places that do.**
+
+*Why the gap widens from grasp to release, which is the mechanism.* At the grasp
+(phase 0.28) `V` is at 0.35 mm on the closing axis against the anchors' 0.10–0.14
+— close. At the release (phase 0.84) it is 1.83 mm against 0.15–0.24, a factor
+of ten. **`V` accumulates**: it integrates, so its error grows with distance
+travelled, and by the release it has had three times as long to drift. An
+anchored law keeps resetting toward the reference, so its error does not grow
+with phase. The two rows are that difference, measured.
+
+*The query site, confirmed on the clean cell.* `V-m` is **worse** than `V` at
+both poses in both conditions — +3.34 mm and +2.62 mm on the release closing
+axis, `p ≤ 0.0006`. This is the only comparison in the study that isolates the
+query site with no anchor or reference attached, and it agrees with the
+confounded ones. The conclusion holds.
+
+*`R-m` under load is the study's one catastrophic failure.* 144.85 mm at the
+release, 140 mm of it on the closing axis, and 34 of 44 runs stalled. Both
+failure modes have the same root: an absolute-position law queried at a lagging
+arm compounds its own off-ridge error (§5.5), and the load pushes the arm
+further off the ridge still.
+
+*The simplest anchor is as good as the cleverest.* `VR-a k=0.20` — a plain
+constant gain — matches or beats `VR-sched` at every pose in both conditions,
+and never stalls. **The speed schedule does not earn its extra parameter on this
+evidence.** That is worth stating plainly because the schedule was my own
+proposal and I had been advocating it.
+
+![Error at the decisive poses](figures/fig_key_poses.png)
+
+*Figure 5. Arm error at the grasp (top) and release (bottom), undisturbed (left)
+and loaded (right). Red is the closing axis — the only one that can lose the
+object, with ~15 mm of room; green is the approach axis with 120–135 mm. The
+vertical scale is logarithmic because `R-m`'s collapse under load reaches 140 mm
+and would otherwise flatten every other bar. Compare the red bars for `V` between
+the top and bottom rows: nearly level with the anchors at the grasp, a factor of
+ten above them at the release.*
+
+---
+
+## 11. Failures, and what caused each
 
 Nothing here is left as "a run that didn't work". Every non-completing run in
-all 704 is accounted for below.
+all 792 is accounted for below.
 
-### 10.1 Runs that raised an exception: **zero**
+### 11.1 Runs that raised an exception: **zero**
 
 | condition | runs | exceptions |
 |---|---|---|
-| undisturbed | 352 | **0** |
-| loaded | 352 | **0** |
+| undisturbed | 396 | **0** |
+| loaded | 396 | **0** |
 
 The sweep is written to catch an exception per run and record it as a result
 rather than abort the campaign — a law that cannot run *is* a finding. None
@@ -717,7 +875,7 @@ occurred. Note this is a meaningful check for `R-a` and `R-m`, which raise
 deliberately if the policy was fitted without the `reference` channel; they did
 not, confirming the channel is present and being read.
 
-### 10.2 Warps rejected before any law ran: **2 of 45, in both conditions**
+### 11.2 Warps rejected before any law ran: **2 of 45, in both conditions**
 
 | bump scale | resulting `min det(J)` | action |
 |---|---|---|
@@ -735,7 +893,7 @@ the same problems.
 
 That leaves **43 valid warps**, which is what every table above is computed on.
 
-### 10.3 Runs the watchdog declared stuck: 33 undisturbed, 54 loaded
+### 11.3 Runs the watchdog declared stuck: 33 undisturbed, 54 loaded
 
 Not distributed evenly — this is Experiment D's table, read as a failure
 inventory:
@@ -775,12 +933,12 @@ here it is a law that hands the clamp an attractor it must always correct. The
 prevent this one — the watchdog terminating the run is the designed and honest
 outcome, not a bug.
 
-### 10.4 Runs that ran out of step budget: **zero**
+### 11.4 Runs that ran out of step budget: **zero**
 
 | condition | budget exhausted |
 |---|---|
-| undisturbed | **0 of 352** |
-| loaded | **0 of 352** |
+| undisturbed | **0 of 396** |
+| loaded | **0 of 396** |
 
 Worth stating explicitly because it is the failure mode §7.16 documents and
 which nothing previously counted: a run that neither finishes nor is diagnosed
@@ -788,7 +946,7 @@ as stuck, just crawls until the step limit. Every run in this study ended in a
 **named** state — completed, or stalled with a reason. That is one of the
 acceptance criteria and it is met.
 
-### 10.5 Not a failure, but worth recording: a 3 h 20 m false start
+### 11.5 Not a failure, but worth recording: a 3 h 20 m false start
 
 The loaded sweep sat for 3 hours 20 minutes without running a single case. The
 wrapper that chained it behind the undisturbed sweep waited with
@@ -808,20 +966,37 @@ match the waiter.**
 
 ---
 
-## 11. What this means, and what would make it false
+## 12. What this means, and what would make it false
 
-### 11.1 The conclusions
+### 12.1 The conclusions
 
 | question | answer | strength |
 |---|---|---|
-| Query at the attractor or the measured arm? | **attractor** | decisive. 8–27 mm penalty undisturbed, 11–61 mm loaded, `p ≤ 0.03` throughout, and the measured-pose laws stall 8–34 runs in 44 where the attractor-queried ones stall none |
-| Which law should ship? | **`V`, unchanged** | it is the best or statistically tied in every condition, and it never stalls |
-| Is any alternative worth having? | **`VR-sched`, as an option** | significantly better than `V` by 1.3–1.5 mm when the lag gate is engaged, and equally robust (0/44 stalls). Below the 4.8 mm practical margin, so not a default |
-| Reference-only (`R-a`, `R-m`)? | **no** | worse everywhere, tails to 72 mm, and `R-m` completes 10 of 44 under load |
+| Query at the attractor or the measured arm? | **attractor** | decisive, and confirmed on the one cell with no confound: `V-m` costs +3.34 mm undisturbed and +2.62 mm loaded on the release closing axis, `p ≤ 0.0006`. Measured-pose laws also stall 8–34 of 44 where attractor-queried ones stall none |
+| Which law should ship? | **`VR-a k=0.20`**, replacing `V` | better at both decisive poses in **both** conditions, `p < 0.0001`; ten-fold better at the release (0.15 mm against 1.83 mm); 0/44 stalls, matching `V` exactly |
+| Constant gain or the speed schedule? | **constant, `k = 0.20`** | matches or beats `VR-sched` at every pose in both conditions. The schedule was my own proposal and does not earn its extra parameter |
+| Reference-only (`R-a`, `R-m`)? | **no** | `R-a` stalls 6/44; `R-m` reaches **144 mm** at the release under load and completes 10 of 44 |
 | Should the anchor be gated? | **immaterial** | ~0.1 mm; axis closed |
 | Is the dwell creep a defect? | **no** | 0.00 mm on the axis that decides the grasp |
 
-### 11.2 What would make these conclusions false
+**How strong is "better"?** The advantage at the release closing axis is
+1.6–2.2 mm against a ~15 mm budget, so on this bed **neither law would lose a
+grasp**. This is a ranking, not a rescue. What raises it above the 4.8 mm
+practical-margin objection that kept `V` in the previous draft is that it is
+consistent across both poses, both conditions and both gains at `p < 0.0001`,
+rather than appearing in one regime only.
+
+**This recommendation has changed twice.** First *"keep `V`, change nothing"*
+(from the undisturbed sweep alone), then *"conditional — `V` by default, the
+anchor under load"*, and now *"switch to `VR-a k=0.20`"*. The first two judged
+the laws on the **worst error anywhere on the run**, which is dominated by the
+long transit segments where being wrong costs nothing. Experiment G measures the
+two instants the task is actually decided at, and the ranking inverts. That is
+§7.27's lesson arriving for the third time in this project — and this time I made
+the mistake after building the axis-decomposition tool specifically to prevent
+it.
+
+### 12.2 What would make these conclusions false
 
 - **A real arm behaving differently from the surrogate.** The bed has no contact,
   no inverse kinematics, and no orientation task. If the queued
@@ -840,7 +1015,7 @@ match the waiter.**
 - **A load larger than 0.08 m/s.** That value shuts the gate on 42% of steps.
   How the ranking behaves at 80% is unmeasured.
 
-### 11.3 What is still missing
+### 12.3 What is still missing
 
 Two simulator tiers, specified and **queued** behind the parallel session's
 MuJoCo runs (currently 84% CPU, 357 MiB free; CLAUDE.md requires checking
@@ -865,18 +1040,18 @@ possible moved arithmetic out of `rollout_policy`. Defaults are asserted bitwise
 identical at unit level; the end-to-end proof is three reshelving seeds against
 the baseline commit compared with `np.array_equal` — not `allclose`.
 
-### 11.4 A note on what "flawless" can mean
+### 12.4 A note on what "flawless" can mean
 
 By the rule of three, zero failures in 20 runs bounds the true per-run failure
 rate only at **14%**. No campaign in this budget can certify the absence of
 failures. What is defensible is: **no violation of the mechanism invariants —
-which are arithmetic, not statistics — across 704 runs**, plus zero exceptions,
+which are arithmetic, not statistics — across 792 runs**, plus zero exceptions,
 zero budget exhaustions, and 44/44 completion for the shipped law in both
 conditions.
 
 ---
 
-## 12. Verification
+## 13. Verification
 
 ```bash
 export MUJOCO_GL=egl

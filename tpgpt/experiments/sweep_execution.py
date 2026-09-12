@@ -67,6 +67,10 @@ from tpgpt.transport.maps import TransportMap
 #: the policy at the measured pose rather than at the attractor.
 LAWS = {
     "V": {},
+    # The pure integrator queried at the arm. This cell isolates the query site
+    # with no anchor and no reference involved, which every other -m comparison
+    # confounds. It was missing from the first version of this sweep.
+    "V-m": dict(query_at="measured"),
     "VR-a k=0.20": dict(attractor_law="anchor", anchor_gain=0.20),
     "VR-a k=0.50": dict(attractor_law="anchor", anchor_gain=0.50),
     "VR-sched": dict(attractor_law="anchor",
@@ -165,6 +169,38 @@ def pinned_warp(labels: PolicyLabels, scale: float, seed: int) -> TransportMap |
     return None if det <= MIN_VALID_DET else m
 
 
+def key_pose_error(rollout, labels: PolicyLabels, index: int, tau: float) -> dict:
+    """Arm error at one label, decomposed into that hand's own axes.
+
+    **This is the measurement the task actually cares about**, and it is not the
+    same question as "worst error over the run". A pick-and-place is decided at
+    two instants -- when the jaws close and when they open -- and an aggregate
+    over the whole trajectory is dominated by the long transit between them,
+    where the hand can be centimetres off at no cost.
+
+    Measuring the aggregate instead ranked the execution laws in the *opposite*
+    order to this one, which is section 7.27's lesson arriving for the third
+    time: an error summed over places that do not matter is not evidence about
+    the places that do.
+
+    The target is ``label - tau*v``, where the demonstrating arm actually was
+    (section 2.7), not the label itself -- comparing the arm to the label would
+    charge the correct impedance lag as an error.
+    """
+    target_phase = labels.time_belief[index]
+    k = int(np.argmin(np.abs(rollout.time_belief - target_phase)))
+    truth = labels.positions[index] - tau * labels.velocities[index]
+    error = rollout.positions[k] - truth
+    closing, approach, jaw = grasp_frame(labels, index)
+    return {
+        "total": float(np.linalg.norm(error)) * 1000,
+        "closing": abs(float(error @ closing)) * 1000,
+        "approach": abs(float(error @ approach)) * 1000,
+        "jaw": abs(float(error @ jaw)) * 1000,
+        "phase": float(target_phase),
+    }
+
+
 def measure(rollout, planned: np.ndarray, truth: np.ndarray, labels: PolicyLabels,
             spans, tau: float) -> dict:
     """Every number this study reports, from one rollout.
@@ -220,6 +256,12 @@ def measure(rollout, planned: np.ndarray, truth: np.ndarray, labels: PolicyLabel
         out[f"dwell_{name}_closing"] = abs(float(net @ closing)) * 1000
         out[f"dwell_{name}_approach"] = abs(float(net @ approach)) * 1000
         out[f"dwell_{name}_jaw"] = abs(float(net @ jaw)) * 1000
+
+    # Error at the two poses the task is decided at, which is a different and
+    # more relevant question than the worst error anywhere on the path.
+    for name, (a, b) in zip(("grasp", "release"), spans[:2]):
+        for axis, value in key_pose_error(rollout, labels, (a + b) // 2, tau).items():
+            out[f"pose_{name}_{axis}"] = value
     return out
 
 

@@ -285,3 +285,60 @@ def figure_quiet_vs_loaded(quiet: list[dict], loaded: list[dict], path,
         fontsize=11, y=1.0,
     )
     return _save(fig, path)
+
+
+def figure_key_poses(quiet: list[dict], loaded: list[dict], path,
+                     title: str = "") -> Path:
+    """Error at the two poses the task is actually decided at.
+
+    A pick-and-place succeeds or fails at two instants — when the jaws close and
+    when they open — and an aggregate over the whole trajectory is dominated by
+    the long transit in between, where the hand can be centimetres off at no
+    cost. This figure is the same runs as the drift figures, read at those two
+    instants instead.
+
+    Top row is the grasp (phase ≈ 0.28), bottom the release (≈ 0.84). Left
+    column is the undisturbed arm, right is the loaded one. Bars are the median
+    arm error split into the hand's own axes: **red is the closing axis**, the
+    only one that can lose the object, against a ~15 mm budget; green is the
+    approach axis with 120–135 mm of room.
+
+    The thing to read off it: the gap between the shipped law and the anchor
+    **widens between the top row and the bottom**, because an integrator's error
+    accumulates with distance travelled while an anchored one does not.
+    """
+    import numpy as np
+
+    laws = [l for l in dict.fromkeys(r["law"] for r in quiet if not r.get("failed"))]
+    fig, axes = plt.subplots(2, 2, figsize=(13, 7.2), sharex=True)
+    x = np.arange(len(laws))
+
+    for row, phase in enumerate(("grasp", "release")):
+        for col, (rows, cond) in enumerate(((quiet, "undisturbed"), (loaded, "loaded"))):
+            ax = axes[row][col]
+            def med(law, axis):
+                v = [r[f"pose_{phase}_{axis}"] for r in rows
+                     if r["law"] == law and not r.get("failed")
+                     and f"pose_{phase}_{axis}" in r]
+                return float(np.median(v)) if v else np.nan
+            ax.bar(x - 0.2, [med(l, "closing") for l in laws], 0.4,
+                   label="closing axis (~15 mm budget)", color=REFERENCE_COLOUR)
+            ax.bar(x + 0.2, [med(l, "approach") for l in laws], 0.4,
+                   label="approach axis (120-135 mm)", color=ANCHOR_COLOUR)
+            ax.set_title(f"{phase} pose, {cond}", fontsize=10)
+            ax.set_ylabel("arm error (mm), log scale")
+            # Log, because R-m's collapse under load reaches 140 mm and would
+            # otherwise flatten every other bar into the axis.
+            ax.set_yscale("log")
+            ax.grid(axis="y", alpha=0.25)
+            if row == 0 and col == 0:
+                ax.legend(fontsize=7)
+    for ax in axes[1]:
+        ax.set_xticks(x)
+        ax.set_xticklabels(laws, rotation=30, ha="right", fontsize=7)
+    fig.suptitle(
+        title or "At the two poses that decide the task, the anchor beats the "
+                 "integrator — and the gap widens the further into the trajectory you go",
+        fontsize=11, y=1.0,
+    )
+    return _save(fig, path)

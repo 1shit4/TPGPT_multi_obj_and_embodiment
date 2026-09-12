@@ -1968,7 +1968,7 @@ negative, that a point mid-segment is on the path, that a late trajectory shows
 no drift, that a deep error does not pollute the closing axis, and that an
 untracked source file is fatal to reproducibility.
 
-### 7.28 The attractor law: the query site is settled, the law is conditional
+### 7.28 The attractor law: query at the attractor, and switch to a light anchor
 
 > **Numbering note.** A parallel session is appending to this file too; if both
 > added a 7.28 the merge should renumber, not merge, the two.
@@ -2029,13 +2029,53 @@ nothing left to correct with, while the anchor still holds an absolute statement
 of where the hand should be. Undisturbed, that pull solves a problem that does
 not exist and fights the feed-forward instead.
 
-**`V` stays the default anyway.** 1.3-1.5 mm is below the practical margin: the
-demonstration's own residual at the end of its dwell is 4.8 mm, and the
-re-measurement spread of the validated placement error is +-2.3 mm. This is a
-statistically solid effect smaller than the noise the end-to-end result is
-quoted with -- a reason to have the switch, not to flip the default. Under load
-the shipped law's own arm error doubles (5.3 -> 11.4 mm), which is the honest
-size of the regime difference.
+#### Then the metric itself turned out to be wrong
+
+Both tables above score a law by its **worst error anywhere on the run**. A
+pick-and-place is not decided anywhere on the run: it is decided at two instants,
+when the jaws close and when they open, and the long transit between them is
+where a hand can be centimetres off at no cost. Measuring at those two labels
+instead **inverts the ranking**.
+
+Arm error at the release, closing axis -- the axis that can lose the object --
+median over 44 warps, paired against `V`:
+
+| law | undisturbed | p | loaded | p |
+|---|---|---|---|---|
+| `V` (ships) | 1.83 mm | - | 2.41 mm | - |
+| `V-m` | +3.34 | <0.0001 worse | +2.62 | 0.0006 worse |
+| **`VR-a k=0.20`** | **-1.66** | **<0.0001 better** | **-2.09** | **<0.0001 better** |
+| `VR-sched` | -1.60 | <0.0001 better | -2.16 | <0.0001 better |
+| `R-a` | -1.46 | 0.004 better | -1.93 | 0.005 better |
+| `R-m` | -0.81 | 0.094 | **+138.12** | <0.0001 worse |
+
+**So the recommendation is to switch to `VR-a k=0.20`**, not to keep `V`. It is
+better at both decisive poses in **both** conditions, ten-fold better at the
+release (0.15 mm against 1.83 mm), and stalls 0 of 44 exactly as `V` does.
+
+*Why the gap widens from grasp to release.* At the grasp (phase 0.28) `V` is at
+0.35 mm against the anchors' 0.10-0.14. At the release (phase 0.84) it is
+1.83 mm against 0.15-0.24. `V` **accumulates** -- it integrates, so its error
+grows with distance travelled -- while an anchored law keeps resetting toward
+the reference and does not. Those two rows are that difference, measured.
+
+*The query site, now confirmed without a confound.* `V-m` is the only pair in the
+study that isolates the query site with no anchor or reference attached, and it
+was missing from the first version. It is worse than `V` at both poses in both
+conditions, `p <= 0.0006`, so the conclusion drawn from the confounded
+comparisons holds.
+
+*The simplest anchor is as good as the cleverest.* A plain constant `k = 0.20`
+matches or beats the speed-scheduled gain at every pose in both conditions. The
+schedule was my own proposal; it does not earn its extra parameter.
+
+> **Recommendation history, kept rather than overwritten.** Draft 1: keep `V`,
+> change nothing -- from the undisturbed sweep alone. Draft 2: conditional, `V`
+> by default and the anchor under load, since 1.3-1.5 mm sat below the 4.8 mm
+> practical margin. Draft 3, this one: switch to `VR-a k=0.20`. The first two
+> judged the laws on worst-error-over-run and were measuring the wrong thing.
+> That is 7.27's lesson for the third time in this project, made after building
+> `reach_axes` specifically to prevent it.
 
 **The query-site conclusion is unchanged and strengthened**: querying at the
 measured pose costs 11-61 mm under load against 8-27 mm undisturbed. Under load
@@ -2044,21 +2084,43 @@ grows exactly as the mechanism predicts. **Gating the anchor remains immaterial*
 even at 42% gate closure: -1.48 against -1.49 mm. That axis is closed.
 
 **Querying at the measured pose is decisively wrong**, and the comparison is
-clean because the only difference between `R-a`/`R-m` and between
-`VR-a k=0.50`/`VR-m k=0.50` is the query site. It costs 8-27 mm. The reason is
-the zero-mean prior of Appendix A: away from the labels the velocity channel
-returns *no motion at all*, and an arm legitimately trailing by 24 mm is exactly
-such a state. Note the `reference` channel does **not** rescue it -- `VR-m` has a
-restoring term and is still 10 mm worse than its attractor-queried twin. This is
-the first direct measurement behind the claim `tpgpt/sim/rollout.py`'s docstring
-has been making since it was written.
+clean: the only difference between `R-a`/`R-m`, and between `VR-a k=0.50` and
+`VR-m k=0.50`, is the query site. Confirmed on the pure integrator too -- `V-m`
+is worse than `V` at the grasp by 0.70 mm quiet and 0.85 mm loaded,
+`p < 0.0001` -- which is the cell the first version of this sweep was missing,
+and the only one with no anchor or reference to confound it.
 
-**The reference-only laws carry a tail**: `R-m` reaches 72 mm and `R-a` 53 mm in
-the aggressive bin. The mechanism is understood rather than mysterious. Setting
-an absolute position means the *clamp* -- which projects the attractor onto a
-sphere around the arm -- becomes the dominant term, and "reference position,
-then projected near the measurement" is arithmetically close to the mode 2.8
-records as failing at 0.29 m/s from a 24 mm deviation.
+**The mechanism, after two wrong explanations of my own.** The cause is that
+**the query leaves the ridge the policy was trained on**. Its inputs are
+`(position, phase)` pairs and it only ever saw pairs that co-occur -- a
+one-dimensional curve through a four-dimensional space. The arm trails the
+attractor by `tau*v ~ 20 mm`, so querying at the arm pairs a position meaning
+"phase `t - delta`" with a phase input meaning "`t`", a combination that appears
+nowhere in the data. Measuring `reference` against the label at the same phase:
+
+| queried at | median | max |
+|---|---|---|
+| the exact training labels | 0.39 mm | 5.99 mm |
+| the attractor, during `R-a` | 1.45 mm | 17.0 mm |
+| the arm, during `R-m` | 3.45 mm | 41.4 mm |
+
+> **Withdrawn.** I first attributed this to Appendix A's zero-mean prior on the
+> *velocity* channel. That cannot be it for `R-a` or `R-m`, which never read
+> velocity -- they set the attractor to `reference` outright. I then attributed
+> the reference laws' tail to the attractor clamp. Instrumenting a run settles
+> it: **the clamp fires on 0 of 209 steps** and moves the attractor by at most
+> 0.35 mm. Both explanations were plausible, both were recitations of existing
+> docstrings rather than measurements, and both were wrong.
+
+**Why `R-a` is worse than `V` even though both query at the attractor.** `R-a` is
+a fixed-point iteration, `a <- reference(a, t)`: a small error moves `a` off the
+ridge, the next query is further off and returns a larger error, and it
+compounds -- which is the 0.39 -> 1.45 mm median in the table. `V` cannot
+compound, because accumulating the velocity field makes the attractor advance at
+the rate the phase advances, so the pair stays self-consistent and the query
+never leaves the ridge. That is also why an anchor helps where `R` hurts: the
+integrated part keeps the query on the ridge while the reference part supplies
+restoring, so a small `k` buys the second without paying for the first.
 
 **A retraction of my own, from the planning for this work.** A prototype with
 one sample per condition suggested a speed-scheduled anchor cut drift 40% on
