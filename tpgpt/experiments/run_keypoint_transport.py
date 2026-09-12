@@ -932,6 +932,11 @@ def transport(
         source_labels.positions, source_labels.orientations
     )
     report = transport_map.check_diffeomorphism(source_labels.positions)
+    stage1_report = stage2_report = None
+    if hasattr(transport_map, "stage_reports"):
+        stage1_report, stage2_report = transport_map.stage_reports(
+            source_labels.positions
+        )
     grasp_index, release_index = carry_indices(source_labels)
 
     wanted_pick = corresponding_point(
@@ -958,6 +963,19 @@ def transport(
         "keypoint_residual": float(transport_map.keypoint_residual().max()),
         "min_det": float(report.min_determinant),
         "fraction_positive": float(report.fraction_positive),
+        # A composed map's two stages, checked separately. The composite's
+        # ``min_det`` is a minimum of a product and the two stages' minima sit
+        # at different points, so it can look healthy while one stage is close
+        # to folding. Empty for a single-stage map.
+        "stage_min_det": (
+            {
+                "min_det_stage1": float(stage1_report.min_determinant),
+                "min_det_stage2": float(stage2_report.min_determinant),
+                "fraction_positive_stage1": float(stage1_report.fraction_positive),
+                "fraction_positive_stage2": float(stage2_report.fraction_positive),
+            }
+            if stage1_report is not None else {}
+        ),
         # The rotation the warp has to realise between the source and target
         # task frames. **This, not the approach mismatch, is what folds the
         # map**: measured across 20 cells, ``min det`` runs 0.94-0.99 at 3-19

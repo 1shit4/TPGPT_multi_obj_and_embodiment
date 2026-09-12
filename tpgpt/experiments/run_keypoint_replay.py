@@ -462,6 +462,14 @@ def replay_variant(env, labels, source_placement, target, variant,
         # a weak diagnostic that reads 100% on a collapsed box (7.22).
         "min_det": result["min_det"],
         "fraction_positive": result["fraction_positive"],
+        # **Per stage, for a composed map, because a minimum over a path does
+        # not distribute over a product.** Determinants multiply --
+        # ``det(J) = det(J_2) det(J_1)`` -- but the two minima occur at
+        # different points, so the composite's worst value can be better than
+        # either stage's and still hide a stage that folds. 8d measured stage 2
+        # falling to 0.08-0.30 while the composite looked healthy. Absent for
+        # the single-stage constructions, which have no stages to report.
+        **result.get("stage_min_det", {}),
         "keypoint_residual": result["keypoint_residual"],
         "frame_rotation_deg": result["frame_rotation_deg"],
         "aim_map": result["aim_map"],
@@ -552,6 +560,7 @@ def main(
     hold_at_contact: bool = False,
     hold_margin: float = 0.0,
     grasp_from=None,
+    objects=REPLAY_OBJECTS,
 ) -> dict:
     """Replay every construction on every hand and object.
 
@@ -638,6 +647,11 @@ def main(
         max_path_candidates: How far down the ranked list the path check looks
             before falling back to the top-ranked candidate.
 
+        objects: Which objects stand in the scene. **Changing this changes the
+            scene**, because the placement sampler lays out whatever it is
+            given, so a run with an extra object is not cell-by-cell comparable
+            with one without it -- the neighbours a hand has to avoid are
+            different. Say so when reporting one.
         grasp_from: Path to a previous run's ``rows.json``. Each cell then
             executes **the candidate that run executed**, and selection is
             skipped entirely.
@@ -786,12 +800,12 @@ def main(
         print(f"  executing the grasps recorded in {grasp_from} "
               f"({len(forced)} cells); selection is skipped", flush=True)
     for gripper in grippers:
-        for name in REPLAY_OBJECTS:
+        for name in objects:
             if wanted is not None and f"{gripper}/{name}" not in wanted:
                 continue
             for variant in variants:
                 env = build_scene(
-                    objects=REPLAY_OBJECTS, seed=seed, controller_config=config,
+                    objects=objects, seed=seed, controller_config=config,
                     gripper=gripper,
                 )
                 try:
@@ -861,7 +875,7 @@ def main(
                     # a comparison of different scenes. Checked on the first
                     # hand only, since a different hand legitimately gets a
                     # different grasp TCP.
-                    if name == REPLAY_OBJECTS[0] and gripper == grippers[0]:
+                    if name == objects[0] and gripper == grippers[0]:
                         if reference_tcp is None:
                             reference_tcp = np.asarray(target.grasp.tcp, dtype=float)
                         elif not np.allclose(target.grasp.tcp, reference_tcp, atol=1e-6):
@@ -923,7 +937,7 @@ def main(
         ),
         settings={
             "varied": {"variant": [v.name for v in variants],
-                       "object": list(REPLAY_OBJECTS)},
+                       "object": list(objects)},
             "grasp_selection": {"filters": filters, "rank_by": rank_by,
                                 "approach_filter": bool(approach_filter),
                                 "grasp_rank": int(grasp_rank),
@@ -1095,6 +1109,12 @@ if __name__ == "__main__":
     )
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument(
+        "--objects", default=None,
+        help=("Comma-separated objects standing in the scene. Changing it "
+              "changes the scene, so a run with a different set is not "
+              "cell-by-cell comparable with one without."),
+    )
+    parser.add_argument(
         "--grasp-from", default=None,
         help=("A previous run's rows.json. Each cell executes the grasp that "
               "run executed and selection is skipped -- about twice as fast, "
@@ -1154,4 +1174,5 @@ if __name__ == "__main__":
         hold_at_contact=args.hold_at_contact,
         hold_margin=args.hold_margin,
         grasp_from=args.grasp_from,
+        objects=tuple(args.objects.split(",")) if args.objects else REPLAY_OBJECTS,
     )
