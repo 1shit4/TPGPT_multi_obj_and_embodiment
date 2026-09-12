@@ -1432,6 +1432,214 @@ def path_feasibility(
     }
 
 
+#: How close two surface samples must come before they count as touching, metres.
+#:
+#: **Larger than the depth tolerance, and for a different reason.** When the
+#: scene is exact geometry, "touching" is an overlap and the only slack needed
+#: is model error (:data:`CONTACT_DEPTH_TOLERANCE`, 1 mm). When both sides are
+#: *point clouds*, two surfaces in contact are two sparse samples of surfaces in
+#: contact, and the nearest pair of samples is typically several millimetres
+#: apart even when the surfaces meet. Measured on this scene at 256 px, the
+#: observed clouds run 5 to 15 mm between neighbouring points.
+#:
+#: This is the honest price of checking against what the robot has seen rather
+#: than against what is there, and it is one-sided in the forgiving direction:
+#: a one-sided cloud under-reports an object's extent (7.36 measured 11 to
+#: 21 mm), so a contact can be missed. It cannot be tuned away.
+CLOUD_CONTACT_RADIUS = 0.005
+
+
+def path_feasibility_observed(
+    env,
+    positions: np.ndarray,
+    rotations: np.ndarray,
+    pair: GripperPair,
+    scene_points: np.ndarray,
+    object_points: np.ndarray,
+    grasp_index: int,
+    release_index: int,
+    place_window: int = 12,
+    arm: str = "right",
+    tolerance: float = REACH_TOLERANCE,
+    contact_radius: float = CLOUD_CONTACT_RADIUS,
+    grasp_window: int = GRASP_CONTACT_WINDOW,
+    support_normal: np.ndarray = (0.0, 0.0, 1.0),
+    stride: int = 1,
+    stop_early: bool = False,
+    bodies=None,
+) -> dict:
+    """The same question as :func:`path_feasibility`, asked with what the robot can see.
+
+    **Why there are two of these, and which is which.** A robot knows its own
+    shape exactly -- its links and its hand come from its own description file --
+    and it does *not* know the shape of the shelf or of the objects on it. All it
+    has of those is a point cloud from its cameras, one-sided and noisy. So:
+
+    * this function is the **filter**. The robot's body is its own convex
+      geometry (:func:`~tpgpt.perception.obstacles.robot_bodies`); everything
+      else is observed points. It is what a real system could run;
+    * :func:`path_feasibility` is the **diagnostic**. It uses the simulator's
+      true geometry, which is a cheat, and in exchange it can say *which panel*
+      the wrist went into rather than only that something was hit.
+
+    Mixing them up is how a filter comes to depend on information it will not
+    have on hardware, and the numbers then do not transfer.
+
+    The phases and what each allows are the same as
+    :func:`path_feasibility`, with one addition the cloud makes necessary:
+
+    ``place``
+        The last ``place_window`` waypoints of the carry, where the object is
+        being set down. Contacts **from below** the object are the set-down and
+        are expected; contacts from the side are a wall or a neighbour and are
+        faults. With named geometry the two are told apart by name; with a cloud
+        they are told apart by direction, which is why the support normal is an
+        argument.
+
+    Args:
+        scene_points: Observed obstacle cloud, **with the target object removed
+            and the robot subtracted** -- see
+            :func:`~tpgpt.perception.obstacles.self_filtered`, without which the
+            arm collides with its own reflection.
+        object_points: Observed cloud of the object being manipulated, in the
+            pose it has at the pick. It is carried with the hand from the close
+            onwards.
+        place_window: How many waypoints before the release count as setting
+            down.
+        bodies: Prebuilt robot geometry, to avoid rebuilding it per candidate.
+
+    Returns:
+        ``reachable_fraction``, ``unreachable``, ``violations``,
+        ``violation_fraction``, ``first_violation``, ``faults`` (keyed
+        ``"<phase>: <what>"``) and ``tested``.
+    """
+    import mujoco
+    from scipy.spatial import cKDTree
+
+    from tpgpt.grasp.grasps import alignment_rotation
+    from tpgpt.perception.obstacles import points_inside_robot, robot_bodies
+    from tpgpt.sim.kinematics import solve_ik
+
+    model, data = env.sim.model, env.sim.data
+    controller = env.robots[0].composite_controller.part_controllers[arm]
+    qpos_index = np.asarray(controller.qpos_index)
+    saved = np.array(data.qpos)
+
+    bodies = bodies if bodies is not None else robot_bodies(env)
+    scene = np.atleast_2d(np.asarray(scene_points, dtype=float))
+    scene_tree = cKDTree(scene) if len(scene) else None
+    held = np.atleast_2d(np.asarray(object_points, dtype=float)) if len(
+        np.asarray(object_points)) else np.empty((0, 3))
+    normal = np.asarray(support_normal, dtype=float)
+    normal = normal / np.linalg.norm(normal)
+
+    indices = np.arange(0, len(positions), max(int(stride), 1))
+    align = alignment_rotation(pair)
+    offset = contact_offset(pair)
+    place_from = max(int(release_index) - int(place_window), int(grasp_index))
+
+    # The object's pose in the hand's frame, fixed from the moment it is gripped.
+    local = None
+    if len(held):
+        p0 = np.asarray(positions[int(grasp_index)], dtype=float)
+        R0 = np.asarray(rotations[int(grasp_index)], dtype=float).reshape(3, 3)
+        local = (held - p0) @ R0
+
+    seed, unreachable, violations, first = None, 0, 0, None
+    faults: dict = {}
+    try:
+        for k in indices:
+            p = np.asarray(positions[k], dtype=float)
+            R = np.asarray(rotations[k], dtype=float).reshape(3, 3)
+            wrist = R @ align
+            result = solve_ik(env, p - wrist @ offset, wrist, arm=arm,
+                              seed_qpos=seed, position_tolerance=tolerance)
+            if result.reachable:
+                seed = result.qpos
+            else:
+                unreachable += 1
+                # **A configuration inverse kinematics did not reach is not a
+                # configuration.** ``solve_ik`` returns its best effort, clamped
+                # to the joint limits, and that pose is usually buried in the
+                # scene -- which read as "200 of 200 waypoints in collision" on
+                # every candidate the arm simply could not follow, burying the
+                # real collisions among them. Unreachable is counted as
+                # unreachable and checked no further.
+                continue
+
+            phase = ("approach" if k < grasp_index
+                     else "carry" if k <= release_index else "retreat")
+            if phase == "carry" and k >= place_from:
+                phase = "place"
+            data.qpos[qpos_index] = np.asarray(result.qpos, dtype=float)
+            mujoco.mj_forward(model._model, data._data)
+
+            hit = False
+            # --- the robot against everything it has seen -------------------
+            if scene_tree is not None:
+                inside = points_inside_robot(env, scene, bodies,
+                                             tolerance=0.0, tree=scene_tree)
+                for name, count in inside["by_body"].items():
+                    faults[f"{phase}: {name} in the scene cloud"] = faults.get(
+                        f"{phase}: {name} in the scene cloud", 0) + count
+                    hit = True
+
+            # --- the robot against the object it has not picked up yet -------
+            if len(held) and phase == "approach" and abs(
+                    int(k) - int(grasp_index)) > int(grasp_window):
+                touching = points_inside_robot(env, held, bodies, tolerance=0.0)
+                for name in touching["by_body"]:
+                    key = f"approach: {name} in the target's cloud"
+                    faults[key] = faults.get(key, 0) + 1
+                    hit = True
+
+            # --- the object it is carrying, against everything else ---------
+            if local is not None and scene_tree is not None and phase in (
+                    "carry", "place"):
+                world = p + local @ R.T
+                near = scene_tree.query_ball_point(world, contact_radius)
+                touched = {int(i) for group in near for i in group}
+                if touched:
+                    # **From underneath is a surface; from the side is a
+                    # collision**, and the rule is the same throughout. It is
+                    # not only the set-down: at the start of the lift the object
+                    # is still standing on the table, so its cloud touches the
+                    # table's, and treating that as a fault rejected every
+                    # candidate on whole cells. What a carried object must never
+                    # do is meet something *beside* it -- a wall, a panel, a
+                    # neighbour -- and that is what this keeps.
+                    centre = world.mean(axis=0)
+                    lateral = [
+                        i for i in touched
+                        if (scene[i] - centre) @ normal
+                        > -0.5 * float(np.linalg.norm(scene[i] - centre) + 1e-12)
+                    ]
+                    if lateral:
+                        key = f"{phase}: the carried object hits something sideways"
+                        faults[key] = faults.get(key, 0) + len(lateral)
+                        hit = True
+            if hit:
+                violations += 1
+                first = k if first is None else first
+                if stop_early:
+                    break
+    finally:
+        data.qpos[:] = saved
+        mujoco.mj_forward(model._model, data._data)
+
+    tested = int(len(indices)) if not stop_early or first is None else int(
+        len([i for i in indices if i <= first]))
+    return {
+        "tested": tested,
+        "unreachable": int(unreachable),
+        "reachable_fraction": float(1.0 - unreachable / tested) if tested else 0.0,
+        "violations": int(violations),
+        "violation_fraction": float(violations / tested) if tested else 0.0,
+        "first_violation": None if first is None else int(first),
+        "faults": faults,
+    }
+
+
 def path_kinematics(
     env,
     positions: np.ndarray,

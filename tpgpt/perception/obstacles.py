@@ -323,3 +323,181 @@ def first_obstruction(
         origin = origin + direction * step
         travelled += step
     return float("inf"), None  # pragma: no cover - unreachable in a finite model
+
+
+@dataclass
+class ConvexBody:
+    """One convex piece of the **robot's own** body, as half spaces.
+
+    Attributes:
+        name: The MuJoCo geom name.
+        geom_id: Its id, so its world pose can be read after a forward pass.
+        planes: ``(f, 4)`` half-space rows ``[nx, ny, nz, d]`` in the geom's own
+            frame; a point is inside when ``n . x + d <= 0`` for every row.
+        radius: Bounding-sphere radius about the geom's origin, for pruning.
+    """
+
+    name: str
+    geom_id: int
+    planes: np.ndarray
+    radius: float
+
+    def contains(self, points: np.ndarray, position, rotation, tolerance: float = 0.0):
+        """Which of ``points`` lie inside this piece, at the given world pose.
+
+        Args:
+            points: ``(n, 3)`` world coordinates.
+            position, rotation: The geom's world pose, from a forward pass.
+            tolerance: Treat a point within this distance of the surface as
+                outside. Positive values shrink the body.
+
+        Returns:
+            ``(n,)`` boolean mask.
+        """
+        local = (np.atleast_2d(points) - position) @ rotation
+        return np.all(local @ self.planes[:, :3].T + self.planes[:, 3] <= -tolerance,
+                      axis=1)
+
+
+def robot_bodies(env, prefixes: tuple[str, ...] = ROBOT_PREFIXES) -> list[ConvexBody]:
+    """The robot's own collision geometry, as convex pieces.
+
+    **This is the one part of the world a real robot does know exactly.** Its
+    links and its hand come from its own description file; the scene does not.
+    So a filter that has to be deployable may use this freely and must get
+    everything else from perception -- which is why this returns the *robot*
+    and :func:`scene_obstacles` returns the *scene*, and why only the second is
+    a cheat when used in a filter.
+
+    MuJoCo's collision meshes are already convex hulls, so each piece is exactly
+    representable as a set of half spaces and "is this point inside the robot"
+    is exact rather than a proximity test against a surface sample. Box geoms --
+    the finger pads -- are converted to the same form.
+
+    Raises:
+        NotImplementedError: for a robot geom this cannot represent, rather than
+            dropping it. A silently missing link is a limb the check cannot see.
+    """
+    import mujoco
+    from scipy.spatial import ConvexHull
+
+    model = env.sim.model
+    bodies: list[ConvexBody] = []
+    for gid in range(model.ngeom):
+        name = model.geom_id2name(gid) or ""
+        if not name.startswith(prefixes):
+            continue
+        if not (model.geom_contype[gid] or model.geom_conaffinity[gid]):
+            continue
+        kind = int(model.geom_type[gid])
+        if kind == int(mujoco.mjtGeom.mjGEOM_MESH):
+            mesh = int(model.geom_dataid[gid])
+            start = int(model.mesh_vertadr[mesh])
+            count = int(model.mesh_vertnum[mesh])
+            vertices = np.array(model.mesh_vert[start:start + count], dtype=float)
+            hull = ConvexHull(vertices)
+            planes = np.array(hull.equations, dtype=float)
+            radius = float(np.linalg.norm(vertices, axis=1).max())
+        elif kind == int(mujoco.mjtGeom.mjGEOM_BOX):
+            half = np.array(model.geom_size[gid], dtype=float)
+            planes = np.array(
+                [[1, 0, 0, -half[0]], [-1, 0, 0, -half[0]],
+                 [0, 1, 0, -half[1]], [0, -1, 0, -half[1]],
+                 [0, 0, 1, -half[2]], [0, 0, -1, -half[2]]], dtype=float,
+            )
+            radius = float(np.linalg.norm(half))
+        else:  # pragma: no cover - no robot in this project has one
+            raise NotImplementedError(
+                f"robot geom {name!r} is a {mujoco.mjtGeom(kind).name} and this "
+                "has no convex form for it; a link the check cannot see is "
+                "worse than a slow check"
+            )
+        bodies.append(ConvexBody(name, gid, planes, radius))
+    return bodies
+
+
+def points_inside_robot(
+    env, points: np.ndarray, bodies, tolerance: float = 0.0, tree=None
+) -> dict:
+    """Which observed points the robot is currently standing in, and where.
+
+    Call after a forward pass, with the arm at the configuration of interest.
+
+    Args:
+        points: ``(n, 3)`` observed world points -- a scene cloud.
+        bodies: From :func:`robot_bodies`, built once and reused.
+        tolerance: Shrinks each piece by this much, so a point within it of the
+            surface does not count. Model error, not task tolerance.
+        tree: A prebuilt ``cKDTree`` over ``points``, to avoid rebuilding it per
+            waypoint.
+
+    Returns:
+        ``{"count": int, "by_body": {name: count}}``.
+    """
+    from scipy.spatial import cKDTree
+
+    data = env.sim.data
+    points = np.atleast_2d(np.asarray(points, dtype=float))
+    if not len(points):
+        return {"count": 0, "by_body": {}}
+    tree = tree if tree is not None else cKDTree(points)
+
+    hits: set[int] = set()
+    by_body: dict = {}
+    for body in bodies:
+        centre = np.array(data.geom_xpos[body.geom_id], dtype=float)
+        near = tree.query_ball_point(centre, body.radius + 1e-6)
+        if not near:
+            continue
+        rotation = np.array(data.geom_xmat[body.geom_id], dtype=float).reshape(3, 3)
+        index = np.asarray(near, dtype=int)
+        inside = body.contains(points[index], centre, rotation, tolerance)
+        if inside.any():
+            by_body[body.name] = int(inside.sum())
+            hits.update(index[inside].tolist())
+    return {"count": len(hits), "by_body": by_body}
+
+
+def self_filtered(env, points: np.ndarray, bodies=None, margin: float = 0.005):
+    """Observed points with the robot's own body removed.
+
+    A depth camera looking at a workspace sees the arm in it, and
+    :func:`~tpgpt.perception.cameras.scene_point_cloud` is built from the whole
+    image, so the robot is in its own obstacle cloud. Left there, every check
+    reports the arm colliding with itself: measured at rest on this scene, three
+    points on links 1, 2 and 3.
+
+    Removing them is not a cheat and it is what a real system does. The robot
+    knows its own shape and its own joint angles at the instant the picture was
+    taken, so it can subtract itself. **It has to be done at the configuration
+    the cloud was captured in**, which is why this takes the environment as it
+    stands rather than a pose.
+
+    Args:
+        margin: Grows each piece by this much before subtracting, since a
+            surface point sits *on* the body rather than inside it and the depth
+            measurement is noisy.
+    """
+    points = np.atleast_2d(np.asarray(points, dtype=float))
+    if not len(points):
+        return points
+    bodies = bodies if bodies is not None else robot_bodies(env)
+    hit = points_inside_robot(env, points, bodies, tolerance=-abs(margin))
+    if not hit["count"]:
+        return points
+    from scipy.spatial import cKDTree
+
+    tree = cKDTree(points)
+    drop: set[int] = set()
+    data = env.sim.data
+    for body in bodies:
+        centre = np.array(data.geom_xpos[body.geom_id], dtype=float)
+        near = tree.query_ball_point(centre, body.radius + abs(margin))
+        if not near:
+            continue
+        rotation = np.array(data.geom_xmat[body.geom_id], dtype=float).reshape(3, 3)
+        index = np.asarray(near, dtype=int)
+        inside = body.contains(points[index], centre, rotation, -abs(margin))
+        drop.update(index[inside].tolist())
+    keep = np.setdiff1d(np.arange(len(points)), np.fromiter(drop, dtype=int))
+    return points[keep]
