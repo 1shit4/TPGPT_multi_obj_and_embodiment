@@ -3214,6 +3214,109 @@ work addresses.
 
 The gripper is therefore left as it was, and `force_target` stays `None`.
 
+### Would a different object help? The bottle, measured rather than guessed
+
+`outputs/expR_bottle`. Five hands, one object, otherwise **exactly** §8p's
+conditions: grasp-pose cube, the whole funnel, the whole-path check, jaws
+commanded shut with plain `+1`.
+
+#### Why it was run
+
+The four failures of §8p are all the bread, and the obvious response is to
+swap it for something easier. A bottle is the natural candidate -- taller,
+heavier, a shape a shelf actually holds. This asks whether that would help,
+before anything is changed on the strength of it.
+
+**The scene had to gain an object for this**, so the placement sampler lays out
+five objects instead of four and every object sits somewhere slightly different.
+The bottle's cells are therefore a measurement in their own right and are **not**
+cell-by-cell comparable with §8p's other objects -- the neighbours each hand has
+to avoid are not the same ones.
+
+#### Result: 0 of 5, and it is worse than the bread
+
+| hand | grasped | traversed | held through carry | lifted | closure reached | placed |
+|---|---|---|---|---|---|---|
+| yumi | yes | no | 55% | 272 mm | **1.00** | no |
+| xarm | no | no | 26% | 4 mm | **1.04** | no |
+| panda | yes | no | 75% | 393 mm | **1.00** | no |
+| robotiq85 | yes | no | 72% | 371 mm | **1.01** | no |
+| robotiq140 | yes | no | 77% | 362 mm | **1.00** | no |
+
+Set against the objects already in the scene:
+
+| object | placed | closure reached, across the five hands |
+|---|---|---|
+| cereal | 5/5 | 0.48 – 0.93 |
+| milk | 5/5 | 0.36 – 0.91 |
+| can | 5/5 | 0.23 – 0.89 |
+| bread | 1/5 | 0.54 – 1.04 |
+| **bottle** | **0/5** | **1.00 – 1.04** |
+
+**Four of the five grip it and lift it 272 to 393 mm, then lose it mid-carry.**
+So it is not a selection failure and not a map failure -- the maps are sound,
+`min det` running 0.575 to 0.976 with no folds. It is the same squeeze-out the
+bread shows, and every hand without exception closes fully.
+
+#### Why: the bottle tapers, and every hand grips the neck
+
+Measured from the bottle's own observed cloud, its width by height:
+
+| height above its base | width | |
+|---|---|---|
+| 8 mm | 53.8 mm | widest |
+| 54 mm (its centre of mass) | 53.7 mm | |
+| 100 mm | 42.8 mm | |
+| 131 mm | 26.9 mm | |
+| 146 mm | **24.1 mm** | narrowest |
+
+A **2.2-fold taper**. The can, for contrast, is 33.5 to 33.8 mm at every height.
+
+And every hand chose a grasp **66 to 84 mm above the bottle's centre of mass**,
+which on that profile is the 24 to 27 mm neck. So the jaws are asked to hold the
+narrowest part of the object, with the mass hanging about 110 mm below the grip.
+The closure trace on `panda/bottle` shows the consequence: the jaws sit at 0.70
+for sixteen waypoints, then creep to 0.98 at waypoint 132 -- which is exactly
+when contact is lost and the bottle falls from 1253 mm to 1150.
+
+#### The finding that matters beyond the bottle
+
+**`by_centre_offset` passed all five, and it could not have done otherwise: it
+measures only the horizontal offset.** The chosen grasps sit 1.7 to 14.2 mm out
+horizontally, comfortably inside the 15 mm limit. The *vertical* offset -- 66 to
+84 mm up a tapering object -- is deliberately ignored, and
+:func:`offset_from_centre` says why in as many words: "gravity acts vertically,
+so a grip taken higher or lower on the object changes nothing about the moment."
+
+**That reasoning is sound for a uniform box and wrong for a tapered object**,
+for two reasons the bottle makes visible:
+
+* gripping higher on a taper means gripping a **narrower** section, which is
+  simply a worse grip -- 24 mm where the body offers 54;
+* and the mass then hangs further below the grip, so the object is a longer
+  pendulum and any rotation swings more of it.
+
+Neither depends on the object being a bottle. Any object whose width varies with
+height -- a jug, a mug, a wine glass, a spray bottle -- has the same property,
+and the current criterion is blind to all of them.
+
+#### What this settles, and what it does not
+
+**Swapping the bread for a bottle would make the result worse, not better**:
+0 of 5 against 1 of 5, and the bottle fails on *every* hand where the bread
+fails on four. The three objects that work -- cereal, milk, can, all 5/5 -- share
+a property the two that fail do not: a roughly constant cross-section over the
+height a hand might grip. That is the property to select an object on, if one is
+being selected.
+
+**It does not say the bottle is ungraspable.** Four of five hands gripped and
+lifted it; what failed was holding it through a 109-waypoint carry with an
+open-loop jaw command, which is the same limitation the bread exposes and is
+recorded with it above. A grip taken on the **body** rather than the neck was
+never tried, because nothing in the funnel asks for one -- which is exactly the
+gap the vertical-offset finding names.
+
+
 ### What closing the jaws on contact is worth, measured four ways
 
 **A fourth closing rule has now been tried and it fails the same way the first
