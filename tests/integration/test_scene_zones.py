@@ -227,3 +227,46 @@ def test_the_place_zone_judges_the_hand_and_not_a_cylinder_around_it():
             )
     finally:
         env.close()
+
+
+def test_the_place_zone_judges_the_pose_the_hand_actually_arrives_in():
+    """The bug that made the stage answer a different question than it asked.
+
+    The hand does not hold its pick orientation all the way to the shelf -- the
+    object is turned on the way, which is most of what reshelving is. On this
+    demonstration the hand rotates **35.5 degrees** between closing the jaws and
+    opening them. Reusing the pick orientation therefore tested a pose 36
+    degrees from the commanded one, and 36 degrees is the difference between a
+    204 mm hand lying across an 88 mm slot and lying along it.
+    """
+    from scipy.spatial.transform import Rotation
+
+    from tpgpt.grasp.filters import by_place_approach
+    from tpgpt.grasp.grasps import Grasp6D
+
+    env = make_scene("cubby")
+    try:
+        pair = resolve_pair("panda")
+        release = np.asarray(env.slot_poses()["top_middle"]) + [0, 0, 0.09]
+        # Picked with the jaws across the shelf, where the hand fits.
+        approach = np.array([0.0, 0.0, -1.0])
+        closing = np.array([0.0, 1.0, 0.0])
+        pose = np.eye(4)
+        pose[:3, :3] = np.column_stack([closing, np.cross(approach, closing), approach])
+        pose[:3, 3] = release
+        grasp = Grasp6D(pose=pose, score=0.9, gripper="franka_panda", width=0.08)
+
+        # Judged in the pick orientation: clear, and that is the wrong answer.
+        kept, _ = by_place_approach([grasp], np.array([0]), env, pair, release[None])
+        assert kept.tolist() == [0]
+
+        # Judged in the pose it actually arrives in -- a quarter turn about the
+        # approach, which swings the 204 mm axis into the 88 mm slot -- blocked.
+        quarter = Rotation.from_rotvec(np.pi / 2 * approach).as_matrix()
+        kept, blocked = by_place_approach(
+            [grasp], np.array([0]), env, pair, release[None], carry_rotation=quarter
+        )
+        assert kept.tolist() == []
+        assert "shelf_top_back" in blocked
+    finally:
+        env.close()

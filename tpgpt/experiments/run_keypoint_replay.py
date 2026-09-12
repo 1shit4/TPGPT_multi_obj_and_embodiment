@@ -88,6 +88,7 @@ from tpgpt.grasp.grasps import (
 from tpgpt.reporting.html import write_manifest
 from tpgpt.experiments.diagnose import grip_force, slip_probe
 from tpgpt.sim.replay import make_position_controller_config, replay_labels
+from tpgpt.sim.keypoints import carry_transform
 from tpgpt.sim.rollout import slot_score
 from tpgpt.transport.labels import PolicyLabels
 
@@ -774,6 +775,14 @@ def main(
                         slot_for_filters=slot,
                         scene_zones=scene_zones,
                         centre_filter=centre_filter,
+                        # How the demonstration turns the hand between closing
+                        # and opening the jaws -- 35.5 degrees here. Without it
+                        # the two place-side stages judge the hand in its pick
+                        # orientation at the release position, and orientation
+                        # is what decides whether a 204 mm hand fits an 88 mm
+                        # slot: the same descent fits one way round and sits
+                        # 64 mm inside the back panel the other.
+                        carry_rotation=carry_transform(labels)[0],
                         # **Per variant, and that is not incidental.** The map
                         # differs between keypoint constructions, so the path
                         # the arm executes differs too; a check run against the

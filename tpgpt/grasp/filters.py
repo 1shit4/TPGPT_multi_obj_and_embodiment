@@ -633,6 +633,7 @@ def by_reachability(
     arm: str = "right",
     check_collision: bool = True,
     ignore_collisions_with: tuple = (),
+    carry_rotation: np.ndarray | None = None,
 ) -> tuple[np.ndarray, dict]:
     """Keep grasps the arm can reach, at the pick and the place *and around them*.
 
@@ -690,6 +691,12 @@ def by_reachability(
 
         if place_pose is not None:
             place_position, place_rotation = place_pose
+            if carry_rotation is not None:
+                # The same correction as the place-zone stage above: the hand
+                # arrives at the shelf turned by the demonstration's own carry
+                # rotation, not in the orientation it picked the object up in.
+                place_rotation = np.asarray(
+                    carry_rotation, dtype=float).reshape(3, 3) @ place_rotation
             # Down onto the shelf, then back out the way it came.
             for f in APPROACH_FRACTIONS:
                 poses.append(
@@ -898,6 +905,7 @@ def by_place_approach(
     corridor_fraction: float = PLACE_CORRIDOR_FRACTION,
     samples: int = PLACE_CORRIDOR_SAMPLES,
     obstacles=None,
+    carry_rotation: np.ndarray | None = None,
 ) -> tuple[np.ndarray, dict]:
     """Drop grasps whose release would have the hand arrive through a wall.
 
@@ -937,12 +945,27 @@ def by_place_approach(
     geometry, read out rather than written down; on the ``open`` variant the
     same probe finds only the board.
 
-    **The grasp does not change orientation between pick and place.** Once the
-    jaws shut the object is rigid with the hand, so the release pose inherits
-    the pick's rotation and the arrival direction is the grasp's own approach
-    axis. That is the same assumption :func:`by_reachability` already makes
-    through :func:`~tpgpt.experiments.pipeline.place_pose_for`, so the two
-    stages agree about where the hand ends up.
+    **The hand does not hold the same orientation from pick to place, and
+    assuming it does was a real defect.** Once the jaws shut the object is rigid
+    with the hand, but the *object* is turned on the way to the shelf -- that is
+    most of what reshelving is. Measured on this demonstration, the hand rotates
+    **35.5 degrees** between closing and opening. A check that reuses the pick
+    orientation therefore tests a pose 36 degrees away from the one the arm is
+    actually commanded to, which is not the same question.
+
+    ``carry_rotation`` is that rotation, taken from the demonstration's own
+    labels by :func:`~tpgpt.sim.keypoints.carry_transform`. Passing it makes
+    this stage judge the pose the hand really arrives in. Omitting it keeps the
+    old behaviour, which exists only so a caller with no demonstration in hand
+    still gets an answer, and that answer is the weaker one.
+
+    **Why the orientation decides it here.** The real Franka hand is **204 mm
+    across its jaw axis and 63 mm across the perpendicular**, measured on
+    robosuite's own model, and the top cubby leaves about **88 mm** of depth
+    between the board's front edge and the back panel. So the very same descent
+    onto the very same slot fits with the jaws turned across the shelf and is
+    64 mm inside the panel with them turned front-to-back. Getting the
+    orientation wrong does not shade the answer; it inverts it.
 
     Args:
         release_positions: Where the hand's fingertip point must be at release,
@@ -981,10 +1004,13 @@ def by_place_approach(
     depth_tcp = float(gripper_geometry(pair.graspgen).tcp_depth)
     steps = np.linspace(0.0, length, max(int(samples), 1))
 
+    carry = (np.eye(3) if carry_rotation is None
+             else np.asarray(carry_rotation, dtype=float).reshape(3, 3))
+
     blocked_by: dict = {}
     keep = []
     for position, i in zip(positions, indices):
-        rotation = grasps[int(i)].rotation
+        rotation = carry @ grasps[int(i)].rotation
         culprit = None
         for step in steps:
             # The hand's own base sits ``tcp_depth`` behind the fingertip point,
@@ -1320,6 +1346,7 @@ def filter_grasps(
     support_normal: np.ndarray | None = (0.0, 0.0, 1.0),
     check_place_approach: bool = True,
     centre_of_mass: np.ndarray | None = None,
+    carry_rotation: np.ndarray | None = None,
 ) -> FilterFunnel:
     """Run the whole funnel, recording what each stage cost.
 
@@ -1344,6 +1371,13 @@ def filter_grasps(
             same pathology without tying the target scene to one recording.
         check_place_approach: Run :func:`by_place_approach`, which needs ``env``
             and ``place_pose``. Off only to isolate what it is worth.
+        carry_rotation: How the demonstration turns the hand between closing
+            the jaws and opening them, from
+            :func:`~tpgpt.sim.keypoints.carry_transform`. **Both place-side
+            stages need it**: without it they test the hand in its *pick*
+            orientation at the *release* position, which on this demonstration
+            is 35.5 degrees from the pose actually commanded -- and orientation
+            is what decides whether a 204 mm hand fits an 88 mm slot.
         centre_of_mass: World centre of mass of the object being picked. Given,
             :func:`by_centre_offset` runs as a late, loose stage; omitted, it
             does not run at all. Late because it is a tie-break among grasps
@@ -1392,6 +1426,7 @@ def filter_grasps(
         survivors, blocked = by_place_approach(
             grasps, indices, env, pair, release,
             exclude=tuple(t for t in (target_name,) if t),
+            carry_rotation=carry_rotation,
         )
         if blocked:
             funnel.flags["place_approach_blocked_by"] = blocked
@@ -1432,6 +1467,7 @@ def filter_grasps(
     if env is not None:
         survivors, failures = by_reachability(
             env, grasps, indices, pair, place_pose,
+            carry_rotation=carry_rotation,
             # The fingers are *meant* to close around the target, so its
             # contacts are the grasp rather than a fault. Everything else --
             # the shelf above all -- counts.

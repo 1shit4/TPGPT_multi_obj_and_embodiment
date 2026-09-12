@@ -139,6 +139,7 @@ def main(
     out_dir: str | Path = "outputs/path_study",
     ik_stride: int = 4,
     check_kinematics: bool = True,
+    figures_dir: str | Path | None = None,
 ) -> dict:
     """Measure every cell of a finished campaign geometrically.
 
@@ -150,6 +151,12 @@ def main(
         ik_stride: Waypoint stride for the kinematic pass.
         check_kinematics: Run it at all. It is the slow half, a few seconds a
             cell against a few hundred milliseconds for the clearance sweep.
+        figures_dir: Draw the demonstration and its transported counterpart for
+            every cell, with the keypoint displacements between them. Reading a
+            path is often faster than reading a table of its statistics, and the
+            trajectory *between* the keypoints is the part no keypoint
+            constrains -- which is exactly where a map that looks healthy on
+            every summary number can still be wrong.
     """
     rows_path, out_dir = Path(rows_path), Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -201,6 +208,7 @@ def main(
                   flush=True)
             continue
 
+        figure_state = None
         env = build_scene(objects=STUDY_OBJECTS, seed=0,
                           controller_config=config, gripper=gripper)
         try:
@@ -395,10 +403,43 @@ def main(
             record.update(
                 _place_zone_audit(env, grasp_set, pair, name, slot_pose, cloud)
             )
+
+            # Kept for the figure, which is drawn after the environment closes.
+            figure_state = {
+                "warped": result["warped"],
+                "S": result["source_keypoints"],
+                "T": result["target_keypoints"],
+                # The figure plots each path's height against the surface it
+                # is delivering onto, so these are the two destination heights.
+                "surfaces": {
+                    "source": source_placement.destination_height,
+                    "target": placement.destination_height,
+                },
+            }
         except Exception as exc:                      # noqa: BLE001 - recorded
             record["failed"] = f"{type(exc).__name__}: {exc}"
         finally:
             env.close()
+        if figures_dir is not None and figure_state is not None:
+            try:
+                from tpgpt.viz.keypoint_figures import figure_transported_trajectory
+
+                Path(figures_dir).mkdir(parents=True, exist_ok=True)
+                gap = record.get("path_vs_vertical_deg", float("nan"))
+                figure_transported_trajectory(
+                    labels.positions,
+                    figure_state["warped"],
+                    figure_state["S"],
+                    figure_state["T"],
+                    figure_state["surfaces"],
+                    Path(figures_dir) / f"{gripper}_{name}.png",
+                    release_index=release_index,
+                    title=(f"{gripper} / {name}: the plan travels {gap:.0f} deg "
+                           f"from vertical into the grasp"),
+                )
+                record["figure"] = f"{gripper}_{name}.png"
+            except Exception as exc:                  # noqa: BLE001 - recorded
+                record["figure_failed"] = f"{type(exc).__name__}: {exc}"
         out_rows.append(record)
         top = sorted(record.get("culprits", {}).items(),
                      key=lambda kv: -kv[1])[:2]
@@ -456,6 +497,8 @@ if __name__ == "__main__":
     parser.add_argument("--out", default="outputs/path_study")
     parser.add_argument("--ik-stride", type=int, default=4)
     parser.add_argument("--no-kinematics", action="store_true")
+    parser.add_argument("--figures", default=None,
+                        help="Directory to draw per-cell trajectory figures into.")
     args = parser.parse_args()
     main(args.rows, args.out, ik_stride=args.ik_stride,
-         check_kinematics=not args.no_kinematics)
+         check_kinematics=not args.no_kinematics, figures_dir=args.figures)

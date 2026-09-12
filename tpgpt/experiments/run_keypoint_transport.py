@@ -457,6 +457,7 @@ def target_placement(
     path_check: "PathCheck | None" = None,
     scene_zones: bool = True,
     centre_filter: bool = True,
+    carry_rotation: np.ndarray | None = None,
 ) -> tuple[ObjectPlacement, np.ndarray]:
     """Describe an object in the scene and where the task wants it.
 
@@ -544,6 +545,12 @@ def target_placement(
             placement pose exists to test reachability against.
         slot_for_filters: Destination slot, needed by ``filters="full"`` to
             derive the placement pose the reachability stage checks.
+        carry_rotation: How the demonstration turns the hand between closing the
+            jaws and opening them. Both place-side filter stages need it or they
+            judge the wrong pose -- 35.5 degrees wrong on this demonstration, and
+            orientation is what decides whether the hand fits the slot at all.
+            Available from ``carry_transform(labels)``; ``path_check`` carries
+            the labels, so a caller passing one can derive it.
         scene_zones: Apply the two scene-derived no-approach zones inside the
             full funnel -- :func:`~tpgpt.grasp.filters.by_support_approach` at
             the pick and :func:`~tpgpt.grasp.filters.by_place_approach` at the
@@ -677,6 +684,7 @@ def target_placement(
                 check_place_approach=bool(scene_zones),
                 centre_of_mass=object_centre_of_mass(env, instance)
                 if centre_filter else None,
+                carry_rotation=carry_rotation,
                 # None disables the funnel's own "demonstrated" stage, which is
                 # how the approach test is switched off inside the full funnel.
                 # The reference is still held above for ranking and the roll.
