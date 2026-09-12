@@ -306,3 +306,73 @@ def test_the_place_zone_judges_the_pose_the_hand_actually_arrives_in():
         assert kept.tolist() == [0]
     finally:
         env.close()
+
+
+def test_the_phase_check_allows_the_grip_and_refuses_the_shelf():
+    """The whole point of phases: the same contact is expected at one moment
+    and a fault at another, so naming them removes the need to tolerate a
+    *fraction* of the path being in collision.
+
+    Built as two straight paths with known answers rather than a transported
+    one, so the expected verdict does not depend on the map.
+    """
+    from tpgpt.grasp.filters import path_feasibility
+
+    env = make_scene("cubby")
+    try:
+        pair = resolve_pair("panda")
+        can = np.asarray(env.object_position("can"))
+        # Straight down onto the can, hold, then straight up. Jaws across the
+        # shelf; the close is at the midpoint.
+        n, grasp_at = 60, 30
+        down = np.linspace(can + [0, 0, 0.25], can + [0, 0, 0.01], grasp_at)
+        up = np.linspace(can + [0, 0, 0.01], can + [0, 0, 0.25], n - grasp_at)
+        positions = np.vstack([down, up])
+        R = np.column_stack([[0.0, 1, 0], [1.0, 0, 0], [0.0, 0, -1]])
+        rotations = np.repeat(R[None], n, axis=0)
+
+        result = path_feasibility(
+            env, positions, rotations, pair, "can", grasp_at, n - 1,
+        )
+        assert result["tested"] == n
+        # Whatever it finds, the fingers closing on the can must not be in it:
+        # that contact is the task.
+        assert not any("can_g0" in key and "gripper" in key
+                       for key in result["faults"]
+                       if key.startswith("carry")), result["faults"]
+
+        # The same motion driven **through the shelf board** -- a pose the arm
+        # can genuinely reach, unlike one behind the back panel, which it simply
+        # cannot get to and where the check therefore has nothing to report.
+        slot = np.asarray(env.slot_poses()["top_middle"])
+        through = np.repeat((slot - [0, 0, 0.05])[None], n, axis=0)
+        result = path_feasibility(
+            env, through, rotations, pair, "can", grasp_at, n - 1,
+        )
+        assert result["violations"] > 0
+        assert any("shelf" in key for key in result["faults"]), result["faults"]
+    finally:
+        env.close()
+
+
+def test_the_phase_check_stops_early_when_asked():
+    """Selection is decided by the first fault, so the rest of the sweep is
+    wasted there; diagnosis needs the whole tally. Both are available."""
+    from tpgpt.grasp.filters import path_feasibility
+
+    env = make_scene("cubby")
+    try:
+        pair = resolve_pair("panda")
+        slot = np.asarray(env.slot_poses()["top_middle"])
+        positions = np.repeat((slot - [0, 0, 0.05])[None], 40, axis=0)
+        R = np.column_stack([[0.0, 1, 0], [1.0, 0, 0], [0.0, 0, -1]])
+        rotations = np.repeat(R[None], 40, axis=0)
+
+        full = path_feasibility(env, positions, rotations, pair, "can", 10, 30)
+        early = path_feasibility(env, positions, rotations, pair, "can", 10, 30,
+                                 stop_early=True)
+        assert full["violations"] > early["violations"]
+        assert early["first_violation"] == full["first_violation"]
+        assert early["tested"] < full["tested"]
+    finally:
+        env.close()

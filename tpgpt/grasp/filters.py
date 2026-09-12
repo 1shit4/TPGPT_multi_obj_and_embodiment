@@ -1147,6 +1147,291 @@ def path_clearance(
     }
 
 
+# ---------------------------------------------- the trajectory, phase by phase
+#: What the task is doing at each waypoint, and therefore which contacts are
+#: allowed there.
+#:
+#: **Why phases instead of one threshold.** ``ROBOTICS_NOTES.md`` 7.38 measured
+#: that a blanket "reject any path that touches anything" rejects *every*
+#: candidate, because contact is normal in this task: the fingers close around
+#: the object, and the object is set down on a board. The response at the time
+#: was to allow a *fraction* of the path to be in contact, which is a fudge --
+#: it lets real collisions through in exchange for tolerating the legitimate
+#: ones, and Experiment Q let the hand be driven into the shelf on 16 of 20
+#: cells at a 40% allowance.
+#:
+#: Naming the legitimate contacts instead removes the need for a fraction. Every
+#: contact is then either expected at that moment or it is a fault, and the
+#: threshold is **zero**.
+#: How far two geoms must overlap before the contact counts as a fault, metres.
+#:
+#: **Not a fraction of the path -- a depth.** The threshold on *how much* of a
+#: trajectory may be in collision is zero, because the legitimate contacts are
+#: named. What is not zero is how deep a contact has to be before it is real,
+#: and that is a statement about the **model**, not about the task:
+#:
+#: * MuJoCo reports a contact as soon as two geoms come within their solver
+#:   margin, so a hand passing a millimetre from a board registers;
+#: * the objects are meshes wrapped in whatever collision primitives robosuite
+#:   gave them, which do not sit exactly on the visible surface;
+#: * and the path is sampled every 200th of itself, so a contact can be
+#:   straddled by the sampling.
+#:
+#: 1 mm is below the thickness of anything that matters here -- the shelf panels
+#: are 12 mm, the fingers several -- and above the grazing that model error
+#: produces. Measured over 200 candidates on eight cells, requiring literal
+#: zero overlap left **no admissible candidate on four of the eight**, and
+#: almost every rejection was a graze.
+CONTACT_DEPTH_TOLERANCE = 0.001
+
+#: Waypoints before the commanded close within which the fingers may touch the
+#: object.
+#:
+#: The jaws are about to shut, and the path is discrete: a hand arriving at the
+#: grasp one or two waypoints early is the sampling, not a fault. What this must
+#: still catch is the hand arriving *properly* early and shoving the object out
+#: of the grasp -- on the yumi cells of `FINDINGS.md` 8o that was contact at
+#: waypoints 39 to 42 against a close commanded at 50, eight to eleven waypoints
+#: ahead, moving the object 17.9 to 113.6 mm. Three waypoints separates the two.
+GRASP_CONTACT_WINDOW = 3
+
+PHASES = ("approach", "carry", "retreat")
+
+
+def _robot_contact_allowed(
+    phase: str, robot: str, other: str, target: str, near_grasp: bool = False
+) -> bool:
+    """Is this **robot**-to-scene contact part of the task, at this moment?
+
+    The rules, and each is a statement about the task rather than a tolerance:
+
+    ``approach``
+        Nothing, **except the fingers meeting the target in the last few
+        waypoints before the close** (``near_grasp``). The hand is travelling to
+        the object and has not reached it, so every other contact is a fault --
+        and touching the object properly early is what shoves it out of the
+        grasp, measured at 17.9 to 113.6 mm on the yumi cells of `FINDINGS.md`
+        8o, where contact arrived eight to eleven waypoints ahead of the close.
+        See :data:`GRASP_CONTACT_WINDOW` for why the exception is narrow.
+    ``carry``
+        The **fingers on the target**, which is the grip. Nothing else: an arm
+        link inside a shelf wall is what stops ``panda/can`` dead from waypoint
+        130, and no part of the hand belongs inside the shelf.
+    ``retreat``
+        The **fingers on the target** again, because they brush it as they part.
+        Anything else is the hand failing to get clear.
+    """
+    fingers = robot.startswith("gripper0")
+    on_target = bool(target) and target in other
+    if phase == "approach":
+        return bool(near_grasp and fingers and on_target)
+    return on_target and fingers
+
+
+def _object_contact_allowed(phase: str, other: str, support: tuple[str, ...]) -> bool:
+    """Is this **carried-object**-to-scene contact part of the task?
+
+    The object is allowed to rest on a surface, and nothing else. Which surfaces
+    those are is passed in rather than assumed, because it is the one piece of
+    task knowledge here: the table it starts on and the board it ends on.
+
+    Note what this forbids during the carry -- the object inside a side wall, a
+    back panel or a neighbouring object. Those are exactly the contacts 7.38
+    found along transported paths (``milk_g0`` hit 98 times on one cell) and
+    they were invisible to every earlier check, because the object was left
+    lying where the simulator had put it while the plan carried it elsewhere.
+    """
+    return any(s and s in other for s in support)
+
+
+def path_feasibility(
+    env,
+    positions: np.ndarray,
+    rotations: np.ndarray,
+    pair: GripperPair,
+    target_name: str,
+    grasp_index: int,
+    release_index: int,
+    carried_offset: tuple[np.ndarray, np.ndarray] | None = None,
+    support: tuple[str, ...] = ("table_collision", "shelf_top_board"),
+    arm: str = "right",
+    tolerance: float = REACH_TOLERANCE,
+    stride: int = 1,
+    stop_early: bool = False,
+    depth_tolerance: float = CONTACT_DEPTH_TOLERANCE,
+    grasp_window: int = GRASP_CONTACT_WINDOW,
+) -> dict:
+    """Can the arm fly this whole path, and does anything hit anything it should not?
+
+    **One pass, because the two questions share their expensive step.** Knowing
+    where the arm's *links* are -- not just its hand -- needs a joint
+    configuration, which needs inverse kinematics. Having solved it, putting it
+    into the model and reading MuJoCo's own contacts costs almost nothing on top.
+    Measured on this scene: 0.70 ms for a warm-started IK solve and 0.34 ms for
+    the contact query, so a 200-waypoint path costs **0.21 s**, against 90 s for
+    one physics replay of the same cell.
+
+    **This replaces three weaker checks.**
+    :func:`by_reachability` asks the same two questions at **13** sampled poses
+    out of 200, and 7.38 measured candidates passing that sample and then
+    colliding at 79 to 162 of the other 187.
+    :func:`path_clearance` checks all 200 but models only the *gripper*, as a
+    point cloud against analytic primitives -- so it cannot see an arm link
+    inside a shelf wall, which is what stops ``panda/can`` dead from waypoint
+    130 (``robot0_link6_collision <-> shelf_top_wall_r``, continuously).
+    And both needed a tolerated *fraction* of contact; this needs none, because
+    the legitimate contacts are named (:func:`_contact_is_allowed`).
+
+    **The carried object travels with the hand.** From the moment the jaws close
+    it is rigid with them, so it is moved to its held pose at each waypoint
+    before the contacts are read. Leaving it where the simulator last put it
+    would check the hand against an object lying on the table while the plan
+    carries it through a shelf.
+
+    Args:
+        positions: ``(m, 3)`` fingertip positions along the transported path.
+        rotations: ``(m, 3, 3)`` grasp-convention orientations along it.
+        target_name: The object being manipulated.
+        grasp_index: Waypoint at which the jaws are commanded shut.
+        release_index: Waypoint at which they are commanded open.
+        carried_offset: ``(position, quaternion)`` of the object in the hand's
+            frame at the moment of the grasp. ``None`` leaves the object where
+            it is and checks the robot alone.
+        support: Geom-name fragments the object is allowed to rest on.
+        stride: Test every n-th waypoint. 1 is the honest figure and costs a
+            fifth of a second.
+        depth_tolerance: How far two geoms must overlap before the contact is
+            a fault. See :data:`CONTACT_DEPTH_TOLERANCE` -- this is model error,
+            not task tolerance, and the *fraction* of the path allowed to be in
+            collision stays zero.
+        grasp_window: Waypoints either side of the close within which the
+            fingers may touch the object.
+        stop_early: Return at the first disallowed contact. Since the threshold
+            is zero, a candidate is decided by its first fault and the rest of
+            the sweep is wasted -- pass this when **selecting**, and leave it off
+            when **diagnosing**, where the whole tally is the point. It matters
+            most on the candidates that are worst: a path the arm cannot hold
+            spends 80 ms per failed inverse-kinematics solve instead of 0.7, so
+            a hopeless candidate costs 7.6 s to sweep and 0.3 s to reject.
+
+    Returns:
+        ``reachable_fraction``, ``unreachable``, ``violations`` (count of
+        waypoints carrying a disallowed contact), ``violation_fraction``,
+        ``first_violation`` (waypoint index, or ``None``), ``faults`` (a tally
+        keyed ``"<phase>: <robot geom> <-> <scene geom>"``), and ``tested``.
+    """
+    import mujoco
+
+    from tpgpt.grasp.grasps import alignment_rotation
+    from tpgpt.sim.kinematics import solve_ik
+
+    model, data = env.sim.model, env.sim.data
+    controller = env.robots[0].composite_controller.part_controllers[arm]
+    qpos_index = np.asarray(controller.qpos_index)
+    saved = np.array(data.qpos)
+
+    indices = np.arange(0, len(positions), max(int(stride), 1))
+    align = alignment_rotation(pair)
+    offset = contact_offset(pair)
+    joint = None
+    if carried_offset is not None:
+        for obj in getattr(env, "objects", []):
+            if obj.name == target_name and getattr(obj, "joints", None):
+                joint = obj.joints[0]
+                break
+
+    seed, unreachable, violations, first = None, 0, 0, None
+    faults: dict = {}
+    try:
+        for k in indices:
+            p = np.asarray(positions[k], dtype=float)
+            R = np.asarray(rotations[k], dtype=float).reshape(3, 3)
+            wrist = R @ align
+            result = solve_ik(env, p - wrist @ offset, wrist, arm=arm,
+                              seed_qpos=seed, position_tolerance=tolerance)
+            if result.reachable:
+                seed = result.qpos
+            else:
+                unreachable += 1
+
+            phase = ("approach" if k < grasp_index
+                     else "carry" if k <= release_index else "retreat")
+            data.qpos[qpos_index] = np.asarray(result.qpos, dtype=float)
+            if joint is not None and phase != "approach":
+                # Rigid with the hand from the close onwards.
+                held_pos, held_quat = carried_offset
+                world = p + R @ np.asarray(held_pos, dtype=float)
+                quat = np.empty(4)
+                mujoco.mju_mat2Quat(quat, np.asarray(R, dtype=float).flatten())
+                out = np.empty(4)
+                mujoco.mju_mulQuat(out, quat, np.asarray(held_quat, dtype=float))
+                data.set_joint_qpos(joint, np.concatenate([world, out]))
+            mujoco.mj_forward(model._model, data._data)
+
+            hit = False
+            near_grasp = abs(int(k) - int(grasp_index)) <= int(grasp_window)
+            for c in range(data._data.ncon):
+                contact = data._data.contact[c]
+                # How deep, not merely whether. MuJoCo reports a contact at its
+                # solver margin, so a millimetre of clearance still registers.
+                if float(contact.dist) > -float(depth_tolerance):
+                    continue
+                if not all(
+                    model.geom_contype[g] or model.geom_conaffinity[g]
+                    for g in (contact.geom1, contact.geom2)
+                ):
+                    continue                      # drawn, not solid
+                a = model.geom_id2name(contact.geom1) or ""
+                b = model.geom_id2name(contact.geom2) or ""
+                names = (a, b)
+                robot = [n for n in names if n.startswith(("robot0", "gripper0"))]
+                other = [n for n in names if not n.startswith(("robot0", "gripper0"))]
+                if len(robot) == 1 and len(other) == 1:
+                    if _robot_contact_allowed(phase, robot[0], other[0],
+                                              target_name, near_grasp):
+                        continue
+                    key = f"{phase}: {robot[0]} <-> {other[0]}"
+                elif not robot and target_name and any(target_name in n for n in names):
+                    # The manipulated object against the scene. Contacts that
+                    # involve neither the robot nor this object -- the shelf on
+                    # the table, a neighbour on the table -- are never this
+                    # function's business and fall through to the ``else``.
+                    scene = [n for n in names if target_name not in n]
+                    if not scene:
+                        continue                      # its own two geoms
+                    if _object_contact_allowed(phase, scene[0], support):
+                        continue
+                    if phase == "approach":
+                        # It is still standing where it was put, untouched, so
+                        # whatever it rests against is the scene's business.
+                        continue
+                    key = f"{phase}: {target_name} <-> {scene[0]}"
+                else:
+                    continue
+                faults[key] = faults.get(key, 0) + 1
+                hit = True
+            if hit:
+                violations += 1
+                first = k if first is None else first
+                if stop_early:
+                    break
+    finally:
+        data.qpos[:] = saved
+        mujoco.mj_forward(model._model, data._data)
+
+    tested = int(len(indices)) if not stop_early or first is None else int(
+        len([i for i in indices if i <= first]))
+    return {
+        "tested": tested,
+        "unreachable": int(unreachable),
+        "reachable_fraction": float(1.0 - unreachable / tested) if tested else 0.0,
+        "violations": int(violations),
+        "violation_fraction": float(violations / tested) if tested else 0.0,
+        "first_violation": None if first is None else int(first),
+        "faults": faults,
+    }
+
+
 def path_kinematics(
     env,
     positions: np.ndarray,
