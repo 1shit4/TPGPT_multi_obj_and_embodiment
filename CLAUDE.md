@@ -516,6 +516,54 @@ Each of these cost real debugging time. Full detail in `ROBOTICS_NOTES.md`.
   geometry more than half the time failed (median 23.4–39.1 mm) and no
   successful cell exceeds 12.4 mm. Partial — it reaches 4 of 9 failures, and
   two failures involve zero penetration.
+- **The scene geometry refused the task, and it took 88 mm against 204 to see
+  it.** The top cubby left **88 mm** of usable depth between the board's front
+  edge and the back panel, while the registered hands are **83 to 217 mm across
+  their jaw axis** and 63 to 130 mm across the perpendicular — measured on
+  robosuite's own models, which agree with GraspGen-X's to 8 mm, so neither
+  model was at fault. Every hand fitted only turned exactly sideways and none
+  fitted turned front-to-back; 16 of 20 cells drove the hand into the back
+  panel, the arm jammed, and the object was released a median **85.5 mm** short
+  of the commanded pose. Deepening the board to 280 mm fixed the placement
+  outright: 7/20 to **16/20**, and the shortfall at release to 13.8 mm. **Before
+  blaming a method, measure whether the hand fits the hole.** `§8p`.
+- **A filter may use the robot's own geometry and must not use the scene's.** A
+  robot knows its links and its hand exactly — its own description file — and
+  knows the shelf only as a point cloud. So `path_feasibility_observed` (the
+  filter) tests the robot's convex collision hulls against the **observed**
+  cloud, and `path_feasibility` (the diagnosis) uses the simulator's truth and
+  in exchange can name the panel. Mixing them makes a filter depend on what
+  hardware will not have. Note also `self_filtered`: a depth image of a
+  workspace contains the arm, so without subtracting itself the robot collides
+  with its own reflection.
+- **A pose inverse kinematics did not reach is not a pose, and must not be
+  collision-checked.** `solve_ik` returns its best effort clamped to the joint
+  limits, and that configuration is usually buried in the scene — so every
+  candidate the arm simply could not follow read as "200 of 200 waypoints in
+  collision" and buried the real collisions among them.
+- **A carried object touching something *below* it is a surface, in every phase,
+  not only at the set-down.** At the start of the lift the object is still
+  standing on the table, so its cloud touches the table's; treating that as a
+  fault rejected every candidate on whole cells. What it must never meet is
+  something *beside* it.
+- **Grip height matters on anything that is not a uniform box, and
+  `by_centre_offset` cannot see it.** It measures the **horizontal** offset only,
+  on the argument that gravity acts vertically so grip height changes no moment.
+  Sound for a box; wrong twice over for a taper. The bottle narrows **2.2-fold**
+  over its height — 53.8 mm at the base, 24.1 mm at the top — and all five hands
+  chose a grasp 66 to 84 mm above its centre of mass, which is the neck. All
+  five passed the horizontal test at 1.7 to 14.2 mm and **0 of 5 placed**.
+  Gripping higher on a taper grips a narrower section *and* lengthens the
+  pendulum below the grip. `§8p`.
+- **Four closing rules have now failed the same way: the grip window is
+  per-object as well as per-hand and no constant sits inside all of them.**
+  `+1` (fully shut) squeezes the bread out; stopping at first contact fires on
+  the descent graze and freezes the jaws at 0.00-0.09; slip feedback runs away,
+  0 of 5, because tightening a grip that is already extruding increases the
+  drift; contact plus a fixed 10% of travel is a **straight trade** — 16/20
+  either way, gaining two bread cells and losing two cereal ones. Closure
+  separates outcomes perfectly under `+1` (kept 0.23-0.93, lost 1.00-1.04) and
+  the separation is destroyed by any rule that moves it. `+1` stays.
 - **A cloud is the wrong description of the shelf, and MuJoCo's ray caster hits
   things that are not solid.** The camera-built scene cloud holds **76 points**
   in the column above the `top_middle` slot -- the column every placement
@@ -528,14 +576,21 @@ Each of these cost real debugging time. Full detail in `ROBOTICS_NOTES.md`.
   marker box at every slot -- an unguarded cast reports an obstruction 58 mm
   away that the hand goes straight through, which is a plausible number for a
   surface that is not there. `§7.39`.
-- **`by_reachability` is inert: it falls back on 20 of 20 cells.** It rejects
-  every remaining candidate on every cell and the funnel passes them through, at
-  the cost of thirteen IK solves per candidate. This is §7.38 arriving as a
-  measurement -- the hand's body is inside scene geometry at the placement for
-  essentially every candidate, so "reject the colliding ones" rejects all of
-  them. It is also the stage `path_clearance` replaces, so it is redundant and
-  inert at once. **A funnel flag saying a stage fell back does not mean the
-  stage was harmless; it means it did nothing at all.** `§7.39`.
+- **`by_reachability` is retired, and three separate defects are why.** It falls
+  back on **20 of 20** cells — rejecting everything, so the funnel passes
+  everything through and only a flag survives, at thirteen IK solves per
+  candidate. It samples **13 poses of a 200-waypoint path**, and §7.38 measured
+  candidates passing that sample and colliding at 79 to 162 of the other 187.
+  And it tested the hand in its **pick** orientation at the release position,
+  where the demonstration turns the hand **35.5 degrees** between closing and
+  opening — against a slot that fits a hand one way round and not the other,
+  that inverts the answer rather than shading it. The same orientation bug was
+  in `by_place_approach`, which additionally approximated the hand as a
+  **cylinder** of its own radius: over 2000 candidates the cylinder kept 489
+  where the hand itself keeps 369, agreeing on **153**. Superseded in full by
+  `path_feasibility_observed`. The general lesson is the first one: **a funnel
+  flag saying a stage fell back does not mean the stage was harmless; it means
+  it did nothing at all.** `§7.39`, `§8p`.
 - **Experiment O's 37.8 degree approach-gap ceiling is withdrawn.** A cell placed
   at **65.3 degrees** in Experiment Q, and within that run the gap separates
   nothing (placed 3.3-65.3, missed 3.6-84.5). The direction still has to be
@@ -603,6 +658,7 @@ and git.
 | Sec. V (simulation, keypoints, impedance control) | `tpgpt/sim/` |
 | Sec. IV metrics | `tpgpt/metrics/` |
 | Grasp generation, gripper registry, frame contract | `tpgpt/grasp/` |
+| Whether a transported path is flyable and collision-free | `filters.path_feasibility_observed` (filter, cloud) and `filters.path_feasibility` (diagnosis, true geometry) |
 | Object clouds and the scene graph | `tpgpt/perception/` |
 | The scene's solid geometry, as exact primitives | `tpgpt/perception/obstacles.py` |
 | Deterministic prompt parsing | `tpgpt/language/` |
@@ -679,6 +735,20 @@ every stage rather than trading aim against conditioning.
 unmeasured).** Text prompt -> object and shelf -> cloud -> ranked 6-DoF grasps
 -> filters -> keypoints -> transport -> policy -> execute -> scored, with
 per-run HTML reports. Nine gripper pairs registered, eight verified in physics.
+
+**The current end-to-end result is 16/20 across five hands and four objects
+(`FINDINGS.md` §8p, Experiment R), from one demonstration.** Cereal, milk and
+can are **15 of 15**; every one of the four failures is the bread. Nineteen of
+twenty grasps hold. That is up from 7/20 on the same cells three weeks of
+debugging earlier, and the whole of the gain is two changes that have nothing to
+do with the transportation map: **the shelf was too shallow for any hand to
+enter** (88 mm of depth against hands 83 to 217 mm wide) and **the checks that
+should have noticed were inert, sampled, or asking about the wrong
+orientation**. `min det` is unchanged at a median 0.901 -- the map was never the
+problem and was never touched.
+
+Read it as a **position-control replay**: no policy, no attractor integration,
+so it is an upper bound on what the full pipeline does.
 
 **Grasp selection no longer needs the demonstration, and that is measured.**
 Experiment Q (`FINDINGS.md` §8o) replaced the 45 degree resemblance test with
