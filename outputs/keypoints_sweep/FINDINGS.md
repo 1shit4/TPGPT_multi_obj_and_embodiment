@@ -37,7 +37,8 @@ numbers are a scratch experiment, not evidence — that rule is `ROBOTICS_NOTES`
 > | N | §8k the full funnel | — | **confounded against M**, its intended baseline; its per-cell diagnosis is **withdrawn** (§7.37). It was the botched first attempt at M, not a later experiment |
 > | O | §8m filters vs ranking | — | **stands.** The first run to vary grasp selection one thing at a time. Gripper commanded shut, as all runs before 2026-09-12 |
 > | P | §8n gripper or grasp? | — | **stands.** 16 of 20 grasps grip with plain `+1`; the grasp pose decides the outcome, not the pair |
-> | Q | §8o scene-derived constraints | — | **stands.** Comparable with O to the last bit -- six cells that chose the same grasp reproduce every recorded field exactly across seven intervening commits |
+> | Q | §8o scene-derived constraints | — | **stands**, and is **superseded by R** for the shelf and the collision check. Its 7/20 was measured against an 88 mm slot no hand fits and a collision check that was inert on every cell |
+> | R | §8p a shelf a hand fits into | — | **stands.** 16/20, with every object but the bread at 5/5. The current result |
 >
 > ### The two corrections, and which numbers each reaches
 >
@@ -2984,6 +2985,217 @@ what the full pipeline does.
   prediction registrable before the outcome was known, and it is why the starved
   funnel is a measurement here rather than a guess afterwards.
 
+
+
+## 8p. Experiment R — a shelf a hand fits into, and a collision check on the real body
+
+`outputs/expR`, five hands times four objects, one seed, the grasp-pose cube,
+position-control replay, jaws commanded shut with plain `+1`. The selection pass
+that preceded it is `outputs/expR_select2`.
+
+### The question
+
+Experiment Q (§8o) placed 7 of 20 and its failures had two causes, both measured
+and neither in the transportation map: the arm jammed against the shelf on its
+way to the placement, and the grip did not survive the lift. This asks what
+happens when the first cause is removed.
+
+Two things were changed, and they are the same defect seen from two sides -- the
+hand did not fit the space it was asked to work in, and nothing in the pipeline
+could see that it did not.
+
+### What was changed
+
+**The shelf.** The top cubby left **88 mm** of usable depth between the board's
+front edge and the back panel. The grippers in this registry are **83 to 217 mm
+across their jaw axis** and 63 to 130 mm across the perpendicular, measured on
+robosuite's own models. So every hand fitted only when turned exactly sideways
+and none fitted turned front-to-back, and 16 of Q's 20 cells drove the hand into
+the back panel. The board is now 280 mm deep, leaving **268 mm**; all nine
+registered hands clear both edges in **either** orientation, the widest by about
+27 mm.
+
+A modelling defect was fixed alongside it. The lower cubby's interior was 180 mm
+where the gap between the two boards is 148, so its back panel and side walls
+poked **20 mm up through the top board** -- a solid obstacle standing inside the
+slot the arm places into.
+
+**The collision check.** Three weaker things were replaced by one pass over the
+*trajectory the arm actually flies*:
+
+* `by_reachability` asked whether the arm can hold a pose and whether it collides
+  there, at **13 sampled poses of a 200-waypoint path**. §7.38 measured
+  candidates passing that sample and then colliding at 79 to 162 of the other
+  187. It was also inert: across Q's twenty cells it emptied the candidate set
+  and fell back on **20 of 20**, so it rejected everything, the funnel passed
+  everything through, and all it left was a flag.
+* the place-side zone tested a **cylinder** of the hand's own radius and length.
+  A gripper is two fingers and a wrist with air in between, and audited over Q's
+  2000 candidates the cylinder kept 489 where the hand itself keeps 369, the two
+  agreeing on **153**: it rejected 216 candidates the hand would have cleared and
+  admitted 336 it would have fouled.
+* and both place-side stages tested the hand in its **pick** orientation at the
+  release position. The demonstration turns the hand **35.5 degrees** between
+  closing the jaws and opening them, so both were answering about a pose 36
+  degrees from the commanded one -- which, against a slot that fits a hand one
+  way round and not the other, inverts the answer rather than shading it.
+
+What replaces them solves inverse kinematics down the whole path, puts each
+solution into the model, **moves the carried object to its held pose**, and
+reads the contacts. Contacts are judged by phase rather than by a tolerated
+fraction: during the approach nothing may touch, during the carry only the
+fingers on the object, and the object may rest on a support surface throughout.
+Everything else is a fault and the allowed fraction is **zero**.
+
+**The filter sees only what the robot could see.** The robot's own body is its
+own geometry -- it knows its description file -- and the scene is the observed
+point cloud, with the robot subtracted from it, because a depth image of a
+workspace contains the arm. The simulator's true geometry is available and is
+deliberately used only for *diagnosis*, never for selection: a filter that reads
+it is not one a real system could run.
+
+### What each column means
+
+| column | what it is |
+|---|---|
+| **grasp** | which of the planner's 100 candidates was executed; `*` marks a cell where nothing was fully admissible and the least bad ran |
+| **gap** | its approach mismatch from the demonstration — **recorded, never used in selection** |
+| **off** | its horizontal distance from the object's centre of mass |
+| **surv** | candidates reaching the ranking |
+| **min det** | smallest local volume ratio of the map; below 0 the map has turned space inside out |
+| **track** | mean tracking error over the path, in mm |
+| **held** | fraction of the carry the object stayed in the hand |
+
+### Result
+
+| run | placed | grasped | traversed | tracking error, median | at the release, median |
+|---|---|---|---|---|---|
+| **O-ii** 45° demonstration filter | 10/20 | 16 | 12 | 18.4 mm | — |
+| **O-iii** ranked by the demonstration | 11/20 | 15 | 14 | 16.5 mm | — |
+| **Q** old shelf, sampled checks | 7/20 | 14 | 12 | 21.3 mm | **85.5 mm** |
+| **R** new shelf, phase check | **16/20** | **19** | **16** | **7.5 mm** | **13.8 mm** |
+
+### Reading it on its own
+
+**The placement failure is gone, and the number that says so is the tracking
+error at the release.** In Q the arm was a median of 85.5 mm from where it was
+commanded when the jaws opened, and as much as 208; here it is 13.8 mm and at
+worst 45.4. That was the whole placement mechanism -- the arm jammed, stopped
+short, and opened its jaws wherever it had got to -- and it no longer happens.
+
+**Both halves of the change contributed and neither would have sufficed.** A
+deeper shelf alone would still have let the funnel choose grasps whose release
+pose puts the hand in a wall, because the check that was supposed to notice was
+inert on every cell and was asking about the wrong orientation anyway. A
+corrected check alone would have had almost nothing to pass: against an 88 mm
+slot and a 204 mm hand, the honest answer is that very few candidates fit.
+
+**Nineteen of twenty grasps now hold**, against 14 in Q and 16 in O-ii.
+
+**The maps are unchanged and were never the problem.** `min det` runs a median
+0.901 with a worst of 0.248 and no folds, against Q's 0.885 and 0.244 -- the same
+distribution. Nothing about the transportation map was touched between the two
+runs, and nothing about it needed to be.
+
+**Every object except one is now perfect:**
+
+| object | O-ii | Q | **R** |
+|---|---|---|---|
+| cereal | 3/5 | 2/5 | **5/5** |
+| milk | 3/5 | 2/5 | **5/5** |
+| can | 2/5 | 1/5 | **5/5** |
+| bread | 2/5 | 2/5 | **1/5** |
+
+Cereal, milk and can are **15 of 15** across five different grippers, from one
+demonstration recorded with a Panda on a different object in a different scene.
+
+**And every hand improved:**
+
+| hand | O-ii | Q | **R** |
+|---|---|---|---|
+| yumi | 2/4 | 0/4 | **3/4** |
+| xarm | 1/4 | 1/4 | **3/4** |
+| panda | 4/4 | 3/4 | **4/4** |
+| robotiq85 | 3/4 | 2/4 | **3/4** |
+| robotiq140 | 0/4 | 1/4 | **3/4** |
+
+The robotiq140 goes from 0 of 4 in O-ii to 3 of 4, and it is the hand this scene
+was hardest on -- 202 mm across its jaw axis and 212 mm long against a slot that
+used to be 88 mm deep.
+
+**The demonstration is still absent from grasp selection**, as Experiment O
+decided. Nothing here consults it except to choose the target's roll.
+
+### The four failures are one object
+
+All four are the bread, and all four are the grip failing during the carry
+rather than anything at the placement:
+
+| cell | grasped | held through the carry | lifted | slip in the hand |
+|---|---|---|---|---|
+| yumi/bread | no | 17% | 8 mm | 43.7 mm |
+| xarm/bread | yes | 57% | 280 mm | 30.6 mm |
+| robotiq85/bread | yes | 60% | 281 mm | 39.9 mm |
+| robotiq140/bread | yes | 68% | 419 mm | 67.3 mm |
+
+Three of the four grip it, lift it 280 to 419 mm, and then drop it. The cause is
+the jaw closure, is measured, and is written up separately below -- the jaws
+close *through* the bread, which is the lightest object at 4.1 g and the only
+near-cubic one. It is a limitation of an open-loop gripper, not of the
+transport, and four closing rules were tried against it without finding one that
+serves every object.
+
+### Every cell
+
+| hand | object | grasp | gap | off | surv | min det | reach | track | **grasped** | **traversed** | held | lift | **placed** | place err |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| yumi | cereal | #88* | 10° | 3.1 | 3 | 0.949 | 73% | 9.3 | **yes** | **yes** | 1.00 | 421 | **yes** | 11 |
+| yumi | milk | #78 | 18° | 7.8 | 16 | 0.989 | 78% | 11.1 | **yes** | **yes** | 1.00 | 415 | **yes** | 11 |
+| yumi | can | #20 | 16° | 6.2 | 8 | 0.778 | 84% | 6.0 | **yes** | **yes** | 1.00 | 421 | **yes** | 4 |
+| yumi | bread | #10* | 30° | 13.3 | 1 | 0.248 | 100% | 8.5 | no | no | 0.17 | 8 | no | 336 |
+| xarm | cereal | #72* | 12° | 11.4 | 2 | 0.987 | 73% | 10.4 | **yes** | **yes** | 1.00 | 404 | **yes** | 14 |
+| xarm | milk | #25 | 40° | 13.9 | 14 | 0.892 | 76% | 8.5 | **yes** | **yes** | 1.00 | 397 | **yes** | 24 |
+| xarm | can | #10 | 4° | 6.6 | 4 | 0.950 | 82% | 7.5 | **yes** | **yes** | 1.00 | 417 | **yes** | 3 |
+| xarm | bread | #99* | 10° | 14.3 | 4 | 0.574 | 68% | 6.5 | **yes** | no | 0.57 | 280 | no | 222 |
+| panda | cereal | #85 | 11° | 10.1 | 2 | 0.990 | 81% | 7.3 | **yes** | **yes** | 1.00 | 416 | **yes** | 26 |
+| panda | milk | #80 | 3° | 8.2 | 5 | 0.998 | 74% | 7.4 | **yes** | **yes** | 1.00 | 424 | **yes** | 6 |
+| panda | can | #30 | 13° | 7.7 | 3 | 0.790 | 80% | 7.0 | **yes** | **yes** | 1.00 | 421 | **yes** | 4 |
+| panda | bread | #94 | 17° | 13.6 | 2 | 0.289 | 100% | 3.9 | **yes** | **yes** | 1.00 | 424 | **yes** | 6 |
+| robotiq85 | cereal | #65* | 30° | 10.8 | 3 | 0.875 | 100% | 5.0 | **yes** | **yes** | 1.00 | 390 | **yes** | 31 |
+| robotiq85 | milk | #38 | 32° | 12.2 | 12 | 0.944 | 84% | 6.3 | **yes** | **yes** | 1.00 | 406 | **yes** | 4 |
+| robotiq85 | can | #1 | 5° | 8.3 | 9 | 0.985 | 62% | 10.5 | **yes** | **yes** | 1.00 | 408 | **yes** | 1 |
+| robotiq85 | bread | #31 | 11° | 7.6 | 5 | 0.588 | 100% | 6.0 | **yes** | no | 0.60 | 281 | no | 129 |
+| robotiq140 | cereal | #24* | 8° | 12.6 | 3 | 0.775 | 62% | 10.8 | **yes** | **yes** | 1.00 | 372 | **yes** | 10 |
+| robotiq140 | milk | #24* | 7° | 9.9 | 14 | 0.997 | 79% | 10.4 | **yes** | **yes** | 1.00 | 401 | **yes** | 19 |
+| robotiq140 | can | #33 | 6° | 7.6 | 6 | 0.911 | 62% | 12.7 | **yes** | **yes** | 1.00 | 404 | **yes** | 29 |
+| robotiq140 | bread | #9* | 10° | 14.6 | 4 | 0.639 | 100% | 7.4 | **yes** | no | 0.68 | 419 | no | 133 |
+
+### What this does not settle
+
+**One seed, one slot, one demonstration, one keypoint construction.** As
+everywhere in this document.
+
+**The replay is position control with no policy**, so every number is an upper
+bound on what the full pipeline does. The impedance controller tracks less
+precisely and will do worse.
+
+**Two changes were made together.** The scene and the collision check went in as
+one step, and the run cannot apportion the gain between them. The argument that
+neither would have sufficed alone is mechanical rather than measured: the
+selection pass shows the check rejecting candidates that the deepened shelf
+still admits, and the geometry shows almost nothing fitting the old slot.
+
+**Seven of twenty cells found no fully admissible candidate** and ran the least
+bad one under a flag. Five of those seven placed anyway, so the flag is not a
+prediction of failure -- but it does mean a third of the run executed a plan the
+check had objected to.
+
+**`by_centre_offset` stays on for a reason that is not the one it was added
+for.** §8o measured that it does not order outcomes among the candidates it
+passes. Removing it here does not reduce the fallbacks at all -- still seven --
+while making the fallback *choice* much worse: `yumi/cereal` goes from a grasp
+3.1 mm off centre at 10 degrees to one 52.1 mm off at 60. Its value is in what it
+leaves behind when nothing is clean.
 
 
 ## 8z. Open items, blocked work, and grey areas
