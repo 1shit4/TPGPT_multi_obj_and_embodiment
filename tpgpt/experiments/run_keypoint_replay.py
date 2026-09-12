@@ -341,7 +341,8 @@ def stage_outcome(replay, labels, target, env=None) -> dict:
 
 
 def replay_variant(env, labels, source_placement, target, variant,
-                   gripper="panda", force_target=None) -> dict:
+                   gripper="panda", force_target=None,
+                   hold_at_contact: bool = False) -> dict:
     """Transport under one construction, then follow the result under position control.
 
     ``labels`` **must already be in the tool frame**. See :func:`main`: passing
@@ -407,9 +408,25 @@ def replay_variant(env, labels, source_placement, target, variant,
         # Close until the grip is firm, then stay -- rather than commanding
         # the jaws shut for the whole carry, which extrudes the object when it
         # cannot stop the fingers itself.
+        # **Close until the object is pinched, then stop** -- rather than
+        # holding the jaws at "go to fully shut" for the whole carry.
+        #
+        # `+1` is a *position* command, so the only thing that stops the fingers
+        # is the object. Measured across the twenty cells of the rebuilt scene:
+        # every cell that kept its object arrested its jaws between 0.23 and
+        # 0.93 of full travel, and **every cell that lost its object reached
+        # 1.00 or beyond** -- no overlap. All four were the bread, the lightest
+        # object at 4.1 g and the only near-cubic one.
+        #
+        # This is not the grip-force target that `force_target` offers and that
+        # §8z retired: no force is measured and no number is chosen. The jaws
+        # close a step at a time until the fingers oppose the object, and then
+        # the command is simply left alone.
         hold_when=(
             (lambda e: grip_force(e, target.metadata["object_name"]) >= force_target)
-            if force_target and target.metadata.get("object_name") else None
+            if force_target and target.metadata.get("object_name")
+            else (_fingers_gate(env, gripper, target.metadata["object_name"])
+                  if hold_at_contact and target.metadata.get("object_name") else None)
         ),
         # **And tighten only if it actually slips.** A force threshold alone
         # cannot work: bread and a can hold at 10 N and are destroyed at 30,
@@ -521,6 +538,7 @@ def main(
     ik_stride: int = 4,
     max_path_candidates: int = 25,
     select_only: bool = False,
+    hold_at_contact: bool = False,
 ) -> dict:
     """Replay every construction on every hand and object.
 
@@ -607,6 +625,12 @@ def main(
         max_path_candidates: How far down the ranked list the path check looks
             before falling back to the top-ranked candidate.
 
+        hold_at_contact: Close the jaws until the object is pinched and then
+            leave them there, instead of commanding them fully shut for the
+            whole carry. See :func:`replay_variant` for the measurement behind
+            it: on the rebuilt scene, closure separates outcomes perfectly --
+            every cell that kept its object arrested below 0.93 of full travel,
+            every cell that lost one reached 1.00.
         select_only: Stop after choosing the grasp. No physics is stepped, so a
             cell costs seconds instead of a minute and a half, and the answer is
             *which candidate each cell would execute and what each filter stage
@@ -825,6 +849,7 @@ def main(
                         row = replay_variant(
                             env, labels, source_placement, target, variant,
                             gripper=gripper, force_target=force_target,
+                            hold_at_contact=hold_at_contact,
                         )
                 # **Both, and deliberately.** ``ValueError`` is "too little
                 # cloud to describe the object"; ``RuntimeError`` is "every
@@ -872,6 +897,8 @@ def main(
                                 "path_check": bool(path_check),
                                 "ik_stride": int(ik_stride),
                                 "max_path_candidates": int(max_path_candidates)},
+            "gripper_hold": ("closed until pinched, then held"
+                             if hold_at_contact else "commanded shut throughout"),
             "cells": None if cells is None else sorted(wanted),
             "gripper_command": {"force_target": force_target},
             # A selection-only run has no success column at all. Recorded at the
@@ -1031,6 +1058,14 @@ if __name__ == "__main__":
     )
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument(
+        "--hold-at-contact", action="store_true",
+        help=(
+            "Close the jaws until the object is pinched, then stop, instead of "
+            "commanding them shut for the whole carry. Not a force target: "
+            "nothing is measured and no constant is chosen."
+        ),
+    )
+    parser.add_argument(
         "--select-only", action="store_true",
         help=(
             "Choose the grasp for every cell and stop -- no physics. Says "
@@ -1067,4 +1102,5 @@ if __name__ == "__main__":
         ik_stride=args.ik_stride,
         max_path_candidates=args.max_path_candidates,
         select_only=args.select_only,
+        hold_at_contact=args.hold_at_contact,
     )
