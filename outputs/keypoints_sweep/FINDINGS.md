@@ -39,6 +39,7 @@ numbers are a scratch experiment, not evidence — that rule is `ROBOTICS_NOTES`
 > | P | §8n gripper or grasp? | — | **stands.** 16 of 20 grasps grip with plain `+1`; the grasp pose decides the outcome, not the pair |
 > | Q | §8o scene-derived constraints | — | **stands**, and is **superseded by R** for the shelf and the collision check. Its 7/20 was measured against an 88 mm slot no hand fits and a collision check that was inert on every cell |
 > | R | §8p a shelf a hand fits into | — | **stands.** 16/20, with every object but the bread at 5/5. The current result |
+> | S | §8q composed contacts | — | **stands.** 14/20 against R's 16 on the same grasps, and it gives up exact interpolation -- keypoint residual 8.9 mm against 0.0004 |
 >
 > ### The two corrections, and which numbers each reaches
 >
@@ -3196,6 +3197,184 @@ passes. Removing it here does not reduce the fallbacks at all -- still seven --
 while making the fallback *choice* much worse: `yumi/cereal` goes from a grasp
 3.1 mm off centre at 10 degrees to one 52.1 mm off at 60. Its value is in what it
 leaves behind when nothing is clean.
+
+
+## 8q. Experiment S — pinning the jaw contacts as a second, composed stage
+
+`outputs/expS`. Five hands times four objects, **the same grasps Experiment R
+executed**, forced by `--grasp-from`, so the only thing that differs between the
+two runs is the keypoint construction. Everything else — the rebuilt shelf, the
+whole-path check, the plain `+1` gripper — is §8p's.
+
+### The question
+
+Every construction so far pins a **box or a cube** and nothing else, and §7.22
+records the trade that forces: a box keeps the map well conditioned everywhere
+and misses the grasp point by about 53 mm, while the jaw contacts hit the grasp
+to about 5 mm and fold the map when thrown into it. The grasp-pose cube escapes
+that by centring the cube *on* the grasp, so the aim is exact by construction.
+
+**Composition is the remaining idea for having the contacts as well.** Instead of
+one map fitted to box and contacts together, fit the box map first and then a
+**second, local map on top of it** that moves the contacts the rest of the way:
+`phi(x) = phi_2(phi_1(x))`. Under composition determinants multiply,
+`det(J) = det(J_2) det(J_1)`, so each stage can be checked on its own, and the
+second stage's length scale (30 mm here) is meant to confine its deformation to
+the grasp's neighbourhood.
+
+§8e measured it on the broken scene and dropped it. This is the first run of it
+on code where the scene, the frames and the collision checks are all correct.
+
+### What was recorded that had not been before
+
+**Each stage's determinant separately.** `ComposedMap.stage_reports` has existed
+since the class was written and nothing ever read it. That matters because a
+minimum over a path **does not distribute over a product**: the two stages'
+worst points are in different places, so the composite's `min det` can look
+healthier than either stage. Measured here on 9 of the 16 cells that ran, the
+composite reads better than stage 2 does.
+
+### Result
+
+| | Experiment R, grasp-pose cube | Experiment S, composed |
+|---|---|---|
+| **placed, of 20 cells** | **16** | **14** |
+| refused outright | 0 | **4** |
+| placed, of the cells that ran | 16/20 | 14/16 |
+| `min det`, median | **0.901** | 0.400 |
+| `min det`, worst | 0.248 | 0.183 |
+| folded maps | 0 | 0 |
+| aim at the grasp, median | **0.0004 mm** | **4.09 mm** |
+| keypoint residual, median | **0.0004 mm** | **8.91 mm** |
+
+### Reading it
+
+**Four cells cannot be built at all, and they are all the cereal.**
+`fit_local_correction` refuses a correction larger than its own locality radius,
+and on `xarm`, `panda`, `robotiq85` and `robotiq140` with the cereal box the
+correction is **30.3 to 38.6 mm** against a 30 mm locality. The guard exists
+because a second stage asked to move points further than it can reach overshoots
+wildly between them — §9 records the 336 mm excursion that put it there. So this
+is the construction declining to produce a map, not a map that fails.
+
+Why the cereal: it is the largest object at 30 × 100 × 150 mm, so its jaw
+contacts sit furthest from the 20 mm cube the first stage pins, and the
+disagreement the second stage must absorb is largest. The refusal is a
+*measurement* of that disagreement, and it says the contacts and the cube are
+about 30 to 39 mm apart on this object.
+
+**Where it runs, it is roughly as good — and it rescues the bread.**
+
+| object | R | S |
+|---|---|---|
+| cereal | 5/5 | **1/5 placed, 4 refused** |
+| milk | 5/5 | 5/5 |
+| can | 5/5 | 5/5 |
+| **bread** | **1/5** | **3/5** |
+
+`xarm/bread` and `robotiq85/bread` both place under composition and both failed
+under the plain cube. That is the contacts doing the thing they were added for,
+on the object with the least purchase — the extra keypoints pin where the
+fingers actually sit, and on a 40 × 48 × 49 mm object that is a real constraint
+the cube alone does not supply. No cell that ran was lost.
+
+So the ledger is **+2 bread, −4 cereal**, and the four losses are refusals rather
+than failures.
+
+**Composition halves the conditioning, and the composite hides where.** The
+median `min det` falls from 0.901 to 0.400. Stage 1 is by construction identical
+to Experiment R's map — 0.901 median, as it must be, since it *is* that map —
+so the entire loss is stage 2, at a median 0.465 and a worst of 0.183. Nothing
+folds anywhere.
+
+And on **9 of the 16** cells that ran, stage 2's worst determinant is below the
+composite's. The differences are small here — `xarm/bread` 0.454 against 0.471,
+`yumi/can` 0.201 against 0.206 — but the direction is the point: a composite
+figure is not a safe summary of a composed map, and §8d measured the same effect
+at a much larger gap, stage 2 falling to 0.08 while the composite looked fine.
+**Report the stages.**
+
+**It costs the two properties the grasp-pose cube was chosen for.** The aim goes
+from 0.0004 mm — exact, because the cube's centre *is* the grasp point and `phi`
+interpolates keypoints exactly — to a median **4.09 mm** and a worst of 8.86.
+And the keypoint residual, which is property (i) of Sec. III-C, goes from
+0.0004 mm to a median **8.91 mm** and a worst of 17.5.
+
+The residual is the more serious of the two, and the mechanism is written into
+`ComposedMap` itself: stage 2 hits *its own* keypoints exactly, but stage 1's no
+longer land on their targets, because `phi(S_1) = phi_2(T_1)`, which equals
+`T_1` only where stage 2 is the identity. Stage 2 is not the identity at the
+cube's corners, because the contacts it is pinning are centimetres away from
+them. So the box keypoints are dragged off their targets by roughly the amount
+stage 2 moves — and 8.9 mm is that amount.
+
+**This is the same failure §8e described, now quantified on correct code.** That
+section said stage 2 "satisfies the contacts by dragging the cube's centre off
+its target", with the aim rising from 0.0 mm to 2.8–13.0 mm. The aim here is
+4.09 mm median, inside that range, and the residual makes the mechanism explicit
+rather than inferred.
+
+### Every cell
+
+| hand | object | R placed | S placed | min det R | **min det S** | **stage 1** | **stage 2** | aim S | residual S | change |
+|---|---|---|---|---|---|---|---|---|---|---|
+| yumi | cereal | **yes** | **yes** | 0.949 | 0.949 | 0.949 | 1.000 | 0.75 mm | 17.5 mm |  |
+| yumi | milk | **yes** | **yes** | 0.989 | 0.183 | 0.989 | 0.183 | 2.61 mm | 9.9 mm |  |
+| yumi | can | **yes** | **yes** | 0.778 | 0.206 | 0.778 | 0.201 | 1.91 mm | 9.2 mm |  |
+| yumi | bread | no | no | 0.248 | 0.248 | 0.248 | 0.642 | 4.20 mm | 6.8 mm |  |
+| xarm | cereal | **yes** | **refused** | 0.987 | — | — | — | — | — | the correction exceeds its own locality |
+| xarm | milk | **yes** | **yes** | 0.892 | 0.531 | 0.892 | 0.524 | 3.98 mm | 6.5 mm |  |
+| xarm | can | **yes** | **yes** | 0.950 | 0.243 | 0.950 | 0.240 | 4.57 mm | 10.5 mm |  |
+| xarm | bread | no | **yes** | 0.574 | 0.471 | 0.574 | 0.454 | 7.64 mm | 9.1 mm | **gained** |
+| panda | cereal | **yes** | **refused** | 0.990 | — | — | — | — | — | the correction exceeds its own locality |
+| panda | milk | **yes** | **yes** | 0.998 | 0.409 | 0.998 | 0.410 | 4.28 mm | 7.8 mm |  |
+| panda | can | **yes** | **yes** | 0.790 | 0.223 | 0.790 | 0.217 | 2.77 mm | 10.3 mm |  |
+| panda | bread | **yes** | **yes** | 0.289 | 0.289 | 0.289 | 0.517 | 3.25 mm | 6.1 mm |  |
+| robotiq85 | cereal | **yes** | **refused** | 0.875 | — | — | — | — | — | the correction exceeds its own locality |
+| robotiq85 | milk | **yes** | **yes** | 0.944 | 0.481 | 0.944 | 0.477 | 3.77 mm | 6.9 mm |  |
+| robotiq85 | can | **yes** | **yes** | 0.985 | 0.390 | 0.985 | 0.390 | 5.11 mm | 9.0 mm |  |
+| robotiq85 | bread | no | **yes** | 0.588 | 0.588 | 0.588 | 0.708 | 3.64 mm | 5.1 mm | **gained** |
+| robotiq140 | cereal | **yes** | **refused** | 0.775 | — | — | — | — | — | the correction exceeds its own locality |
+| robotiq140 | milk | **yes** | **yes** | 0.997 | 0.559 | 0.997 | 0.560 | 4.98 mm | 6.6 mm |  |
+| robotiq140 | can | **yes** | **yes** | 0.911 | 0.228 | 0.911 | 0.225 | 5.21 mm | 11.3 mm |  |
+| robotiq140 | bread | no | no | 0.639 | 0.639 | 0.639 | 0.650 | 8.86 mm | 8.9 mm |  |
+
+### What it establishes
+
+**Composition is not dead, and it is not the default.** On the two objects it
+was supposed to help — the ones where the cube alone does not give the fingers
+enough to hold — it gains two cells and loses none. On the largest object it
+cannot be built at all. And it gives up exact interpolation, which is the
+property the whole method rests on.
+
+**A construction that violates property (i) by 9 mm is a different method, not a
+tuned one.** Sec. III-D requires `phi` to carry each source keypoint exactly onto
+its partner; at 8.9 mm it does not, and every guarantee downstream — the
+orientation transport of Eq. 11, the stiffness and uncertainty transports of
+Eqs. 12–13 — is being computed from a map that no longer satisfies its own
+defining condition. The 14/20 is therefore not comparable with the 16/20 as "two
+settings of one method".
+
+**The locality radius is the one free parameter and it was never swept.** 30 mm
+refuses four cells by 0.3 to 8.6 mm of margin. A larger radius would build them
+and would spread stage 2's deformation further along the path, which is the
+thing locality exists to prevent; a smaller one would refuse more. Nothing here
+says 30 mm is right — only that at 30 mm the cereal's contacts are out of reach.
+
+### What it does not settle
+
+**One seed, one slot, one demonstration**, as everywhere.
+
+**The bread gain is two cells.** It is the right direction and it is consistent
+with the mechanism, and two cells is not a rate.
+
+**The grasps were held fixed at Experiment R's**, which is what makes the
+comparison exact — but they were *chosen* by a whole-path check run on the plain
+cube's trajectory. A composed map produces a different path, so a selection run
+with the composed construction in the loop might pick differently. That is a
+confound removed in one direction and introduced in the other, and it is the
+honest way round: varying the construction alone is the question, and §8k is
+what happens when selection moves too.
 
 
 ## 8z. Open items, blocked work, and grey areas
