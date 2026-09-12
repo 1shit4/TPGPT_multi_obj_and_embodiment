@@ -2065,9 +2065,26 @@ was missing from the first version. It is worse than `V` at both poses in both
 conditions, `p <= 0.0006`, so the conclusion drawn from the confounded
 comparisons holds.
 
-*The simplest anchor is as good as the cleverest.* A plain constant `k = 0.20`
-matches or beats the speed-scheduled gain at every pose in both conditions. The
-schedule was my own proposal; it does not earn its extra parameter.
+*Constant gain against speed schedule: the numbers cannot separate them.* Head
+to head and paired, they are **not significantly different on the closing axis**
+in three of four cells, and the fourth is 73 micrometres. On total error they
+trade signs -- the schedule wins undisturbed, the constant wins loaded, both at
+p<0.0001. An earlier version of this section claimed the constant "matches or
+beats at every pose"; that was false and is withdrawn.
+
+The choice therefore falls to the mechanism, and **the schedule fails its own
+test**. Its rationale is "weak in transit so it does not fight the feed-forward",
+which predicts a smaller penalty than a constant gain in the transit-dominated
+quiet well-conditioned bin. Measured: `k=0.20` +0.95 mm, `VR-sched` +0.96 mm --
+identical -- while `k=0.50` costs +2.11 mm, so gain plainly does drive the
+penalty and the schedule simply is not reducing it. Probably because it applies
+its strongest pull at the dwells, where the worst-case drift tends to sit.
+
+So `k = 0.20`: three parameters and a scene-dependent speed normalisation traded
+for no demonstrated effect. `AnchorSchedule` stays in the code, because its
+argument is about the transit-to-dwell ratio and this demonstration -- 10 s with
+two 0.75 s dwells -- is heavily transit-dominated. A task with longer transit
+might vindicate it, and that is untested.
 
 > **Recommendation history, kept rather than overwritten.** Draft 1: keep `V`,
 > change nothing -- from the undisturbed sweep alone. Draft 2: conditional, `V`

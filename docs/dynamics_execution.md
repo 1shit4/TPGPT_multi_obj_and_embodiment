@@ -839,11 +839,55 @@ failure modes have the same root: an absolute-position law queried at a lagging
 arm compounds its own off-ridge error (§5.5), and the load pushes the arm
 further off the ridge still.
 
-*The simplest anchor is as good as the cleverest.* `VR-a k=0.20` — a plain
-constant gain — matches or beats `VR-sched` at every pose in both conditions,
-and never stalls. **The speed schedule does not earn its extra parameter on this
-evidence.** That is worth stating plainly because the schedule was my own
-proposal and I had been advocating it.
+*Constant gain against speed schedule: indistinguishable where it counts.* Run
+head-to-head, paired on the same warp (negative = `k=0.20` better):
+
+| metric | quiet | p | loaded | p |
+|---|---|---|---|---|
+| grasp, **closing axis** | −0.035 | 0.26 | −0.030 | 0.18 |
+| release, **closing axis** | −0.073 | <0.0001 | −0.041 | 0.22 |
+| grasp, total | **+0.839** | <0.0001 | **−0.798** | <0.0001 |
+| release, total | **+0.335** | <0.0001 | **−0.439** | <0.0001 |
+
+On the closing axis three of four cells are not significant and the fourth is
+**73 micrometres** — a real p-value on a physically meaningless quantity. On
+totals they trade signs: the schedule wins undisturbed, the constant wins loaded.
+**Neither dominates.**
+
+*So the choice falls to the mechanism, and the schedule's mechanism fails its own
+test.* Its rationale is "weak in transit, so it does not fight the feed-forward",
+which predicts a **smaller** penalty than a constant gain in the
+transit-dominated regime — the quiet, well-conditioned bin:
+
+| law | penalty vs `V`, quiet well-conditioned |
+|---|---|
+| `VR-a k=0.20` | +0.95 mm, p=0.0002 |
+| `VR-sched` | +0.96 mm, p=0.0001 |
+| `VR-a k=0.50` | +2.11 mm, p<0.0001 |
+
+Identical. And gain plainly does drive the penalty — `k=0.50` costs 2.2× what
+`k=0.20` costs, roughly in proportion — so the schedule is simply not reducing
+it. The likely reason is that it applies its strongest pull (k≈0.44) at the
+dwells, where worst-over-run drift often peaks, giving back in one place what it
+saves in another.
+
+**Hence `k = 0.20`**: three parameters (`dwell`, `transit`, `speed_scale`) plus a
+scene-dependent normalisation by `max_label_speed`, traded for no demonstrated
+effect. Not "simpler is better" as a slogan — the complexity was justified by a
+mechanism, and the mechanism is measurably not operating.
+
+> **An earlier version of this paragraph claimed `k=0.20` "matches or beats
+> `VR-sched` at every pose".** That is false: the schedule beats it on *total*
+> error in the undisturbed condition, at p<0.0001. I had read down the
+> closing-axis column and generalised. The schedule was also my own proposal, so
+> the error ran against my own advocacy rather than for it.
+
+**What this bed cannot settle.** The schedule's argument is about the *ratio* of
+transit to dwell in a trajectory, and this demonstration is 10 s with two 0.75 s
+dwells — heavily transit-dominated. On a task with longer or faster transit the
+constant gain's penalty would grow while the schedule's should not. That is
+untested, and it is why `AnchorSchedule` stays in the code rather than being
+deleted.
 
 ![Error at the decisive poses](figures/fig_key_poses.png)
 
@@ -974,7 +1018,7 @@ match the waiter.**
 |---|---|---|
 | Query at the attractor or the measured arm? | **attractor** | decisive, and confirmed on the one cell with no confound: `V-m` costs +3.34 mm undisturbed and +2.62 mm loaded on the release closing axis, `p ≤ 0.0006`. Measured-pose laws also stall 8–34 of 44 where attractor-queried ones stall none |
 | Which law should ship? | **`VR-a k=0.20`**, replacing `V` | better at both decisive poses in **both** conditions, `p < 0.0001`; ten-fold better at the release (0.15 mm against 1.83 mm); 0/44 stalls, matching `V` exactly |
-| Constant gain or the speed schedule? | **constant, `k = 0.20`** | matches or beats `VR-sched` at every pose in both conditions. The schedule was my own proposal and does not earn its extra parameter |
+| Constant gain or the speed schedule? | **constant, `k = 0.20`** | the two are statistically **tied** on the closing axis and trade signs on totals, so the numbers cannot separate them. The schedule's own stated mechanism fails its test — it is penalised identically to the constant gain in the transit-dominated regime it was designed to protect. Chosen on that, not on the millimetres |
 | Reference-only (`R-a`, `R-m`)? | **no** | `R-a` stalls 6/44; `R-m` reaches **144 mm** at the release under load and completes 10 of 44 |
 | Should the anchor be gated? | **immaterial** | ~0.1 mm; axis closed |
 | Is the dwell creep a defect? | **no** | 0.00 mm on the axis that decides the grasp |
