@@ -3775,6 +3775,27 @@ rather than the difference of two separately-minimised distances.
   amount of warping fixes a direction the demonstration never contained. This is
   geometry, not a measured failure, which is why it survives the withdrawal of
   7.23.
+- **The yumi, parked deliberately on 2026-09-12 to be picked up later.** It
+  scored 0 of 4 in Experiment Q and the cause is measured and is *not* the hand:
+  three of its four chosen grasps ask its 50 mm jaws to span **56.2, 74.8 and
+  60.4 mm** of object, measured along each grasp's own closing axis from the
+  object's true mesh box. The fingers cannot close and drive into the object
+  instead -- first contact arrives at waypoints 39 to 42 against a close
+  commanded at 50, and the object is shoved 17.9 to 113.6 mm before the jaws
+  move.
+
+  What lets those grasps through is **perception, not selection**. The same
+  widths measured from the point cloud read **45.2, 53.4 and 46.6 mm** -- the
+  cloud under-reads by 11 to 21 mm because it is one-sided, so ``by_jaw_width``
+  sees "45 mm fits in 50" and passes. Every hand gets that under-read; only the
+  yumi, at 50 mm, has less aperture than the error.
+
+  So this is `7.36` arriving with a consequence, and the fix belongs there: an
+  **upper** bound on object width, from a visual hull of the three segmentation
+  silhouettes, which helps every hand. A margin instead would have to be ~25 mm
+  to cover the observed error, which rejects nearly everything a 50 mm jaw could
+  hold. Excluding the yumi is the third option and the least informative one --
+  it hides the perception defect rather than fixing it.
 - **The UMI hand.** Its contact offset `[0.0, -0.035, -0.112]` is the only one
   in the registry with a large *lateral* component; every parallel jaw is almost
   purely along the approach axis. 7.2 also measured it tolerating only 15 mm of
