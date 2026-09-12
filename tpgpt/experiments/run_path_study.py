@@ -40,6 +40,7 @@ import numpy as np
 
 from tpgpt.experiments.pipeline import (
     SOURCE_GRIPPER,
+    place_pose_for,
     _demonstrated_approach,
     _to_tool_frame,
 )
@@ -65,6 +66,72 @@ from tpgpt.transport.labels import PolicyLabels
 
 #: Objects a replay campaign covers, in the order its rows list them.
 STUDY_OBJECTS = ("cereal", "milk", "can", "bread")
+
+
+
+def _place_zone_audit(env, grasp_set, pair, target_name, slot_pose, cloud) -> dict:
+    """Ray-bundle verdict against exact-hand verdict, over every candidate.
+
+    ``by_place_approach`` answers "is the corridor the hand sweeps into the slot
+    clear" by casting rays through a cylinder that contains the hand. That is
+    cheap and it is an **over-estimate of the hand's volume**, because a gripper
+    is mostly air: two fingers and a wrist. The exact answer -- the hand's own
+    surface sample placed at the release pose, measured against the scene's
+    solid primitives -- costs about the same and is what every other check in
+    the pipeline now uses.
+
+    Returns the two counts and their disagreement, so the cost of the cheap test
+    is a measured number.
+    """
+    from tpgpt.grasp.filters import (
+        PATH_PENETRATION_TOLERANCE,
+        by_place_approach,
+        hand_envelope,
+    )
+    from tpgpt.grasp.grasps import contact_offset, grasp_to_eef_pose
+    from tpgpt.grasp.grippers import gripper_geometry, gripper_points
+    from tpgpt.perception.obstacles import deepest_penetration, scene_obstacles
+
+    indices = np.arange(len(grasp_set.grasps))
+    release = np.array([
+        np.asarray(slot_pose[0], dtype=float)
+        + grasp_to_eef_pose(grasp_set.grasps[int(i)], pair)[1] @ contact_offset(pair)
+        for i in indices
+    ])
+    kept_rays, blocked = by_place_approach(
+        grasp_set.grasps, indices, env, pair, release, exclude=(target_name,)
+    )
+
+    obstacles = scene_obstacles(env, exclude=(target_name,))
+    hand = gripper_points(pair.graspgen, n=512)
+    depth_tcp = float(gripper_geometry(pair.graspgen).tcp_depth)
+    length, _ = hand_envelope(pair)
+    kept_exact = []
+    for position, i in zip(release, indices):
+        grasp = grasp_set.grasps[int(i)]
+        rotation = grasp.rotation
+        clear = True
+        # The release pose itself, and a short run back along the approach, so
+        # the last stretch of the arrival is covered rather than one pose.
+        for step in np.linspace(0.0, length, 5):
+            base = position - rotation[:, 2] * (depth_tcp + step)
+            depth, _ = deepest_penetration(base + hand @ rotation.T, obstacles)
+            if depth > PATH_PENETRATION_TOLERANCE:
+                clear = False
+                break
+        if clear:
+            kept_exact.append(int(i))
+
+    kept_rays = set(int(i) for i in kept_rays)
+    kept_exact = set(kept_exact)
+    return {
+        "place_zone_candidates": int(len(indices)),
+        "place_zone_kept_rays": len(kept_rays),
+        "place_zone_kept_exact": len(kept_exact),
+        "place_zone_rejected_but_clear": len(kept_exact - kept_rays),
+        "place_zone_kept_but_fouling": len(kept_rays - kept_exact),
+        "place_zone_blocked_by": blocked,
+    }
 
 
 def main(
@@ -147,6 +214,10 @@ def main(
             placement = _placement_for(
                 env, cloud, grasp, "top_middle", table_surface(env), {}
             )
+            slot_pose = place_pose_for(
+                env, "top_middle", grasp_set.grasps[int(record["chosen_index"])],
+                gripper, float(np.ptp(cloud.points[:, 2])),
+            )
             result = transport(labels, source_placement, placement, variant=variant)
             rotations = result["warped_rotations"]
             pair = resolve_pair(gripper)
@@ -176,6 +247,83 @@ def main(
                         env, result["warped"], rotations, pair, stride=ik_stride
                     ).items()
                 })
+
+            # --- does the plan drive the hand *through* the object it is about
+            # to pick up? ---------------------------------------------------
+            #
+            # The transported path is the demonstration's motion, which descends
+            # from above. The grasp it is built around need not be a descent: a
+            # candidate approaching a cereal box from the side asks for a hand
+            # held sideways, and the warp then carries that orientation down the
+            # demonstrated descent. The fingers sweep downward while pointing
+            # sideways, and they meet the object before the jaws are told to
+            # shut.
+            #
+            # Measured as the deepest the hand's own surface sample gets inside
+            # the **target** object over the approach, i.e. every waypoint up to
+            # the close. The target is the one obstacle excluded from the scene
+            # set everywhere else, precisely because the fingers are meant to
+            # close around it -- but they are meant to close around it *at the
+            # grasp*, not to plough through it on the way in.
+            target_box = [
+                o for o in scene_obstacles(env, include_movable=True)
+                if o.name.startswith(f"{name}_")
+            ]
+            approach = path_clearance(
+                env, result["warped"][: grasp_index + 1],
+                rotations[: grasp_index + 1], pair, obstacles=target_box,
+            )
+            record.update({
+                "approach_into_object_mm": round(approach["max_depth"] * 1000, 2),
+                "approach_waypoints_inside": approach["inside_waypoints"],
+            })
+
+            # --- where does the plan say the object should be released, and is
+            # that where it went? ------------------------------------------
+            #
+            # Distinguishes two failures a placement error cannot tell apart:
+            # a plan that asks for the wrong place, and an arm that does not get
+            # to the right one. The first would be a keypoint or map fault and
+            # should be impossible -- ``phi`` interpolates the release keypoint
+            # exactly -- so measuring it is how that assumption gets checked
+            # rather than assumed.
+            commanded = np.asarray(result["warped"][release_index], dtype=float)
+            record.update({
+                "release_commanded_xyz": [round(float(v), 4) for v in commanded],
+                "release_commanded_lateral_mm": round(float(np.linalg.norm(
+                    commanded[:2] - np.asarray(placement.destination)[:2])) * 1000, 1),
+                "release_commanded_above_board_mm": round(
+                    float(commanded[2] - placement.destination_height) * 1000, 1),
+            })
+
+            # --- rank of the executed candidate among everything the planner
+            # proposed ------------------------------------------------------
+            scores = np.array([g.score for g in grasp_set.grasps], dtype=float)
+            chosen = int(record["chosen_index"])
+            record.update({
+                "n_candidates": int(len(scores)),
+                "chosen_score": round(float(scores[chosen]), 4),
+                "chosen_score_rank": int((scores > scores[chosen]).sum()) + 1,
+            })
+
+            # --- is the place-side zone rejecting candidates the hand would
+            # actually fit through? ----------------------------------------
+            #
+            # ``by_place_approach`` tests a **bundle of rays** filling a cylinder
+            # of the hand's own radius and length behind the release pose. A
+            # gripper is not a solid cylinder -- it is two fingers and a wrist
+            # with a great deal of air in between -- so a cylinder containing it
+            # clips panels the hand itself misses.
+            #
+            # The exact test is available and costs the same: put the hand's own
+            # surface sample at the release pose and measure it against the
+            # scene's primitives, which is what ``path_clearance`` does at every
+            # other waypoint. This compares the two verdicts over **every**
+            # candidate, so "the cheap test over-rejects" is a number rather
+            # than an argument.
+            record.update(
+                _place_zone_audit(env, grasp_set, pair, name, slot_pose, cloud)
+            )
         except Exception as exc:                      # noqa: BLE001 - recorded
             record["failed"] = f"{type(exc).__name__}: {exc}"
         finally:
