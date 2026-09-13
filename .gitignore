@@ -4,11 +4,19 @@ __pycache__/
 .pytest_cache/
 .coverage
 htmlcov/
-outputs/
+outputs/**
 # ...but the written-up findings are the deliverable, not scratch data, and were
 # sitting untracked in an ignored directory -- exactly the provenance failure
 # ROBOTICS_NOTES 7.26 is about. Keep the prose, keep the manifests that name the
 # commit behind each run, and keep ignoring the bulk arrays.
+#
+# The first line must be `outputs/**`, not `outputs/`. Git cannot re-include a
+# file whose *parent directory* is excluded -- it never descends far enough to
+# read the negations -- so with `outputs/` the three `!` lines below were dead,
+# and every manifest here got tracked only because someone typed `git add -f`.
+# `outputs/**` excludes the contents rather than the directory, and the
+# `!outputs/**/` line lets git walk back in to evaluate the file patterns.
+!outputs/**/
 !outputs/**/*.md
 !outputs/**/manifest.json
 .ipynb_checkpoints/
