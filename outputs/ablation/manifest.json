@@ -1,0 +1,8 @@
+{
+  "title": "Residual ablation: affine only against affine plus GP",
+  "description": "Whether the nonlinear stage of phi earns its place. Dropping it takes reshelving from 17/20 to 4/20 (p = 3.3e-5).",
+  "settings": {
+    "source": "python -m tpgpt.experiments.ablate_residual"
+  },
+  "created": "2026-09-07T01:10:24"
+}

@@ -1,0 +1,9 @@
+{
+  "title": "Theory figures (paper Figs. 2, 4, 5)",
+  "description": "Space deformation under phi, the transported velocity field, and the uncertainty fields of Eqs. 12-13. Generated from the theory alone, with no simulator involved.",
+  "settings": {
+    "source": "python -m tpgpt.experiments.figures"
+  },
+  "report": "fig2_space_deformation.png",
+  "created": "2026-09-07T01:10:24"
+}

@@ -4035,20 +4035,64 @@ they differ, the cells are not paired and must be dropped, not averaged in.
 Pairing on the 10 valid cells gave a clean answer -- 9 of 10 either way,
 Wilcoxon p = 0.547 -- where the full-grid comparison gave a false one.
 
-**Two per-cell results worth keeping.** `robotiq85 cereal` failed at `reach`
-with a 230 mm error on a *well-conditioned* map (0.875) and the same grasp
-replay had used successfully: an honest executor failure. And `yumi bread`, the
-worst-conditioned map in the paired set at `min det(J) = 0.248`, **failed under
-position control at 336 mm and placed at 11.8 mm under the executor.** The
-plausible mechanism is compliance -- `solve_ik` drives the arm onto every warped
-waypoint whether or not it makes sense, while an impedance controller chasing an
-attractor can give -- which would make the executor a partial *defence* against
-a folded map. One cell is not evidence; the test is a sweep of hands and objects
-at `min det(J) < 0.4` under both controllers.
-
 One more instance of the standing result that **`min det(J)` predicts the map's
 validity, not the task's outcome**: `yumi can` improved from 0.778 to 0.990 and
 turned a 4.0 mm placement into a 716 mm failure at `reach`.
+
+#### The fix, and what the clean comparison then showed
+
+Re-running from the same commit would **not** have fixed this, and that is the
+part worth remembering. The two drivers select through structurally different
+code -- `pipeline.filter_grasps` plus `_choose_grasp` against
+`run_keypoint_transport.target_placement` -- so equal settings at an equal
+commit buy nothing at all.
+
+What fixes it is refusing to re-derive the choice. `target_placement` already
+accepted `forced_index` and `run_keypoint_replay` already exposed it as
+`--grasp-from`, but nothing on the pipeline side emitted an index it could read:
+`_choose_grasp` enumerates the **survivor** list, so its `chosen` is a position
+in that list and is meaningless to a driver holding a different funnel, while
+`forced_index` indexes `grasp_set.grasps` -- all 100, straight from the grasp
+cache, and therefore identical for any driver that sees the same cloud. Mapping
+the choice back through `funnel.survivors` and recording it as
+`grasp_chosen_index` is the whole fix.
+
+Re-run that way over **seven hands x four objects = 28 cells**
+(`outputs/campaigns/execution7/` against `outputs/expR7_pinned/`, both at commit
+`a7b66d0`, both reproducible), the pairing verifies on both available
+fingerprints: **0 of 28** cells differ in executed grasp index, **0 of 28**
+differ in `min det(J)`. Same grasp, same map, every cell.
+
+**The answer changed.** Executor 17/28 against replay 19/28 -- Fisher p = 0.781,
+no evidence of a success-rate difference. But on the 15 cells both placed, the
+executor is **6.1 mm less accurate**, median, at Wilcoxon p = 0.048 two-sided
+(0.024 one-sided), which is above the +-2.3 mm band repeat measurements of this
+quantity have spanned (4.5, 7.8, 7.25). The confounded 10-cell subset had given
++3.8 mm at p = 0.547.
+
+**So the confound was not only making the comparison unreadable -- it was hiding
+a real difference.** That is the less obvious of the two ways a confound hurts,
+and it is the reason to fix pairing rather than to widen error bars and move on.
+
+**And a hypothesis recorded here is now falsified.** The previous draft noted
+`yumi bread`, the worst-conditioned map in the set at `min det(J) = 0.248`,
+failing at 336 mm under position control and placing at 11.8 mm under the
+executor, and proposed compliance as a partial *defence* against a folded map --
+`solve_ik` drives the arm onto every warped waypoint whether or not it makes
+sense, while an impedance controller chasing an attractor can give. It was
+stated as a prediction with a named test, and the exactly-paired grid is that
+test. The two folded cells go in **opposite** directions:
+
+| cell | `min det(J)` | executor | replay |
+|---|---|---|---|
+| `panda/bread` | 0.170 | failed, 320.5 mm | placed, 39.8 mm |
+| `yumi/bread` | 0.248 | placed, 11.8 mm | failed, 336.4 mm |
+
+No support. Recorded rather than dropped, because it was stated as a prediction.
+
+**The three-finger hand is 0/4 under both controllers**, with `min det(J)` from
+0.864 to 0.976 -- among the best maps in the run. Whatever defeats `robotiq3f`
+is neither the map nor the executor, and it is open.
 
 ## 8. Open items
 

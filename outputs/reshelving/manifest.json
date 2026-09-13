@@ -1,0 +1,10 @@
+{
+  "title": "Reshelving validation (paper Sec. V-A)",
+  "description": "The validated baseline: one demonstration transported into 20 randomised scenes. 17/20 at 9.1 mm mean placement error, failing on seeds 8, 11 and 16. Every change to the control loop is regression-tested against this.",
+  "settings": {
+    "source": "python -m tpgpt.experiments.run_reshelving",
+    "succeeded": "17/20",
+    "mean_placement_error_mm": 9.1
+  },
+  "created": "2026-09-07T01:10:24"
+}

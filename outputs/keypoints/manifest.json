@@ -1,0 +1,8 @@
+{
+  "title": "Grasp-aligned keypoint extraction (Sec. III-A)",
+  "description": "Keypoints fitted to an object cloud in a frame built from the grasp and the support surface, so an unseen mesh pairs with the demonstration by role. Reproduces the reshelving result exactly and transports onto five unseen tabletop objects.",
+  "settings": {
+    "source": "python -m tpgpt.experiments.run_keypoint_transport"
+  },
+  "created": "2026-09-07T01:10:24"
+}

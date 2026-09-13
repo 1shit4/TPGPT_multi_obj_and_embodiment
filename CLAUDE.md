@@ -812,18 +812,18 @@ the full pipeline. Read them as 15/20 and 10/20 with that caveat attached;
 in `FINDINGS.md` §8j. Nothing from the campaigns deleted under §7.26 has been
 reinstated.
 
-**The policy-driven rate is now measured, and the executor is not the
-bottleneck.** The full five-hand x four-object grid run through the fitted
-policy in torque control places **15 of 20**
-(`outputs/campaigns/execution/manifest.json`, commit `96b9bf9`, reproducible),
-against 16 of 20 for Experiment R -- the same grid under the position
-controller. **Do not read those totals as a one-cell cost.** They are not
-comparable: a `_choose_grasp` fix landed between the two campaigns and
-reselected the grasp in 10 of the 20 cells, and the grids disagree on six cells
-in *both* directions at Fisher p = 1.000. On the ten cells that did run the same
-task it is **9 of 10 either way**, median placement difference +3.8 mm at
-Wilcoxon p = 0.547. `§7.41`, and `docs/dynamics_execution.md` §12 for the full
-method. Nine attractor laws and two query sites were compared to reach that
+**The policy-driven rate is measured, on a grid paired grasp for grasp.** Seven
+hands x four objects = 28 cells, run through the fitted policy in torque control
+and against the same cells under position control, with the replay **pinned to
+the campaign's own grasps** via `--grasp-from` so selection is skipped entirely:
+**0 of 28** cells differ in executed grasp index or in `min det(J)`
+(`outputs/campaigns/execution7/` and `outputs/expR7_pinned/`, commit `a7b66d0`,
+both reproducible). Executor **17/28** against replay **19/28** -- Fisher
+p = 0.781, no success-rate difference. **But on the 15 cells both placed the
+executor is 6.1 mm less accurate**, Wilcoxon p = 0.048, which is above the
++-2.3 mm re-measurement band. An earlier confounded attempt gave +3.8 mm at
+p = 0.547, so **the confound was hiding a real effect, not just adding noise**.
+`§7.41`, and `docs/dynamics_execution.md` §12. Nine attractor laws and two query sites were compared to reach that
 default: **query at the attractor, keep the shipped integrator**; on a real arm
 the seed-to-seed spread is ~30x the law-to-law spread. `§7.40`.
 

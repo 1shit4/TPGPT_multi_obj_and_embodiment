@@ -9,15 +9,22 @@ object on 8 of 8 seeds and no paired difference is significant (§11). The
 seed-to-seed spread is ~50 mm against law-to-law differences of 0.03–1.67 mm, so
 the choice sits far below the system's noise floor. Full reasoning in §14.
 
-**And the executor is not what limits the system.** Run on the full
-five-hand × four-object grid with a real transportation map, against the same
-grid driven straight onto its waypoints by inverse kinematics with no policy at
-all, it places **equally often — 9 of 10 either way** on the cells where the
-comparison is valid, with no significant difference in placement error (§12).
-The headline counts for those two campaigns are 15/20 and 16/20, and **that
-one-cell gap is not a measurement** — Fisher p = 1.000, the grids disagree on
-six cells in both directions, and half of them ran a different grasp. §12 is as
-much about that trap as about the result.
+**And the executor costs precision, not success.** Run on a full
+seven-hand × four-object grid with a real transportation map, against the same
+28 cells driven straight onto their waypoints by inverse kinematics with no
+policy at all — and **paired grasp for grasp, verified identical in 28 of 28
+cells** — it places **17/28 against 19/28**, which is Fisher p = 0.781 and no
+evidence of a difference. But on the 15 cells both placed, the executor is
+**6.1 mm less accurate** at Wilcoxon p = 0.048, which is above this project's
+±2.3 mm re-measurement band. §12.
+
+That pairing had to be built. An earlier attempt compared two campaigns with
+the same settings at the same commit and found they had executed **different
+grasps in 10 of 20 cells**, because the two drivers select through different
+code; the totals read as a clean one-cell difference and the grids in fact
+disagreed on six cells in both directions. **Removing the confound did not just
+make the comparison readable — it exposed an effect the confound had hidden.**
+§12 is as much about that as about the result.
 
 **What this is.** A study of the **execution** half of the pipeline — the code
 that turns a fitted policy into motion — deciding between nine candidate rules
@@ -29,11 +36,43 @@ the arm follows whatever path it is given.
 freely-tracking arm) and `outputs/dynamics_loaded/rows.json` (396 runs, loaded
 arm). Reproduce with
 `python -m tpgpt.experiments.sweep_execution --out outputs/dynamics [--load 0.08]`.
-The physics tiers come from `tpgpt/experiments/identity_execution.py` (§11) and
-`outputs/campaigns/execution/manifest.json` (§12, commit `96b9bf9`, reproducible;
-`python -m tpgpt.experiments.run_experiments --campaign execution`). The
-surrogate-plant work was done on branch `dynamics-execution`, since merged to
-`master`.
+The physics tiers come from `tpgpt/experiments/identity_execution.py` (§11) and,
+for §12, `outputs/campaigns/execution7/` paired against `outputs/expR7_pinned/`
+— both at commit `a7b66d0` and both recorded reproducible:
+
+```bash
+python -m tpgpt.experiments.run_experiments --campaign execution --out outputs/campaigns/execution7
+python -m tpgpt.experiments.run_keypoint_replay --out outputs/expR7_pinned \
+    --grippers yumi,xarm,panda,robotiq85,robotiq140,robotiq3f,rethink \
+    --variants 2_cube_grasp_pose \
+    --grasp-from outputs/campaigns/execution7/execution/rows.json
+```
+
+**A caveat on the surrogate-plant data, stated plainly.** The original
+`outputs/dynamics*` row files — the 396 runs Experiments A–G were computed from
+— **no longer exist**. They were written inside the `dynamics-execution`
+worktree and were lost when it was removed on consolidation; unlike the
+campaigns of §7.26 the *driver* is committed, so they are regenerable, but the
+regenerated files are a **different sample, not a reproduction**: the warp
+lattice depends on the sweep size, and the regeneration holds **378 rows**, not
+396. The A–G tables below were computed from the originals and **have not been
+recomputed**. Two spot-checks on the regenerated data (commit `a7b66d0`):
+
+- **The query-site conclusion reproduces overwhelmingly.** `V-m` is worse than
+  `V` by +2.40 mm at the grasp pose (p = 4.6e-13), +3.33 mm on the release
+  closing axis (p = 1.4e-06) and +1.41 mm on worst arm error (p = 2.4e-10),
+  over 42 paired warps. This is the one recommendation of this document that
+  rests on the bed, and it is not in doubt.
+- **§10's specific anchor numbers do not reproduce, and should not be quoted as
+  if they had.** On the regenerated sample the *stronger* anchors beat `V` at
+  the grasp pose by 0.24–0.29 mm (`VR-a k=0.50` p = 2.2e-07, `VR-sched`
+  p = 7.5e-07) while the *light* `VR-a k=0.20` is **worse** by 0.55 mm
+  (p = 2.1e-04) — where §10 reported a light anchor ahead by 1.6–2.2 mm. The
+  direction of §10's argument survives (the bed favours anchoring at the
+  decisive poses) and its magnitude and its best gain do not.
+
+Neither disturbs the recommendation, because the recommendation does not rest on
+the bed: §11 and §12 overturned it in physics, and both of those datasets exist.
 
 ---
 
@@ -933,7 +972,8 @@ policy execution. Torque control through the Cartesian impedance controller, the
 real reshelving scene, a real object that can be gripped or dropped. Ground
 truth is `metadata["measured_positions"]`, where the demonstrating arm actually
 was. Eight seeds × three laws, paired — the same scene for each law. Driver:
-`tpgpt/experiments/identity_execution.py`.
+`tpgpt/experiments/identity_execution.py`; data in `outputs/identity/`
+(24 rows, commit `7aa2735`).
 
 **Result.** Medians over 8 seeds, millimetres:
 
@@ -1000,172 +1040,166 @@ code with `V` as its default.
 
 ---
 
-## 12. Experiment I — the chosen law on the real grid, and a lesson about counting
+## 12. Experiment I — the chosen law on the real grid, paired grasp for grasp
 
-**Question.** Experiments A–H asked which law to use. Experiment H answered "the
-shipped one, `V`", but on an *identity* task: the policy was fitted on the
-demonstration's own labels and run in the demonstration's own scene. Nothing was
-transported. So one question is left: **when the full system runs — a real
-transportation map, a real unseen object, a real unseen hand — does the executor
-turn out to be what limits it?**
+**Question.** Experiments A–H asked which law to use, and Experiment H answered
+"the shipped one, `V`" on an *identity* task — the policy fitted on the
+demonstration's own labels and run in the demonstration's own scene, with
+nothing transported. One question is left: **when the full system runs — a real
+transportation map, a real unseen object, a real unseen hand — is the executor
+what limits it?**
 
-**Conditions.** The same five-hand × four-object grid that Experiment R of
-`outputs/keypoints_sweep/FINDINGS.md` used to pick the keypoints — five grippers
-(`yumi`, `xarm`, `panda`, `robotiq85`, `robotiq140`) crossed with four objects
-(cereal, milk, can, bread), 20 cells, seed 0, top-middle slot. Grasp-pose-cube
-keypoints. Full pipeline: prompt → point cloud → GraspGen-X candidates → seven
-filters → keypoints → transportation map → policy refit → **torque control
-through the Cartesian impedance controller** under law `V`. Driver:
-`tpgpt.experiments.run_experiments --campaign execution`. Manifest:
-`outputs/campaigns/execution/manifest.json`, commit `96b9bf9`, reproducible.
+**Conditions.** Seven grippers (`yumi`, `xarm`, `panda`, `robotiq85`,
+`robotiq140`, `robotiq3f`, `rethink`) crossed with four objects (cereal, milk,
+can, bread): **28 cells**, seed 0, top-middle slot, grasp-pose-cube keypoints.
+Full pipeline — prompt → point cloud → GraspGen-X candidates → filters →
+keypoints → transportation map → policy refit → **torque control through the
+Cartesian impedance controller** under law `V`.
 
-The comparison is against **Experiment R**, the same grid under **position
-control** — `solve_ik` driving the arm straight onto each waypoint, no policy and
-no executor at all. That is the *executor-free ceiling*: whatever R achieves is
-what the map and the grasp are worth when nothing is lost in the driving.
+The comparison is the same 28 cells under **position control**: `solve_ik`
+driving the arm straight onto each waypoint, no policy and no executor at all.
+That is the *executor-free ceiling*.
+
+Both runs are at commit `a7b66d0`, both recorded reproducible with no untracked
+code. `outputs/campaigns/execution7/` and `outputs/expR7_pinned/`.
+
+### The pairing, which is the part that had to be fixed first
+
+**A previous attempt at this comparison was invalid, and the way it failed is
+worth stating because it is not obvious.** Two campaigns on the same grid, with
+the same settings, at the same commit, produced *different grasps in 10 of 20
+cells* — from an identical point cloud, an identical 100-candidate set and an
+identical survivor count. The two drivers select through structurally different
+code (`pipeline.filter_grasps` + `_choose_grasp` against
+`run_keypoint_transport.target_placement`), so equal settings buy nothing. The
+totals read as a clean 16/20 against 15/20; the truth was six cells disagreeing
+in **both** directions at Fisher p = 1.000. `ROBOTICS_NOTES` §7.41.
+
+So the pairing is no longer left to the code agreeing. The campaign now records
+`grasp_chosen_index` — an index into the **raw** candidate list, which comes
+from the grasp cache and is therefore identical for any driver seeing the same
+cloud — and the replay runs with `--grasp-from` pointed at its `rows.json`.
+Selection is skipped entirely there. **The two runs execute the same grasp by
+construction.**
+
+Verified after the fact, on both available fingerprints:
+
+| check | result |
+|---|---|
+| cells where the executed grasp index differs | **0 of 28** |
+| cells where `min det(J)` differs | **0 of 28** |
+
+Same grasp, same keypoints, same map, every cell. **Any difference below is the
+executor and nothing else.**
 
 ### Result
 
-Experiment R placed **16 of 20**. The execution campaign placed **15 of 20**.
-
-**The obvious reading of those two numbers is wrong, and this section is mostly
-about why.**
-
-#### First: the count difference is not a measurement
-
-16/20 against 15/20 is Fisher's exact test **p = 1.000** — not "weak evidence",
-but the largest p-value the test can return. At n=20 per arm, a one-cell
-difference is indistinguishable from a coin landing differently. Reporting
-"the executor costs one cell" would be reading a number out of noise.
-
-#### Second: the two grids disagree on six cells, not one
-
-The count hides this completely, and it is the more informative fact:
-
-| direction | cells |
-|---|---|
-| replay placed it, the executor did not | `yumi milk`, `yumi can`, `panda bread`, `robotiq85 cereal` |
-| the executor placed it, replay did not | `yumi bread`, `robotiq85 bread`, `robotiq140 bread` |
-| both agree | the other 13 |
-
-Four losses and three wins nets out to −1. **Seven cells changed outcome and the
-count showed one.** This is the same principle the acceptance criteria stated in
-advance for the 20-seed reshelving gate — *seed identity is the sharp test, not
-the count* — arriving here on its own.
-
-#### Third, and decisive: half the grid is not comparable at all
-
-Before attributing any of those seven flips to the executor, the two campaigns
-have to be shown to have faced the same task. They did not.
-
-`min det(J)` — the conditioning of the fitted map, which is a direct fingerprint
-of which keypoints were used, and therefore of which grasp was chosen — **differs
-in 10 of the 20 cells**:
-
-| cell | `min det(J)` in R | in the execution campaign |
+| | executor (policy, torque control) | replay (position control) |
 |---|---|---|
-| `xarm bread` | 0.574 | **0.938** |
-| `robotiq85 bread` | 0.588 | **0.898** |
-| `robotiq140 bread` | 0.639 | **0.927** |
-| `robotiq140 cereal` | 0.775 | **0.993** |
-| `panda can` | 0.790 | **0.998** |
-| `yumi can` | 0.778 | **0.990** |
-| `yumi milk` | 0.989 | 0.849 |
-| `panda bread` | 0.289 | 0.170 |
-| `xarm cereal` | 0.987 | 0.958 |
-| `yumi cereal` | 0.949 | 0.930 |
+| placed | **17 / 28** | **19 / 28** |
 
-**What did *not* change is what proves the cause.** Every cell has an *identical*
-point cloud (20/20 — 598 points for the yumi cereal in both, 57 for every can,
-167 for every bread), an identical candidate count (100 in all 40 runs) and an
-identical survivor count after filtering (3 and 3, 16 and 16, 8 and 8, …). So
-perception is bit-stable, the grasp cache is doing its job, and **GraspGen-X
-handed both campaigns exactly the same set of grasps to choose from**. The two
-campaigns then chose *differently* from that identical set in half the cells.
+Fisher's exact test on that: **p = 0.781**. No evidence of a difference in how
+often the task succeeds.
 
-That is `_choose_grasp`, which was rewritten between the two runs: the old flip
-loop was replaced by a whole-path feasibility check. Same survivors, different
-pick, different keypoints, different map. **The confound is mine, introduced by
-a pipeline fix landing between the two campaigns** — precisely the failure §7.26
-is about, caught this time because the manifests record enough to catch it.
+Per hand, out of four objects each:
 
-### The comparison that is actually valid
+| hand | executor | replay | cells the executor missed | cells the replay missed |
+|---|---|---|---|---|
+| `robotiq140` | **4/4** | **4/4** | — | — |
+| `xarm` | 3/4 | **4/4** | bread | — |
+| `panda` | 3/4 | **4/4** | bread | — |
+| `robotiq85` | 3/4 | **4/4** | cereal | — |
+| `yumi` | 2/4 | 2/4 | milk, can | milk, bread |
+| `rethink` | 2/4 | 1/4 | cereal, bread | cereal, can, bread |
+| `robotiq3f` | **0/4** | **0/4** | all four | all four |
 
-Ten cells picked the same grasp and therefore ran the same task. Those are
-paired, and only those:
-
-| cell | `min det(J)` | replay error | executor error | replay | executor |
-|---|---|---|---|---|---|
-| `panda cereal` | 0.990 | 26.0 mm | 28.8 mm | placed | placed |
-| `panda milk` | 0.998 | 5.7 | 11.8 | placed | placed |
-| `robotiq140 can` | 0.911 | 28.9 | 18.6 | placed | placed |
-| `robotiq140 milk` | 0.997 | 19.2 | 14.0 | placed | placed |
-| `robotiq85 can` | 0.985 | 1.5 | 8.3 | placed | placed |
-| `robotiq85 cereal` | 0.875 | 30.7 | **230.6** | placed | **failed at `reach`** |
-| `robotiq85 milk` | 0.944 | 3.9 | 3.2 | placed | placed |
-| `xarm can` | 0.950 | 3.3 | 8.2 | placed | placed |
-| `xarm milk` | 0.892 | 24.3 | 31.2 | placed | placed |
-| `yumi bread` | **0.248** | **336.4** | 11.8 | **failed** | placed |
-
-**9 of 10 either way.** One cell lost, one cell won.
-
-On the eight cells both placed, the paired differences (executor minus replay,
-so negative is better) are `+6.9, +4.8, +2.8, +6.1, −0.7, +6.9, −5.2, −10.2` mm:
-median **+3.8 mm**, better under the executor in 3 of 8, **Wilcoxon p = 0.547**.
-Nowhere near significance, and with n=8 the test could not have reached p<0.05
-on a 3-to-5 split regardless — the floor for the paired Wilcoxon is n=6 and it
-needs a near-unanimous sign pattern at that size.
-
-**Reading of the columns.** `min det(J)` is the smallest Jacobian determinant of
-the fitted map along the path: 1.0 means undeformed, 0 means folded inside out.
-`replay error` and `executor error` are the horizontal distance from the object's
-resting place to the centre of the target slot, in millimetres — the same ruler
-in both campaigns. "failed at `reach`" names the *stage* the run stopped at, from
-`tpgpt.experiments.diagnose`: the hand did not arrive where the grasp was
-planned, so nothing downstream could have worked.
+**Reading the columns.** "placed" means the object came to rest in the target
+slot — the `settle` stage of `tpgpt.experiments.diagnose`, which watches the
+object rather than the arm. A hand at 4/4 placed every object it was given.
 
 ### Results and why
 
-**The executor is not what limits this system.** On the only ten cells where the
-question can be asked cleanly, it places exactly as often as driving the arm
-straight onto the waypoints with inverse kinematics, and its placement error is
-within 4 mm of it with no statistical support for even that. Everything
-Experiment H found on the identity task survives contact with a real
-transportation map, a real unseen object and a real unseen hand.
+**The three-finger hand fails under both controllers, so it is not an execution
+problem.** `robotiq3f` is 0/4 either way. That matters because it is the only
+three-finger hand that can be run at all — a gripper needs both a robosuite
+model and a GraspGen-X description, and the other multi-finger pairing
+(`inspire`) has fingers that travel 0.7 mm and does not actuate. Its maps are
+not the problem either: `min det(J)` runs 0.864 to 0.976 across its four cells,
+among the best in the run. Whatever defeats it sits between the grasp and the
+grip, and it is out of this section's scope.
 
-**The one cell it lost is worth naming.** `robotiq85 cereal` failed at `reach`
-with a 230 mm error on a well-conditioned map (0.875). The map was fine and the
-grasp was the same one replay used successfully; the arm simply did not get
-there. That is an executor failure, and it is the single honest one in the set.
+**Success rate: no difference.** 17 against 19 at p = 0.781, with six cells
+disagreeing — four the replay placed and the executor did not (`panda/bread`,
+`robotiq85/cereal`, `xarm/bread`, `yumi/can`), two the reverse (`rethink/can`,
+`yumi/bread`). Four-to-two is exactly the kind of split that produces a
+two-cell gap out of noise.
 
-**The one cell it won is worth naming more.** `yumi bread` has `min det(J) =
-0.248` — a badly folded map, the worst in the paired subset. Position-control
-replay failed it at 336 mm. The impedance-controlled executor **placed it at
-11.8 mm.** The plausible mechanism is compliance: `solve_ik` drives the arm onto
-every warped waypoint whether or not the waypoint makes sense, so a folded map
-becomes a folded arm path; the impedance controller chases an attractor through
-a spring and is free to give when the path asks for something the contact will
-not allow. **If that is real, the executor is not merely free — it is a partial
-defence against a bad map.** One cell is not evidence of it, and it is stated
-here as a hypothesis with a named test, not a finding.
+**Placement precision: the executor is worse, and this is a real effect.** On
+the 15 cells both controllers placed, the paired differences (executor minus
+replay, so positive means the executor was less accurate) are, in millimetres:
 
-**What would make this false.** Re-run both campaigns from the *same* commit, so
-`_choose_grasp` picks identically and all 20 cells pair. If the full paired grid
-shows the executor losing cells that replay places, the conclusion above is
-wrong. Separately, for the `yumi bread` hypothesis: sweep several hands and
-objects with `min det(J) < 0.4` under both controllers. If compliance really
-rescues folded maps, replay should fail the badly-conditioned cells
-systematically while the executor places them; if `yumi bread` was luck, the two
-should fail together.
+```
+-10.2  -5.2  -4.2  -2.0  -0.7   2.8   4.8   6.1   6.8   6.9   6.9   8.1  13.9  14.7  27.3
+```
 
-**What this does not say.** It does not say the two campaigns' *headline* numbers
-can be compared — they cannot, and 16/20 versus 15/20 should not be quoted as a
-before-and-after of anything. It also says nothing about the ten confounded
-cells, in either direction. Note in passing that better conditioning did not
-rescue them: `yumi can` went from 0.778 to 0.990 — a *much* better map — and
-turned from a 4.0 mm placement into a 716 mm failure at `reach`, which is one
-more instance of the standing result that **`min det(J)` predicts the map's
-validity and not the task's outcome.**
+Median **+6.1 mm**; better under the executor in 5 of 15; **Wilcoxon
+p = 0.048** two-sided, 0.024 one-sided. Replay median placement error 14.2 mm,
+executor 18.6 mm.
+
+That 6.1 mm sits **above** the ±2.3 mm band that repeat measurements of the same
+quantity have spanned in this project (§4.5, §7.8, §7.25 gave 7.6 / 9.1 /
+9.9 mm for the same figure), so it is not re-measurement noise. It is a modest
+effect at a marginal p-value and it should be read as such — but it is the first
+statistically supported executor cost this study has produced.
+
+> **This supersedes what an earlier draft of this section said.** That draft
+> reported "the executor neither helps nor hurts", from a 10-cell subset of the
+> confounded pairing: +3.8 mm at p = 0.547. Removing the confound roughly halved
+> the noise and added five pairs, and the same effect went from invisible to
+> significant. **The confound was not merely making the comparison unreadable —
+> it was hiding a real difference**, which is the less obvious of the two ways a
+> confound hurts.
+
+*A partial mechanism, not established.* Under the executor the object is
+released a median 10.1 mm from the slot centre and then travels a further
+**+4.8 mm** while settling, ending at 18.6 mm. That is consistent with §7.35 —
+every placement is a drop, because the arm stops short of the commanded release
+pose and the jaws open above the board. It is only half the comparison: the
+replay's rows do not record a release-time error, so whether the replay drops
+from lower cannot be checked from this data, and the mechanism stays a
+hypothesis. Recording the release pose on both sides would settle it.
+
+**A hypothesis from the previous draft is now falsified.** That draft noted
+`yumi/bread` — the worst-conditioned map in the set at `min det(J) = 0.248` —
+failing at 336 mm under position control and placing at 11.8 mm under the
+executor, and proposed that compliance might be a partial *defence* against a
+folded map: `solve_ik` drives the arm onto every warped waypoint whether or not
+it makes sense, while an impedance controller chasing an attractor can give. It
+was recorded as a hypothesis with a named test. The exactly-paired grid supplies
+that test, and the answer is no:
+
+| cell | `min det(J)` | executor | replay |
+|---|---|---|---|
+| `panda/bread` | 0.170 | **failed**, 320.5 mm | placed, 39.8 mm |
+| `yumi/bread` | 0.248 | placed, 11.8 mm | **failed**, 336.4 mm |
+
+**The two folded cells go in opposite directions.** Whatever decides them, it is
+not compliance, and the proposal gets no support. Recorded here rather than
+quietly dropped because it was stated as a prediction.
+
+**What this does not say.** It does not compare against the *original*
+Experiment R. The pinned replay places 18 of 20 on the five hands that grid
+used, against its 16 of 20 — but `run_keypoint_replay.py` has changed by 120
+lines since, so that difference straddles a change in the executor as well as in
+the grasp, and §7.39's rule is that such a comparison is not one. It is left
+unattributed.
+
+**What would make this false.** The placement result rests on 15 pairs at
+p = 0.048; a second grid at a different seed should reproduce a positive median
+of similar size. If it comes back near zero, this is a marginal p-value that
+happened to land. The success-rate conclusion is the more robust half: 17
+against 19 would need a much larger grid to separate, and nothing here suggests
+it would.
 
 ---
 

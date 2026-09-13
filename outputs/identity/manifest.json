@@ -1,0 +1,60 @@
+{
+  "title": "identity-transport execution",
+  "description": "The policy fitted on the source demonstration's own labels and executed in the same scene at the same seed -- no transportation map, no keypoints, no grasp planner. Ground truth is the recorded measured arm trace, so every millimetre belongs to policy execution. Confirms or overturns the surrogate-plant ranking of section 7.40 in physics.",
+  "settings": {
+    "campaign": "identity_execution",
+    "n_settings": 24,
+    "varied": {
+      "law": [
+        "V",
+        "VR-a k=0.20",
+        "VR-sched"
+      ],
+      "seed": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7
+      ]
+    },
+    "fixed": {
+      "transport": "identity (none)",
+      "ground_truth": "metadata['measured_positions']",
+      "max_steps": 600
+    }
+  },
+  "results": {
+    "rows": 24,
+    "failed": 0,
+    "placed": 24
+  },
+  "runs": [],
+  "created": "2026-09-13T12:36:51",
+  "provenance": {
+    "commit": "7aa27359f2a807937e18417ba2b491f64069fef8",
+    "commit_short": "7aa2735",
+    "branch": "keypoints-grasp-cube",
+    "committed": "2026-09-13T12:28:20+05:30",
+    "dirty": [
+      "tpgpt/sim/rollout.py"
+    ],
+    "diff_stat": "tpgpt/sim/rollout.py | 9 +++++++--\n 1 file changed, 7 insertions(+), 2 deletions(-)",
+    "untracked_code": [
+      "tpgpt/experiments/identity_execution.py"
+    ],
+    "reproducible": false,
+    "python": "3.10.12",
+    "platform": "Linux-6.8.0-138-generic-x86_64-with-glibc2.35",
+    "packages": {
+      "numpy": "2.2.6",
+      "scipy": "1.15.3",
+      "mujoco": "3.7.0",
+      "robosuite": "1.5.2",
+      "similaritymeasures": "1.4.0"
+    }
+  }
+}

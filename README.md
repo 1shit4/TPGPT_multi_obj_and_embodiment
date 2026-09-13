@@ -23,19 +23,26 @@ two objects share no correspondence.
 | | result |
 |---|---|
 | the paper's own setting — same object and hand, 20 randomised scenes | **17/20**, 7.6 mm mean placement error, against 4/20 without the nonlinear stage (p = 3.3e-5) |
-| **five different hands × four different objects**, position-control replay | **16/20** |
-| the same grid, executed by the learned policy under impedance control | **15/20** |
+| **seven different hands × four different objects**, position-control replay | **19/28** |
+| the same 28 cells, executed by the learned policy under impedance control | **17/28** |
 
-Those last two are *not* a measurement of what the executor costs — they were run
-on different grasp-selection code, so half the cells are not comparable. On the
-ten cells where both runs picked the same grasp it is **9/10 either way**, with
-no significant difference in placement error (p = 0.55).
+Those last two are paired **grasp for grasp** — the replay is pinned to the
+campaign's own chosen grasp, and 0 of 28 cells differ in the grasp executed or
+in the map it produced. The 17-vs-19 gap is not significant (Fisher p = 0.78),
+but on the 15 cells both placed, the policy executor is **6.1 mm less
+accurate** (p = 0.048).
 
-The five hands span 24 to 61 mm of tool offset and 50 to 125 mm of jaw
-aperture, and include revolute linkages as well as parallel jaws; the four
-objects are a milk carton, a can, a 15 cm cereal box and a loaf of bread. Only
-one hand-and-object pair — the Panda on its own object — is the one the
-demonstration was recorded with.
+The seven hands span 24 to 61 mm of tool offset and 50 to 125 mm of jaw
+aperture, include revolute linkages as well as parallel jaws, and one of them
+(`robotiq3f`) has **three fingers** rather than two; the four objects are a milk
+carton, a can, a 15 cm cereal box and a loaf of bread. Only one hand-and-object
+pair — the Panda on its own object — is the one the demonstration was recorded
+with.
+
+The three-finger hand is the honest weak spot: it places **0 of 4**, and it does
+so under *both* controllers with among the best-conditioned maps in the run
+(`min det(J)` 0.86–0.98), so the failure is neither the transport nor the
+executor. It sits between the grasp and the grip, and it is open.
 
 ## The three pieces the question breaks into
 
@@ -63,8 +70,9 @@ attractor an impedance-controlled arm chases. Nine candidate attractor laws and
 two query sites, on a physics-free bed and then in simulation: query the policy
 at the attractor rather than the measured arm, and keep the shipped integrator,
 because in physics no law beats another by more than the re-measurement noise.
-**15/20** end-to-end, and on the properly paired subset the executor neither
-helps nor hurts. `docs/dynamics_execution.md`.
+**17/28** end-to-end. Against a grasp-for-grasp-paired position-control replay
+the executor costs no success rate but about 6 mm of placement precision.
+`docs/dynamics_execution.md`.
 
 Getting the object seen and grasped at all sits underneath all three: a text
 prompt resolves to an object and a destination, the object is segmented into a
@@ -169,7 +177,7 @@ number's provenance stated.
 | document | what it answers |
 |---|---|
 | **`outputs/keypoints_sweep/FINDINGS.md`** | **Which keypoints should pin the transportation map?** Experiments A–S. The answer is the *grasp-pose cube*: Experiment R places **16 of 20** across five grippers and four objects from a single Panda demonstration, and all of the remaining failures are the gripping mechanism rather than the map. |
-| **`docs/dynamics_execution.md`** | **How should the transported policy be executed?** Experiments A–H, comparing nine attractor laws and two query sites. Query the policy at the attractor, not the measured arm; keep the shipped integrator, because in physics no law beats another by more than the re-measurement noise. The chosen law then runs the same five-hand, four-object grid end-to-end at **15 of 20**; on the ten cells that are genuinely paired against the replay ceiling it is 9/10 either way, so the executor is not what limits the system. Includes four figures in `docs/figures/`. |
+| **`docs/dynamics_execution.md`** | **How should the transported policy be executed?** Experiments A–H, comparing nine attractor laws and two query sites. Query the policy at the attractor, not the measured arm; keep the shipped integrator, because in physics no law beats another by more than the re-measurement noise. The chosen law then runs a seven-hand, four-object grid end-to-end at **17 of 28**, paired grasp for grasp against a position-control replay at 19/28: no success-rate difference (p = 0.78), but 6.1 mm less placement precision (p = 0.048). Includes four figures in `docs/figures/`. |
 | **`ROBOTICS_NOTES.md`** | The running log behind both — every finding, every deviation from the paper with the measurement that motivated it, and every retraction. **Read this first if you want to know *why* the code is the way it is.** Sections 7.26 and 7.27 in particular are about measurements that turned out to be wrong and how. |
 
 Raw run data sits under `outputs/<experiment>/`. Only the prose and the

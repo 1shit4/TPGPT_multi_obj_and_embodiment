@@ -1,0 +1,108 @@
+{
+  "title": "execution-law sweep",
+  "description": "Five attractor laws on a surrogate impedance plant, over warps of increasing aggressiveness with the grasp and release poses pinned. No simulator and no keypoint design: the independent variable is min det(J), so the result is a lookup for whatever the keypoint work settles on.",
+  "settings": {
+    "campaign": "sweep_execution",
+    "n_settings": 378,
+    "varied": {
+      "law": [
+        "V",
+        "V-m",
+        "VR-a k=0.20",
+        "VR-a k=0.50",
+        "VR-sched",
+        "VR-sched ungated",
+        "VR-m k=0.50",
+        "R-a",
+        "R-m"
+      ],
+      "case": [
+        "identity",
+        "warp0",
+        "warp1",
+        "warp2",
+        "warp3",
+        "warp4",
+        "warp5",
+        "warp6",
+        "warp7",
+        "warp8",
+        "warp9",
+        "warp10",
+        "warp11",
+        "warp12",
+        "warp13",
+        "warp14",
+        "warp15",
+        "warp16",
+        "warp17",
+        "warp18",
+        "warp19",
+        "warp20",
+        "warp21",
+        "warp22",
+        "warp23",
+        "warp24",
+        "warp26",
+        "warp27",
+        "warp28",
+        "warp29",
+        "warp30",
+        "warp31",
+        "warp32",
+        "warp33",
+        "warp34",
+        "warp36",
+        "warp37",
+        "warp38",
+        "warp40",
+        "warp41",
+        "warp42",
+        "warp43"
+      ]
+    },
+    "fixed": {
+      "demonstration": "outputs/reshelving/source_labels.npz",
+      "dt": 0.05,
+      "substeps": 1,
+      "plant": "first-order impedance",
+      "load": [
+        0.0,
+        0.0,
+        -0.08
+      ]
+    }
+  },
+  "thresholds": {
+    "demonstration_lag_mean_mm": 23.893815848457354,
+    "demonstration_lag_at_dwell_end_mm": 4.8,
+    "closing_budget_mm": 15.0,
+    "approach_tolerance_mm": 120.0,
+    "min_valid_det": 0.02
+  },
+  "results": {
+    "rows": 378,
+    "failed": 0
+  },
+  "runs": [],
+  "created": "2026-09-13T15:20:47",
+  "provenance": {
+    "commit": "a7b66d013982dbf604a014e5726d9268c83a0aeb",
+    "commit_short": "a7b66d0",
+    "branch": "main",
+    "committed": "2026-09-13T15:08:22+05:30",
+    "dirty": [],
+    "diff_stat": null,
+    "untracked_code": [],
+    "reproducible": true,
+    "python": "3.10.12",
+    "platform": "Linux-6.8.0-138-generic-x86_64-with-glibc2.35",
+    "packages": {
+      "numpy": "2.2.6",
+      "scipy": "1.15.3",
+      "mujoco": "3.7.0",
+      "robosuite": "1.5.2",
+      "similaritymeasures": "1.4.0"
+    }
+  }
+}
