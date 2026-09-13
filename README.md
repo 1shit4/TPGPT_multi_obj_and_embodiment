@@ -24,7 +24,12 @@ two objects share no correspondence.
 |---|---|
 | the paper's own setting — same object and hand, 20 randomised scenes | **17/20**, 7.6 mm mean placement error, against 4/20 without the nonlinear stage (p = 3.3e-5) |
 | **five different hands × four different objects**, position-control replay | **16/20** |
-| the same, executed by the learned policy under impedance control | **15/20** |
+| the same grid, executed by the learned policy under impedance control | **15/20** |
+
+Those last two are *not* a measurement of what the executor costs — they were run
+on different grasp-selection code, so half the cells are not comparable. On the
+ten cells where both runs picked the same grasp it is **9/10 either way**, with
+no significant difference in placement error (p = 0.55).
 
 The five hands span 24 to 61 mm of tool offset and 50 to 125 mm of jaw
 aperture, and include revolute linkages as well as parallel jaws; the four
@@ -58,8 +63,8 @@ attractor an impedance-controlled arm chases. Nine candidate attractor laws and
 two query sites, on a physics-free bed and then in simulation: query the policy
 at the attractor rather than the measured arm, and keep the shipped integrator,
 because in physics no law beats another by more than the re-measurement noise.
-**15/20** end-to-end, i.e. the executor costs about one cell against the 16/20
-replay ceiling. `docs/dynamics_execution.md`.
+**15/20** end-to-end, and on the properly paired subset the executor neither
+helps nor hurts. `docs/dynamics_execution.md`.
 
 Getting the object seen and grasped at all sits underneath all three: a text
 prompt resolves to an object and a destination, the object is segmented into a
@@ -164,7 +169,7 @@ number's provenance stated.
 | document | what it answers |
 |---|---|
 | **`outputs/keypoints_sweep/FINDINGS.md`** | **Which keypoints should pin the transportation map?** Experiments A–S. The answer is the *grasp-pose cube*: Experiment R places **16 of 20** across five grippers and four objects from a single Panda demonstration, and all of the remaining failures are the gripping mechanism rather than the map. |
-| **`docs/dynamics_execution.md`** | **How should the transported policy be executed?** Experiments A–H, comparing nine attractor laws and two query sites. Query the policy at the attractor, not the measured arm; keep the shipped integrator, because in physics no law beats another by more than the re-measurement noise. The chosen law then runs the same five-hand, four-object grid end-to-end at **15 of 20** — one cell below the executor-free replay ceiling, which is what the executor costs. Includes four figures in `docs/figures/`. |
+| **`docs/dynamics_execution.md`** | **How should the transported policy be executed?** Experiments A–H, comparing nine attractor laws and two query sites. Query the policy at the attractor, not the measured arm; keep the shipped integrator, because in physics no law beats another by more than the re-measurement noise. The chosen law then runs the same five-hand, four-object grid end-to-end at **15 of 20**; on the ten cells that are genuinely paired against the replay ceiling it is 9/10 either way, so the executor is not what limits the system. Includes four figures in `docs/figures/`. |
 | **`ROBOTICS_NOTES.md`** | The running log behind both — every finding, every deviation from the paper with the measurement that motivated it, and every retraction. **Read this first if you want to know *why* the code is the way it is.** Sections 7.26 and 7.27 in particular are about measurements that turned out to be wrong and how. |
 
 Raw run data sits under `outputs/<experiment>/`. Only the prose and the

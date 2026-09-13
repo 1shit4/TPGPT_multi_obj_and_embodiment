@@ -3675,7 +3675,7 @@ Shortening it or deleting the stage is the obvious next measurement, and it is
 whether the path check would have kept them. Seconds per cell, no physics, and it
 is the most informative unmeasured quantity left in this thread.
 
-### 7.40 The attractor law: query at the attractor, and switch to a light anchor
+### 7.40 The attractor law: query at the attractor, and keep the shipped integrator
 
 > **Numbered 7.40 on merge.** This was written as 7.28 in an isolated worktree
 > while the keypoint session was appending to the same file; both claimed 7.28,
@@ -3946,15 +3946,109 @@ tunes `lag_tolerance` again.
   equality, so a helper cannot drift from the behaviour the validated 17/20 was
   measured under.
 
-#### What this cannot decide
+#### What this cannot decide -- and what the simulator then decided
 
 The bed has no contact, no inverse kinematics and no orientation task, so it
 cannot see grasping, the roughly quarter of a trajectory that is unreachable at
 its commanded orientation (7.25), or anything about task outcome. **It ranks
-hypotheses; it does not confirm them.** Two simulator tiers are specified and
-queued in `docs/dynamics_execution.md`: identity transport against the recorded
-arm trace, and the 20-scene reshelving gate. The byte-identity check of the
-refactor against the baseline commit is queued with them.
+hypotheses; it does not confirm them.** That caveat was written in advance, and
+it then had to be cashed.
+
+**Correction, superseding the recommendation this section originally carried.**
+This section was first titled "*switch to a light anchor*", on the strength of
+the bed's 1.6-2.2 mm advantage for `VR` at the two poses that decide the task.
+The simulator tiers have since run and the anchor does not survive them:
+
+- **Identity transport, 8 seeds x 3 laws, paired** (`identity_execution.py`,
+  `docs/dynamics_execution.md` 11). All three laws place the object **8 of 8**.
+  Every paired difference against `V` is *positive* -- the anchors are nominally
+  **worse** -- and none is significant; the closest, `VR-sched` at p=0.055, is in
+  the direction of being worse. Arm error spans **22 to 74 mm across seeds**
+  while the laws differ by **0.03 to 1.67 mm**: seed-to-seed variation is about
+  **thirty times** law-to-law variation, so no realistic number of runs could
+  resolve it.
+- **The effect shrank every time the bed got more faithful** -- 2.2 mm on the
+  surrogate plant, 1.7 mm and not significant in physics, 0 in task outcome.
+  **An effect that shrinks as the measurement improves is usually not there.**
+
+So the default stays `V`, not because it won but because nothing beat anything
+and it is the incumbent behind a validated result. `attractor_law` stays in the
+code, and the mechanism behind the anchor is real and measured -- `reference` is
+genuinely more accurate than a running integral at a dwell -- so it may surface
+on a longer trajectory or one where contact and IK contribute less.
+
+**And the executor is not what limits the pipeline.** The full five-hand x
+four-object grid, real map and real grasps, run under `V` in torque control
+(`outputs/campaigns/execution/manifest.json`, commit `96b9bf9`) places 15 of 20,
+against 16 of 20 for the same grid driven straight onto its waypoints by
+`solve_ik` with no policy at all (Experiment R). On the ten cells where the two
+picked the same grasp -- and only those are comparable, see 7.41 -- it is **9 of
+10 either way**, with a median placement difference of +3.8 mm at Wilcoxon
+p = 0.547. **The `reach` bottleneck of 8 is upstream of the executor.**
+
+### 7.41 A pipeline fix between two campaigns reselected the grasp in half the cells
+
+Two campaigns ran the same 20-cell grid -- five hands x four objects, seed 0,
+top-middle slot, grasp-pose-cube keypoints. Experiment R drove the arm with
+`solve_ik`, straight onto every waypoint, no policy. The execution campaign ran
+the same grid through the fitted policy in torque control. The counts were
+**16 of 20** and **15 of 20**, and the obvious sentence to write was "the
+executor costs one cell".
+
+**Three things are wrong with that sentence, in increasing order of severity.**
+
+**1. The count difference is not a measurement.** 16/20 against 15/20 is
+Fisher's exact test at **p = 1.000** -- not weak evidence, the maximum the test
+can return. At this sample size a one-cell difference is a coin.
+
+**2. The grids disagree on six cells, not one.** Four cells that replay placed,
+the executor did not (`yumi milk`, `yumi can`, `panda bread`,
+`robotiq85 cereal`); three that the executor placed and replay did not
+(`yumi bread`, `robotiq85 bread`, `robotiq140 bread`). **Seven outcomes changed
+and the count showed one.** This is the same reason the reshelving gate is
+specified on *seed identity* rather than on the count.
+
+**3. Half the grid did not run the same task.** `min det(J)` differs in **10 of
+the 20 cells** -- `xarm bread` 0.574 -> 0.938, `panda can` 0.790 -> 0.998,
+`yumi milk` 0.989 -> 0.849, and seven more. A different `min det(J)` means
+different keypoints, which means **a different grasp was chosen**.
+
+**What did not change is what identifies the cause.** Every cell has an
+identical point cloud (20 of 20: 598 points for the yumi cereal in both, 57 for
+every can, 167 for every bread), an identical candidate count (100 in all 40
+runs) and an identical survivor count after filtering. Perception is bit-stable
+and the grasp cache is working, so **GraspGen-X handed both campaigns the same
+set of grasps** and they picked differently from it. That is `_choose_grasp`,
+rewritten between the two runs to replace the flip loop with a whole-path
+feasibility check.
+
+The confound was introduced by a fix landing between two campaigns -- 7.26's
+failure mode exactly, caught this time only because the manifests record
+`min det(J)`, the cloud size and the survivor count per cell. **The count alone
+would have hidden it completely, and the pairing check is what exposed it.**
+
+**The rule.** Before comparing two campaigns, prove they faced the same task --
+on a per-cell fingerprint, not on the totals. The cheap fingerprints already in
+every manifest are `cloud_points`, the survivor count and `min det(J)`: the
+first two say perception and filtering agreed, the third says the map did. If
+they differ, the cells are not paired and must be dropped, not averaged in.
+Pairing on the 10 valid cells gave a clean answer -- 9 of 10 either way,
+Wilcoxon p = 0.547 -- where the full-grid comparison gave a false one.
+
+**Two per-cell results worth keeping.** `robotiq85 cereal` failed at `reach`
+with a 230 mm error on a *well-conditioned* map (0.875) and the same grasp
+replay had used successfully: an honest executor failure. And `yumi bread`, the
+worst-conditioned map in the paired set at `min det(J) = 0.248`, **failed under
+position control at 336 mm and placed at 11.8 mm under the executor.** The
+plausible mechanism is compliance -- `solve_ik` drives the arm onto every warped
+waypoint whether or not it makes sense, while an impedance controller chasing an
+attractor can give -- which would make the executor a partial *defence* against
+a folded map. One cell is not evidence; the test is a sweep of hands and objects
+at `min det(J) < 0.4` under both controllers.
+
+One more instance of the standing result that **`min det(J)` predicts the map's
+validity, not the task's outcome**: `yumi can` improved from 0.778 to 0.990 and
+turned a 4.0 mm placement into a 716 mm failure at `reach`.
 
 ## 8. Open items
 

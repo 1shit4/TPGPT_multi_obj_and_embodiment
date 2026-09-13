@@ -200,6 +200,15 @@ Each of these cost real debugging time. Full detail in `ROBOTICS_NOTES.md`.
   argument is geometric and does not need a success rate; the size of the
   improvement was measured on withdrawn campaigns and is not currently known.
   `§7.20`.
+- **Two campaigns are not comparable until you prove they faced the same task,
+  per cell.** A `_choose_grasp` fix landing between two runs of the same 20-cell
+  grid reselected the grasp in **10 of 20** cells -- same point cloud, same 100
+  candidates, same survivors, different pick -- so half the grid was silently a
+  different task. The totals looked like a clean 16/20 vs 15/20 one-cell cost;
+  the truth was six cells disagreeing in *both* directions and Fisher p = 1.000.
+  Fingerprint every cell on `cloud_points`, the survivor count and `min det(J)`
+  before pairing, and drop the cells that differ rather than averaging them in.
+  `ROBOTICS_NOTES.md` 7.41.
 - **A null result from a diagnostic deserves as much suspicion as a surprising
   one.** The frame problem above was tested early and recorded as *disproved*,
   because the instrument (`contact_offset`) was returning zeros and the test was
@@ -801,7 +810,22 @@ are an **upper bound** on what the keypoints can support rather than a rate for
 the full pipeline. Read them as 15/20 and 10/20 with that caveat attached;
 `outputs/keypoint_replay_v4/`, commit `6fb83d4`, and the per-cell attribution is
 in `FINDINGS.md` §8j. Nothing from the campaigns deleted under §7.26 has been
-reinstated, and the policy-driven rate remains unmeasured.
+reinstated.
+
+**The policy-driven rate is now measured, and the executor is not the
+bottleneck.** The full five-hand x four-object grid run through the fitted
+policy in torque control places **15 of 20**
+(`outputs/campaigns/execution/manifest.json`, commit `96b9bf9`, reproducible),
+against 16 of 20 for Experiment R -- the same grid under the position
+controller. **Do not read those totals as a one-cell cost.** They are not
+comparable: a `_choose_grasp` fix landed between the two campaigns and
+reselected the grasp in 10 of the 20 cells, and the grids disagree on six cells
+in *both* directions at Fisher p = 1.000. On the ten cells that did run the same
+task it is **9 of 10 either way**, median placement difference +3.8 mm at
+Wilcoxon p = 0.547. `§7.41`, and `docs/dynamics_execution.md` §12 for the full
+method. Nine attractor laws and two query sites were compared to reach that
+default: **query at the attractor, keep the shipped integrator**; on a real arm
+the seed-to-seed spread is ~30x the law-to-law spread. `§7.40`.
 
 **The largest known execution weakness is that every placement is a drop.** The
 arm stops 13 to 130 mm short of the commanded release pose, so the jaws open a
