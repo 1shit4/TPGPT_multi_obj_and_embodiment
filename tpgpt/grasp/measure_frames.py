@@ -78,7 +78,7 @@ from pathlib import Path
 
 import numpy as np
 
-from tpgpt.grasp.grippers import GRIPPER_PAIRS
+from tpgpt.grasp.grippers import GRIPPER_PAIRS, gripper_action
 
 #: Where the measured frames are cached.
 FRAMES_PATH = Path(__file__).with_name("gripper_frames.json")
@@ -153,13 +153,16 @@ def measure_frame(robosuite_name: str, robot: str = "Panda") -> dict:
         def geom_positions():
             return np.array([sim.data.geom_xpos[i].copy() for i in geom_ids])
 
-        action = np.zeros(env.action_dim)
-        action[-1] = -1.0
+        # ``gripper_action`` fills the whole gripper block. ``action[-1]`` drives
+        # one degree of freedom, which measured the Inspire hand's thumb and
+        # called its other four fingers stationary -- 9.07 mm of travel against
+        # 58.54 mm. See the helper's docstring.
+        action = gripper_action(env, gripper, -1.0)
         for _ in range(SETTLE_STEPS):
             env.step(action)
         opened = geom_positions()
 
-        action[-1] = 1.0
+        action = gripper_action(env, gripper, 1.0)
         for _ in range(SETTLE_STEPS):
             env.step(action)
         closed = geom_positions()

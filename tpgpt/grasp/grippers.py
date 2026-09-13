@@ -339,6 +339,52 @@ def summary_table() -> str:
 SINGLE_AXIS_ANISOTROPY = 50.0
 
 
+def gripper_action(env, gripper, command: float) -> np.ndarray:
+    """A full action vector whose **whole** gripper block carries ``command``.
+
+    robosuite lays an environment's action vector out as the arm's degrees of
+    freedom followed by the gripper's, so the jaws occupy the *last*
+    ``gripper.dof`` entries -- not the last one. Writing ``action[-1] = 1.0``
+    therefore drives a single degree of freedom and silently leaves the rest at
+    zero, which for a multi-fingered hand means commanding one finger and
+    calling the others stationary.
+
+    Measured on the two hands in the registry with ``dof > 1``, driving fully
+    open to fully closed and taking the largest geom displacement:
+
+    ==========  =====  ==================  ==================
+    hand        dof    ``action[-1]``      whole block
+    ==========  =====  ==================  ==================
+    inspire         6  9.07 mm             **58.54 mm**
+    umi             2  2 finger geoms      **4 finger geoms**
+    ==========  =====  ==================  ==================
+
+    The Inspire hand was recorded in ``gripper_frames.json`` as travelling
+    0.7 mm and written up as a hand that "does not actuate". It actuates; the
+    ruler was reading its thumb. That is ROBOTICS_NOTES.md section 7.28
+    repeating itself with a different instrument, which is why this is a shared
+    helper rather than two local fixes: the next hand with more than one
+    actuator must not be able to reintroduce it.
+
+    The seven ``dof == 1`` hands are unaffected -- for them the last entry *is*
+    the whole block -- which is what makes this fix checkable against the
+    existing registry.
+
+    Args:
+        env: A built robosuite environment, for ``action_dim``.
+        gripper: The mounted gripper model, for ``dof``.
+        command: The open/close command, ``-1`` open to ``+1`` closed.
+
+    Returns:
+        A zero action vector of length ``env.action_dim`` with its last
+        ``gripper.dof`` entries set to ``command``.
+    """
+    dof = int(getattr(gripper, "dof", 1) or 1)
+    action = np.zeros(env.action_dim)
+    action[env.action_dim - dof:] = float(command)
+    return action
+
+
 def measure_closing_angle(
     robosuite_name: str,
     robot: str = "Panda",
@@ -404,14 +450,15 @@ def measure_closing_angle(
         def positions():
             return np.array([sim.data.geom_xpos[i].copy() for i in geom_ids])
 
-        action = np.zeros(env.action_dim)
-        action[-1] = -1.0                       # fully open
+        # The whole gripper block, not just the last entry: a hand with more
+        # than one actuator would otherwise be measured one finger at a time.
+        action = gripper_action(env, gripper, -1.0)     # fully open
         for _ in range(steps):
             env.step(action)
         before = positions()
         rotation = np.array(sim.data.site_xmat[site]).reshape(3, 3)
 
-        action[-1] = 1.0                        # fully closed
+        action = gripper_action(env, gripper, 1.0)      # fully closed
         for _ in range(steps):
             env.step(action)
 
