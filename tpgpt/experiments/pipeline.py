@@ -121,6 +121,13 @@ DEFAULT_KEYPOINTS = ("box",)
 #: the frame the demonstration's own keypoints were anchored in.
 SOURCE_GRIPPER = "panda"
 
+#: Fraction of a transported path whose poses the arm must be able to hold.
+#:
+#: A candidate can be collision-free and still be unreachable for a stretch of
+#: its path. 0.60 is the replay driver's value, kept so the two selection paths
+#: agree rather than being tuned separately here.
+MIN_REACHABLE_FRACTION = 0.60
+
 #: Surviving grasps whose transported motion is scored before choosing one.
 #:
 #: Each costs a map fit and fourteen IK solves, about a tenth of a second, and
@@ -272,6 +279,7 @@ def run(
     cube_half_extent: float = GRASP_CUBE_HALF_EXTENT,
     approach_filter: bool = False,
     max_candidates: int = 100,
+    preconditions: bool = True,
     max_steps: int = 600,
     env=None,
     rollout_kwargs: dict | None = None,
@@ -311,6 +319,19 @@ def run(
         entity = graph.by_id(spec.object_id)
         result.object_name = entity.label
         result.slot = graph.by_id(spec.destination_id).metadata["slot"]
+
+        # **Before any physics, and after the object is known.** Each check here
+        # corresponds to a bug that was found only once a campaign had already
+        # produced plausible numbers: the wrong hand mounted, a scene reused
+        # from the previous cell, an object that had drifted since reset, an
+        # uncalibrated jaw. All four are answerable in milliseconds from a fresh
+        # environment, so the run refuses to start rather than discovering it in
+        # the results. ``FINDINGS.md`` §8p.
+        if preconditions:
+            from tpgpt.experiments.diagnose import replay_preconditions, require
+
+            require(replay_preconditions(env, gripper, result.object_name),
+                    f"{gripper}/{result.object_name}")
 
         obs = env._get_observations()
 
@@ -402,12 +423,16 @@ def run(
         # 180 degree alignment rides through the map and arrives attached to
         # whichever hand is executing: 0.2 degrees of error on a Robotiq 2F-85,
         # 90 on an XArm. 7.34.
-        tool_labels = PolicyLabels(
-            positions=tool_labels.positions,
-            velocities=tool_labels.velocities,
-            orientations=to_grasp_convention(tool_labels.orientations, SOURCE_GRIPPER),
-            gripper=tool_labels.gripper,
-            time_belief=tool_labels.time_belief,
+        #
+        # ``replace`` rather than rebuilding field by field. Rebuilding dropped
+        # **stiffness, damping and time_rate** here: only five families were
+        # listed, so the policy was fitted without an impedance channel and
+        # ``rollout_policy`` then dereferenced ``prediction.stiffness[0]`` on a
+        # ``None``. ``PolicyLabels.replace``'s own docstring names this failure
+        # -- "rebuilding the object field by field instead is how a family
+        # quietly gets dropped" -- which is the argument for never doing it.
+        tool_labels = tool_labels.replace(
+            orientations=to_grasp_convention(tool_labels.orientations, SOURCE_GRIPPER)
         )
 
         candidates = [grasp_set.grasps[i] for i in funnel.survivors[:max_candidates]]
@@ -415,11 +440,12 @@ def run(
             env, placement, target_of, tool_labels, keypoint_parts, candidates,
             box=keypoint_box, orientation=keypoint_orientation,
             cube_half_extent=cube_half_extent,
+            gripper=gripper, object_name=result.object_name,
         )
         if chosen is None:
             return _fail(result, "map_not_a_diffeomorphism",
                          "no surviving grasp produced a valid transportation map")
-        result.grasp, sets, executable = chosen
+        result.grasp, sets, path_flags = chosen
         # The object's width along **this grasp's own** closing axis, taken from
         # the cloud. Recorded here because this is the only place both the cloud
         # and the chosen grasp are in scope, and because ``closing_budget``
@@ -432,7 +458,27 @@ def run(
             np.ptp(cloud.points @ result.grasp.closing)
         )
         result.alternatives = [g for g in candidates if g is not result.grasp][:5]
-        result.metrics["executable_fraction"] = executable
+        # **The whole path-check record, not a single number.** Which candidate
+        # was chosen, how far down the ranking it sat, whether nothing was
+        # admissible and the least-bad one had to run, and for every candidate
+        # examined the waypoint of its first fault and what that fault was.
+        # Without this a fallback cell is indistinguishable from an ordinary one
+        # in the results, which is how a campaign comes to report numbers for a
+        # scene where no admissible grasp existed.
+        result.metrics.update(path_flags)
+        check = path_flags.get("path_check", {})
+        result.metrics["path_fell_back"] = bool(check.get("fell_back"))
+        result.metrics["path_rank_examined"] = check.get("rank_examined")
+        # The funnel's own stage tallies, so a rejection can be attributed to
+        # the stage that made it rather than only to the funnel as a whole.
+        if result.funnel is not None:
+            result.metrics["funnel_stages"] = {
+                stage.name: [stage.entered, stage.survived]
+                for stage in result.funnel.stages
+            }
+            result.metrics["funnel_fallbacks"] = [
+                stage.name for stage in result.funnel.stages if stage.fallback
+            ]
         source_set, target_set = _select_parts(sets[0], sets[1], keypoint_parts)
         result.source_keypoints, result.target_keypoints = source_set, target_set
         result.source_capture = placement.metadata.get("capture")
@@ -532,6 +578,18 @@ def run(
 #: moments where it *cannot* give anything up are closing on the object and
 #: setting it down, and those occupy a handful of labels out of two hundred.
 #: Sampling uniformly is therefore sampling in the wrong place.
+#: **Retired.** These three, and :func:`executable_fraction` below, were the
+#: grasp selector until the whole-path check replaced them. They sampled 14
+#: poses of a 200-waypoint trajectory, and ``ROBOTICS_NOTES`` §7.38 measured
+#: candidates passing that sample and then colliding at 79 to 162 of the other
+#: 187 -- so the proxy was answering a different question, not a coarser version
+#: of the same one.
+#:
+#: Kept rather than deleted because §7.25's account of the infeasibility
+#: fallback is written in terms of them, and because a reader comparing this
+#: file against that section should find the thing it describes. Nothing calls
+#: them; ``run_experiments`` reads ``executable_fraction`` out of the metrics,
+#: where it is now absent and reads as ``None``.
 CRITICAL_SAMPLES = 6
 CRITICAL_WINDOW = 12
 
@@ -600,44 +658,141 @@ def executable_fraction(
     return solved / float(len(index))
 
 
-def _choose_grasp(env, placement, target_of, labels, keypoint_parts, candidates, arm="right"):
+def _choose_grasp(env, placement, target_of, labels, keypoint_parts, candidates,
+                  arm="right", box=DEFAULT_KEYPOINT_BOX,
+                  orientation=DEFAULT_KEYPOINT_ORIENTATION,
+                  cube_half_extent=GRASP_CUBE_HALF_EXTENT,
+                  gripper: str = "panda", object_name: str | None = None,
+                  min_reachable_fraction: float = MIN_REACHABLE_FRACTION,
+                  stride: int = 4):
     """Pick the candidate whose *transported motion* the arm can actually follow.
 
     Each candidate defines a slightly different keypoint frame and so a slightly
     different warp, and the differences matter far more than they look: the same
     scene gives paths the arm can follow almost entirely and paths it can barely
-    start. Both frame signs are tried for each, since a parallel jaw closing
-    along ``+c`` and ``-c`` is one grasp commanded as two wrist angles 180
-    degrees apart, and a wrist has a limited range.
+    start.
 
-    Returns ``(grasp, sets, score)`` for the best, or ``None`` if every
-    candidate produced a degenerate keypoint set.
+    **The roll is no longer chosen here.** This used to try both frame signs per
+    candidate and keep whichever score preferred, on the argument that a
+    parallel jaw closing along ``+c`` and ``-c`` is one grasp commanded as two
+    wrist angles 180 degrees apart. The argument is sound and the criterion was
+    not: ``FINDINGS.md`` §8j measured it picking the *worse* roll at 2 of 8
+    yaws. ``scene_keypoints`` resolves the roll once, on the grasp, by agreement
+    with the demonstration.
+
+    **And a candidate is judged on the whole path it produces.** This used to
+    rank by :func:`executable_fraction`, which samples 14 poses out of 200.
+    ``ROBOTICS_NOTES`` §7.38 measured candidates passing that sample and then
+    colliding at **79 to 162** of the other 187 waypoints, so the proxy was not
+    merely coarse -- it was answering a different question. Selection now walks
+    the ranked list and takes the **first admissible** candidate, judged by
+    :func:`~tpgpt.grasp.filters.path_feasibility_observed` at every waypoint.
+
+    Two things about that check are deliberate. It sees only what the robot
+    could: the arm's own convex geometry from its description file, and the
+    scene as an observed cloud **with the arm subtracted from it** -- without
+    that subtraction the arm collides with its own reflection, because a depth
+    image of a workspace contains the arm. And faults are judged by phase at a
+    zero threshold: nothing may touch during the approach, only the fingers may
+    touch the object during the carry, and the object may rest on a support
+    surface throughout.
+
+    Returns ``(grasp, sets, flags)``, or ``None`` if every candidate produced a
+    degenerate keypoint set. ``flags`` records each candidate examined and why
+    it was rejected, so a cell that had to fall back reads as "no admissible
+    grasp exists here" rather than as an ordinary result.
     """
-    best = None
-    for grasp in candidates:
+    from tpgpt.grasp.filters import path_feasibility_observed
+    from tpgpt.perception.cameras import scene_point_cloud
+    from tpgpt.perception.obstacles import robot_bodies, self_filtered
+
+    pair = resolve_pair(gripper)
+    # Built once. Neither the robot's own shape nor the scene changes while
+    # candidates are compared, and rebuilding them per candidate would be most
+    # of the cost.
+    bodies = robot_bodies(env)
+    scene = self_filtered(
+        env, scene_point_cloud(env, exclude=(object_name,) if object_name else (),
+                               obs=None),
+        bodies,
+    )
+    grasp_index, release_index = carry_indices(labels)
+
+    examined, fallback, degenerate = [], None, None
+    for index, grasp in enumerate(candidates):
         target = target_of(grasp)
-        for flip in (False, True):
-            sets = scene_keypoints(
-                placement, target, labels,
-                # The support point is emitted by the same block as the jaw
-                # contacts, so it has to be switched on for either of them.
-                include_contacts=bool({"contacts", "support"} & set(keypoint_parts)),
-                flip_target=flip,
-            )
-            source_set, target_set = _select_parts(sets[0], sets[1], keypoint_parts)
-            if source_set.is_degenerate() or target_set.is_degenerate():
-                if best is None:
-                    best = (grasp, sets, -1.0)
-                continue
-            transport_map = TransportMap().fit(source_set.points, target_set.points)
-            if not transport_map.check_diffeomorphism(labels.positions).consistent_sign:
-                continue
-            score = executable_fraction(env, transport_map, labels, arm=arm)
-            if best is None or score > best[2]:
-                best = (grasp, sets, score)
-            if score >= 1.0:
-                return best
-    return best
+        sets = scene_keypoints(
+            placement, target, labels,
+            # The support point is emitted by the same block as the jaw
+            # contacts, so it has to be switched on for either of them.
+            include_contacts=bool({"contacts", "support"} & set(keypoint_parts)),
+            box=box, orientation=orientation, cube_half_extent=cube_half_extent,
+        )
+        source_set, target_set = _select_parts(sets[0], sets[1], keypoint_parts)
+        if source_set.is_degenerate() or target_set.is_degenerate():
+            examined.append({"index": index, "rejected": "degenerate keypoints"})
+            if degenerate is None:
+                degenerate = (grasp, sets)
+            continue
+        transport_map = TransportMap().fit(source_set.points, target_set.points)
+        if not transport_map.check_diffeomorphism(labels.positions).consistent_sign:
+            examined.append({"index": index, "rejected": "map folded"})
+            continue
+
+        warped = transport_map.transport_positions(labels.positions)
+        rotations = transport_map.transport_orientations(
+            labels.positions, labels.orientations
+        )
+        feasible = path_feasibility_observed(
+            env, warped, rotations, pair, scene, placement.points,
+            grasp_index, release_index, bodies=bodies, stride=stride,
+            # Selection is decided by the first fault, so sweeping the rest is
+            # wasted here. Diagnosis wants the whole tally and asks for it.
+            stop_early=True,
+        )
+        record = {
+            "index": index,
+            "violations": feasible["violations"],
+            "first_violation": feasible["first_violation"],
+            "reachable_fraction": round(feasible["reachable_fraction"], 3),
+            "faults": {k: v for k, v in list(feasible["faults"].items())[:4]},
+        }
+        if feasible["violations"]:
+            record["rejected"] = "collision"
+        elif feasible["reachable_fraction"] < min_reachable_fraction:
+            record["rejected"] = "kinematics"
+        else:
+            examined.append(record)
+            return grasp, sets, {"path_check": {
+                "chosen": index, "rank_examined": len(examined),
+                "fell_back": False, "examined": examined,
+            }}
+        examined.append(record)
+        if fallback is None or _got_further(record, fallback[2]):
+            fallback = (grasp, sets, record)
+
+    # **Nothing was admissible, so take the least bad and say so.** Falling back
+    # to the top-ranked candidate would throw away everything the check just
+    # learned. The one that got furthest before its first fault is the one whose
+    # plan is wrong latest, and on a path that ends at a shelf that is the one
+    # most likely to have done the useful part of the task first.
+    if fallback is not None:
+        return fallback[0], fallback[1], {"path_check": {
+            "chosen": fallback[2]["index"], "rank_examined": len(examined),
+            "fell_back": True, "examined": examined,
+        }}
+    if degenerate is not None:
+        return degenerate[0], degenerate[1], {"path_check": {
+            "chosen": None, "fell_back": True, "examined": examined,
+        }}
+    return None
+
+
+def _got_further(record: dict, best: dict) -> bool:
+    """Whether ``record``'s first fault comes later than ``best``'s."""
+    far = lambda r: (r.get("first_violation") if r.get("first_violation") is not None
+                     else 10**9)
+    return far(record) > far(best)
 
 
 def _to_tool_frame(labels, offset: np.ndarray):

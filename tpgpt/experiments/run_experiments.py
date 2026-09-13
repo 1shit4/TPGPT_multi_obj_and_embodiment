@@ -162,7 +162,11 @@ def _row(result, label: str) -> dict:
         "survivors": (
             len(result.funnel.survivors) if result.funnel is not None else None
         ),
+        # Retired with the whole-path check; absent from new runs, kept so an
+        # older rows.json still reads. See pipeline.CRITICAL_SAMPLES.
         "executable_fraction": result.metrics.get("executable_fraction"),
+        "path_fell_back": result.metrics.get("path_fell_back"),
+        "path_rank_examined": result.metrics.get("path_rank_examined"),
         "steps": result.metrics.get("steps"),
         "seconds": round(result.seconds, 1),
     }
