@@ -56,8 +56,9 @@ import numpy as np
 from tpgpt.experiments import diagnose
 from tpgpt.grasp.grasps import approach_waypoint, grasp_to_eef_pose
 from tpgpt.grasp.grippers import VERIFIED_PAIRS, resolve_pair
+from tpgpt.grasp.filters import filter_grasps
 from tpgpt.grasp.pipeline import grasps_for_cloud
-from tpgpt.perception.cameras import object_point_cloud
+from tpgpt.perception.cameras import object_point_cloud, scene_point_cloud
 from tpgpt.reporting.html import write_manifest
 
 #: Hands the registry says are usable. Read from the registry rather than
@@ -208,6 +209,20 @@ def _grip_and_carry(env, controller, grasp, gripper, obj, probes, closure=None):
     drive(pre_grasp, STEPS["pre"], -1.0, settle=STEPS["settle"])
     drive(position, STEPS["descend"], -1.0, settle=STEPS["settle"])
 
+    # How close the hand actually got, before the jaws move. Without this a
+    # cell that failed because the arm could not reach the pose is
+    # indistinguishable from one that reached it and lost its grip, and those
+    # want opposite fixes. Split by axis as well as in total, because only the
+    # component along the **closing** axis decides whether the object ends up
+    # between the jaws -- the approach axis tolerates 120 to 135 mm on a
+    # parallel jaw (ROBOTICS_NOTES 7.2, 7.27).
+    reached, reached_rot = controller.eef_state()[0], None
+    reach_error = position - reached
+    axes = {"closing": rotation[:, 0], "jaw": rotation[:, 1],
+            "approach": rotation[:, 2]}
+    reach = {f"reach_{k}_mm": float(reach_error @ v) * 1000 for k, v in axes.items()}
+    reach["reach_total_mm"] = float(np.linalg.norm(reach_error)) * 1000
+
     # Close, in place. ``hold`` of 0.0 means "stay where you are": robosuite's
     # gripper interface integrates the *sign* of the command, and the sign of
     # zero is zero.
@@ -241,6 +256,7 @@ def _grip_and_carry(env, controller, grasp, gripper, obj, probes, closure=None):
     held = trace["held"]
     carry_start = STEPS["close"]
     return {
+        **reach,
         "lift_height": lift_height,
         "final_height": float(env.object_position(obj)[2]) - start_z,
         "closure_at_close": closure_at_close,
@@ -274,7 +290,38 @@ def run_cell(gripper: str, obj: str, *, seed: int = 0, ranks: int = DEFAULT_RANK
         if not grasps.grasps:
             return [{**base, "outcome": "no_grasp_generated", "grasp_rank": None}]
 
-        order = np.argsort([-g.score for g in grasps.grasps])[:ranks]
+        # Filter before ranking. The planner's own score does **not** order
+        # candidates by executability: on `panda/can` only **25 of 100** of its
+        # candidates approach from above at all, and its six top-scoring ones
+        # include four that come in almost horizontally, at an end-effector
+        # height of 846 to 872 mm against a table top at 840. Executed
+        # unfiltered they drive the hand along the table and shove the object
+        # 115 to 280 mm without ever lifting it, which measures the ranking and
+        # not the hand.
+        #
+        # Only the pick-side stages run. `check_place_approach` is off and no
+        # `place_pose` is given, because this bench has no shelf: the question
+        # is whether the hand can hold the object, not where it can put it.
+        scene = scene_point_cloud(env, exclude=(obj,))
+        funnel = filter_grasps(
+            grasps.grasps, gripper,
+            target_points=cloud.points,
+            scene_points=scene,
+            env=env,
+            target_name=obj,
+            support_normal=(0.0, 0.0, 1.0),
+            check_place_approach=False,
+            centre_of_mass=env.object_position(obj),
+        )
+        survivors = np.asarray(funnel.survivors, dtype=int)
+        base["survivors"] = int(len(survivors))
+        base["rejected_by"] = funnel.rejected_by
+        base["funnel_flags"] = sorted(funnel.flags)
+        if len(survivors) == 0:
+            return [{**base, "outcome": "no_grasp_survived", "grasp_rank": None}]
+
+        scores = np.array([grasps.grasps[i].score for i in survivors])
+        order = survivors[np.argsort(-scores)][:ranks]
         if plan_only:
             return [
                 {**base, "grasp_rank": int(r), "grasp_index": int(i),
@@ -353,8 +400,9 @@ def main(argv=None) -> Path:
         cells = [(g, o) for g in grippers for o in objects]
 
     rows = []
-    print(f"{'hand':<11}{'object':<11}{'cloud':>7}{'cand':>6}{'rank':>5}"
-          f"{'lift mm':>9}{'closure':>9}{'slip mm':>9}{'held':>6}  outcome")
+    print(f"{'hand':<11}{'object':<11}{'cloud':>7}{'surv':>6}{'rank':>5}"
+          f"{'reach mm':>10}{'lift mm':>9}{'closure':>9}{'slip mm':>9}"
+          f"{'held':>6}  outcome")
     for gripper, obj in cells:
         for row in run_cell(gripper, obj, seed=args.seed, ranks=args.ranks,
                             plan_only=args.plan_only,
@@ -363,8 +411,9 @@ def main(argv=None) -> Path:
             rows.append(row)
             print(
                 f"{row['gripper']:<11}{row['object']:<11}"
-                f"{row.get('cloud_points', 0):>7}{row.get('candidates', 0):>6}"
+                f"{row.get('cloud_points', 0):>7}{row.get('survivors', 0):>6}"
                 f"{str(row.get('grasp_rank', '-')):>5}"
+                f"{row.get('reach_total_mm', float('nan')):>10.1f}"
                 f"{row.get('lift_height', float('nan')) * 1000:>9.1f}"
                 f"{row.get('closure_at_lift', float('nan')):>9.2f}"
                 f"{row.get('slip_max', float('nan')) * 1000:>9.1f}"
@@ -391,9 +440,14 @@ def main(argv=None) -> Path:
                 "scene": "TabletopShelf, ONE object, rebuilt fresh per grasp",
                 "seed": args.seed,
                 "camera": f"{args.camera_size}x{args.camera_size}, three views",
-                "grasps": "GraspGen-X via tpgpt.grasp.cache, ranked by its own "
-                          "score. Cached because the planner is an unseeded "
-                          "diffusion model (ROBOTICS_NOTES 7.15)",
+                "grasps": "GraspGen-X via tpgpt.grasp.cache, put through "
+                          "filters.filter_grasps' pick-side stages, then "
+                          "ranked by the planner's own score. Cached because "
+                          "the planner is an unseeded diffusion model "
+                          "(ROBOTICS_NOTES 7.15)",
+                "filters": "visibility, target containment, jaw width, "
+                           "support approach, collision, centre offset. No "
+                           "place-side stage and no reachability stage",
                 "gripper_command": (
                     "plain +1 shut; no force target, no feedback"
                     if args.closure is None else

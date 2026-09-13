@@ -27,7 +27,7 @@ all?** Nothing here involves a transportation map, a policy, or a shelf.
 > | B | §4 the Inspire and UMI hands, re-measured and re-calibrated | **stands.** Frames repaired and two false claims removed; both hands still lift 0 of 13, and the reason is measured — their fingertips part by 28 mm against a 65 mm can. One 132 mm lift is **withdrawn** as irreproducible |
 > | C | §5 two hands paired from halves already on disk | **stands.** `g1three` and `bd` measured and registered; both lift 0 of 13. Every hand with `grip_site` at its base fails and every hand with it at the fingertips passes, 11 of 11 |
 > | D | §6 GraspGen-X descriptions authored from the MuJoCo model | *not started* |
-> | E | §7 object census — what the cameras see, per object | *not started* |
+> | E | §7 object census — what the cameras see, per object | **stands.** 70 of 70 cells plan; every new object resolves better than the can, and the single-object scene nearly doubles the bread |
 > | F | §8 the bench — grasp, close, lift, carry | *not started* |
 > | G | §9 the closure sweep, and how wide each pair's band is | *not started* |
 > | H | §10 the closure table applied, paired grasp for grasp | *not started* |
@@ -573,3 +573,104 @@ repeated calls agree to 0.005 mm on this hand; across processes they do not.
 The seed is set, so something outside `np.random` differs between processes.
 That is unexplained, and it is the reason the advice above is "measure only the
 hand you are adding" rather than "run it twice and average".
+
+---
+
+## 7. Experiment E — the object census: what the cameras see, one object at a time
+
+`outputs/bench_plan`, commit `217a584`, clean tree.
+`run_grasp_bench --plan-only --ranks 5`, 70 cells, about 20 minutes.
+
+### Why
+
+Six objects were added to `OBJECT_CLASSES` — a hammer, a wrench, a pot, a mug
+and two nuts — on the argument that a box, a carton, a can and a loaf are all
+things a **parallel jaw** is good at, so a fleet measured only on them cannot
+show that more fingers buy anything. A handle, a rim, a hole and an offset
+centre of mass can.
+
+Before any of that can be measured, the objects have to be **seen**. This
+project already has one object it cannot use for exactly this reason: the lemon
+fuses to **17** points in the five-object scene, against a `MIN_CLOUD_POINTS`
+floor of 40, and GraspGen-X refuses a cloud that thin outright (§7.18). So the
+first question about a new object is not whether it can be grasped but whether
+the cameras resolve it at all.
+
+`--plan-only` answers that in seconds a cell rather than minutes: it runs
+perception and grasp generation and stops before any physics. It also answers
+the second question — whether the planner returns candidates at all — which is
+worth knowing before an hour of physics is committed.
+
+### Conditions, held fixed
+
+Seven hands (every pair in `VERIFIED_PAIRS`) × ten objects. **One object on the
+table at a time**, cameras at **256 × 256**, three views (`workspace`,
+`sideview`, `birdview`) fused with one pixel of mask erosion, seed 0. Grasps
+from GraspGen-X through `tpgpt.grasp.cache`, 200 samples drawn, top 100 kept.
+
+The resolution is deliberately unchanged. Raising it to 512 would roughly
+quadruple every cloud and lift the lemon over the floor, and it would also change
+what GraspGen-X proposes for every object, so it belongs in its own experiment.
+
+### What each column means
+
+| column | what it is |
+|---|---|
+| cloud points | points in the fused, world-frame object cloud after mask erosion and downsampling |
+| range | smallest and largest across the seven hands. The hand is at its home pose, so it occludes a little, and the object does not settle identically under different hands |
+| five-object scene | the same object's cloud in the four- or five-object campaign scene, from `ROBOTICS_NOTES.md` §7.18 |
+
+### Result: every object is seen, and the two the campaigns struggle with are the two thinnest
+
+| object | cloud points, median over the seven hands | range | in the five-object scene (§7.18) |
+|---|---|---|---|
+| `pot` | 2892 | 2838 – 2908 | — (new) |
+| `wrench` | 1388 | 1383 – 1388 | — (new) |
+| `cereal` | 1031 | 1023 – 1031 | 975 |
+| `mug` | 650 | 650 – 650 | — (new) |
+| `hammer` | 619 | 507 – 1278 | — (new) |
+| `nut_round` | 372 | 367 – 373 | — (new) |
+| `milk` | 367 | 366 – 367 | 345 |
+| `nut_square` | 340 | 335 – 341 | — (new) |
+| `can` | 238 | 237 – 238 | 255 |
+| `bread` | 156 | 156 – 156 | 81 |
+
+**70 of 70 cells planned**, every one returning the full 100 candidates. No cell
+was rejected for a thin cloud and none was refused by the planner.
+
+### Reading it
+
+**Every new object is seen more thoroughly than the grocery meshes.** The thinnest
+of the six, `nut_square` at 340 points, is still better resolved than the `can` at
+238 and more than twice the `bread` at 156. So nothing here repeats the lemon's
+problem, and the census can be set aside: if one of these objects fails later, it
+will not be because the cameras could not find it.
+
+**The single-object scene helps, and the size of the help says what it is.** The
+bread goes from 81 points to **156**, very nearly doubling; the cereal, milk and
+can barely move (975 → 1031, 345 → 367, 255 → 238). The objects that gain are the
+small ones, which is what you would expect if the gain is **occlusion** — a small
+object is easily hidden behind a larger neighbour and a large one is not. The can
+actually loses 17 points, which is within the variation across hands and is not
+a change worth explaining.
+
+**The hammer is the only object whose cloud depends on which hand is mounted**,
+and it varies two and a half fold — 507 points with the `rethink` against 1278
+with the `robotiq140`. Every other object varies by less than 2%. The hammer is
+the one object here with a long thin handle and a head, so how it comes to rest
+matters more: the same seed does not settle an object identically under different
+grippers (`CLAUDE.md`), and a hammer that settles on its side presents a very
+different silhouette from one that settles on its head. That is a property of the
+object, not a fault, but it does mean **hammer cells are not cross-hand
+comparable in the way the other nine are**.
+
+### What it does not settle
+
+Nothing about grasping. A well-resolved cloud is a precondition, not a result,
+and the pot at 2892 points is also the largest and heaviest object here. Whether
+any hand can hold these objects is Experiment F.
+
+Nor does it settle the lemon, which is excluded from this grid because it is
+excluded from the pipeline. A single-object scene would very likely lift it over
+the floor — the bread nearly doubled — but that was not tested and should not be
+assumed.
