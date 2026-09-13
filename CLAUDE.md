@@ -344,13 +344,20 @@ Each of these cost real debugging time. Full detail in `ROBOTICS_NOTES.md`.
   the same cells: median 0.944, min 0.456, no folds, against 0.878 and 0.443.
   On a synthetic yaw sweep the cheap criterion still picks the worse roll at
   2 of 8 yaws; the old code folded at those same two and could not be rescued.
-- **GraspGen-X declares `symmetric` per gripper and we ignore it.**
-  `parallel_2f` and `revolute_2f` are `True`; **`revolute_3f` is `False`** --
-  `robotiq3f` and `inspire`. A half turn about the approach is the same grasp
-  for two fingers and a *different* grasp for three.
-  `orientation_transport_error` applies it unconditionally, so every orientation
-  figure for those two hands, including their rows in `§7.29`'s nine-hand table,
-  used a symmetry they do not have. **Not yet fixed.** `§7.34`.
+- **GraspGen-X declares `symmetric` per gripper, and the code no longer assumes
+  it. Fixed.** `parallel_2f` and `revolute_2f` are `True`; **`revolute_3f` is
+  `False`** -- `robotiq3f` and `inspire` -- because a half turn about the
+  approach is the same grasp for two fingers and a *different* grasp for three.
+  `orientation_transport_error` used to minimise over that half turn
+  unconditionally, so every orientation figure for those two hands used a
+  symmetry they do not have. The forgiveness was removed at `e55ce3f` and the
+  function now returns the plain geodesic, which is why the three-finger hand can
+  be measured at all. Compared against the grasp actually *executed* rather than
+  the one the planner emitted, minimising over the symmetry changed the answer on
+  **0 of 20** cells, so it was inert as well as wrong. `§7.34`, `§8z` item 1b.
+  Use `metrics.transport.carry_orientation_error` for anything that *carries* an
+  object: a roll taken at both ends cancels there and one taken at a single end
+  does not.
 - **The number of fingers a gripper has is declared, in GraspGen-X's own
   config.** Its `type` field: `parallel_2f` and `revolute_2f` are two,
   `revolute_3f` is three. Read it with `grippers.declared_fingers` rather than
