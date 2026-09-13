@@ -27,6 +27,7 @@ import numpy as np
 
 from tpgpt.experiments.diagnose import diagnose, object_probe
 from tpgpt.experiments.reshelving_pipeline import record_source_placement
+from tpgpt.experiments.run_keypoint_transport import object_centre_of_mass
 from tpgpt.grasp.filters import FilterFunnel, filter_grasps
 from tpgpt.grasp.grasps import (
     Grasp6D,
@@ -41,9 +42,11 @@ from tpgpt.perception.cameras import object_point_cloud, scene_point_cloud
 from tpgpt.perception.scene_graph import build_scene_graph
 from tpgpt.policy.gp_policy import GPPolicy
 from tpgpt.sim.keypoints import (
+    GRASP_CUBE_HALF_EXTENT,
     GraspFrame,
     ObjectPlacement,
     carry_indices,
+    carry_transform,
     scene_keypoints,
 )
 from tpgpt.sim.rollout import rollout_policy, slot_score
@@ -124,6 +127,17 @@ SOURCE_GRIPPER = "panda"
 #: the search stops early on the first candidate whose whole path is executable.
 MAX_CANDIDATES = 8
 
+#: The keypoint construction. ``"cloud"``/``"task"`` is the cloud box that this
+#: pipeline shipped with; ``"grasp_cube"``/``"grasp"`` is Experiment R's winner
+#: (``FINDINGS.md`` §8p), which placed 15/20 against the cloud box's 10/20 under
+#: replay and carries the grasp point exactly rather than to 26-70 mm.
+#:
+#: The cube is a fixed-size box centred on the grasp TCP, so it pins the map
+#: where the jaws close instead of at the object's centroid, and takes the
+#: hand's own rotation rather than a task frame that can only carry a yaw.
+DEFAULT_KEYPOINT_BOX = "grasp_cube"
+DEFAULT_KEYPOINT_ORIENTATION = "grasp"
+
 
 @dataclass
 class RunResult:
@@ -175,8 +189,17 @@ def _fail(result: RunResult, outcome: str, detail: str) -> RunResult:
     return result
 
 
+#: Scene object order, matching ``run_keypoint_replay.REPLAY_OBJECTS``.
+#:
+#: **This is not cosmetic.** The placement sampler lays objects out in the order
+#: it is given, so a different order is a different scene -- different positions,
+#: different occlusions, different clouds. Running the campaign in one order and
+#: the replay in another compares two scenes rather than two executors.
+SCENE_OBJECTS = ("cereal", "milk", "can", "bread")
+
+
 def build_scene(
-    objects=("milk", "can", "cereal", "bread"),
+    objects=SCENE_OBJECTS,
     gripper: str = "panda",
     shelf_variant: str = "cubby",
     seed: int = 0,
@@ -240,10 +263,15 @@ def run(
     gripper: str = "panda",
     shelf_variant: str = "cubby",
     seed: int = 0,
-    objects=("milk", "can", "cereal", "bread"),
+    objects=SCENE_OBJECTS,
     source: tuple | None = None,
     include_contacts: bool = False,
     keypoint_parts: tuple[str, ...] = DEFAULT_KEYPOINTS,
+    keypoint_box: str = DEFAULT_KEYPOINT_BOX,
+    keypoint_orientation: str = DEFAULT_KEYPOINT_ORIENTATION,
+    cube_half_extent: float = GRASP_CUBE_HALF_EXTENT,
+    approach_filter: bool = False,
+    max_candidates: int = 100,
     max_steps: int = 600,
     env=None,
     rollout_kwargs: dict | None = None,
@@ -308,10 +336,29 @@ def run(
         target_height = float(np.ptp(cloud.points[:, 2]))
         provisional = place_pose_for(env, result.slot, grasp_set.grasps[0], gripper,
                                      target_height)
+        # Four arguments that were missing, and one of them was a live bug.
+        #
+        # ``carry_rotation`` is the bug. The demonstration turns the hand 35.5
+        # degrees between closing the jaws and opening them. Without it both
+        # place-side stages judge the hand in its *pick* orientation at the
+        # release position -- and against a slot that fits a 204 mm hand one way
+        # round and not the other, that inverts the answer rather than shading
+        # it. ``FINDINGS.md`` §8p.
+        #
+        # ``centre_of_mass`` switches on a stage that otherwise never runs at
+        # all. ``reference_approach`` is now off by default: the target's roll
+        # is resolved inside ``scene_keypoints`` from the grasps' own closing
+        # axes, not from this argument, so the 45 degree test only narrows the
+        # pool. And the pool itself was capped at 8 candidates, which is below
+        # what the path check needs to find an admissible one.
         funnel = filter_grasps(
             grasp_set.grasps, gripper, cloud.points, scene_points=scene,
             camera_positions=cloud.camera_positions, env=env, place_pose=provisional,
-            reference_approach=_demonstrated_approach(labels),
+            reference_approach=(
+                _demonstrated_approach(labels) if approach_filter else None
+            ),
+            centre_of_mass=object_centre_of_mass(env, result.object_name),
+            carry_rotation=carry_transform(labels)[0],
             target_name=result.object_name,
         )
         result.funnel = funnel
@@ -363,9 +410,11 @@ def run(
             time_belief=tool_labels.time_belief,
         )
 
-        candidates = [grasp_set.grasps[i] for i in funnel.survivors[:MAX_CANDIDATES]]
+        candidates = [grasp_set.grasps[i] for i in funnel.survivors[:max_candidates]]
         chosen = _choose_grasp(
-            env, placement, target_of, tool_labels, keypoint_parts, candidates
+            env, placement, target_of, tool_labels, keypoint_parts, candidates,
+            box=keypoint_box, orientation=keypoint_orientation,
+            cube_half_extent=cube_half_extent,
         )
         if chosen is None:
             return _fail(result, "map_not_a_diffeomorphism",
