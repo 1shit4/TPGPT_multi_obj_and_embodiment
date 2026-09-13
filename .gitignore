@@ -24,3 +24,11 @@ outputs/**
 # The paper this project implements (arXiv:2404.13458v2). Kept on disk, not
 # redistributed from this repo: the code cites it by number wherever it matters.
 TPGPT.pdf
+
+# Paper drafting workspace. Prose, figures and LaTeX live here while the paper
+# is being written; nothing in it is a research artefact and none of it should
+# enter the repository history until it is a submission.
+paper/
+
+# MuJoCo writes this next to the working directory on a solver warning.
+MUJOCO_LOG.TXT
