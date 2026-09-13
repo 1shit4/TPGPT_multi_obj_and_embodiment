@@ -209,6 +209,16 @@ Each of these cost real debugging time. Full detail in `ROBOTICS_NOTES.md`.
   Fingerprint every cell on `cloud_points`, the survivor count and `min det(J)`
   before pairing, and drop the cells that differ rather than averaging them in.
   `ROBOTICS_NOTES.md` 7.41.
+- **`stage_outcome`'s `placed_on_shelf` flag measures how tall the object is,
+  not whether it was placed.** It is `abs(z[-1] - destination[2]) < 0.06` on the
+  object's **body origin**, so a tall object standing on the very same board sits
+  higher and fails a test a short one passes. Over 28 cells it disagrees with the
+  scored outcome on **8**, in both directions: every `placed but not on shelf`
+  cell is the milk or the cereal -- the two tall objects -- at horizontal errors
+  of 3.9 to 26.0 mm, and `robotiq3f/can` passes the height test while sitting
+  **84.4 mm** from the slot, because a height-only test cannot see horizontal
+  error. Use `placed`, which is the scored outcome. The full table is
+  `docs/dynamics_execution.md` §12, Table 5.
 - **A null result from a diagnostic deserves as much suspicion as a surprising
   one.** The frame problem above was tested early and recorded as *disproved*,
   because the instrument (`contact_offset`) was returning zeros and the test was

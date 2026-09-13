@@ -1295,6 +1295,151 @@ demonstration, and — by construction — the grasp executed in each cell.
 | `rethink/can` | 1.000 | 32 | 0.89 | 29.1 | `retreat` | yes | 10.3 |
 | `rethink/bread` | 1.016 | 287 | 1.0 | 21.1 | `None` | yes | 9.2 |
 
+#### Column glossary for the stage tables
+
+*Table 4, the executor's stages.* These come from `tpgpt.experiments.diagnose`,
+which watches the **object** rather than the arm: `approach` (the arm reached the
+start of the transported motion), `reach` (the hand arrived where the grasp was
+planned, within a 45 mm tolerance), `grasp` (the jaws closed on it), `lift` (it
+came off the table), `carry` (it stayed in the hand), `place` (it was let go
+above the right shelf), `settle` (it came to rest in the slot).
+
+**Read these as diagnostic proxies, not as a chain.** Each is an independent
+threshold test, so a cell can fail one and still place — `yumi/cereal` fails
+`reach` and places, because the hand arrived 6.4 mm off the *planned* grasp but
+gripped a part of the object that worked just as well. The class says so
+explicitly: *"the stages are diagnostic proxies with measured thresholds; the
+task outcome is ground truth. When the two disagree, the outcome wins."* That is
+also why the per-stage totals in the bottom row do not descend monotonically and
+why `reach` at 22/28 sits below `approach` at 25/28 without implying that three
+runs skipped a step. **`blamed` is only populated for a cell that failed**, and
+names the first proxy that did.
+
+*Table 5, the replay's stage flags.* These are computed separately, in
+`run_keypoint_replay.stage_outcome`, from the recorded object trace:
+
+- **grasped** — opposing finger contact within ±12 waypoints of the commanded
+  close, **and** the object rose more than 20 mm. The ±12 window is a known
+  weakness: a Robotiq 2F-140 has 125 mm jaws against a 66 mm can, so each finger
+  travels ~30 mm before touching anything, and first contact has been measured at
+  waypoint 65 against a close commanded at 50. That cell reads "never grasped"
+  while the object is caught and carried.
+- **traversed** — `grasped`, and the object was never permanently lost, and
+  contact was held for more than half the carry.
+- **held at close / held during carry** — the contact fraction at the close and
+  averaged over the carry. 1.00 means opposing contact throughout.
+- **lost at** — the waypoint at which contact was lost for good, or `—` if it
+  never was.
+- **placed** — the scored outcome, and **the authoritative column**. This is the
+  one the 19/28 total counts.
+- **on shelf** — **do not read this column as a placement check. It is broken,
+  and the tables are printed with it so that the defect is on the record rather
+  than quietly dropped.**
+
+#### The `on shelf` flag is measuring object height, not placement
+
+`placed` passes on 19 cells and `placed_on_shelf` on 13, and they disagree on
+**8 of 28** — in *both* directions. The cause is geometric and complete:
+`placed_on_shelf` is `abs(z[-1] - destination[2]) < 0.06`, where `z[-1]` is the
+object's **body origin**, not its base. A taller object standing on the very same
+shelf board therefore has a higher origin and fails a test that a short one
+passes.
+
+Sorting the placed cells by final origin height shows it immediately — and note
+these are *identical within an object*, because the objects come to rest the same
+way regardless of which hand put them there:
+
+| object | final origin height, cells that placed | `on shelf` says |
+|---|---|---|
+| cereal (one cell) | 1.0957 m | yes |
+| bread | 1.1041 m | yes |
+| can | 1.1213 m | yes |
+| **milk** | **1.1420 m** | **no** |
+| **cereal (four cells)** | **1.1559 m** | **no** |
+
+Every `placed=yes, on shelf=no` cell is a milk carton or a cereal box — the two
+tall objects — and their horizontal errors are 3.9, 5.7, 8.0, 19.2, 24.3 and
+26.0 mm, which is as well placed as anything in the run. The flag is failing
+them for being tall.
+
+It fails the other way too. `robotiq3f/can` passes `on shelf` while sitting
+**84.4 mm** from the slot horizontally, because a height-only test cannot see
+horizontal error at all.
+
+**Neither direction affects any number in this section**, since every total here
+is computed from `placed` and from `outcome`. The flag is reported to the
+manifest and should be repaired or removed; it is not repaired here, because
+§7.26's rule is not to change a measurement and a system in the same sitting,
+and this run is the measurement.
+
+#### Table 4 — the executor's seven stages, per cell
+
+| cell | approach | reach | grasp | lift | carry | place | settle | outcome | blamed |
+|---|---|---|---|---|---|---|---|---|---|
+| `yumi/cereal` | y | **n** | y | y | y | y | y | placed | — |
+| `yumi/milk` | y | y | y | **n** | **n** | **n** | **n** | **failed** | `lift` |
+| `yumi/can` | y | **n** | y | y | **n** | **n** | **n** | **failed** | `reach` |
+| `yumi/bread` | y | **n** | y | y | y | y | y | placed | — |
+| `xarm/cereal` | y | **n** | y | y | y | y | y | placed | — |
+| `xarm/milk` | y | y | y | y | y | y | y | placed | — |
+| `xarm/can` | y | y | y | y | y | y | y | placed | — |
+| `xarm/bread` | y | y | **n** | **n** | **n** | **n** | **n** | **failed** | `grasp` |
+| `panda/cereal` | y | y | y | y | y | y | y | placed | — |
+| `panda/milk` | y | y | y | y | y | y | y | placed | — |
+| `panda/can` | y | y | y | y | y | y | y | placed | — |
+| `panda/bread` | y | **n** | **n** | **n** | **n** | **n** | **n** | **failed** | `reach` |
+| `robotiq85/cereal` | y | **n** | **n** | **n** | **n** | **n** | **n** | **failed** | `reach` |
+| `robotiq85/milk` | y | y | y | y | y | y | y | placed | — |
+| `robotiq85/can` | y | y | y | y | y | y | y | placed | — |
+| `robotiq85/bread` | y | y | y | y | y | y | y | placed | — |
+| `robotiq140/cereal` | y | y | y | y | y | y | y | placed | — |
+| `robotiq140/milk` | y | y | y | y | y | y | y | placed | — |
+| `robotiq140/can` | y | y | y | y | y | y | y | placed | — |
+| `robotiq140/bread` | **n** | y | y | y | y | y | y | placed | — |
+| `robotiq3f/cereal` | **n** | **n** | **n** | **n** | **n** | **n** | **n** | **failed** | `approach` |
+| `robotiq3f/milk` | y | y | y | **n** | **n** | **n** | **n** | **failed** | `lift` |
+| `robotiq3f/can` | **n** | **n** | **n** | **n** | **n** | **n** | **n** | **failed** | `approach` |
+| `robotiq3f/bread` | y | y | y | **n** | **n** | **n** | **n** | **failed** | `lift` |
+| `rethink/cereal` | y | **n** | y | y | y | y | **n** | **failed** | `reach` |
+| `rethink/milk` | y | y | y | y | y | y | y | placed | — |
+| `rethink/can` | y | y | y | y | y | y | y | placed | — |
+| `rethink/bread` | y | **n** | **n** | **n** | **n** | **n** | **n** | **failed** | `reach` |
+| **passed** | **25/28** | **18/28** | **22/28** | **19/28** | **18/28** | **18/28** | **17/28** | **17/28** | |
+
+#### Table 5 — the replay's stage flags, per cell
+
+| cell | grasped | traversed | on shelf | placed | held at close | held during carry | lost at |
+|---|---|---|---|---|---|---|---|
+| `yumi/cereal` | y | y | y | y | 1.00 | 1.00 | — |
+| `yumi/milk` | **n** | **n** | **n** | **n** | 1.00 | 0.15 | 66 |
+| `yumi/can` | y | y | y | y | 1.00 | 1.00 | — |
+| `yumi/bread` | **n** | **n** | **n** | **n** | 1.00 | 0.17 | 68 |
+| `xarm/cereal` | y | y | y | y | 1.00 | 1.00 | — |
+| `xarm/milk` | y | y | **n** | y | 1.00 | 1.00 | — |
+| `xarm/can` | y | y | y | y | 1.00 | 1.00 | — |
+| `xarm/bread` | y | y | y | y | 1.00 | 1.00 | — |
+| `panda/cereal` | y | y | **n** | y | 1.00 | 1.00 | — |
+| `panda/milk` | y | y | **n** | y | 1.00 | 1.00 | — |
+| `panda/can` | y | y | y | y | 1.00 | 1.00 | — |
+| `panda/bread` | y | y | y | y | 1.00 | 1.00 | — |
+| `robotiq85/cereal` | y | y | y | y | 1.00 | 1.00 | — |
+| `robotiq85/milk` | y | y | **n** | y | 1.00 | 1.00 | — |
+| `robotiq85/can` | y | y | y | y | 1.00 | 1.00 | — |
+| `robotiq85/bread` | y | y | y | y | 1.00 | 1.00 | — |
+| `robotiq140/cereal` | y | y | **n** | y | 1.00 | 1.00 | — |
+| `robotiq140/milk` | y | y | **n** | y | 1.00 | 1.00 | — |
+| `robotiq140/can` | y | y | y | y | 1.00 | 1.00 | — |
+| `robotiq140/bread` | y | y | y | y | 1.00 | 1.00 | — |
+| `robotiq3f/cereal` | y | **n** | **n** | **n** | 1.00 | 0.38 | 91 |
+| `robotiq3f/milk` | y | y | **n** | **n** | 1.00 | 1.00 | — |
+| `robotiq3f/can` | y | y | y | **n** | 1.00 | 1.00 | — |
+| `robotiq3f/bread` | **n** | **n** | **n** | **n** | 1.00 | 0.22 | — |
+| `rethink/cereal` | y | y | **n** | **n** | 1.00 | 1.00 | — |
+| `rethink/milk` | y | y | **n** | y | 1.00 | 1.00 | — |
+| `rethink/can` | y | **n** | **n** | **n** | 1.00 | 0.19 | 71 |
+| `rethink/bread` | y | **n** | **n** | **n** | 1.00 | 0.55 | 110 |
+| **passed** | **25/28** | **22/28** | **13/28** | **19/28** | | | |
+
 ### Results and why
 
 **The three-finger hand fails under both controllers, so it is not an execution
