@@ -12,3 +12,7 @@ outputs/
 !outputs/**/*.md
 !outputs/**/manifest.json
 .ipynb_checkpoints/
+
+# The paper this project implements (arXiv:2404.13458v2). Kept on disk, not
+# redistributed from this repo: the code cites it by number wherever it matters.
+TPGPT.pdf
