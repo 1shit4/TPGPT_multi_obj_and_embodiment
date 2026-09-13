@@ -135,10 +135,27 @@ def lift_height(
     yaw: float = 0.0,
     seed: int = 2,
 ) -> float:
-    """Height the object gained, in metres. The frame contract's pass/fail."""
+    """Height the object gained, in metres. The frame contract's pass/fail.
+
+    ``obj`` is put into the scene rather than assumed to be there, so a hand
+    can be calibrated against an object it can actually hold. A can is 65 mm
+    across and the default here, which is a fine reference for a jaw that opens
+    to 80 or 125 mm and a meaningless one for a hand whose fingertips part by
+    30: for that hand the sweep measures "a can does not fit", not "this hand
+    cannot grasp". Two of the four hands that fail the sweep entirely are
+    multi-finger hands in exactly that position.
+    """
     from tpgpt.sim.controllers.cartesian_impedance import CartesianImpedanceController
 
-    env = make_env(gripper_short, seed=seed)
+    # The default scene is left exactly as it was -- ``make_env``'s own
+    # ("can", "milk") -- because every calibrated depth in the registry was
+    # measured in it, and the placement sampler lays objects out in the order
+    # it is given, so adding or reordering one moves the others. A different
+    # reference object is appended rather than substituted.
+    objects = ("can", "milk")
+    if obj not in objects:
+        objects = objects + (obj,)
+    env = make_env(gripper_short, objects=objects, seed=seed)
     try:
         env.reset()
         controller = CartesianImpedanceController(env)

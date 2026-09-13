@@ -1,0 +1,378 @@
+"""Can this hand hold this object? Grasp, close, lift, carry — nothing else.
+
+**No transportation map, no policy, no shelf.** Every other driver in this
+package measures a *transported* plan, which puts the map, the keypoints, the
+grasp selection, the controller and the shelf geometry in series: when a cell
+fails, six things could be responsible. This one removes all of them. It asks
+the planner for grasps on the object in front of it, executes them directly, and
+reports whether the object was still in the hand at the end.
+
+That makes it the right instrument for two questions that the end-to-end
+campaigns cannot answer:
+
+**Which hand-object pairs are physically viable at all?** A fleet of two-finger
+jaws measured on a box, a carton, a can and a loaf cannot show that more fingers
+buy anything, because those are all things a parallel jaw is good at. Pairs that
+cannot hold an object should be found here, in a minute, rather than inferred
+from a failed campaign twenty minutes in.
+
+**How far should the jaws close?** Four rules have been tried and each fails
+somewhere, because the window between gripping and crushing is per-object *and*
+per-hand and no constant sits inside all of them (``FINDINGS.md`` 8z). A per-pair
+sweep needs a per-pair measurement, and this is it.
+
+**One object at a time, deliberately.** ``pipeline`` lays several objects out
+together and its placement sampler works **in the order it is given**, so adding
+or reordering an object moves all of them -- which is why ``outputs/expR_bottle``
+could not be compared cell-by-cell with the run it was meant to extend. A
+single-object scene makes every cell independent. The cost is stated rather than
+hidden: **bench cells are not comparable with the four-object campaigns**, and a
+pair that holds an object here may still fail in a cluttered scene.
+
+**Several grasps per pair, also deliberately.** Experiment P
+(``FINDINGS.md`` 8n) measured the spread *within* a pair to be larger than the
+spread *between* pairs -- the same hand and object lifting 43 mm at one grasp
+pose and 408 mm at another. One grasp per pair cannot tell "this pair failed"
+from "this grasp failed", so the default is five.
+
+Usage::
+
+    python -m tpgpt.experiments.run_grasp_bench --plan-only
+    python -m tpgpt.experiments.run_grasp_bench --grippers panda,robotiq3f \\
+        --objects can,hammer --ranks 5 --out outputs/bench
+
+Writes ``manifest.json`` (with provenance, automatically) and ``rows.json``.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import warnings
+from pathlib import Path
+
+import numpy as np
+
+from tpgpt.experiments import diagnose
+from tpgpt.grasp.grasps import approach_waypoint, grasp_to_eef_pose
+from tpgpt.grasp.grippers import VERIFIED_PAIRS, resolve_pair
+from tpgpt.grasp.pipeline import grasps_for_cloud
+from tpgpt.perception.cameras import object_point_cloud
+from tpgpt.reporting.html import write_manifest
+
+#: Hands the registry says are usable. Read from the registry rather than
+#: hardcoded, so a hand that gains or loses a calibrated depth enters or leaves
+#: the bench without this file changing.
+DEFAULT_GRIPPERS = VERIFIED_PAIRS
+
+#: Objects to try. The four grocery meshes every campaign has used, plus the
+#: shapes a multi-finger hand should be better at than a parallel jaw -- a
+#: handle, a rim, a hole, an offset centre of mass. See
+#: ``tabletop_shelf.OBJECT_CLASSES``.
+DEFAULT_OBJECTS = (
+    "can", "milk", "cereal", "bread",
+    "hammer", "wrench", "pot", "mug", "nut_square", "nut_round",
+)
+
+#: Grasp candidates tried per pair, best-scoring first.
+DEFAULT_RANKS = 5
+
+#: Below this many points the object is too thinly seen to plan on. Matches
+#: ``pipeline.MIN_CLOUD_POINTS`` so the bench and the pipeline agree about what
+#: "seen" means.
+MIN_CLOUD_POINTS = 40
+
+#: A lift of at least this counts as having left the table, in metres. Matches
+#: ``diagnose.LIFT_HEIGHT``.
+LIFT_HEIGHT = 0.02
+
+#: How far the object is carried sideways after the lift, in metres, and back.
+#: A grip that survives a straight lift can still fail under lateral
+#: acceleration, which is what a carry applies and a lift does not.
+CARRY_DISTANCE = 0.20
+
+#: Control steps per phase of the motion.
+STEPS = {"pre": 45, "descend": 40, "close": 25, "lift": 45, "carry": 45, "settle": 10}
+
+#: Impedance gains. Matches ``verify.execute_grasp`` so the bench and the depth
+#: calibration are driving the arm the same way.
+STIFFNESS = 600.0
+ROTATIONAL_STIFFNESS = 60.0
+ROTATIONAL_DAMPING = 12.0
+
+#: Height above the table the carry is performed at, in metres above the pick.
+LIFT_TO = 0.15
+
+
+def _scene(gripper: str, obj: str, seed: int, camera_size: int = 256):
+    """One object, one hand, cameras on. Nothing else in the scene."""
+    from robosuite.controllers import load_composite_controller_config
+
+    from tpgpt.sim.controllers.cartesian_impedance import make_torque_controller_config
+    from tpgpt.sim.scenes.tabletop_shelf import TabletopShelf
+
+    pair = resolve_pair(gripper)
+    config = make_torque_controller_config(
+        load_composite_controller_config(controller="BASIC", robot="Panda")
+    )
+    env = TabletopShelf(
+        robots="Panda",
+        gripper_types=pair.robosuite,
+        controller_configs=config,
+        objects=(obj,),
+        has_offscreen_renderer=True,
+        use_camera_obs=True,
+        camera_names=["workspace", "sideview", "birdview"],
+        camera_heights=camera_size,
+        camera_widths=camera_size,
+        camera_depths=True,
+        camera_segmentations="instance",
+        control_freq=20,
+        seed=seed,
+    )
+    env.reset()
+    return env
+
+
+def _grip_and_carry(env, controller, grasp, gripper, obj, probes):
+    """Approach, close, lift, carry, and report what the hand did.
+
+    Returns a dict of measurements. The phases are the same ones
+    ``verify.execute_grasp`` uses, with a lateral carry added: a grip that
+    survives a straight lift can still shed the object under lateral
+    acceleration, and the carry is what a reshelving task actually asks for.
+    """
+    position, rotation = grasp_to_eef_pose(grasp, gripper)
+    pre_grasp = approach_waypoint(grasp, standoff=0.12, gripper=gripper)
+    K = np.eye(3) * STIFFNESS
+    D = np.eye(3) * (2 * np.sqrt(STIFFNESS) * 0.9)
+
+    trace = {"closure": [], "force": [], "slip": [], "held": []}
+
+    def sample():
+        trace["closure"].append(float(probes["closure"]()))
+        trace["force"].append(float(diagnose.grip_force(env, obj)))
+        trace["slip"].append(float(probes["slip"](env)))
+        trace["held"].append(bool(diagnose._gripper_touches(env, obj)))
+
+    def drive(target, steps, command, settle=0, record=False):
+        start = controller.eef_state()[0]
+        for step in range(steps):
+            alpha = (step + 1) / steps
+            env.step(controller.action(
+                start + alpha * (target - start), K, D, gripper=command,
+                rotation_desired=rotation,
+                rotational_stiffness=ROTATIONAL_STIFFNESS,
+                rotational_damping=ROTATIONAL_DAMPING,
+            ))
+            if record:
+                sample()
+        for _ in range(settle):
+            env.step(controller.action(
+                target, K, D, gripper=command, rotation_desired=rotation,
+                rotational_stiffness=ROTATIONAL_STIFFNESS,
+                rotational_damping=ROTATIONAL_DAMPING,
+            ))
+            if record:
+                sample()
+
+    start_z = float(env.object_position(obj)[2])
+
+    drive(pre_grasp, STEPS["pre"], -1.0, settle=STEPS["settle"])
+    drive(position, STEPS["descend"], -1.0, settle=STEPS["settle"])
+
+    # Close, in place.
+    for _ in range(STEPS["close"]):
+        env.step(controller.action(
+            position, K, D, gripper=1.0, rotation_desired=rotation,
+            rotational_stiffness=ROTATIONAL_STIFFNESS,
+            rotational_damping=ROTATIONAL_DAMPING,
+        ))
+        sample()
+    closure_at_close = float(probes["closure"]())
+    force_at_close = float(diagnose.grip_force(env, obj))
+
+    lifted = position + np.array([0.0, 0.0, LIFT_TO])
+    drive(lifted, STEPS["lift"], 1.0, settle=STEPS["settle"], record=True)
+    lift_height = float(env.object_position(obj)[2]) - start_z
+    closure_at_lift = float(probes["closure"]())
+
+    # Carry sideways and back. Both directions, so the grip is loaded each way.
+    across = lifted + np.array([0.0, CARRY_DISTANCE, 0.0])
+    drive(across, STEPS["carry"], 1.0, settle=STEPS["settle"], record=True)
+    drive(lifted, STEPS["carry"], 1.0, settle=STEPS["settle"], record=True)
+
+    held = trace["held"]
+    carry_start = STEPS["close"]
+    return {
+        "lift_height": lift_height,
+        "final_height": float(env.object_position(obj)[2]) - start_z,
+        "closure_at_close": closure_at_close,
+        "closure_at_lift": closure_at_lift,
+        "closure_max": float(np.nanmax(trace["closure"])) if trace["closure"] else float("nan"),
+        "force_at_close": force_at_close,
+        "force_max": float(np.max(trace["force"])) if trace["force"] else 0.0,
+        "slip_max": float(np.max(trace["slip"])) if trace["slip"] else 0.0,
+        "held_fraction": float(np.mean(held[carry_start:])) if len(held) > carry_start else 0.0,
+        "held_at_end": bool(held[-1]) if held else False,
+    }
+
+
+def run_cell(gripper: str, obj: str, *, seed: int = 0, ranks: int = DEFAULT_RANKS,
+             plan_only: bool = False, camera_size: int = 256) -> list[dict]:
+    """Every grasp tried for one hand and one object."""
+    from tpgpt.sim.controllers.cartesian_impedance import CartesianImpedanceController
+
+    base = {"gripper": gripper, "object": obj, "seed": seed}
+    env = _scene(gripper, obj, seed, camera_size)
+    try:
+        cloud = object_point_cloud(env, obj)
+        base["cloud_points"] = len(cloud)
+        if len(cloud) < MIN_CLOUD_POINTS:
+            return [{**base, "outcome": "object_not_seen", "grasp_rank": None}]
+
+        grasps = grasps_for_cloud(cloud, gripper)
+        base["candidates"] = len(grasps.grasps)
+        if not grasps.grasps:
+            return [{**base, "outcome": "no_grasp_generated", "grasp_rank": None}]
+
+        order = np.argsort([-g.score for g in grasps.grasps])[:ranks]
+        if plan_only:
+            return [
+                {**base, "grasp_rank": int(r), "grasp_index": int(i),
+                 "score": float(grasps.grasps[i].score), "outcome": "planned"}
+                for r, i in enumerate(order)
+            ]
+
+        rows = []
+        for rank, index in enumerate(order):
+            grasp = grasps.grasps[int(index)]
+            row = {**base, "grasp_rank": rank, "grasp_index": int(index),
+                   "score": float(grasp.score)}
+            cell = _scene(gripper, obj, seed, camera_size) if rank else env
+            try:
+                checks = diagnose.replay_preconditions(cell, gripper, obj)
+                diagnose.require(checks, context=f"{gripper}/{obj} rank {rank}")
+                controller = CartesianImpedanceController(cell)
+                controller.reset()
+                probes = {
+                    "closure": diagnose.jaw_closure_probe(cell, gripper),
+                    "slip": diagnose.slip_probe(cell, obj),
+                }
+                with warnings.catch_warnings():
+                    warnings.simplefilter("ignore")
+                    row.update(_grip_and_carry(cell, controller, grasp, gripper,
+                                               obj, probes))
+                row["outcome"] = (
+                    "held" if row["held_at_end"] and row["final_height"] > LIFT_HEIGHT
+                    else "lifted_then_lost" if row["lift_height"] > LIFT_HEIGHT
+                    else "never_lifted"
+                )
+            except Exception as exc:
+                row["outcome"] = f"{type(exc).__name__}: {exc}"[:200]
+            finally:
+                if rank:
+                    cell.close()
+            rows.append(row)
+        return rows
+    finally:
+        env.close()
+
+
+def main(argv=None) -> Path:
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("--out", default="outputs/grasp_bench")
+    parser.add_argument("--grippers", default=",".join(DEFAULT_GRIPPERS))
+    parser.add_argument("--objects", default=",".join(DEFAULT_OBJECTS))
+    parser.add_argument("--ranks", type=int, default=DEFAULT_RANKS)
+    parser.add_argument("--seed", type=int, default=0)
+    parser.add_argument("--camera-size", type=int, default=256)
+    parser.add_argument(
+        "--cells", default=None,
+        help="Subset, as 'panda/can,robotiq3f/hammer'. Recorded in the "
+             "manifest, so a partial run cannot be mistaken for a full one.",
+    )
+    parser.add_argument(
+        "--plan-only", action="store_true",
+        help="Perception and grasp selection, no physics. Seconds per cell "
+             "instead of minutes, and it answers 'is this grid even runnable' "
+             "before an hour is spent finding out.",
+    )
+    args = parser.parse_args(argv)
+
+    grippers = [g.strip() for g in args.grippers.split(",") if g.strip()]
+    objects = [o.strip() for o in args.objects.split(",") if o.strip()]
+    if args.cells:
+        cells = [tuple(c.split("/")) for c in args.cells.split(",")]
+    else:
+        cells = [(g, o) for g in grippers for o in objects]
+
+    rows = []
+    print(f"{'hand':<11}{'object':<11}{'cloud':>7}{'cand':>6}{'rank':>5}"
+          f"{'lift mm':>9}{'closure':>9}{'slip mm':>9}{'held':>6}  outcome")
+    for gripper, obj in cells:
+        for row in run_cell(gripper, obj, seed=args.seed, ranks=args.ranks,
+                            plan_only=args.plan_only,
+                            camera_size=args.camera_size):
+            rows.append(row)
+            print(
+                f"{row['gripper']:<11}{row['object']:<11}"
+                f"{row.get('cloud_points', 0):>7}{row.get('candidates', 0):>6}"
+                f"{str(row.get('grasp_rank', '-')):>5}"
+                f"{row.get('lift_height', float('nan')) * 1000:>9.1f}"
+                f"{row.get('closure_at_lift', float('nan')):>9.2f}"
+                f"{row.get('slip_max', float('nan')) * 1000:>9.1f}"
+                f"{str(row.get('held_at_end', '-')):>6}  {row['outcome']}",
+                flush=True,
+            )
+
+    out = Path(args.out)
+    out.mkdir(parents=True, exist_ok=True)
+    (out / "rows.json").write_text(json.dumps(rows, indent=2))
+    physical = [r for r in rows if "held_at_end" in r]
+    write_manifest(
+        out,
+        title="Grasp bench: can this hand hold this object?",
+        description=(
+            "One object on the table, one hand, several planner grasps each. "
+            "Approach, close, lift, carry sideways and back. No transportation "
+            "map, no policy, no shelf."
+        ),
+        settings={
+            "varied": {"gripper": grippers, "object": objects,
+                       "grasp_rank": list(range(args.ranks))},
+            "fixed": {
+                "scene": "TabletopShelf, ONE object, rebuilt fresh per grasp",
+                "seed": args.seed,
+                "camera": f"{args.camera_size}x{args.camera_size}, three views",
+                "grasps": "GraspGen-X via tpgpt.grasp.cache, ranked by its own "
+                          "score. Cached because the planner is an unseeded "
+                          "diffusion model (ROBOTICS_NOTES 7.15)",
+                "gripper_command": "plain +1 shut; no force target, no feedback",
+                "control": "Cartesian impedance, stiffness 600, same as "
+                           "verify.execute_grasp",
+                "carry": f"{CARRY_DISTANCE} m sideways and back, at "
+                         f"{LIFT_TO} m above the pick",
+                "preconditions": "gripper_mounted, scene_unstepped, "
+                                 "object_placement, closure_calibrated -- "
+                                 "checked per grasp, aborts before physics",
+                "cells": args.cells or "all",
+            },
+        },
+        results={
+            "grasps_attempted": len(physical),
+            "held": sum(1 for r in physical if r["outcome"] == "held"),
+            "lifted_then_lost": sum(
+                1 for r in physical if r["outcome"] == "lifted_then_lost"),
+            "never_lifted": sum(
+                1 for r in physical if r["outcome"] == "never_lifted"),
+        },
+        thresholds={"lift_height_m": LIFT_HEIGHT,
+                    "min_cloud_points": MIN_CLOUD_POINTS},
+    )
+    print(f"\nwrote {out}/rows.json and manifest.json")
+    return out
+
+
+if __name__ == "__main__":
+    main()

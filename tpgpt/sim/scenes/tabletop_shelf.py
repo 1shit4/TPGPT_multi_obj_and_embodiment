@@ -31,8 +31,14 @@ from robosuite.models.objects import (
     BreadObject,
     CanObject,
     CerealObject,
+    HammerObject,
+    HollowCylinderObject,
     LemonObject,
     MilkObject,
+    PotWithHandlesObject,
+    RatchetingWrenchObject,
+    RoundNutObject,
+    SquareNutObject,
 )
 from robosuite.models.tasks import ManipulationTask
 from robosuite.utils.observables import Observable, sensor
@@ -40,6 +46,24 @@ from robosuite.utils.placement_samplers import UniformRandomSampler
 from robosuite.utils.transform_utils import convert_quat
 
 #: Selectable objects, keyed by the short name the language layer resolves to.
+#:
+#: The first six are the grocery meshes every campaign so far has used. The rest
+#: are **shapes a two-finger jaw and a multi-finger hand should disagree about**,
+#: which the grocery set cannot show: a box, a carton, a can and a loaf are all
+#: things a parallel jaw is good at, so a fleet measured only on them cannot
+#: demonstrate that more fingers buy anything.
+#:
+#: ``hammer`` and ``wrench`` have a handle to grip and mass somewhere else, so
+#: the grasp has a moment about it. ``pot`` has handles, which is the case a
+#: hand with opposable fingers should win outright. ``mug`` is a thin wall and a
+#: rim rather than a solid body. ``nut_square`` and ``nut_round`` are small and
+#: have a hole through them.
+#:
+#: Adding a key here changes nothing on its own: ``DEFAULT_OBJECTS`` is
+#: unchanged, and every campaign names its own object list. But note that the
+#: placement sampler lays objects out **in the order it is given**, so any run
+#: with a different set is a different scene and is not cell-by-cell comparable
+#: with one that has a different set.
 OBJECT_CLASSES = {
     "milk": MilkObject,
     "can": CanObject,
@@ -47,6 +71,12 @@ OBJECT_CLASSES = {
     "bread": BreadObject,
     "bottle": BottleObject,
     "lemon": LemonObject,
+    "hammer": HammerObject,
+    "wrench": RatchetingWrenchObject,
+    "pot": PotWithHandlesObject,
+    "mug": HollowCylinderObject,
+    "nut_square": SquareNutObject,
+    "nut_round": RoundNutObject,
 }
 
 DEFAULT_OBJECTS = ("milk", "can", "cereal", "bread")

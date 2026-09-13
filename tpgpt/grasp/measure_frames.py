@@ -108,6 +108,71 @@ def _unit(v: np.ndarray) -> np.ndarray:
     return np.asarray(v, dtype=float) / n
 
 
+def finger_axes(
+    opened: np.ndarray,
+    closed: np.ndarray,
+    origin: np.ndarray,
+    rotation: np.ndarray,
+    root_position: np.ndarray,
+    min_travel: float = MIN_TRAVEL,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """A hand's own axes, from where its geoms were and where they went.
+
+    Pure geometry, so it can be tested without a simulator, and shared so that
+    two callers cannot drift apart: :func:`measure_frame` expresses the result
+    in robosuite's ``grip_site`` frame, and
+    :mod:`tpgpt.grasp.describe` expresses it in the gripper's root-body frame,
+    which is the frame a GraspGen-X description is written in. The axes are the
+    same either way; only the origin differs.
+
+    Measuring the *motion* rather than the finger geometry is what makes this
+    work for every hand. Naming-based attempts failed first: robosuite's
+    ``important_geoms`` lists names that do not exist in some compiled models,
+    the Yumi's lists are empty, and taking the separation between named pad
+    groups put the UMI's fingers 3.17 m apart.
+
+    Args:
+        opened: World positions of every gripper geom, hand fully open.
+        closed: The same, hand fully closed. Same row order as ``opened``.
+        origin: World position the local frame is measured from.
+        rotation: World-to-local rotation, as a 3x3 whose columns are the local
+            axes in world coordinates.
+        root_position: World position of the gripper's root body, which is what
+            makes the approach direction a direction rather than a sign
+            ambiguity: the fingers are *away* from the root.
+        min_travel: Geoms moving less than this are structure, not fingers.
+
+    Returns:
+        ``(approach, closing, basis, moving)``. ``approach`` and ``closing`` are
+        unit vectors in the local frame; ``basis`` has them as its third and
+        first columns respectively, so it takes grasp-convention coordinates
+        (``+X`` closing, ``+Z`` approach) into the local frame; ``moving`` is a
+        boolean mask over the geom rows.
+
+    Raises:
+        RuntimeError: if fewer than two geoms moved, which means the hand never
+            actuated and no axis can be claimed.
+    """
+    travel = (closed - opened) @ rotation
+    moving = np.linalg.norm(travel, axis=1) > min_travel
+    if int(moving.sum()) < 2:
+        raise RuntimeError("gripper did not actuate")
+
+    fingers_local = (closed[moving] - origin) @ rotation
+    root_local = (root_position - origin) @ rotation
+
+    # Approach: root body -> fingertip cloud.
+    approach = _unit(fingers_local.mean(axis=0) - root_local)
+
+    # Closing: principal direction of travel, approach component removed.
+    flat = travel[moving] - np.outer(travel[moving] @ approach, approach)
+    _, singular, right = np.linalg.svd(flat, full_matrices=False)
+    closing = _unit(right[0] - float(right[0] @ approach) * approach)
+
+    basis = np.column_stack([closing, np.cross(approach, closing), approach])
+    return approach, closing, basis, moving
+
+
 def measure_frame(robosuite_name: str, robot: str = "Panda") -> dict:
     """Measure one gripper's frame and contact point.
 
@@ -180,16 +245,14 @@ def measure_frame(robosuite_name: str, robot: str = "Panda") -> dict:
         root_position = np.array(sim.data.body_xpos[root])
 
         travel = (closed - opened) @ rotation
-        moving = np.linalg.norm(travel, axis=1) > MIN_TRAVEL
-        if int(moving.sum()) < 2:
-            raise RuntimeError(f"{robosuite_name}: gripper did not actuate")
+        try:
+            approach, closing, basis, moving = finger_axes(
+                opened, closed, site_position, rotation, root_position
+            )
+        except RuntimeError as exc:
+            raise RuntimeError(f"{robosuite_name}: {exc}") from None
 
-        # Local coordinates of the fingers once closed, and of the root body.
         fingers_local = (closed[moving] - site_position) @ rotation
-        root_local = (root_position - site_position) @ rotation
-
-        # Approach: root body -> fingertip cloud.
-        approach = _unit(fingers_local.mean(axis=0) - root_local)
 
         # Contact region: the distal part of the fingers, where an object is
         # actually held, rather than the whole finger including its knuckle.
@@ -197,12 +260,9 @@ def measure_frame(robosuite_name: str, robot: str = "Panda") -> dict:
         cutoff = along.max() - DISTAL_FRACTION * float(np.ptp(along) or 1.0)
         contact_local = fingers_local[along >= cutoff].mean(axis=0)
 
-        # Closing: principal direction of travel, approach component removed.
+        # Anisotropy: how well one axis describes this hand's motion.
         flat = travel[moving] - np.outer(travel[moving] @ approach, approach)
-        _, singular, right = np.linalg.svd(flat, full_matrices=False)
-        closing = _unit(right[0] - float(right[0] @ approach) * approach)
-
-        basis = np.column_stack([closing, np.cross(approach, closing), approach])
+        singular = np.linalg.svd(flat, compute_uv=False)
 
         # Closure calibration. The spread of the *moving* geoms along the
         # closing axis, fully open and fully closed. Both are taken in the
@@ -297,18 +357,44 @@ def measure_all(pairs=None) -> dict:
     return frames
 
 
-def main(path: str | Path = FRAMES_PATH) -> Path:
-    """Re-measure every gripper and **merge** the result into the cache.
+def main(path: str | Path = FRAMES_PATH, only: str | None = None) -> Path:
+    """Re-measure grippers and **merge** the result into the cache.
 
     Merged, not overwritten. ``gripper_frames.json`` also carries
     ``calibrated_depth``, which comes from a much more expensive physics sweep
     (:func:`tpgpt.grasp.verify.calibrate_depth`, 13 grasp attempts per hand),
     and which :func:`~tpgpt.grasp.grippers._physics_verified` reads to decide
     which hands campaigns may use. A plain overwrite here silently emptied that
-    list, and an empty list falls back to *all* measured pairs -- so the Inspire
-    hand, which lifts nothing, would quietly re-enter every campaign.
+    list, and an empty list falls back to *all* measured pairs -- so a hand that
+    lifts nothing would quietly re-enter every campaign.
+
+    **Prefer ``only`` to a full re-measurement.** This measurement has a
+    reproducibility floor, and for one hand that floor is large. Three fresh
+    processes measuring ``RobotiqThreeFingerGripper`` with identical code and an
+    identical seed classified **28, 32 and 30** geoms as fingers and returned
+    contact offsets spanning **11.7 mm** in the approach direction. Its fingers
+    settle against each other chaotically and some geoms sit right on the
+    ``MIN_TRAVEL`` threshold, so which ones count as "moving" changes, and
+    ``contact_offset`` is the centroid of a subset of them -- the instability of
+    a statistic taken over a thin band, which this project has now met three
+    times. The parallel jaws are reproducible to about 0.02 mm; the Inspire hand
+    is worse still, at 3.2 mm and five degrees.
+
+    So re-measuring a settled hand does not refresh its value, it **draws
+    another sample**, and substituting one draw for another silently changes
+    every campaign that hand appears in. Measure the hand you are adding.
+
+    Args:
+        path: Where to merge the result. Defaults to the packaged cache.
+        only: Comma-separated registry short names to measure. ``None``
+            measures every registered hand.
     """
-    frames = measure_all()
+    pairs = [p.strip() for p in only.split(",")] if only else None
+    if pairs:
+        unknown = [p for p in pairs if p not in GRIPPER_PAIRS]
+        if unknown:
+            raise KeyError(f"not in GRIPPER_PAIRS: {unknown}")
+    frames = measure_all(pairs)
     path = Path(path)
     existing = json.loads(path.read_text()) if path.is_file() else {}
     for short, frame in frames.items():
@@ -333,4 +419,14 @@ def main(path: str | Path = FRAMES_PATH) -> Path:
 
 
 if __name__ == "__main__":
-    main()
+    import argparse
+
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument(
+        "--only", default=None,
+        help="Comma-separated registry short names. Measuring only the hand "
+             "being added is the usual case -- see main().",
+    )
+    parser.add_argument("--path", default=str(FRAMES_PATH))
+    args = parser.parse_args()
+    main(args.path, args.only)

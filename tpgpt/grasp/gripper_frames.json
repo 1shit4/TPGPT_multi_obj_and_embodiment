@@ -1,4 +1,115 @@
 {
+  "bd": {
+    "alignment": [
+      [
+        0.9984796911768093,
+        -5.982379130096403e-05,
+        -0.05512080123308777
+      ],
+      [
+        -5.195419505597967e-05,
+        -0.9999999882531359,
+        0.00014420294672016533
+      ],
+      [
+        -0.055120809212358186,
+        -0.00014111995684903082,
+        -0.9984796825559008
+      ]
+    ],
+    "anisotropy": 85179.50090273104,
+    "approach_in_site": [
+      -0.055120809212358186,
+      -0.00014111995684903082,
+      -0.9984796825559008
+    ],
+    "closing_angle_deg": -0.003432869774115943,
+    "closing_in_site": [
+      0.9984796911768093,
+      -5.982379130096403e-05,
+      -0.05512080123308777
+    ],
+    "contact_offset": [
+      -0.02483301988231892,
+      -1.2713167330119512e-06,
+      -0.20824559703865242
+    ],
+    "finger_geoms": [
+      "gripper0_right_g2_vis",
+      "gripper0_right_g3_vis",
+      "gripper0_right_g4_col",
+      "gripper0_right_g5_col",
+      "gripper0_right_g6_col",
+      "gripper0_right_g7_col",
+      "gripper0_right_g8_col",
+      "gripper0_right_g9_col"
+    ],
+    "finger_travel_mm": 51.97367015099985,
+    "n_moving_geoms": 8,
+    "plus_one_closes": true,
+    "robosuite": "BDGripper",
+    "spread_closed": 0.04486575260588532,
+    "spread_open": 0.09683942275688517
+  },
+  "g1three": {
+    "alignment": [
+      [
+        -0.6814054876631653,
+        -0.7299875494772348,
+        -0.05295978654361856
+      ],
+      [
+        -0.731905302734058,
+        0.6795107347941023,
+        0.050791624598412424
+      ],
+      [
+        -0.0010905101057696656,
+        0.07337124033162387,
+        -0.9973041020069596
+      ]
+    ],
+    "anisotropy": 1.1840213401867694,
+    "approach_in_site": [
+      -0.0010905101057696656,
+      0.07337124033162387,
+      -0.9973041020069596
+    ],
+    "closing_angle_deg": 46.97142005558291,
+    "closing_in_site": [
+      -0.6814054876631653,
+      -0.7299875494772348,
+      -0.05295978654361856
+    ],
+    "contact_offset": [
+      -0.000511714968527744,
+      -0.018975063144918713,
+      -0.13015138081072858
+    ],
+    "finger_geoms": [
+      "gripper0_right_g0_vis",
+      "gripper0_right_g0_col",
+      "gripper0_right_g1_vis",
+      "gripper0_right_g2_vis",
+      "gripper0_right_g1_col",
+      "gripper0_right_g3_vis",
+      "gripper0_right_g2_col",
+      "gripper0_right_g4_vis",
+      "gripper0_right_g3_col",
+      "gripper0_right_g5_vis",
+      "gripper0_right_g4_col",
+      "gripper0_right_g6_vis",
+      "gripper0_right_g5_col",
+      "gripper0_right_g7_vis",
+      "gripper0_right_g6_col"
+    ],
+    "finger_travel_mm": 8.055980589742523,
+    "n_moving_geoms": 15,
+    "plus_one_closes": true,
+    "robosuite": "G1ThreeFingerRightGripper",
+    "spread_closed": 0.09269633860964181,
+    "spread_open": 0.10075231919938434
+  },
   "inspire": {
     "alignment": [
       [

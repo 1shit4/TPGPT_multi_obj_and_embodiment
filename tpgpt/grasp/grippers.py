@@ -148,6 +148,26 @@ GRIPPER_PAIRS: dict[str, GripperPair] = {
     "inspire": GripperPair(
         "InspireRightHand", "inspire_hand", ("Panda",), 7.4, 6.3, 0.000
     ),
+    # Pairings whose two halves were both already on disk and had simply never
+    # been wired together. FINDINGS.md 8z item 1h lists them as "unverified
+    # rather than ruled out"; nothing new had to be built for either.
+    #
+    # ``g1three``'s anisotropy of 1.2 is the lowest in the registry by a wide
+    # margin -- the three fingers converge radially, so there is no dominant
+    # opposition direction at all and ``closing_angle`` is close to meaningless
+    # for it. It is also the least reproducible hand here: two fresh processes
+    # measured 28.4 and 47.0 degrees with 3.4 and 8.1 mm of spread travel.
+    # ``single_axis`` already reports False for it; the physics is what decides.
+    "g1three": GripperPair(
+        "G1ThreeFingerRightGripper", "unitree_g1", ("Panda",), 47.0, 1.2, 0.000
+    ),
+    # ``bd`` is the one ``revolute_2f`` hand GraspGen-X declares asymmetric, so
+    # it is the only registered exercise of the asymmetric path for a two-finger
+    # jaw. Its ``grip_site`` sits at the base, like the UMI's and the Inspire
+    # hand's, which is why its contact offset is 208 mm.
+    "bd": GripperPair(
+        "BDGripper", "bd_spot", ("Panda",), 0.0, 85179.5, 0.000
+    ),
 }
 
 #: Pairs whose GraspGen-X side is already loaded on the running server.
