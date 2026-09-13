@@ -1,0 +1,8 @@
+{
+  "title": "Grasp generation on the tabletop scene",
+  "description": "Prompt to object to point cloud to ranked 6-DoF grasps, per gripper. Perception and grasping only; nothing is executed.",
+  "settings": {
+    "source": "python -m tpgpt.experiments.run_grasp_scene"
+  },
+  "created": "2026-09-07T01:10:24"
+}

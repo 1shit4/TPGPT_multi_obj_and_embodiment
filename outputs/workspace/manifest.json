@@ -1,0 +1,10 @@
+{
+  "title": "Panda workspace",
+  "description": "Where the arm can reach, and where it can reach with the hand pointing down. Only the second is usable for a top-down grasp, and the two differ a great deal.",
+  "settings": {
+    "shelf": "cubby",
+    "tolerance_mm": 15.0
+  },
+  "report": "workspace.png",
+  "created": "2026-09-06T20:31:33"
+}

@@ -1,0 +1,288 @@
+{
+  "title": "Transported paths re-measured geometrically against a finished campaign",
+  "description": "For every cell of an existing replay campaign, the grasp it actually executed is re-transported and the resulting path is measured against the scene's solid geometry -- how much of it sits inside something, how deep, and which panel -- plus a warm-started inverse-kinematics pass down the same path. No physics is stepped. Set beside the campaign's own success column, this says whether the geometric criterion separates the cells that worked from the ones that did not, which is what has to be true before it is used to select grasps.",
+  "settings": {
+    "varied": {
+      "cell": "every row of the source campaign"
+    },
+    "source_rows": "/tmp/claude-1000/-home-ishita-TPGPT/c813aea9-e4e5-479e-8b35-e0ed435613e6/scratchpad/plotcells.json",
+    "fixed": {
+      "source": "reshelving seed 0, one demonstration",
+      "slot": "top_middle",
+      "seed": 0,
+      "grasp": "the candidate index the campaign recorded, from the same cached candidate set, so the grasp is identical",
+      "instrument": "analytic signed distance to the scene's solid primitives; the gripper's own published surface sample placed at every transported waypoint",
+      "ik_stride": 4
+    }
+  },
+  "rows": [
+    {
+      "gripper": "yumi",
+      "object": "can",
+      "variant": "2_cube_grasp_pose",
+      "campaign_success": false,
+      "campaign_placed": false,
+      "chosen_index": 95,
+      "inside_fraction": 0.475,
+      "max_depth_mm": 8.61,
+      "median_inside_depth_mm": 5.85,
+      "inside_waypoints": 95,
+      "waypoints": 200,
+      "culprits": {
+        "milk_g0": 11,
+        "shelf_top_wall_r": 19,
+        "shelf_top_back": 65
+      },
+      "object_max_depth_mm": 16.57,
+      "min_det": 0.24429805892769865,
+      "aim_map": 8.944866957511746e-08,
+      "approach_into_object_mm": 17.6,
+      "approach_waypoints_inside": 8,
+      "release_commanded_xyz": [
+        0.2118,
+        0.0027,
+        1.1393
+      ],
+      "release_commanded_lateral_mm": 8.7,
+      "release_commanded_above_board_mm": 58.3,
+      "n_candidates": 100,
+      "chosen_score": 0.4494,
+      "chosen_score_rank": 96,
+      "path_travel_mm": 54.79,
+      "path_vs_grasp_axis_deg": 3.2,
+      "path_vs_vertical_deg": 81.5,
+      "path_length_ratio": 1.054,
+      "path_max_step_ratio": 2.04,
+      "path_deviation_from_rigid_mm": 86.8,
+      "release_jaw_axis_vs_shelf_depth_deg": 40.3,
+      "place_zone_candidates": 100,
+      "place_zone_kept_rays": 24,
+      "place_zone_kept_exact": 24,
+      "place_zone_rejected_but_clear": 0,
+      "place_zone_kept_but_fouling": 0,
+      "place_zone_blocked_by": {
+        "shelf_top_back": 49,
+        "shelf_top_board": 6,
+        "shelf_top_wall_l": 16,
+        "shelf_bottom_back": 5
+      },
+      "figure": "yumi_can.png"
+    },
+    {
+      "gripper": "panda",
+      "object": "cereal",
+      "variant": "2_cube_grasp_pose",
+      "campaign_success": false,
+      "campaign_placed": false,
+      "chosen_index": 76,
+      "inside_fraction": 0.09,
+      "max_depth_mm": 4.51,
+      "median_inside_depth_mm": 4.51,
+      "inside_waypoints": 18,
+      "waypoints": 200,
+      "culprits": {
+        "shelf_top_back": 18
+      },
+      "object_max_depth_mm": 0.0,
+      "min_det": 0.8699749284351956,
+      "aim_map": 2.545673380573455e-07,
+      "approach_into_object_mm": 0.0,
+      "approach_waypoints_inside": 0,
+      "release_commanded_xyz": [
+        0.2191,
+        0.0056,
+        1.2459
+      ],
+      "release_commanded_lateral_mm": 5.6,
+      "release_commanded_above_board_mm": 164.9,
+      "n_candidates": 100,
+      "chosen_score": 0.6258,
+      "chosen_score_rank": 77,
+      "path_travel_mm": 57.3,
+      "path_vs_grasp_axis_deg": 1.0,
+      "path_vs_vertical_deg": 13.8,
+      "path_length_ratio": 1.007,
+      "path_max_step_ratio": 1.17,
+      "path_deviation_from_rigid_mm": 47.3,
+      "release_jaw_axis_vs_shelf_depth_deg": 14.9,
+      "place_zone_candidates": 100,
+      "place_zone_kept_rays": 37,
+      "place_zone_kept_exact": 37,
+      "place_zone_rejected_but_clear": 0,
+      "place_zone_kept_but_fouling": 0,
+      "place_zone_blocked_by": {
+        "shelf_top_back": 62,
+        "shelf_bottom_back": 1
+      },
+      "figure": "panda_cereal.png"
+    },
+    {
+      "gripper": "panda",
+      "object": "milk",
+      "variant": "2_cube_grasp_pose",
+      "campaign_success": true,
+      "campaign_placed": true,
+      "chosen_index": 34,
+      "inside_fraction": 0.315,
+      "max_depth_mm": 6.0,
+      "median_inside_depth_mm": 5.46,
+      "inside_waypoints": 63,
+      "waypoints": 200,
+      "culprits": {
+        "cereal_g0": 7,
+        "shelf_top_back": 56
+      },
+      "object_max_depth_mm": 14.92,
+      "min_det": 0.7402475123517048,
+      "aim_map": 2.3322615128674505e-07,
+      "approach_into_object_mm": 0.0,
+      "approach_waypoints_inside": 0,
+      "release_commanded_xyz": [
+        0.2248,
+        0.0138,
+        1.201
+      ],
+      "release_commanded_lateral_mm": 14.6,
+      "release_commanded_above_board_mm": 120.0,
+      "n_candidates": 100,
+      "chosen_score": 0.715,
+      "chosen_score_rank": 35,
+      "path_travel_mm": 57.36,
+      "path_vs_grasp_axis_deg": 1.6,
+      "path_vs_vertical_deg": 63.7,
+      "path_length_ratio": 1.048,
+      "path_max_step_ratio": 1.55,
+      "path_deviation_from_rigid_mm": 89.6,
+      "release_jaw_axis_vs_shelf_depth_deg": 0.6,
+      "place_zone_candidates": 100,
+      "place_zone_kept_rays": 6,
+      "place_zone_kept_exact": 6,
+      "place_zone_rejected_but_clear": 0,
+      "place_zone_kept_but_fouling": 0,
+      "place_zone_blocked_by": {
+        "shelf_top_back": 94
+      },
+      "figure": "panda_milk.png"
+    },
+    {
+      "gripper": "panda",
+      "object": "bread",
+      "variant": "2_cube_grasp_pose",
+      "campaign_success": true,
+      "campaign_placed": true,
+      "chosen_index": 51,
+      "inside_fraction": 0.32,
+      "max_depth_mm": 6.0,
+      "median_inside_depth_mm": 5.72,
+      "inside_waypoints": 64,
+      "waypoints": 200,
+      "culprits": {
+        "shelf_top_back": 64
+      },
+      "object_max_depth_mm": 0.0,
+      "min_det": 0.557535655566992,
+      "aim_map": 1.271769401695607e-07,
+      "approach_into_object_mm": 0.0,
+      "approach_waypoints_inside": 0,
+      "release_commanded_xyz": [
+        0.2316,
+        0.0165,
+        1.1241
+      ],
+      "release_commanded_lateral_mm": 20.2,
+      "release_commanded_above_board_mm": 43.1,
+      "n_candidates": 100,
+      "chosen_score": 0.6008,
+      "chosen_score_rank": 52,
+      "path_travel_mm": 57.43,
+      "path_vs_grasp_axis_deg": 1.6,
+      "path_vs_vertical_deg": 1.9,
+      "path_length_ratio": 0.994,
+      "path_max_step_ratio": 1.36,
+      "path_deviation_from_rigid_mm": 90.9,
+      "release_jaw_axis_vs_shelf_depth_deg": 0.8,
+      "place_zone_candidates": 100,
+      "place_zone_kept_rays": 5,
+      "place_zone_kept_exact": 5,
+      "place_zone_rejected_but_clear": 0,
+      "place_zone_kept_but_fouling": 0,
+      "place_zone_blocked_by": {
+        "shelf_bottom_back": 25,
+        "shelf_top_board": 29,
+        "shelf_top_back": 40,
+        "shelf_top_wall_l": 1
+      },
+      "figure": "panda_bread.png"
+    },
+    {
+      "gripper": "robotiq85",
+      "object": "cereal",
+      "variant": "2_cube_grasp_pose",
+      "campaign_success": false,
+      "campaign_placed": false,
+      "chosen_index": 65,
+      "inside_fraction": 0.1,
+      "max_depth_mm": 5.86,
+      "median_inside_depth_mm": 5.76,
+      "inside_waypoints": 20,
+      "waypoints": 200,
+      "culprits": {
+        "shelf_top_back": 20
+      },
+      "object_max_depth_mm": 0.0,
+      "min_det": 0.8754257464532883,
+      "aim_map": 2.3003226786981172e-07,
+      "approach_into_object_mm": 0.0,
+      "approach_waypoints_inside": 0,
+      "release_commanded_xyz": [
+        0.2216,
+        0.0099,
+        1.2296
+      ],
+      "release_commanded_lateral_mm": 10.0,
+      "release_commanded_above_board_mm": 148.6,
+      "n_candidates": 100,
+      "chosen_score": 0.6811,
+      "chosen_score_rank": 66,
+      "path_travel_mm": 56.77,
+      "path_vs_grasp_axis_deg": 1.4,
+      "path_vs_vertical_deg": 29.0,
+      "path_length_ratio": 1.008,
+      "path_max_step_ratio": 1.24,
+      "path_deviation_from_rigid_mm": 39.7,
+      "release_jaw_axis_vs_shelf_depth_deg": 30.5,
+      "place_zone_candidates": 100,
+      "place_zone_kept_rays": 32,
+      "place_zone_kept_exact": 32,
+      "place_zone_rejected_but_clear": 0,
+      "place_zone_kept_but_fouling": 0,
+      "place_zone_blocked_by": {
+        "shelf_top_back": 67,
+        "shelf_top_wall_l": 1
+      },
+      "figure": "robotiq85_cereal.png"
+    }
+  ],
+  "created": "2026-09-12T12:22:31",
+  "provenance": {
+    "commit": "fcf93f6a3a85d7bcf5f87d5ebebbdb3241e9af9d",
+    "commit_short": "fcf93f6",
+    "branch": "keypoints-grasp-cube",
+    "committed": "2026-09-12T11:39:12+05:30",
+    "dirty": [
+      "tpgpt/experiments/run_path_study.py"
+    ],
+    "diff_stat": "tpgpt/experiments/run_path_study.py | 45 ++++++++++++++++++++++++++++++++++++-\n 1 file changed, 44 insertions(+), 1 deletion(-)",
+    "untracked_code": [],
+    "reproducible": false,
+    "python": "3.10.12",
+    "platform": "Linux-6.8.0-138-generic-x86_64-with-glibc2.35",
+    "packages": {
+      "numpy": "2.2.6",
+      "scipy": "1.15.3",
+      "mujoco": "3.7.0",
+      "robosuite": "1.5.2",
+      "similaritymeasures": "1.4.0"
+    }
+  }
+}
