@@ -1117,6 +1117,184 @@ Per hand, out of four objects each:
 slot — the `settle` stage of `tpgpt.experiments.diagnose`, which watches the
 object rather than the arm. A hand at 4/4 placed every object it was given.
 
+### The complete data, cell by cell
+
+**Recorded in full because the totals have twice been misleading here.** §7.41's
+confound was invisible in a success count and obvious in a per-cell fingerprint,
+and the 6.1 mm effect below is invisible in a count too. Anyone re-running this
+should be able to check their cells against these rather than against a
+headline. Every number is in `outputs/campaigns/execution7/execution/manifest.json`
+(executor) and `outputs/expR7_pinned/manifest.json` (replay), both tracked.
+
+**What was varied:** the gripper (7) and the object (4), 28 combinations.
+**What was held fixed:** seed 0, the `top_middle` slot, grasp-pose-cube
+keypoints with a 20 mm half-extent, the four-object scene, the source
+demonstration, and — by construction — the grasp executed in each cell.
+
+#### Column glossary
+
+*Table 1, the setup and the outcome.*
+
+- **grasp** — which of the 100 GraspGen-X candidates was executed, indexed into
+  the raw cached list. **This is the column that makes the comparison valid**:
+  it is identical in both runs for all 28 cells, because the replay was pinned
+  to it rather than choosing for itself.
+- **cloud** — how many points the depth cameras recovered of the object. Note it
+  is a property of the *object*, not the hand: every can cell is 57 points,
+  every bread 167, because the scene and seed are fixed and only the gripper
+  changes.
+- **surv** — how many of the 100 candidates survived the filter funnel and were
+  available to rank. A low number means the funnel nearly emptied the set.
+- **`min det(J)`** — the smallest Jacobian determinant of the fitted map along
+  the path. 1.0 is undeformed space; 0 is folded inside out. It measures whether
+  the map is a *valid* deformation, and this project's standing result is that
+  it does **not** predict task outcome.
+- **frame rot** — how far the target grasp's frame is rotated from the source
+  demonstration's, in degrees. The larger it is, the more work the map is doing.
+- **err** — horizontal distance from where the object came to rest to the centre
+  of the target slot. The same ruler in both runs. A value in the hundreds means
+  the object is not in the slot at all.
+- **stopped at** — the stage `tpgpt.experiments.diagnose` blames, which watches
+  the *object* rather than the arm: `approach`, `reach`, `grasp`, `lift`,
+  `carry`, `place`, `settle`. It names where a run stopped, not what the outcome
+  looked like.
+
+*Table 2, what the executor was doing.* All in millimetres.
+
+- **reach err** — how far the hand was from the planned grasp pose when it
+  arrived, and **on closing axis** is that error resolved along the direction
+  the jaws close. The split matters because the budgets differ by two orders of
+  magnitude: a few millimetres across the jaws, 120–135 mm along the approach.
+- **closing budget** — how much closing-axis error this grasp could absorb,
+  derived as `(aperture − object width) / 2` from the target keypoints rather
+  than assumed. `0.0` means the jaws had no slack at all on that cell.
+- **lag at close** — how far the arm trailed its attractor when the jaws shut.
+  Some lag is *correct*: an impedance-controlled arm chasing a moving setpoint
+  must stay stretched by `K⁻¹D·v` to supply the force (§2.7).
+- **attractor drift** — the largest pointwise deviation of the commanded
+  attractor from the transported path, measured against the path itself so it
+  cannot come out negative.
+- **release err / final err** — where the object was when the jaws opened, and
+  where it ended up. The gap between them is the drop (§7.35).
+- **lift** — how high the object came off the table. Near zero means it never
+  left.
+
+*Table 3, what the replay was doing.*
+
+- **jaw closure** — how far the jaws travelled, on a cross-hand scale where 0 is
+  open and 1 is fully shut. **1.0 means the jaws closed completely, i.e. on
+  nothing** — or squeezed the object out.
+- **reachable** — the fraction of the 200 waypoints inverse kinematics could
+  solve. It is a property of the *whole path*, since each solve is warm-started
+  from the previous one, and it has no collision model, so a pose can be
+  "reachable" and physically buried in the shelf.
+- **worst tracking err** — the largest distance between commanded and achieved
+  pose. Under position control this is the arm failing to go where it was sent,
+  which usually means it is jammed against something.
+- **worst segment** — which phase carried the most unreachable waypoints. It
+  reads `None` when nothing was unreachable at all.
+- **held at close / slip** — whether opposing fingers were in contact when the
+  close was commanded, and how far the object moved within the grip.
+
+#### Table 1 — the task each cell faced, and what both controllers did with it
+
+| cell | grasp | cloud | surv | `min det(J)` | frame rot | executor | err (mm) | stopped at | replay | err (mm) |
+|---|---|---|---|---|---|---|---|---|---|---|
+| `yumi/cereal` | 98 | 598 | 3 | 0.930 | 9.9° | placed | 46.6 | — | placed | 19.2 |
+| `yumi/milk` | 48 | 279 | 16 | 0.849 | 57.8° | **failed** | 438.7 | `lift` | **failed** | 348.8 |
+| `yumi/can` | 57 | 57 | 8 | 0.990 | 16.3° | **failed** | 716.0 | `reach` | placed | 6.6 |
+| `yumi/bread` | 10 | 167 | 1 | 0.248 | 77.0° | placed | 11.8 | — | **failed** | 336.4 |
+| `xarm/cereal` | 75 | 587 | 2 | 0.958 | 11.3° | placed | 27.4 | — | placed | 20.5 |
+| `xarm/milk` | 25 | 279 | 14 | 0.892 | 38.9° | placed | 31.2 | — | placed | 24.3 |
+| `xarm/can` | 10 | 57 | 4 | 0.950 | 53.7° | placed | 8.2 | — | placed | 3.3 |
+| `xarm/bread` | 52 | 167 | 4 | 0.938 | 12.1° | **failed** | 320.6 | `grasp` | placed | 59.6 |
+| `panda/cereal` | 85 | 602 | 2 | 0.990 | 9.5° | placed | 28.8 | — | placed | 26.0 |
+| `panda/milk` | 80 | 279 | 5 | 0.998 | 32.9° | placed | 11.8 | — | placed | 5.7 |
+| `panda/can` | 33 | 57 | 3 | 0.998 | 22.0° | placed | 16.3 | — | placed | 2.4 |
+| `panda/bread` | 59 | 167 | 2 | 0.170 | 79.7° | **failed** | 320.5 | `reach` | placed | 39.8 |
+| `robotiq85/cereal` | 65 | 602 | 3 | 0.875 | 1.2° | **failed** | 230.6 | `reach` | placed | 30.7 |
+| `robotiq85/milk` | 38 | 279 | 12 | 0.944 | 37.8° | placed | 3.2 | — | placed | 3.9 |
+| `robotiq85/can` | 1 | 57 | 9 | 0.985 | 33.2° | placed | 8.3 | — | placed | 1.5 |
+| `robotiq85/bread` | 70 | 167 | 5 | 0.898 | 14.1° | placed | 22.3 | — | placed | 14.2 |
+| `robotiq140/cereal` | 44 | 601 | 3 | 0.993 | 13.4° | placed | 18.7 | — | placed | 4.0 |
+| `robotiq140/milk` | 24 | 279 | 14 | 0.997 | 33.2° | placed | 14.0 | — | placed | 19.2 |
+| `robotiq140/can` | 33 | 57 | 6 | 0.911 | 54.7° | placed | 18.6 | — | placed | 28.9 |
+| `robotiq140/bread` | 83 | 167 | 4 | 0.927 | 11.4° | placed | 23.6 | — | placed | 25.7 |
+| `robotiq3f/cereal` | 19 | 590 | 18 | 0.976 | 33.9° | **failed** | 321.2 | `approach` | **failed** | 323.6 |
+| `robotiq3f/milk` | 35 | 279 | 5 | 0.864 | 66.5° | **failed** | 441.3 | `lift` | **failed** | 75.9 |
+| `robotiq3f/can` | 28 | 57 | 3 | 0.943 | 63.2° | **failed** | 352.1 | `approach` | **failed** | 84.4 |
+| `robotiq3f/bread` | 48 | 167 | 4 | 0.935 | 13.2° | **failed** | 374.2 | `lift` | **failed** | 370.7 |
+| `rethink/cereal` | 59 | 602 | 2 | 0.839 | 21.8° | **failed** | 61.1 | `reach` | **failed** | 327.7 |
+| `rethink/milk` | 45 | 279 | 11 | 0.995 | 16.6° | placed | 3.8 | — | placed | 8.0 |
+| `rethink/can` | 5 | 57 | 7 | 0.858 | 65.2° | placed | 11.4 | — | **failed** | 367.9 |
+| `rethink/bread` | 48 | 167 | 3 | 0.940 | 9.4° | **failed** | 320.5 | `reach` | **failed** | 211.8 |
+
+#### Table 2 — executor diagnostics, per cell
+
+| cell | reach err | on closing axis | closing budget | lag at close | attractor drift | release err | final err | lift |
+|---|---|---|---|---|---|---|---|---|
+| `yumi/cereal` | 6.4 | 3.7 | 0.0 | 6.8 | 3.9 | 35.7 | 46.6 | 443 |
+| `yumi/milk` | 18.0 | 2.2 | 3.0 | 18.0 | 4.5 | 438.7 | 438.7 | 5 |
+| `yumi/can` | 16.4 | 5.9 | 2.1 | 17.2 | 52.8 | 716.0 | 716.0 | 116 |
+| `yumi/bread` | 22.9 | 15.8 | 5.3 | 22.0 | 4.4 | 12.4 | 11.8 | 431 |
+| `xarm/cereal` | 8.9 | 4.3 | 1.7 | 7.6 | 3.4 | 15.8 | 27.4 | 454 |
+| `xarm/milk` | 9.1 | 1.8 | 23.1 | 9.1 | 2.3 | 25.9 | 31.2 | 450 |
+| `xarm/can` | 19.6 | 11.0 | 29.8 | 16.5 | 3.0 | 5.3 | 8.2 | 449 |
+| `xarm/bread` | 70.7 | 18.9 | 20.8 | 56.0 | 19.8 | 320.6 | 320.6 | 0 |
+| `panda/cereal` | 10.2 | 0.5 | 19.3 | 12.1 | 5.4 | 17.2 | 28.8 | 446 |
+| `panda/milk` | 19.3 | 4.2 | 19.9 | 18.7 | 3.9 | 7.0 | 11.8 | 420 |
+| `panda/can` | 10.3 | 0.9 | 20.4 | 11.2 | 2.7 | 10.1 | 16.3 | 454 |
+| `panda/bread` | 122.6 | 118.7 | 19.8 | 35.4 | 148.1 | 320.5 | 320.5 | 0 |
+| `robotiq85/cereal` | 52.5 | 44.3 | 0.0 | 30.8 | 103.8 | 230.6 | 230.6 | 2 |
+| `robotiq85/milk` | 8.2 | 2.8 | 23.0 | 9.9 | 2.2 | 3.1 | 3.2 | 441 |
+| `robotiq85/can` | 14.0 | 13.4 | 24.1 | 14.4 | 3.5 | 6.9 | 8.3 | 423 |
+| `robotiq85/bread` | 18.5 | 12.1 | 21.2 | 19.7 | 55.7 | 19.5 | 22.3 | 455 |
+| `robotiq140/cereal` | 6.2 | 0.6 | 28.6 | 5.2 | 5.1 | 5.4 | 18.7 | 453 |
+| `robotiq140/milk` | 21.9 | 13.3 | 43.7 | 21.8 | 2.6 | 15.7 | 14.0 | 450 |
+| `robotiq140/can` | 13.4 | 11.6 | 49.5 | 13.0 | 2.6 | 9.8 | 18.6 | 443 |
+| `robotiq140/bread` | 10.6 | 10.6 | 40.9 | 26.2 | 64.1 | 21.8 | 23.6 | 386 |
+| `robotiq3f/cereal` | 164.0 | 78.6 | 24.4 | 35.1 | 149.9 | 321.2 | 321.2 | 0 |
+| `robotiq3f/milk` | 37.6 | 15.8 | 32.1 | 36.0 | 3.8 | 441.3 | 441.3 | 5 |
+| `robotiq3f/can` | 144.3 | 120.3 | 42.8 | 35.6 | 115.2 | 352.1 | 352.1 | 0 |
+| `robotiq3f/bread` | 32.2 | 13.6 | 33.6 | 35.3 | 27.9 | 374.1 | 374.2 | 12 |
+| `rethink/cereal` | 6.0 | 1.2 | 0.0 | 4.0 | 3.6 | 26.1 | 61.1 | 399 |
+| `rethink/milk` | 15.2 | 8.6 | 13.4 | 14.9 | 2.5 | 2.4 | 3.8 | 448 |
+| `rethink/can` | 20.7 | 3.4 | 21.8 | 19.2 | 4.7 | 11.2 | 11.4 | 429 |
+| `rethink/bread` | 66.7 | 11.7 | 10.9 | 55.7 | 13.4 | 320.5 | 320.5 | 0 |
+
+#### Table 3 — replay diagnostics, per cell
+
+| cell | jaw closure | lift | reachable | worst tracking err | worst segment | held at close | slip |
+|---|---|---|---|---|---|---|---|
+| `yumi/cereal` | 0.474 | 387 | 0.59 | 98.2 | `place` | yes | 21.0 |
+| `yumi/milk` | 1.000 | 1 | 0.62 | 55.7 | `place` | yes | 36.2 |
+| `yumi/can` | 0.227 | 423 | 0.865 | 27.6 | `retreat` | yes | 6.3 |
+| `yumi/bread` | 1.014 | 8 | 1.0 | 45.4 | `None` | yes | 43.0 |
+| `xarm/cereal` | 0.770 | 387 | 0.595 | 84.9 | `place` | yes | 27.0 |
+| `xarm/milk` | 0.644 | 397 | 0.755 | 37.8 | `retreat` | yes | 5.7 |
+| `xarm/can` | 0.550 | 417 | 0.82 | 43.1 | `retreat` | yes | 1.2 |
+| `xarm/bread` | 1.040 | 465 | 1.0 | 23.7 | `None` | yes | 54.2 |
+| `panda/cereal` | 0.622 | 416 | 0.81 | 39.0 | `retreat` | yes | 11.7 |
+| `panda/milk` | 0.507 | 424 | 0.74 | 30.2 | `place` | yes | 6.6 |
+| `panda/can` | 0.384 | 432 | 0.955 | 13.5 | `retreat` | yes | 0.3 |
+| `panda/bread` | 0.535 | 414 | 0.85 | 87.1 | `retreat` | yes | 2.9 |
+| `robotiq85/cereal` | 0.902 | 390 | 1.0 | 26.2 | `None` | yes | 46.5 |
+| `robotiq85/milk` | 0.860 | 406 | 0.835 | 29.0 | `retreat` | yes | 2.0 |
+| `robotiq85/can` | 0.745 | 408 | 0.625 | 43.0 | `place` | yes | 2.8 |
+| `robotiq85/bread` | 0.799 | 454 | 1.0 | 26.1 | `None` | yes | 29.3 |
+| `robotiq140/cereal` | 0.934 | 412 | 0.615 | 65.4 | `place` | yes | 11.2 |
+| `robotiq140/milk` | 0.909 | 401 | 0.79 | 61.9 | `retreat` | yes | 59.0 |
+| `robotiq140/can` | 0.892 | 404 | 0.62 | 56.1 | `place` | yes | 8.2 |
+| `robotiq140/bread` | 0.905 | 441 | 0.7 | 17.0 | `place` | yes | 46.6 |
+| `robotiq3f/cereal` | 0.993 | 141 | 0.61 | 82.2 | `place` | yes | 18.9 |
+| `robotiq3f/milk` | 0.935 | 405 | 0.605 | 87.9 | `place` | yes | 12.7 |
+| `robotiq3f/can` | 1.002 | 371 | 0.0 | 122.6 | `approach` | yes | 24.3 |
+| `robotiq3f/bread` | 1.005 | 2 | 0.775 | 84.0 | `retreat` | yes | 42.2 |
+| `rethink/cereal` | 0.668 | 362 | 0.58 | 126.0 | `place` | yes | 37.9 |
+| `rethink/milk` | 0.496 | 420 | 0.81 | 40.7 | `retreat` | yes | 3.8 |
+| `rethink/can` | 1.000 | 32 | 0.89 | 29.1 | `retreat` | yes | 10.3 |
+| `rethink/bread` | 1.016 | 287 | 1.0 | 21.1 | `None` | yes | 9.2 |
+
 ### Results and why
 
 **The three-finger hand fails under both controllers, so it is not an execution
@@ -1187,6 +1365,27 @@ that test, and the answer is no:
 not compliance, and the proposal gets no support. Recorded here rather than
 quietly dropped because it was stated as a prediction.
 
+**A rule stated elsewhere in this project does not survive these 28 cells, and
+the full table is how that became visible.** `CLAUDE.md` records, from the
+earlier seven-hand run, that *"all nine failures have the jaws at 0.99 closure
+or beyond and nothing that placed went above 0.94"* — a clean separation, with
+the open-loop gripper blamed for every failure. On this grid there are **three
+counterexamples out of 28**:
+
+| cell | jaw closure | outcome | why it contradicts the rule |
+|---|---|---|---|
+| `xarm/bread` | **1.040** | **placed**, 59.6 mm | jaws fully shut, and the object still arrived |
+| `robotiq3f/milk` | 0.935 | **failed** | below the threshold, and failed anyway |
+| `rethink/cereal` | 0.668 | **failed** | jaws barely half closed, and failed anyway |
+
+Closure remains a **strong predictor** — 7 of 9 failures sit at or above 0.99
+and 18 of 19 placements below it, Fisher p = 2.2e-04 — but it is not the clean
+separator the earlier run suggested, and "every failure is the gripper" is too
+strong. Two of the nine failures here happened with the jaws in a perfectly
+reasonable place. The earlier run and this one executed **different grasps**, so
+this is not a contradiction of that measurement; it is the rule failing to
+generalise past the grasps it was derived on.
+
 **What this does not say.** It does not compare against the *original*
 Experiment R. The pinned replay places 18 of 20 on the five hands that grid
 used, against its 16 of 20 — but `run_keypoint_replay.py` has changed by 120
@@ -1208,7 +1407,7 @@ it would.
 Nothing here is left as "a run that didn't work". Every non-completing run in
 all 792 is accounted for below.
 
-### 12.1 Runs that raised an exception: **zero**
+### 13.1 Runs that raised an exception: **zero**
 
 | condition | runs | exceptions |
 |---|---|---|
@@ -1221,7 +1420,7 @@ occurred. Note this is a meaningful check for `R-a` and `R-m`, which raise
 deliberately if the policy was fitted without the `reference` channel; they did
 not, confirming the channel is present and being read.
 
-### 12.2 Warps rejected before any law ran: **2 of 45, in both conditions**
+### 13.2 Warps rejected before any law ran: **2 of 45, in both conditions**
 
 | bump scale | resulting `min det(J)` | action |
 |---|---|---|
@@ -1239,7 +1438,7 @@ the same problems.
 
 That leaves **43 valid warps**, which is what every table above is computed on.
 
-### 12.3 Runs the watchdog declared stuck: 33 undisturbed, 54 loaded
+### 13.3 Runs the watchdog declared stuck: 33 undisturbed, 54 loaded
 
 Not distributed evenly — this is Experiment D's table, read as a failure
 inventory:
@@ -1279,7 +1478,7 @@ here it is a law that hands the clamp an attractor it must always correct. The
 prevent this one — the watchdog terminating the run is the designed and honest
 outcome, not a bug.
 
-### 12.4 Runs that ran out of step budget: **zero**
+### 13.4 Runs that ran out of step budget: **zero**
 
 | condition | budget exhausted |
 |---|---|
@@ -1292,7 +1491,7 @@ as stuck, just crawls until the step limit. Every run in this study ended in a
 **named** state — completed, or stalled with a reason. That is one of the
 acceptance criteria and it is met.
 
-### 12.5 Not a failure, but worth recording: a 3 h 20 m false start
+### 13.5 Not a failure, but worth recording: a 3 h 20 m false start
 
 The loaded sweep sat for 3 hours 20 minutes without running a single case. The
 wrapper that chained it behind the undisturbed sweep waited with
@@ -1314,7 +1513,7 @@ match the waiter.**
 
 ## 14. What this means, and what would make it false
 
-### 13.1 The conclusions
+### 14.1 The conclusions
 
 | question | answer | strength |
 |---|---|---|
@@ -1345,7 +1544,7 @@ two instants the task is actually decided at, and the ranking inverts. That is
 the mistake after building the axis-decomposition tool specifically to prevent
 it.
 
-### 13.2 What would make these conclusions false
+### 14.2 What would make these conclusions false
 
 - **A real arm behaving differently from the surrogate.** The bed has no contact,
   no inverse kinematics, and no orientation task. If the queued
@@ -1364,7 +1563,7 @@ it.
 - **A load larger than 0.08 m/s.** That value shuts the gate on 42% of steps.
   How the ranking behaves at 80% is unmeasured.
 
-### 13.3 What is still missing
+### 14.3 What is still missing
 
 Two simulator tiers, specified and **queued** behind the parallel session's
 MuJoCo runs (currently 84% CPU, 357 MiB free; CLAUDE.md requires checking
@@ -1389,7 +1588,7 @@ possible moved arithmetic out of `rollout_policy`. Defaults are asserted bitwise
 identical at unit level; the end-to-end proof is three reshelving seeds against
 the baseline commit compared with `np.array_equal` — not `allclose`.
 
-### 13.4 A note on what "flawless" can mean
+### 14.4 A note on what "flawless" can mean
 
 By the rule of three, zero failures in 20 runs bounds the true per-run failure
 rate only at **14%**. No campaign in this budget can certify the absence of

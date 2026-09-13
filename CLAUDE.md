@@ -755,9 +755,18 @@ per-run HTML reports. Nine gripper pairs registered, eight verified in physics.
 **The current end-to-end result is 19/28 across seven hands and four objects
 (`FINDINGS.md` §8p, Experiment R), from one demonstration** -- 16/20 on the five
 hands the campaign was run with, plus the three-finger `robotiq3f` at 2/4 and
-the `rethink` at 1/4. **All nine failures have the jaws at 0.99 closure or
-beyond and nothing that placed went above 0.94**, so every one of them is the
-open-loop gripper and not the transport.
+the `rethink` at 1/4. On *that* run all nine failures had the jaws at 0.99
+closure or beyond and nothing that placed went above 0.94.
+
+**That clean separation does not generalise, and "every failure is the gripper"
+is too strong.** A later 28-cell grid executing *different* grasps
+(`outputs/expR7_pinned/`, also 19/28) has **three counterexamples**:
+`xarm/bread` placed with closure at **1.040**, and `robotiq3f/milk` (0.935) and
+`rethink/cereal` (0.668) failed well below the threshold. Closure is still a
+strong predictor there -- 7 of 9 failures at or above 0.99 against 18 of 19
+placements below it, Fisher p = 2.2e-04 -- but it is a predictor, not a
+separator, and two failures happened with the jaws in a reasonable place.
+`docs/dynamics_execution.md` §12 carries the full 28-cell table.
 
 **The three-finger hand transports as well as the parallel jaws do.** Its maps
 are the best in the run -- `min det` 0.935 to 0.996, the highest single value of
