@@ -84,16 +84,33 @@ class TestFrameContract:
         assert set(MEASURED_PAIRS) == set(GRIPPER_PAIRS)
 
     def test_verified_means_it_lifts_not_merely_that_it_converts(self):
-        """The Inspire hand converts cleanly and lifts nothing.
+        """Two hands convert cleanly and lift nothing.
 
         Keeping the two lists separate is what stops a hand that cannot execute
         a grasp from silently joining a campaign and looking like a transport
         failure.
+
+        **The Inspire hand** does not actuate: its fingers travel 0.7 to 6.5 mm
+        against 29 to 90 mm for every other hand, so a single open/close command
+        never closes it on anything.
+
+        **The UMI** was verified until ROBOTICS_NOTES 7.32 and is not any more.
+        Re-calibrated on a scene whose objects actually settle, it has no
+        working depth band at all: 0 of 13 swept offsets lift the reference can,
+        the best lift is 5.4 mm against a 50 mm threshold, and most samples are
+        *negative* -- the hand pushes the can down. Its stored 0.030 offset had
+        been measured in a scene where objects were dropped 25 mm and ejected by
+        an interpenetrating arm. It is also the only hand that cannot be placed
+        at the shared home pose, reaching 0 of 48 candidates where the other
+        eight reach 48 of 48.
         """
         assert "panda" in VERIFIED_PAIRS
-        assert "inspire" in GRIPPER_PAIRS
-        assert "inspire" not in VERIFIED_PAIRS
-        assert len(VERIFIED_PAIRS) == 8
+        for excluded in ("inspire", "umi"):
+            assert excluded in GRIPPER_PAIRS, f"{excluded} left the registry"
+            assert excluded not in VERIFIED_PAIRS, (
+                f"{excluded} converts but does not lift; it must not be verified"
+            )
+        assert len(VERIFIED_PAIRS) == 7
 
     def test_an_axis_aligned_gripper_keeps_its_approach_and_closing_axes(self):
         """The Panda's jaws close along grip_site X with Z the approach -- the

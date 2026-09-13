@@ -47,8 +47,12 @@ python -m tpgpt.grasp.server                    # status, and how to start it
   4-12 s per inference. Budget that against MuJoCo's ~1 GB.
 - Assets come from the sibling checkout via `GRASPGENX_GRIPPER_CFG_DIR` and
   `GRASPGENX_PROJECT_ROOT`. Nothing is duplicated into this repo.
-- Only `franka_panda`, `robotiq_2f_85` and `robotiq_2f_140` are loaded by
-  default; other grippers need the server restarted with them.
+- `franka_panda`, `robotiq_2f_85` and `robotiq_2f_140` are what a running
+  server usually has resident, but **any registered gripper works without a
+  restart**: `zmq_server.py:110` loads a sampler *lazily* on the first `infer`
+  request naming it, then caches it. `python -m tpgpt.grasp.server` reports
+  `loaded grippers`, which is what has been asked for so far, not a whitelist.
+  Budget the first call for that hand accordingly.
 - `tests/integration/test_graspgen.py` **skips** when the server is unreachable,
   so the suite still runs offline. Never start the server implicitly from a test.
 
@@ -218,6 +222,410 @@ Each of these cost real debugging time. Full detail in `ROBOTICS_NOTES.md`.
   must stay stretched by `K^-1 D v` (~24 mm at 0.25 m/s) to supply the force.
   Before "fixing" it, read `§2.7`: the lag is transport-invariant here and lands
   the arm where the demonstrating arm actually was, so it may be correct.
+- **The tabletop scene handed over objects that were still falling, inside the
+  robot. Read `§7.32` before trusting any number measured in it.** Three
+  defects, all fixed: `SETTLE_STEPS = 60` was 0.12 s where the cereal needed up
+  to 0.96 s, so a 150 mm box toppled 35-78 mm *on its own* after handover; the
+  arm's rest pose sat inside the sampling region, so objects were created
+  interpenetrating the gripper (4.85-26.77 mm on four of six hands) and ejected
+  on the first step; and objects are dropped 25 mm, not the 2 mm `z_offset`
+  claims, because each declares a `bottom_offset` that much larger than its true
+  half height. The scene consequently **differed by up to 154 mm between
+  grippers from the same seed**. It is now identical across hands to 0.00 mm.
+- **Settling is detected by displacement, never by velocity.** An object at rest
+  on the table carries 8-23 mm/s and 0.18-0.65 rad/s of solver jitter
+  indefinitely, oscillating in sign, so no meaningful velocity threshold is ever
+  met while the object does not move 0.1 mm in a second. And **one still window
+  is not enough**: a box balanced on an edge pauses before it tips, which is why
+  the gate needs four consecutive windows.
+- **A shared joint configuration does not give a shared start pose.** The same
+  `init_qpos` puts a 97 mm-deep Panda hand and a 270 mm-deep Robotiq 2F-140 in
+  completely different places. `HOME_TCP` is a **fingertip** target and IK solves
+  per hand for the wrist behind it, which is what makes every arm start at the
+  same point (3-4 mm) — the same conversion the replay does.
+- **Gravity compensation during a settle must touch only the arm's DOFs.**
+  `qfrc_applied[:] = qfrc_bias` across the whole model makes the *objects*
+  weightless: they hang at their placement heights, and every check reports
+  perfection — no interpenetration, no cross-gripper spread, all upright —
+  because nothing has moved. **A settle that freezes what it is meant to settle
+  looks exactly like a settle that works.** Three integration tests caught it
+  when the purpose-built verification did not.
+- **Every `calibrated_depth` in the registry was re-measured after `§7.32` and
+  all seven moved, by up to 30 mm.** `contact_offset` derives from it, so the
+  Panda's wrist-to-fingertip offset was **41.1 mm** throughout the project and is
+  **11.1 mm**. Any note quoting 41.1 mm predates this. The value feeds
+  `_to_tool_frame`, `grasp_to_eef_pose`, the replay's IK and the home pose, and
+  19.7 mm of tool-offset error was separately measured turning a 28 mm placement
+  into a 232 mm one — so this is not a rounding detail.
+- **`VERIFIED_PAIRS` is 7, not 8: the UMI is out.** On the corrected scene it
+  lifts nothing (0 of 13 swept depths), reaches **0 of 48** candidate home poses
+  where the other eight reach 48 of 48, and had 8 of 8 Tier 2 paths unreachable.
+  Convertible, not executable, like the Inspire hand. The reasons are stored in
+  `gripper_frames.json`, not left as a silent `None`.
+- **`+1` closes every hand in the registry, and the jaw *reading* is what
+  differs.** Robosuite's per-gripper `format_action` sign multipliers look
+  inverted between hands (`[-1, +1]` for the Panda, `[+1, -1]` for the Robotiq
+  2F-140), but they compensate for opposite joint conventions in the two models;
+  measured on all nine, the fingers converge on `+1` and reopen on `-1`,
+  reversibly to 0.1 mm. What is **not** cross-hand valid is
+  `diagnose._jaw_opening`, `sum |qpos|` over the gripper joints: it *falls* on
+  closing for the two prismatic hands and *rises* for the five revolute ones,
+  it is metres on some and radians on others (0.001 vs 4.9 for "shut"), and it
+  has no signal at all on the Rethink (+0.0012) and Yumi (0.0000) whose fingers
+  travel 46 mm and 38 mm. Reading it as a width diagnosed a sign bug that does
+  not exist. Use `diagnose.jaw_closure_probe`, which is 0 open and 1 closed on
+  every hand. `§7.28`.
+- **The same seed does not settle the objects identically across hands.** The
+  placement sampler is seeded the same, but the scene's 60 settle steps then run
+  with a different gripper attached, and the can comes to rest 14.6 mm away
+  between a Panda and a Robotiq 2F-140. Every cross-hand comparison carries that
+  ~15 mm scene difference by construction; a reproducibility check must be keyed
+  per hand or it will flag it as a failure.
+- **Never let a campaign be the first test of its own harness.** Four harness
+  bugs in one thread were each found only *after* a 12-25 minute physics run had
+  produced plausible numbers -- wrist-frame labels, a reused environment, the
+  wrong hand mounted, and the jaw units above -- and all four are answerable in
+  milliseconds from a fresh scene. `diagnose.replay_preconditions` checks
+  `gripper_mounted`, `scene_unstepped`, `object_placement` and
+  `closure_calibrated` on every cell and `diagnose.require` aborts before any
+  physics. Extend it rather than adding checks by hand. `§7.28`.
+- **`measure_frames.main` used to overwrite `gripper_frames.json` wholesale**,
+  wiping `calibrated_depth`, which comes from a much more expensive 13-grasp
+  physics sweep and which `_physics_verified` reads to decide which hands
+  campaigns may use -- and that function **falls back to all measured pairs when
+  the list is empty**, so the Inspire hand, which lifts nothing, would quietly
+  re-enter every campaign. It merges now. Any new per-hand measurement must
+  merge too.
+- **The Inspire hand's fingers travel 0.7 mm.** It does not actuate, which is a
+  simpler explanation for its 24 failed grasp attempts than the registry
+  docstring's "five fingers cannot pinch a can from above". Against 29-90 mm for
+  every other hand.
+- **A grasp is a pose, not an axis. Never re-derive its closing direction.**
+  `task_frame` used to pick the closing axis's sign with a world-axis test
+  (`c[1] >= 0`, tie-broken on `c[0]`), run independently at each of
+  `scene_keypoints`' four blocks. The demonstration **places its object square
+  with the shelf**, so the placed closing axis lands on world `x` at
+  `[1, -1e-17, 0]`, the tie-break fires and answers the opposite way to the
+  pick, whose `c[1]` is an unambiguous `-0.581`. The source's own two frames
+  came out **180 degrees apart**. Once the jaws shut the object is rigid with
+  the hand, so a half turn at one end only **reflects it through the grasp
+  point**: dead centre nothing moves, `d` off-centre it lands `2d` away --
+  4 to 100 mm over 20 cells. `Grasp6D.closing` has a definite sign; use it.
+  The origin was upstream: `reshelving_placement` built the source grasp from
+  `rotation[:, 0]`, the **product's body axis**, whose sign is undefined, and
+  everything downstream was compensating. `§7.33`.
+- **Three instruments read clean through that, and none was broken.** The map
+  stayed a valid diffeomorphism (`min det` 0.44-1.00, residual ~1e-7). **The aim
+  was exactly 0.00 mm at both ends** -- a half turn about the approach leaves
+  the grasp point *fixed*, so aim is blind to it by construction. And
+  `orientation_transport_error` minimises over `JAW_SYMMETRY`, which **is** that
+  half turn, so it read 0.2-4.5 degrees. For anything that *carries* an object
+  use `metrics.transport.carry_orientation_error`: it compares the relative
+  rotation between grasp and release, where a roll taken at both ends cancels
+  and one taken at a single end does not.
+- **Keypoints live in the grasp convention; the robot is commanded in the wrist
+  convention; convert explicitly.** GraspGen-X emits `+Z` approach and `+X`
+  closing, uniform across all nine hands. Each gripper model's `grip_site` is
+  its own frame, differing by the measured `alignment_rotation`: **0.2 degrees**
+  for the Robotiqs, **90** for the XArm, **180** for the Panda, Yumi and
+  Rethink. Neither `alignment_rotation` nor `grasp_to_eef_pose` appeared in the
+  Tier 2 path, so the plan was commanded 0.6-91 degrees wrong. Use
+  `to_grasp_convention` / `to_wrist_convention`, once at each end. `§7.34`.
+- **`flip_target` was a no-op for the life of the project.** The sign resolution
+  ran after it and put the sign back; both branches gave identical keypoints, to
+  three decimals of `min det` at all eight yaws of a sweep.
+  `pipeline._choose_grasp` tries both rolls and keeps the better -- it was
+  scoring one option twice. Any "try both and pick the best" search deserves an
+  assertion that the two branches actually differ.
+- **Removing the sign resolution loses a job it was doing silently.** `min det`
+  tracks the source-to-target frame rotation, and **three of twenty maps fold**
+  past about 145 degrees. The target's roll is now chosen *once, on the grasp*,
+  by agreement with the demonstration -- not four times from a world axis. Over
+  the same cells: median 0.944, min 0.456, no folds, against 0.878 and 0.443.
+  On a synthetic yaw sweep the cheap criterion still picks the worse roll at
+  2 of 8 yaws; the old code folded at those same two and could not be rescued.
+- **GraspGen-X declares `symmetric` per gripper, and the code no longer assumes
+  it. Fixed.** `parallel_2f` and `revolute_2f` are `True`; **`revolute_3f` is
+  `False`** -- `robotiq3f` and `inspire` -- because a half turn about the
+  approach is the same grasp for two fingers and a *different* grasp for three.
+  `orientation_transport_error` used to minimise over that half turn
+  unconditionally, so every orientation figure for those two hands used a
+  symmetry they do not have. The forgiveness was removed at `e55ce3f` and the
+  function now returns the plain geodesic, which is why the three-finger hand can
+  be measured at all. Compared against the grasp actually *executed* rather than
+  the one the planner emitted, minimising over the symmetry changed the answer on
+  **0 of 20** cells, so it was inert as well as wrong. `§7.34`, `§8z` item 1b.
+  Use `metrics.transport.carry_orientation_error` for anything that *carries* an
+  object: a roll taken at both ends cancels there and one taken at a single end
+  does not.
+- **The number of fingers a gripper has is declared, in GraspGen-X's own
+  config.** Its `type` field: `parallel_2f` and `revolute_2f` are two,
+  `revolute_3f` is three. Read it with `grippers.declared_fingers` rather than
+  deriving it -- **three ways of deriving it were measured and each is wrong on
+  at least one hand.** The body sub-tree splits a Robotiq's linkage into four
+  chains and collapses a Yumi's into one; the driving actuator collapses the
+  XArm, whose single actuator moves both fingers through a coupling, and
+  over-counts the 3F because its palm-spread joint looks like a finger; the sign
+  along the closing axis cannot see a Yumi's geoms at all. Knowing the count
+  makes the derivation a *choice*: `diagnose.finger_groups` tries both and keeps
+  whichever matches, which resolves eight of the nine hands and **refuses** the
+  Inspire rather than guessing. The same config also carries `symmetric`
+  (`declared_symmetric`), which is `False` for both three-finger hands.
+- **The lift now waits for the jaws, and it is gated on contact.**
+  `replay_labels` holds at the grasp until the gripper has had **continuous**
+  contact for `GRASP_CONTACT_STEPS = 4` control steps, capped at
+  `GRASP_GATE_MAX_STEPS = 200` with a `RuntimeWarning` naming the waypoint. The
+  gate's steps come *out of* that pose's settle budget rather than on top, so
+  the trajectory's timing is unchanged elsewhere. Default is off
+  (`grasp_gate=None`), so every existing caller is unaffected; the Tier 2 driver
+  opts in. **Any Tier 2 number predating this is not comparable**, because it
+  changes when the lift begins.
+  Contact and not a scaled dwell: an open-loop budget is the shape of
+  `SETTLE_STEPS = 60`, and the delay is not derivable -- 0, 0, 10 and 15
+  waypoints across four objects on one hand, *not* monotonic in object width.
+  The continuity requirement is not decoration: `xarm/cereal` touches its box
+  four waypoints before the close, so a one-step gate would report a grasp that
+  does not exist. And the test is **opposition**, not a count: at least one
+  finger touching from *each side* of the closing axis. A count would have been
+  wrong -- "two fingers" is safe on a parallel jaw, where two is both of them,
+  and wrong on a three-finger hand, which carries **two fingers on one side and
+  one on the other** (the Robotiq 3F's sit at -63.8, -61.6 and +71.9 mm along its
+  closing axis), so two of its fingers touching can be the pair *shoving* the
+  object. Opposition needs no threshold and means the same thing on two fingers,
+  three or five. Counting contacting *geoms* would be worse still: a Robotiq has
+  five per finger and a Yumi one.
+  **Holding shut for longer does not squeeze the object out, measured.** The
+  worry was that a hand the gate waits longer for also squeezes longer. Over a
+  **20x** increase in hold -- 8 to 160 control steps -- slip in the grip moves
+  by at most 1.8 mm (`panda/can` 9.4 -> 11.2 mm, `robotiq140/bread`
+  14.7 -> 13.6), and every cell still lifts 124-143 mm. The pre-compaction
+  measurement that a 25-waypoint dwell squeezed a can out was taken on the
+  broken scene with the wrong contact offsets and is withdrawn.
+- **A closure-*rate* rule cannot detect contact, and object shape is not why.**
+  The jaws are position-commanded (`+1` = "go to fully closed") and `closure`
+  reports where the fingers *are*, so it asymptotes toward the commanded value
+  whether or not anything is between them: on `robotiq140/can` the rate falls
+  from 0.343 to 0.012 per waypoint by waypoint 52 while contact is registered at
+  **65**, then jumps back to 0.148 *at* contact. The drop marks the jaws
+  arriving, not touching. And on four of five hands the close finishes inside a
+  single waypoint, so there is no rate to read at all -- `closure` is sampled
+  once per waypoint, eight control steps. Gate on the `held` contact channel, or
+  sample closure per control step first.
+- **`stage_outcome`'s `grasped` flag misses a slow-closing hand.** It looks for
+  contact within twelve waypoints either side of the commanded close. A Robotiq
+  2F-140 has 125 mm jaws against a 66 mm can, so each finger travels ~30 mm
+  before touching anything and first contact came at waypoint **65** against a
+  close at 50. The cell is scored "never grasped" while the can is caught and
+  carried to 1.266 m. The gripper schedule is inherited from a Panda
+  demonstration whose narrower jaws close much sooner -- so this is the
+  cross-hand closing schedule (open item 2) surfacing as a *measurement* fault.
+- **The warp does not bend the approach, so do not reach for it to explain a
+  disturbed object.** A transported path need not descend along the grasp's own
+  approach axis, which makes it the obvious suspect when the hand disturbs the
+  object before closing. Measured: the tilt is **0.2 to 1.7 degrees** across all
+  20 cells, and a clean straight descent to the same pose contacts the object to
+  within 0.2-2.5 mm of the warped one. `xarm/cereal` shifts its box 22.1 mm
+  before the jaws close and topples it, and the cause is **not established** --
+  it is not the warp, and it is not the fingers being forced apart (the negative
+  jaw reading is a calibration offset present on all four xarm cells, three of
+  which succeed). It reproduces with no map in the loop, so it is a property of
+  that grasp, object and hand.
+- **A Robotiq flicks the object sideways as it opens.** Its finger pads swing
+  inward while parting, so an object between them is nudged rather than let go:
+  72.8 mm and 81.9 mm of post-release travel on two cells that fouled nothing
+  and were released only 21-40 mm above the board. The sibling project measured
+  the same on the same family of hand and saw a mug carried back up 12.9 cm by
+  fingers that had correctly opened. A Panda does not do this.
+- **The plan commands the hand through the shelf, and `solve_ik` cannot see it.**
+  The default scene is the **cubby** variant, so the top slot is a **78 mm gap
+  in x** between the bottom cubby's back panel (which rises 20 mm *above* the
+  top board) and the top cubby's 180 mm back wall. **15 of 20 cells command the
+  hand inside `shelf_top_back`, by 4.8 to 79.9 mm.** The arm jams: on
+  `robotiq140/bread` a finger is 8.24 mm into the wall from waypoint 132, which
+  is exactly where the tracking error starts to climb, and the object's motion
+  collapses to 0.99 mm per waypoint against 5.3 commanded. So every placement is
+  a **drop** from a median 40 mm rather than a set-down -- on cells that work the
+  contact is the *object* on the *board* at 0.05-0.17 mm.
+  **`solve_ik` is joint angles and a Jacobian with no collision model**, which is
+  why the release pose "solves to 3.4-4.9 mm" while being physically
+  unreachable, and it is why ruling out the workspace envelope (r = -0.028) and
+  the warm-started IK chain (2 of 20 cells) was correct and could not find this.
+  `by_collision` only ever checks the hand at the **grasp**. The foul does *not*
+  predict which cells fail -- `panda/bread` fouls deepest at -79.9 mm and places
+  -- so the mechanism is established and its decisiveness is not. `§7.35`.
+- **`reachable_fraction` is a property of the whole path, not of a pose.**
+  `replay_labels` seeds each IK solve from the previous one, so it answers "can
+  the arm move *between* these poses". The direct control places objects at
+  3.8 mm while reporting 53% reachable. Its 5 mm tolerance also flickers --
+  successful solves land at 2.4-5.0 mm. And `worst_segment` says "approach"
+  whenever *nothing* was unreachable, which reads as an accusation.
+- **Hold the grasp selection fixed when comparing constructions.**
+  `target_placement`'s `filters="approach"` keeps the 45-degree test and ranks
+  by agreement with the demonstration; `"full"` runs the whole funnel and ranks
+  by GraspGen-X's own score. The chosen candidate's approach mismatch goes from
+  a median of 3.2 to 13.8 degrees and its TCP moves a median 15.7 mm, so
+  **39 of 40 cells execute a different grasp**. A run that varies this and
+  anything else measures neither. `§8k` in `outputs/keypoints_sweep/FINDINGS.md`.
+- **A cloud's extent is a *lower bound* on an object's width, so the jaw-width
+  check can prove "too wide" and can never prove "fits".** It read 5.9 mm from
+  an 11-point slab where the object is ~50 mm. Not sparsity -- at 512 px that
+  slab has 108 points and still reads 21.3 mm -- the cameras see a crescent and
+  the object continues behind it. `by_jaw_width` now gives three verdicts and
+  **drops** what it cannot measure; the funnel's own fallback stops that
+  emptying the set, and `flags["cloud_too_sparse_for_jaw_width"]` reaches
+  `ObjectPlacement.metadata` so the cell reads as a *perception* fault. On both
+  can cells this is **behaviourally neutral** -- everything becomes unverified,
+  the stage falls back, the same grasp runs. Widest-chord and slab-disagreement
+  were measured as replacements and both over-reject a legitimate grasp. `§7.36`.
+- **Never conclude a hand cannot close from a declared aperture.** GraspGen-X
+  declares the yumi at 50.0 mm and the can measures 50.0 mm, and that coincidence
+  was written up as physical impossibility. It is wrong: the registry's measured
+  `spread_open` for that hand is **58.39 mm**, taken from `geom_xpos` -- finger
+  geom *centres*, not inner faces -- so the declared aperture, the measured
+  spread and the inner gap are three different quantities. The cell succeeds,
+  placing at **2.29 mm**. `§7.36`.
+- **`JAW_MARGIN = 0.005` would have rejected a grasp that works.** With the width
+  measured correctly at 50 mm the rule `50 + 5 <= 50` fails, yet the cell places
+  at 2.29 mm. It is also 10% of the yumi's 50 mm opening against 4% of the
+  robotiq140's 125 mm, so one absolute clearance across nine hands is suspect.
+  One data point, so this is an open question, not a licence to change it.
+- **A scratch diagnostic that produces a number worth quoting is a campaign.**
+  Four hours of physics traces were withdrawn because their scripts do not
+  reproduce them: `HEAD` never moved, that commit reproduces the *current*
+  answer, the grasp is identical to 0.00 mm, the replay is deterministic to
+  0.00 mm and the cache was untouched -- so the run used an uncommitted tree
+  state that cannot be identified even from the reflog. `provenance` and
+  `--require-clean` only cover *campaigns*; a scratchpad script has no
+  provenance at all. Stamp `git rev-parse HEAD` and `git status --porcelain`
+  into the output file, or refuse to run dirty. **And run the reshelving gate
+  before attributing causes** -- it is what distinguishes "twelve cells with
+  interesting individual explanations" from a regression in the map. `§7.37`.
+- **The placement failures are collision, not reach — 0 of 473 unreachable
+  waypoints are a position limit.** Re-solving position-only succeeds at every
+  one, including points 907 mm from a base rated for 855. **423 are the hand's
+  body inside scene geometry** and 50 are a pose reachable but not at the
+  *commanded orientation*. `solve_ik` is joint angles and a Jacobian with no
+  collision model, so it calls all of them reachable. Two plausible readings
+  were wrong first — "the shelf is out of reach" and "the 78 mm slot is too
+  tight"; the space above the top board is open except a back panel 38 mm
+  behind the slot. `§7.38`.
+- **The funnel validates 13 poses of a 200-pose trajectory.** `by_reachability`
+  checks five down the approach, two on the lift, five at place and retreat —
+  so a candidate passes its sample and then collides at 79 to 162 of the other
+  187. The thing checked is not the thing executed. Transporting all 25
+  top-scoring candidates gives **0 collision-free paths on every cell tried**,
+  hitting side walls, back panels, neighbouring objects, the table and the
+  robot's own pedestal.
+- **Contact is normal here, so "reject a colliding path" rejects everything.**
+  A cell places through a **50.5 mm** transient penetration while another fails
+  with none at all, so maximum depth is useless as a filter. What separates,
+  one-sidedly, is **sustained** penetration: every cell whose path sits inside
+  geometry more than half the time failed (median 23.4–39.1 mm) and no
+  successful cell exceeds 12.4 mm. Partial — it reaches 4 of 9 failures, and
+  two failures involve zero penetration.
+- **The scene geometry refused the task, and it took 88 mm against 204 to see
+  it.** The top cubby left **88 mm** of usable depth between the board's front
+  edge and the back panel, while the registered hands are **83 to 217 mm across
+  their jaw axis** and 63 to 130 mm across the perpendicular — measured on
+  robosuite's own models, which agree with GraspGen-X's to 8 mm, so neither
+  model was at fault. Every hand fitted only turned exactly sideways and none
+  fitted turned front-to-back; 16 of 20 cells drove the hand into the back
+  panel, the arm jammed, and the object was released a median **85.5 mm** short
+  of the commanded pose. Deepening the board to 280 mm fixed the placement
+  outright: 7/20 to **16/20**, and the shortfall at release to 13.8 mm. **Before
+  blaming a method, measure whether the hand fits the hole.** `§8p`.
+- **A filter may use the robot's own geometry and must not use the scene's.** A
+  robot knows its links and its hand exactly — its own description file — and
+  knows the shelf only as a point cloud. So `path_feasibility_observed` (the
+  filter) tests the robot's convex collision hulls against the **observed**
+  cloud, and `path_feasibility` (the diagnosis) uses the simulator's truth and
+  in exchange can name the panel. Mixing them makes a filter depend on what
+  hardware will not have. Note also `self_filtered`: a depth image of a
+  workspace contains the arm, so without subtracting itself the robot collides
+  with its own reflection.
+- **A pose inverse kinematics did not reach is not a pose, and must not be
+  collision-checked.** `solve_ik` returns its best effort clamped to the joint
+  limits, and that configuration is usually buried in the scene — so every
+  candidate the arm simply could not follow read as "200 of 200 waypoints in
+  collision" and buried the real collisions among them.
+- **A carried object touching something *below* it is a surface, in every phase,
+  not only at the set-down.** At the start of the lift the object is still
+  standing on the table, so its cloud touches the table's; treating that as a
+  fault rejected every candidate on whole cells. What it must never meet is
+  something *beside* it.
+- **Grip height matters on anything that is not a uniform box, and
+  `by_centre_offset` cannot see it.** It measures the **horizontal** offset only,
+  on the argument that gravity acts vertically so grip height changes no moment.
+  Sound for a box; wrong twice over for a taper. The bottle narrows **2.2-fold**
+  over its height — 53.8 mm at the base, 24.1 mm at the top — and all five hands
+  chose a grasp 66 to 84 mm above its centre of mass, which is the neck. All
+  five passed the horizontal test at 1.7 to 14.2 mm and **0 of 5 placed**.
+  Gripping higher on a taper grips a narrower section *and* lengthens the
+  pendulum below the grip. `§8p`.
+- **Four closing rules have now failed the same way: the grip window is
+  per-object as well as per-hand and no constant sits inside all of them.**
+  `+1` (fully shut) squeezes the bread out; stopping at first contact fires on
+  the descent graze and freezes the jaws at 0.00-0.09; slip feedback runs away,
+  0 of 5, because tightening a grip that is already extruding increases the
+  drift; contact plus a fixed 10% of travel is a **straight trade** — 16/20
+  either way, gaining two bread cells and losing two cereal ones. Closure
+  separates outcomes perfectly under `+1` (kept 0.23-0.93, lost 1.00-1.04) and
+  the separation is destroyed by any rule that moves it. `+1` stays.
+- **A cloud is the wrong description of the shelf, and MuJoCo's ray caster hits
+  things that are not solid.** The camera-built scene cloud holds **76 points**
+  in the column above the `top_middle` slot -- the column every placement
+  descends through -- out of 8192, so a hand 10 cm across passes between them;
+  and a nearest-neighbour test cannot report *depth*, which is the quantity
+  §7.38 measured as discriminating. It does not have to: every immovable solid
+  here is a **box, a cylinder or a plane**, so an exact signed distance is a few
+  operations. `perception/obstacles.py` reads them from the model. Its one trap
+  is that `mj_ray` intersects everything *drawn*, including the translucent
+  marker box at every slot -- an unguarded cast reports an obstruction 58 mm
+  away that the hand goes straight through, which is a plausible number for a
+  surface that is not there. `§7.39`.
+- **`by_reachability` is retired, and three separate defects are why.** It falls
+  back on **20 of 20** cells — rejecting everything, so the funnel passes
+  everything through and only a flag survives, at thirteen IK solves per
+  candidate. It samples **13 poses of a 200-waypoint path**, and §7.38 measured
+  candidates passing that sample and colliding at 79 to 162 of the other 187.
+  And it tested the hand in its **pick** orientation at the release position,
+  where the demonstration turns the hand **35.5 degrees** between closing and
+  opening — against a slot that fits a hand one way round and not the other,
+  that inverts the answer rather than shading it. The same orientation bug was
+  in `by_place_approach`, which additionally approximated the hand as a
+  **cylinder** of its own radius: over 2000 candidates the cylinder kept 489
+  where the hand itself keeps 369, agreeing on **153**. Superseded in full by
+  `path_feasibility_observed`. The general lesson is the first one: **a funnel
+  flag saying a stage fell back does not mean the stage was harmless; it means
+  it did nothing at all.** `§7.39`, `§8p`.
+- **Experiment O's 37.8 degree approach-gap ceiling is withdrawn.** A cell placed
+  at **65.3 degrees** in Experiment Q, and within that run the gap separates
+  nothing (placed 3.3-65.3, missed 3.6-84.5). The direction still has to be
+  constrained -- with *no* constraint the planner's best candidate approaches
+  from under the table on two of four objects and 0 of 20 cells place -- but not
+  by resemblance to the source, and not at 37.8 degrees. `§7.39`, `FINDINGS §8o`.
+- **Before comparing two runs, diff the cells where they chose the same grasp.**
+  Seven commits touched `sim/replay.py` between Experiments O and Q; on the six
+  cells that executed the same candidate, every recorded field matched **bit for
+  bit**, which is what makes the comparison a comparison of grasp selection and
+  nothing else. It costs no physics -- both runs are on disk -- and without it a
+  changed executor rides silently into the totals, which is `§7.26` in a new
+  costume. `§7.39`.
+- **A number carried between two instruments is an assumption.** §7.38's
+  penetration threshold was measured with MuJoCo's narrowphase on IK solutions;
+  re-measuring the same twenty cells with the analytic check **corrected both
+  new thresholds, each going the wrong way** -- 0.30 sustained penetration would
+  have rejected two cells that placed, and a 0.90 path-reachability bar would
+  have rejected **6 of the 11 that worked**. Note also that `max_depth` reads
+  exactly 6.0 mm on fourteen of twenty cells, because `shelf_top_back` is a
+  12 mm slab: a bounded statistic cannot order unbounded severity. `§7.39`.
+- **Run `--select-only` before any campaign.** It chooses the grasp for every
+  cell with no physics, in seconds rather than minutes, and answers the two
+  questions that have to be answered *before* an hour is spent: is the change
+  inert (14 of 20 cells executed a new candidate), and what did each stage cost
+  (the funnel left a median of **2.5** candidates to rank, against 7 and 14 for
+  the demonstration-based rules). It also makes a prediction registrable before
+  the outcome is known. `FINDINGS §8o`.
 - **Two capabilities exist in the policy and are never used at runtime.**
   `prediction.reference` — the regressed attractor position, the paper's own
   Sec. V formulation and the policy's only restoring term — is fitted and never
@@ -257,7 +665,9 @@ and git.
 | Sec. V (simulation, keypoints, impedance control) | `tpgpt/sim/` |
 | Sec. IV metrics | `tpgpt/metrics/` |
 | Grasp generation, gripper registry, frame contract | `tpgpt/grasp/` |
+| Whether a transported path is flyable and collision-free | `filters.path_feasibility_observed` (filter, cloud) and `filters.path_feasibility` (diagnosis, true geometry) |
 | Object clouds and the scene graph | `tpgpt/perception/` |
+| The scene's solid geometry, as exact primitives | `tpgpt/perception/obstacles.py` |
 | Deterministic prompt parsing | `tpgpt/language/` |
 | Figs. 2, 4, 5 | `tpgpt/viz/`, `tpgpt/experiments/` |
 | Stage attribution and the reach/drift instruments | `tpgpt/experiments/diagnose.py` |
@@ -291,23 +701,112 @@ independent *geometric* measurements that agree (§6.4 and §7.22): adding the j
 contacts collapses `min det(J)` from ~0.68 to 0.0074 and folds five maps in six,
 because the contacts sit centimetres inside the box's own convex hull and the
 map cannot satisfy both constraints without bending sharply enough to turn
-inside out.
+inside out. **Those two figures predate the scene and frame corrections**; the
+mechanism is geometric and holds, the numbers have not been re-measured.
 
 What §7.22 also shows, and what was missed at the time: **the box misses the
 grasp point by about 53 mm, and the contact keypoints hit it to about 5 mm.**
-The default trades ten-fold aim accuracy for a well-conditioned map. Both
-requirements are legitimate and no keypoint set on the current menu satisfies
-both. This is the largest open design question — see §8, thread A.
+The default trades ten-fold aim accuracy for a well-conditioned map. Same
+caveat: mechanism yes, numbers unverified on corrected code.
+
+**That trade is resolved, and the default should change — but read the numbers
+from the right place.** A fixed 20 mm cube centred on the grasp, oriented by the
+full grasp pose, gets *both*: the aim is exact by construction (the cube's centre
+**is** the grasp point and `phi` interpolates keypoints exactly) and the map
+stays well conditioned. **The per-hand figures that used to sit here came from
+§7.29, which is withdrawn** — it predates both the scene correction and the
+frame corrections, and its orientation column was read through a metric that
+minimises over the very half turn the source frames carried. The corrected
+geometry is `min det` median **0.944** against the cloud box's 0.527 over
+20 cells, with no folds in either; the corrected execution is **15/20 against
+10/20** (`FINDINGS.md` §8j). Composition remains dead on the corrected code:
+median keypoint residual ~10 mm, violating property (i) everywhere.
+
+**Two of the nine hands are still measured wrongly** and it has not been fixed:
+`robotiq3f` and `inspire` are `revolute_3f` with `symmetric: false` in
+GraspGen-X's own config, so a half turn about the approach is a *different*
+grasp for them, and `orientation_transport_error` applies it anyway. Any
+cross-hand orientation claim covering those two is unsupported.
+
+**Execution has now been measured, twice, and the second time it was worth
+having.** Tier 2 across five hands: the grasp-pose cube places **15 of 20**
+against the cloud box's 10, grasps 18 against 14, and traverses 18 against 13.
+That is on the corrected code; the first attempt gave 12 and 10 and was largely
+measuring three coordinate-frame defects (`§7.33`, `§7.34`), whose repair
+recovered five cells and whose two quantitatively predicted cases both came out
+as predicted. The default in `object_keypoints` still stays `box="cloud"` until
+flipping it is its own commit, but the evidence now clearly favours the cube on
+every stage rather than trading aim against conditioning.
 
 **Grasping, filtering and end-to-end physics (built end to end; reliability
 unmeasured).** Text prompt -> object and shelf -> cloud -> ranked 6-DoF grasps
--> seven filters -> keypoints -> transport -> policy -> execute -> scored, with
+-> filters -> keypoints -> transport -> policy -> execute -> scored, with
 per-run HTML reports. Nine gripper pairs registered, eight verified in physics.
 
-**There is currently no trustworthy end-to-end success rate**, and there should
-not be one until the provenance rules of §7.26 are in force. Everything that
-used to be quoted here — per-campaign success counts, which stage is the
-bottleneck, what predicts success — came from the deleted campaigns.
+**The current end-to-end result is 19/28 across seven hands and four objects
+(`FINDINGS.md` §8p, Experiment R), from one demonstration** -- 16/20 on the five
+hands the campaign was run with, plus the three-finger `robotiq3f` at 2/4 and
+the `rethink` at 1/4. **All nine failures have the jaws at 0.99 closure or
+beyond and nothing that placed went above 0.94**, so every one of them is the
+open-loop gripper and not the transport.
+
+**The three-finger hand transports as well as the parallel jaws do.** Its maps
+are the best in the run -- `min det` 0.935 to 0.996, the highest single value of
+all 28 cells -- which is the claim the fixed-size grasp cube rests on: the cube
+encodes the grasp pose and nothing about the hand, not the aperture, not the
+fingertip depth, not the finger count.
+
+**But it is the only non-two-fingered hand that can be run, and no five-finger
+hand can.** A gripper needs a robosuite model *and* a GraspGen-X description of
+the same hand; robosuite offers Ability, Fourier, SchunkSvh and Jaco hands and
+GraspGen-X has a description for none of them. `inspire` is the only other
+multi-finger pairing and its fingers travel 6.5 mm, so it does not actuate.
+Open item 1h in `§8z`.
+
+**The original five-hand figure was 16/20 and the shape of that result is
+this:** Cereal, milk and
+can are **15 of 15**; every one of the four failures is the bread. Nineteen of
+twenty grasps hold. That is up from 7/20 on the same cells three weeks of
+debugging earlier, and the whole of the gain is two changes that have nothing to
+do with the transportation map: **the shelf was too shallow for any hand to
+enter** (88 mm of depth against hands 83 to 217 mm wide) and **the checks that
+should have noticed were inert, sampled, or asking about the wrong
+orientation**. `min det` is unchanged at a median 0.901 -- the map was never the
+problem and was never touched.
+
+Read it as a **position-control replay**: no policy, no attractor integration,
+so it is an upper bound on what the full pipeline does.
+
+**Grasp selection no longer needs the demonstration, and that is measured.**
+Experiment Q (`FINDINGS.md` §8o) replaced the 45 degree resemblance test with
+constraints read off the scene -- the support's own normal at the pick, the
+shelf's own panels at the placement, both derived rather than listed so they
+hold across the open/cubby/enclosed variants -- plus clearance and kinematics on
+the **whole transported path** rather than the 13-pose sample `by_reachability`
+takes. Against the honest baseline of selecting without the demonstration at
+all, which places **0 of 20**, it places **7 of 20** (p = 0.016). Against the two
+demonstration-based rules at 10 and 11 it is behind on the point estimate and
+not distinguishable at n = 20 (p = 0.45, p = 0.29).
+
+The known weakness is **not** the idea but the aggregate strictness: the funnel
+now leaves a median of **2.5** candidates to rank against 7 and 14 before, three
+cells reach the ranking with one, and the whole deficit sits on the yumi, whose
+jaws are the narrowest and whose cells are starved hardest. The stage to suspect
+is `by_place_approach`, whose straight-line corridor duplicates, more crudely,
+what `path_clearance` measures exactly on the curved path actually flown.
+
+**The end-to-end numbers that exist are the Tier 2 replays**, which run under a
+stiff position controller with no policy and no attractor integration, so they
+are an **upper bound** on what the keypoints can support rather than a rate for
+the full pipeline. Read them as 15/20 and 10/20 with that caveat attached;
+`outputs/keypoint_replay_v4/`, commit `6fb83d4`, and the per-cell attribution is
+in `FINDINGS.md` §8j. Nothing from the campaigns deleted under §7.26 has been
+reinstated, and the policy-driven rate remains unmeasured.
+
+**The largest known execution weakness is that every placement is a drop.** The
+arm stops 13 to 130 mm short of the commanded release pose, so the jaws open a
+median 40 mm above the shelf board. It usually lands anyway, which is why this
+went unnoticed, and it is what makes marginal cells flip between runs. `§7.35`.
 
 **Two threads are open, and they are independent of each other.** The interface
 between them is the transported label set: keypoints and the map *produce* it,
@@ -320,13 +819,14 @@ so they can be built and tested separately. Full detail in `ROBOTICS_NOTES.md`
   passes to the grasp, the minimum `det(J)`, and the keypoint residual. Runs in
   milliseconds per variant from a cached cloud and a cached grasp, so hundreds
   of designs can be swept offline. This is where the largest known error lives.
-- ~~**Thread B — policy execution.**~~ **Measured; `V` stays the default.**
-  §7.40 and `docs/dynamics_execution.md`. Five attractor laws x two query sites
+- ~~**Thread B — policy execution.**~~ **Measured; switch to a light anchor.**
+  §7.40 and `docs/dynamics_execution.md`. Nine attractor laws x two query sites
   x 43 paired warps, run twice — once on a freely-tracking arm and once under a
   load that shuts the lag gate on 42% of steps instead of 2.5%.
 
-  **Query at the attractor, not the measured pose** — settled, decisively, in
-  both conditions (8-27 mm penalty undisturbed, 11-61 mm loaded, `p <= 0.03`).
+  **Query at the attractor, not the measured pose** — settled, and confirmed on
+  the one comparison with no confound (`V-m` vs `V`, +3.34 mm undisturbed and
+  +2.62 mm loaded at the release closing axis, `p <= 0.0006`).
   `prediction.reference` is now read and measured; it does not rescue the
   measured-pose query.
 
@@ -379,9 +879,12 @@ offset is the only one in the registry with a large lateral component
 (`[0.0, -0.035, -0.112]`) and which §7.2 measured as tolerating only 15 mm of
 depth error against 120-135 mm for the parallel jaws.
 
-423 tests pass (10 skipped, needing the grasp server) in ~4 min; the unit
-suite alone is ~330 tests in ~10 s. The suite was unaffected by the campaign
-deletion: it tests mechanisms, not campaign outcomes.
+**607 tests pass** in ~4 min; the unit suite alone is 509 in ~16 s. The suite
+was unaffected by the campaign deletion, because it tests mechanisms rather than
+campaign outcomes — but note that it also failed to catch the three frame
+defects of `§7.33`-`§7.34` for the life of the project, and one of its tests
+actively *enforced* the wrong behaviour. When a test breaks under a change,
+treat it as a question about which of the two is right, not as a verdict.
 
 ## History
 

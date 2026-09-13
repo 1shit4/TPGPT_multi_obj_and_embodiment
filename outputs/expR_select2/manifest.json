@@ -1,0 +1,2547 @@
+{
+  "title": "Keypoint constructions under position-control replay",
+  "description": "Transported paths followed pose by pose under position control -- no policy, no attractor integration, no lag gate -- so every number is attributable to the keypoint construction alone. Answers whether a well-conditioned map is actually executable: reachability, tracking error split by whether IK could hold the pose, grasp slip, and task completion. Read as an upper bound: a failure here is the keypoints', a failure only under the policy is the executor's.",
+  "settings": {
+    "varied": {
+      "variant": [
+        "2_cube_grasp_pose"
+      ],
+      "object": [
+        "cereal",
+        "milk",
+        "can",
+        "bread"
+      ]
+    },
+    "grasp_selection": {
+      "filters": "full",
+      "rank_by": "score",
+      "approach_filter": false,
+      "grasp_rank": 0,
+      "scene_zones": true,
+      "centre_filter": true,
+      "path_check": true,
+      "ik_stride": 4,
+      "max_path_candidates": 25
+    },
+    "cells": null,
+    "gripper_command": {
+      "force_target": null
+    },
+    "select_only": true,
+    "fixed": {
+      "source": "reshelving seed 0, one demonstration",
+      "slot": "top_middle",
+      "seed": 0,
+      "scene": "rebuilt fresh for every replay, asserted reproducible",
+      "control": "JOINT_POSITION via solve_ik, no policy",
+      "grasp_source": "graspgen, filters='full' -- real GraspGen-X candidates for *this* hand. 'approach' keeps the 45 degree approach test and ranks by agreement with the demonstration; 'full' runs the whole funnel and ranks by the planner's score. They pick different grasps, so this must be held fixed to compare constructions.",
+      "labels": "tool frame -- converted by _to_tool_frame before transport",
+      "tool_offset": "contact_offset(<this hand>) -- per hand, not the source's",
+      "preconditions": "gripper_mounted, scene_unstepped, object_placement, closure_calibrated -- checked on every cell, campaign aborts on failure"
+    }
+  },
+  "rows": [
+    {
+      "variant": "2_cube_grasp_pose",
+      "gripper": "yumi",
+      "selected_only": true,
+      "cloud_points": 598,
+      "grasp_place_approach_blocked_by": {
+        "shelf_top_back": 5,
+        "shelf_top_wall_l": 1
+      },
+      "grasp_jaw_width": {
+        "fits": 13,
+        "too_wide": 20,
+        "unverified": 0
+      },
+      "grasp_ranked_by": "score",
+      "grasp_stages": [
+        [
+          "generated",
+          100,
+          100,
+          false
+        ],
+        [
+          "visibility",
+          100,
+          88,
+          false
+        ],
+        [
+          "support",
+          88,
+          39,
+          false
+        ],
+        [
+          "place zone",
+          39,
+          33,
+          false
+        ],
+        [
+          "on target",
+          33,
+          33,
+          false
+        ],
+        [
+          "jaw width",
+          33,
+          13,
+          false
+        ],
+        [
+          "collision",
+          13,
+          13,
+          false
+        ],
+        [
+          "centred",
+          13,
+          3,
+          false
+        ],
+        [
+          "distinct",
+          3,
+          3,
+          false
+        ]
+      ],
+      "grasp_path_check": {
+        "chosen": 88,
+        "rank_examined": 3,
+        "fell_back": true,
+        "fell_back_to": "the candidate that got furthest before its first fault",
+        "examined": [
+          {
+            "index": 88,
+            "violations": 1,
+            "first_violation": 52,
+            "reachable_fraction": 1.0,
+            "faults": {
+              "carry: the carried object hits something sideways": 1
+            },
+            "rejected": "collision"
+          },
+          {
+            "index": 93,
+            "violations": 1,
+            "first_violation": 52,
+            "reachable_fraction": 1.0,
+            "faults": {
+              "carry: the carried object hits something sideways": 1
+            },
+            "rejected": "collision"
+          },
+          {
+            "index": 98,
+            "violations": 1,
+            "first_violation": 52,
+            "reachable_fraction": 1.0,
+            "faults": {
+              "carry: the carried object hits something sideways": 1
+            },
+            "rejected": "collision"
+          }
+        ]
+      },
+      "grasp_path_check_fell_back": true,
+      "grasp_chosen_index": 88,
+      "grasp_chosen_score": 0.6480519771575928,
+      "grasp_chosen_approach_mismatch_deg": 9.715068730741766,
+      "grasp_n_candidates": 100,
+      "grasp_n_survivors": 3,
+      "grasp_offset_mm": 3.0640994828725456,
+      "grasp_height_mm": 79.04225401711106,
+      "object": "cereal"
+    },
+    {
+      "variant": "2_cube_grasp_pose",
+      "gripper": "yumi",
+      "selected_only": true,
+      "cloud_points": 279,
+      "grasp_place_approach_blocked_by": {
+        "shelf_top_back": 6,
+        "shelf_top_wall_l": 6
+      },
+      "grasp_jaw_width": {
+        "fits": 32,
+        "too_wide": 7,
+        "unverified": 1
+      },
+      "grasp_jaw_width_unverified": 1,
+      "grasp_ranked_by": "score",
+      "grasp_stages": [
+        [
+          "generated",
+          100,
+          100,
+          false
+        ],
+        [
+          "visibility",
+          100,
+          97,
+          false
+        ],
+        [
+          "support",
+          97,
+          52,
+          false
+        ],
+        [
+          "place zone",
+          52,
+          40,
+          false
+        ],
+        [
+          "on target",
+          40,
+          40,
+          false
+        ],
+        [
+          "jaw width",
+          40,
+          32,
+          false
+        ],
+        [
+          "collision",
+          32,
+          31,
+          false
+        ],
+        [
+          "centred",
+          31,
+          21,
+          false
+        ],
+        [
+          "distinct",
+          21,
+          16,
+          false
+        ]
+      ],
+      "grasp_path_check": {
+        "chosen": 78,
+        "rank_examined": 13,
+        "fell_back": false,
+        "examined": [
+          {
+            "index": 23,
+            "violations": 1,
+            "first_violation": 44,
+            "reachable_fraction": 1.0,
+            "faults": {
+              "approach: gripper0_right_gripper_r_finger_r_collision in the target's cloud": 1,
+              "approach: gripper0_right_gripper_r_finger_l_collision in the target's cloud": 1
+            },
+            "rejected": "collision"
+          },
+          {
+            "index": 25,
+            "violations": 1,
+            "first_violation": 112,
+            "reachable_fraction": 1.0,
+            "faults": {
+              "carry: robot0_link7_collision in the scene cloud": 6
+            },
+            "rejected": "collision"
+          },
+          {
+            "index": 26,
+            "violations": 1,
+            "first_violation": 44,
+            "reachable_fraction": 1.0,
+            "faults": {
+              "approach: gripper0_right_gripper_r_finger_r_collision in the target's cloud": 1,
+              "approach: gripper0_right_gripper_r_finger_l_collision in the target's cloud": 1
+            },
+            "rejected": "collision"
+          },
+          {
+            "index": 32,
+            "violations": 1,
+            "first_violation": 152,
+            "reachable_fraction": 0.846,
+            "faults": {
+              "place: robot0_link5_collision in the scene cloud": 3
+            },
+            "rejected": "collision"
+          },
+          {
+            "index": 37,
+            "violations": 1,
+            "first_violation": 44,
+            "reachable_fraction": 1.0,
+            "faults": {
+              "approach: gripper0_right_gripper_r_finger_r_collision in the target's cloud": 1,
+              "approach: gripper0_right_gripper_r_finger_l_collision in the target's cloud": 1
+            },
+            "rejected": "collision"
+          },
+          {
+            "index": 41,
+            "violations": 1,
+            "first_violation": 44,
+            "reachable_fraction": 1.0,
+            "faults": {
+              "approach: gripper0_right_gripper_r_finger_r_collision in the target's cloud": 1,
+              "approach: gripper0_right_gripper_r_finger_l_collision in the target's cloud": 1
+            },
+            "rejected": "collision"
+          },
+          {
+            "index": 48,
+            "violations": 1,
+            "first_violation": 44,
+            "reachable_fraction": 1.0,
+            "faults": {
+              "approach: gripper0_right_gripper_r_finger_r_collision in the target's cloud": 1,
+              "approach: gripper0_right_gripper_r_finger_l_collision in the target's cloud": 1
+            },
+            "rejected": "collision"
+          },
+          {
+            "index": 56,
+            "violations": 1,
+            "first_violation": 44,
+            "reachable_fraction": 1.0,
+            "faults": {
+              "approach: gripper0_right_gripper_r_finger_r_collision in the target's cloud": 1,
+              "approach: gripper0_right_gripper_r_finger_l_collision in the target's cloud": 1
+            },
+            "rejected": "collision"
+          },
+          {
+            "index": 58,
+            "violations": 1,
+            "first_violation": 44,
+            "reachable_fraction": 1.0,
+            "faults": {
+              "approach: gripper0_right_gripper_r_finger_r_collision in the target's cloud": 1,
+              "approach: gripper0_right_gripper_r_finger_l_collision in the target's cloud": 1
+            },
+            "rejected": "collision"
+          },
+          {
+            "index": 66,
+            "violations": 1,
+            "first_violation": 44,
+            "reachable_fraction": 1.0,
+            "faults": {
+              "approach: gripper0_right_gripper_r_finger_r_collision in the target's cloud": 1,
+              "approach: gripper0_right_gripper_r_finger_l_collision in the target's cloud": 1
+            },
+            "rejected": "collision"
+          },
+          {
+            "index": 68,
+            "violations": 1,
+            "first_violation": 104,
+            "reachable_fraction": 1.0,
+            "faults": {
+              "carry: robot0_link7_collision in the scene cloud": 22
+            },
+            "rejected": "collision"
+          },
+          {
+            "index": 70,
+            "violations": 1,
+            "first_violation": 112,
+            "reachable_fraction": 1.0,
+            "faults": {
+              "carry: robot0_link7_collision in the scene cloud": 9
+            },
+            "rejected": "collision"
+          },
+          {
+            "index": 78,
+            "violations": 0,
+            "first_violation": null,
+            "reachable_fraction": 0.82,
+            "faults": {}
+          }
+        ]
+      },
+      "grasp_chosen_index": 78,
+      "grasp_chosen_score": 0.5644791126251221,
+      "grasp_chosen_approach_mismatch_deg": 17.87394659113113,
+      "grasp_n_candidates": 100,
+      "grasp_n_survivors": 16,
+      "grasp_offset_mm": 7.779330360291275,
+      "grasp_height_mm": 70.29946627140305,
+      "object": "milk"
+    },
+    {
+      "variant": "2_cube_grasp_pose",
+      "gripper": "yumi",
+      "selected_only": true,
+      "cloud_points": 57,
+      "grasp_place_approach_blocked_by": {
+        "shelf_top_back": 3,
+        "shelf_top_wall_r": 3
+      },
+      "grasp_jaw_width": {
+        "fits": 0,
+        "too_wide": 1,
+        "unverified": 26
+      },
+      "grasp_jaw_width_unverified": 26,
+      "grasp_jaw width_fell_back": true,
+      "grasp_cloud_too_sparse_for_jaw_width": true,
+      "grasp_ranked_by": "score",
+      "grasp_stages": [
+        [
+          "generated",
+          100,
+          100,
+          false
+        ],
+        [
+          "visibility",
+          100,
+          92,
+          false
+        ],
+        [
+          "support",
+          92,
+          33,
+          false
+        ],
+        [
+          "place zone",
+          33,
+          27,
+          false
+        ],
+        [
+          "on target",
+          27,
+          27,
+          false
+        ],
+        [
+          "jaw width",
+          27,
+          27,
+          true
+        ],
+        [
+          "collision",
+          27,
+          19,
+          false
+        ],
+        [
+          "centred",
+          19,
+          12,
+          false
+        ],
+        [
+          "distinct",
+          12,
+          8,
+          false
+        ]
+      ],
+      "grasp_path_check": {
+        "chosen": 20,
+        "rank_examined": 2,
+        "fell_back": false,
+        "examined": [
+          {
+            "index": 5,
+            "violations": 1,
+            "first_violation": 44,
+            "reachable_fraction": 1.0,
+            "faults": {
+              "approach: gripper0_right_gripper_r_finger_l_collision in the target's cloud": 1
+            },
+            "rejected": "collision"
+          },
+          {
+            "index": 20,
+            "violations": 0,
+            "first_violation": null,
+            "reachable_fraction": 0.9,
+            "faults": {}
+          }
+        ]
+      },
+      "grasp_chosen_index": 20,
+      "grasp_chosen_score": 0.8597742915153503,
+      "grasp_chosen_approach_mismatch_deg": 15.961982546443187,
+      "grasp_n_candidates": 100,
+      "grasp_n_survivors": 8,
+      "grasp_offset_mm": 6.19352852251207,
+      "grasp_height_mm": 36.44232796040126,
+      "object": "can"
+    },
+    {
+      "variant": "2_cube_grasp_pose",
+      "gripper": "yumi",
+      "selected_only": true,
+      "cloud_points": 167,
+      "grasp_place_approach_blocked_by": {
+        "shelf_top_wall_r": 4,
+        "shelf_top_back": 2,
+        "shelf_top_wall_l": 3
+      },
+      "grasp_jaw_width": {
+        "fits": 6,
+        "too_wide": 7,
+        "unverified": 0
+      },
+      "grasp_ranked_by": "score",
+      "grasp_stages": [
+        [
+          "generated",
+          100,
+          100,
+          false
+        ],
+        [
+          "visibility",
+          100,
+          78,
+          false
+        ],
+        [
+          "support",
+          78,
+          22,
+          false
+        ],
+        [
+          "place zone",
+          22,
+          13,
+          false
+        ],
+        [
+          "on target",
+          13,
+          13,
+          false
+        ],
+        [
+          "jaw width",
+          13,
+          6,
+          false
+        ],
+        [
+          "collision",
+          6,
+          6,
+          false
+        ],
+        [
+          "centred",
+          6,
+          1,
+          false
+        ],
+        [
+          "distinct",
+          1,
+          1,
+          false
+        ]
+      ],
+      "grasp_path_check": {
+        "chosen": 10,
+        "rank_examined": 1,
+        "fell_back": true,
+        "fell_back_to": "the candidate that got furthest before its first fault",
+        "examined": [
+          {
+            "index": 10,
+            "violations": 1,
+            "first_violation": 44,
+            "reachable_fraction": 1.0,
+            "faults": {
+              "approach: gripper0_right_gripper_r_finger_r_collision in the target's cloud": 1,
+              "approach: gripper0_right_gripper_r_finger_l_collision in the target's cloud": 1
+            },
+            "rejected": "collision"
+          }
+        ]
+      },
+      "grasp_path_check_fell_back": true,
+      "grasp_chosen_index": 10,
+      "grasp_chosen_score": 0.7138352990150452,
+      "grasp_chosen_approach_mismatch_deg": 29.64235670343588,
+      "grasp_n_candidates": 100,
+      "grasp_n_survivors": 1,
+      "grasp_offset_mm": 13.276254434244585,
+      "grasp_height_mm": 10.723904232221248,
+      "object": "bread"
+    },
+    {
+      "variant": "2_cube_grasp_pose",
+      "gripper": "xarm",
+      "selected_only": true,
+      "cloud_points": 587,
+      "grasp_place_approach_blocked_by": {
+        "shelf_top_back": 12
+      },
+      "grasp_jaw_width": {
+        "fits": 15,
+        "too_wide": 5,
+        "unverified": 4
+      },
+      "grasp_jaw_width_unverified": 4,
+      "grasp_ranked_by": "score",
+      "grasp_stages": [
+        [
+          "generated",
+          100,
+          100,
+          false
+        ],
+        [
+          "visibility",
+          100,
+          83,
+          false
+        ],
+        [
+          "support",
+          83,
+          36,
+          false
+        ],
+        [
+          "place zone",
+          36,
+          24,
+          false
+        ],
+        [
+          "on target",
+          24,
+          24,
+          false
+        ],
+        [
+          "jaw width",
+          24,
+          15,
+          false
+        ],
+        [
+          "collision",
+          15,
+          15,
+          false
+        ],
+        [
+          "centred",
+          15,
+          2,
+          false
+        ],
+        [
+          "distinct",
+          2,
+          2,
+          false
+        ]
+      ],
+      "grasp_path_check": {
+        "chosen": 72,
+        "rank_examined": 2,
+        "fell_back": true,
+        "fell_back_to": "the candidate that got furthest before its first fault",
+        "examined": [
+          {
+            "index": 72,
+            "violations": 1,
+            "first_violation": 52,
+            "reachable_fraction": 1.0,
+            "faults": {
+              "carry: the carried object hits something sideways": 1
+            },
+            "rejected": "collision"
+          },
+          {
+            "index": 75,
+            "violations": 1,
+            "first_violation": 52,
+            "reachable_fraction": 1.0,
+            "faults": {
+              "carry: the carried object hits something sideways": 1
+            },
+            "rejected": "collision"
+          }
+        ]
+      },
+      "grasp_path_check_fell_back": true,
+      "grasp_chosen_index": 72,
+      "grasp_chosen_score": 0.6880730986595154,
+      "grasp_chosen_approach_mismatch_deg": 12.489818644800105,
+      "grasp_n_candidates": 100,
+      "grasp_n_survivors": 2,
+      "grasp_offset_mm": 11.428147241007105,
+      "grasp_height_mm": 84.67723755669232,
+      "object": "cereal"
+    },
+    {
+      "variant": "2_cube_grasp_pose",
+      "gripper": "xarm",
+      "selected_only": true,
+      "cloud_points": 279,
+      "grasp_place_approach_blocked_by": {
+        "shelf_top_back": 9,
+        "shelf_top_wall_l": 4,
+        "shelf_top_wall_r": 1
+      },
+      "grasp_jaw_width": {
+        "fits": 29,
+        "too_wide": 0,
+        "unverified": 2
+      },
+      "grasp_jaw_width_unverified": 2,
+      "grasp_ranked_by": "score",
+      "grasp_stages": [
+        [
+          "generated",
+          100,
+          100,
+          false
+        ],
+        [
+          "visibility",
+          100,
+          93,
+          false
+        ],
+        [
+          "support",
+          93,
+          45,
+          false
+        ],
+        [
+          "place zone",
+          45,
+          31,
+          false
+        ],
+        [
+          "on target",
+          31,
+          31,
+          false
+        ],
+        [
+          "jaw width",
+          31,
+          29,
+          false
+        ],
+        [
+          "collision",
+          29,
+          26,
+          false
+        ],
+        [
+          "centred",
+          26,
+          22,
+          false
+        ],
+        [
+          "distinct",
+          22,
+          14,
+          false
+        ]
+      ],
+      "grasp_path_check": {
+        "chosen": 25,
+        "rank_examined": 3,
+        "fell_back": false,
+        "examined": [
+          {
+            "index": 21,
+            "violations": 1,
+            "first_violation": 160,
+            "reachable_fraction": 0.878,
+            "faults": {
+              "retreat: robot0_link5_collision in the scene cloud": 10
+            },
+            "rejected": "collision"
+          },
+          {
+            "index": 24,
+            "violations": 1,
+            "first_violation": 100,
+            "reachable_fraction": 1.0,
+            "faults": {
+              "carry: robot0_link6_collision in the scene cloud": 1,
+              "carry: robot0_link7_collision in the scene cloud": 22
+            },
+            "rejected": "collision"
+          },
+          {
+            "index": 25,
+            "violations": 0,
+            "first_violation": null,
+            "reachable_fraction": 0.82,
+            "faults": {}
+          }
+        ]
+      },
+      "grasp_chosen_index": 25,
+      "grasp_chosen_score": 0.8274844884872437,
+      "grasp_chosen_approach_mismatch_deg": 40.272352576166504,
+      "grasp_n_candidates": 100,
+      "grasp_n_survivors": 14,
+      "grasp_offset_mm": 13.94554779078396,
+      "grasp_height_mm": 51.21153797626765,
+      "object": "milk"
+    },
+    {
+      "variant": "2_cube_grasp_pose",
+      "gripper": "xarm",
+      "selected_only": true,
+      "cloud_points": 57,
+      "grasp_place_approach_blocked_by": {
+        "shelf_top_back": 6,
+        "shelf_top_wall_l": 2,
+        "shelf_top_wall_r": 3
+      },
+      "grasp_jaw_width": {
+        "fits": 0,
+        "too_wide": 0,
+        "unverified": 27
+      },
+      "grasp_jaw_width_unverified": 27,
+      "grasp_jaw width_fell_back": true,
+      "grasp_cloud_too_sparse_for_jaw_width": true,
+      "grasp_ranked_by": "score",
+      "grasp_stages": [
+        [
+          "generated",
+          100,
+          100,
+          false
+        ],
+        [
+          "visibility",
+          100,
+          91,
+          false
+        ],
+        [
+          "support",
+          91,
+          38,
+          false
+        ],
+        [
+          "place zone",
+          38,
+          27,
+          false
+        ],
+        [
+          "on target",
+          27,
+          27,
+          false
+        ],
+        [
+          "jaw width",
+          27,
+          27,
+          true
+        ],
+        [
+          "collision",
+          27,
+          10,
+          false
+        ],
+        [
+          "centred",
+          10,
+          8,
+          false
+        ],
+        [
+          "distinct",
+          8,
+          4,
+          false
+        ]
+      ],
+      "grasp_path_check": {
+        "chosen": 10,
+        "rank_examined": 1,
+        "fell_back": false,
+        "examined": [
+          {
+            "index": 10,
+            "violations": 0,
+            "first_violation": null,
+            "reachable_fraction": 0.88,
+            "faults": {}
+          }
+        ]
+      },
+      "grasp_chosen_index": 10,
+      "grasp_chosen_score": 0.8747729659080505,
+      "grasp_chosen_approach_mismatch_deg": 3.5405522650814536,
+      "grasp_n_candidates": 100,
+      "grasp_n_survivors": 4,
+      "grasp_offset_mm": 6.630279336934249,
+      "grasp_height_mm": 36.558772548108685,
+      "object": "can"
+    },
+    {
+      "variant": "2_cube_grasp_pose",
+      "gripper": "xarm",
+      "selected_only": true,
+      "cloud_points": 167,
+      "grasp_place_approach_blocked_by": {
+        "shelf_top_back": 6,
+        "shelf_top_wall_r": 3,
+        "shelf_top_wall_l": 1
+      },
+      "grasp_jaw_width": {
+        "fits": 21,
+        "too_wide": 0,
+        "unverified": 0
+      },
+      "grasp_ranked_by": "score",
+      "grasp_stages": [
+        [
+          "generated",
+          100,
+          100,
+          false
+        ],
+        [
+          "visibility",
+          100,
+          83,
+          false
+        ],
+        [
+          "support",
+          83,
+          31,
+          false
+        ],
+        [
+          "place zone",
+          31,
+          21,
+          false
+        ],
+        [
+          "on target",
+          21,
+          21,
+          false
+        ],
+        [
+          "jaw width",
+          21,
+          21,
+          false
+        ],
+        [
+          "collision",
+          21,
+          16,
+          false
+        ],
+        [
+          "centred",
+          16,
+          7,
+          false
+        ],
+        [
+          "distinct",
+          7,
+          4,
+          false
+        ]
+      ],
+      "grasp_path_check": {
+        "chosen": 99,
+        "rank_examined": 4,
+        "fell_back": true,
+        "fell_back_to": "the candidate that got furthest before its first fault",
+        "examined": [
+          {
+            "index": 52,
+            "violations": 1,
+            "first_violation": 68,
+            "reachable_fraction": 1.0,
+            "faults": {
+              "carry: the carried object hits something sideways": 1
+            },
+            "rejected": "collision"
+          },
+          {
+            "index": 69,
+            "violations": 1,
+            "first_violation": 12,
+            "reachable_fraction": 1.0,
+            "faults": {
+              "approach: robot0_link7_collision in the scene cloud": 5
+            },
+            "rejected": "collision"
+          },
+          {
+            "index": 83,
+            "violations": 1,
+            "first_violation": 68,
+            "reachable_fraction": 1.0,
+            "faults": {
+              "carry: the carried object hits something sideways": 1
+            },
+            "rejected": "collision"
+          },
+          {
+            "index": 99,
+            "violations": 1,
+            "first_violation": 92,
+            "reachable_fraction": 1.0,
+            "faults": {
+              "carry: robot0_link5_collision in the scene cloud": 1
+            },
+            "rejected": "collision"
+          }
+        ]
+      },
+      "grasp_path_check_fell_back": true,
+      "grasp_chosen_index": 99,
+      "grasp_chosen_score": 0.5550082325935364,
+      "grasp_chosen_approach_mismatch_deg": 9.60647890549646,
+      "grasp_n_candidates": 100,
+      "grasp_n_survivors": 4,
+      "grasp_offset_mm": 14.287553575687646,
+      "grasp_height_mm": 32.58374545975262,
+      "object": "bread"
+    },
+    {
+      "variant": "2_cube_grasp_pose",
+      "gripper": "panda",
+      "selected_only": true,
+      "cloud_points": 602,
+      "grasp_place_approach_blocked_by": {
+        "shelf_top_back": 12,
+        "shelf_top_wall_l": 2,
+        "shelf_top_wall_r": 1
+      },
+      "grasp_jaw_width": {
+        "fits": 11,
+        "too_wide": 12,
+        "unverified": 4
+      },
+      "grasp_jaw_width_unverified": 4,
+      "grasp_ranked_by": "score",
+      "grasp_stages": [
+        [
+          "generated",
+          100,
+          100,
+          false
+        ],
+        [
+          "visibility",
+          100,
+          88,
+          false
+        ],
+        [
+          "support",
+          88,
+          42,
+          false
+        ],
+        [
+          "place zone",
+          42,
+          27,
+          false
+        ],
+        [
+          "on target",
+          27,
+          27,
+          false
+        ],
+        [
+          "jaw width",
+          27,
+          11,
+          false
+        ],
+        [
+          "collision",
+          11,
+          11,
+          false
+        ],
+        [
+          "centred",
+          11,
+          3,
+          false
+        ],
+        [
+          "distinct",
+          3,
+          2,
+          false
+        ]
+      ],
+      "grasp_path_check": {
+        "chosen": 85,
+        "rank_examined": 2,
+        "fell_back": false,
+        "examined": [
+          {
+            "index": 76,
+            "violations": 1,
+            "first_violation": 68,
+            "reachable_fraction": 1.0,
+            "faults": {
+              "carry: the carried object hits something sideways": 1
+            },
+            "rejected": "collision"
+          },
+          {
+            "index": 85,
+            "violations": 0,
+            "first_violation": null,
+            "reachable_fraction": 0.88,
+            "faults": {}
+          }
+        ]
+      },
+      "grasp_chosen_index": 85,
+      "grasp_chosen_score": 0.6174386739730835,
+      "grasp_chosen_approach_mismatch_deg": 11.072204224457272,
+      "grasp_n_candidates": 100,
+      "grasp_n_survivors": 2,
+      "grasp_offset_mm": 10.075516300908193,
+      "grasp_height_mm": 83.66685075592639,
+      "object": "cereal"
+    },
+    {
+      "variant": "2_cube_grasp_pose",
+      "gripper": "panda",
+      "selected_only": true,
+      "cloud_points": 279,
+      "grasp_place_approach_blocked_by": {
+        "shelf_top_back": 13,
+        "shelf_top_wall_l": 7,
+        "shelf_top_wall_r": 1
+      },
+      "grasp_jaw_width": {
+        "fits": 15,
+        "too_wide": 0,
+        "unverified": 4
+      },
+      "grasp_jaw_width_unverified": 4,
+      "grasp_ranked_by": "score",
+      "grasp_stages": [
+        [
+          "generated",
+          100,
+          100,
+          false
+        ],
+        [
+          "visibility",
+          100,
+          96,
+          false
+        ],
+        [
+          "support",
+          96,
+          40,
+          false
+        ],
+        [
+          "place zone",
+          40,
+          19,
+          false
+        ],
+        [
+          "on target",
+          19,
+          19,
+          false
+        ],
+        [
+          "jaw width",
+          19,
+          15,
+          false
+        ],
+        [
+          "collision",
+          15,
+          14,
+          false
+        ],
+        [
+          "centred",
+          14,
+          7,
+          false
+        ],
+        [
+          "distinct",
+          7,
+          5,
+          false
+        ]
+      ],
+      "grasp_path_check": {
+        "chosen": 80,
+        "rank_examined": 4,
+        "fell_back": false,
+        "examined": [
+          {
+            "index": 34,
+            "violations": 1,
+            "first_violation": 0,
+            "reachable_fraction": 1.0,
+            "faults": {
+              "approach: gripper0_right_hand_collision in the scene cloud": 7
+            },
+            "rejected": "collision"
+          },
+          {
+            "index": 53,
+            "violations": 1,
+            "first_violation": 152,
+            "reachable_fraction": 1.0,
+            "faults": {
+              "place: robot0_link5_collision in the scene cloud": 4
+            },
+            "rejected": "collision"
+          },
+          {
+            "index": 55,
+            "violations": 1,
+            "first_violation": 100,
+            "reachable_fraction": 1.0,
+            "faults": {
+              "carry: robot0_link6_collision in the scene cloud": 9,
+              "carry: robot0_link7_collision in the scene cloud": 1
+            },
+            "rejected": "collision"
+          },
+          {
+            "index": 80,
+            "violations": 0,
+            "first_violation": null,
+            "reachable_fraction": 0.94,
+            "faults": {}
+          }
+        ]
+      },
+      "grasp_chosen_index": 80,
+      "grasp_chosen_score": 0.5598467588424683,
+      "grasp_chosen_approach_mismatch_deg": 3.204546269742923,
+      "grasp_n_candidates": 100,
+      "grasp_n_survivors": 5,
+      "grasp_offset_mm": 8.194878019936311,
+      "grasp_height_mm": 59.73689505577351,
+      "object": "milk"
+    },
+    {
+      "variant": "2_cube_grasp_pose",
+      "gripper": "panda",
+      "selected_only": true,
+      "cloud_points": 57,
+      "grasp_place_approach_blocked_by": {
+        "shelf_top_wall_l": 3,
+        "shelf_top_back": 6,
+        "shelf_top_wall_r": 2,
+        "shelf_top_board": 1
+      },
+      "grasp_jaw_width": {
+        "fits": 0,
+        "too_wide": 0,
+        "unverified": 21
+      },
+      "grasp_jaw_width_unverified": 21,
+      "grasp_jaw width_fell_back": true,
+      "grasp_cloud_too_sparse_for_jaw_width": true,
+      "grasp_ranked_by": "score",
+      "grasp_stages": [
+        [
+          "generated",
+          100,
+          100,
+          false
+        ],
+        [
+          "visibility",
+          100,
+          96,
+          false
+        ],
+        [
+          "support",
+          96,
+          33,
+          false
+        ],
+        [
+          "place zone",
+          33,
+          21,
+          false
+        ],
+        [
+          "on target",
+          21,
+          21,
+          false
+        ],
+        [
+          "jaw width",
+          21,
+          21,
+          true
+        ],
+        [
+          "collision",
+          21,
+          9,
+          false
+        ],
+        [
+          "centred",
+          9,
+          5,
+          false
+        ],
+        [
+          "distinct",
+          5,
+          3,
+          false
+        ]
+      ],
+      "grasp_path_check": {
+        "chosen": 30,
+        "rank_examined": 1,
+        "fell_back": false,
+        "examined": [
+          {
+            "index": 30,
+            "violations": 0,
+            "first_violation": null,
+            "reachable_fraction": 0.88,
+            "faults": {}
+          }
+        ]
+      },
+      "grasp_chosen_index": 30,
+      "grasp_chosen_score": 0.6758760809898376,
+      "grasp_chosen_approach_mismatch_deg": 13.209381978627624,
+      "grasp_n_candidates": 100,
+      "grasp_n_survivors": 3,
+      "grasp_offset_mm": 7.736283429532609,
+      "grasp_height_mm": 43.92772515621712,
+      "object": "can"
+    },
+    {
+      "variant": "2_cube_grasp_pose",
+      "gripper": "panda",
+      "selected_only": true,
+      "cloud_points": 167,
+      "grasp_place_approach_blocked_by": {
+        "shelf_top_wall_r": 4,
+        "shelf_top_wall_l": 2,
+        "shelf_top_back": 2
+      },
+      "grasp_jaw_width": {
+        "fits": 14,
+        "too_wide": 0,
+        "unverified": 0
+      },
+      "grasp_ranked_by": "score",
+      "grasp_stages": [
+        [
+          "generated",
+          100,
+          100,
+          false
+        ],
+        [
+          "visibility",
+          100,
+          88,
+          false
+        ],
+        [
+          "support",
+          88,
+          22,
+          false
+        ],
+        [
+          "place zone",
+          22,
+          14,
+          false
+        ],
+        [
+          "on target",
+          14,
+          14,
+          false
+        ],
+        [
+          "jaw width",
+          14,
+          14,
+          false
+        ],
+        [
+          "collision",
+          14,
+          10,
+          false
+        ],
+        [
+          "centred",
+          10,
+          2,
+          false
+        ],
+        [
+          "distinct",
+          2,
+          2,
+          false
+        ]
+      ],
+      "grasp_path_check": {
+        "chosen": 94,
+        "rank_examined": 2,
+        "fell_back": false,
+        "examined": [
+          {
+            "index": 59,
+            "violations": 1,
+            "first_violation": 148,
+            "reachable_fraction": 1.0,
+            "faults": {
+              "place: robot0_link5_collision in the scene cloud": 4
+            },
+            "rejected": "collision"
+          },
+          {
+            "index": 94,
+            "violations": 0,
+            "first_violation": null,
+            "reachable_fraction": 1.0,
+            "faults": {}
+          }
+        ]
+      },
+      "grasp_chosen_index": 94,
+      "grasp_chosen_score": 0.5423210859298706,
+      "grasp_chosen_approach_mismatch_deg": 16.862227280914368,
+      "grasp_n_candidates": 100,
+      "grasp_n_survivors": 2,
+      "grasp_offset_mm": 13.563734846521204,
+      "grasp_height_mm": 24.17928073807285,
+      "object": "bread"
+    },
+    {
+      "variant": "2_cube_grasp_pose",
+      "gripper": "robotiq85",
+      "selected_only": true,
+      "cloud_points": 602,
+      "grasp_place_approach_blocked_by": {
+        "shelf_top_back": 6,
+        "shelf_top_wall_l": 4
+      },
+      "grasp_jaw_width": {
+        "fits": 15,
+        "too_wide": 11,
+        "unverified": 0
+      },
+      "grasp_ranked_by": "score",
+      "grasp_stages": [
+        [
+          "generated",
+          100,
+          100,
+          false
+        ],
+        [
+          "visibility",
+          100,
+          91,
+          false
+        ],
+        [
+          "support",
+          91,
+          36,
+          false
+        ],
+        [
+          "place zone",
+          36,
+          26,
+          false
+        ],
+        [
+          "on target",
+          26,
+          26,
+          false
+        ],
+        [
+          "jaw width",
+          26,
+          15,
+          false
+        ],
+        [
+          "collision",
+          15,
+          15,
+          false
+        ],
+        [
+          "centred",
+          15,
+          4,
+          false
+        ],
+        [
+          "distinct",
+          4,
+          3,
+          false
+        ]
+      ],
+      "grasp_path_check": {
+        "chosen": 65,
+        "rank_examined": 3,
+        "fell_back": true,
+        "fell_back_to": "the candidate that got furthest before its first fault",
+        "examined": [
+          {
+            "index": 65,
+            "violations": 1,
+            "first_violation": 52,
+            "reachable_fraction": 1.0,
+            "faults": {
+              "carry: the carried object hits something sideways": 1
+            },
+            "rejected": "collision"
+          },
+          {
+            "index": 74,
+            "violations": 1,
+            "first_violation": 52,
+            "reachable_fraction": 1.0,
+            "faults": {
+              "carry: the carried object hits something sideways": 1
+            },
+            "rejected": "collision"
+          },
+          {
+            "index": 86,
+            "violations": 1,
+            "first_violation": 52,
+            "reachable_fraction": 1.0,
+            "faults": {
+              "carry: the carried object hits something sideways": 1
+            },
+            "rejected": "collision"
+          }
+        ]
+      },
+      "grasp_path_check_fell_back": true,
+      "grasp_chosen_index": 65,
+      "grasp_chosen_score": 0.6811133027076721,
+      "grasp_chosen_approach_mismatch_deg": 30.309892266972984,
+      "grasp_n_candidates": 100,
+      "grasp_n_survivors": 3,
+      "grasp_offset_mm": 10.813115279930729,
+      "grasp_height_mm": 73.96781067680958,
+      "object": "cereal"
+    },
+    {
+      "variant": "2_cube_grasp_pose",
+      "gripper": "robotiq85",
+      "selected_only": true,
+      "cloud_points": 279,
+      "grasp_place_approach_blocked_by": {
+        "shelf_top_wall_l": 5,
+        "shelf_top_back": 3
+      },
+      "grasp_jaw_width": {
+        "fits": 24,
+        "too_wide": 0,
+        "unverified": 0
+      },
+      "grasp_ranked_by": "score",
+      "grasp_stages": [
+        [
+          "generated",
+          100,
+          100,
+          false
+        ],
+        [
+          "visibility",
+          100,
+          91,
+          false
+        ],
+        [
+          "support",
+          91,
+          32,
+          false
+        ],
+        [
+          "place zone",
+          32,
+          24,
+          false
+        ],
+        [
+          "on target",
+          24,
+          24,
+          false
+        ],
+        [
+          "jaw width",
+          24,
+          24,
+          false
+        ],
+        [
+          "collision",
+          24,
+          23,
+          false
+        ],
+        [
+          "centred",
+          23,
+          20,
+          false
+        ],
+        [
+          "distinct",
+          20,
+          12,
+          false
+        ]
+      ],
+      "grasp_path_check": {
+        "chosen": 38,
+        "rank_examined": 2,
+        "fell_back": false,
+        "examined": [
+          {
+            "index": 32,
+            "violations": 1,
+            "first_violation": 0,
+            "reachable_fraction": 1.0,
+            "faults": {
+              "approach: gripper0_right_right_inner_knuckle_collision in the scene cloud": 1
+            },
+            "rejected": "collision"
+          },
+          {
+            "index": 38,
+            "violations": 0,
+            "first_violation": null,
+            "reachable_fraction": 0.9,
+            "faults": {}
+          }
+        ]
+      },
+      "grasp_chosen_index": 38,
+      "grasp_chosen_score": 0.7324934601783752,
+      "grasp_chosen_approach_mismatch_deg": 32.027662803955835,
+      "grasp_n_candidates": 100,
+      "grasp_n_survivors": 12,
+      "grasp_offset_mm": 12.245937206997224,
+      "grasp_height_mm": 54.21232094288142,
+      "object": "milk"
+    },
+    {
+      "variant": "2_cube_grasp_pose",
+      "gripper": "robotiq85",
+      "selected_only": true,
+      "cloud_points": 57,
+      "grasp_place_approach_blocked_by": {
+        "shelf_top_back": 3,
+        "shelf_top_wall_r": 3
+      },
+      "grasp_jaw_width": {
+        "fits": 0,
+        "too_wide": 0,
+        "unverified": 26
+      },
+      "grasp_jaw_width_unverified": 26,
+      "grasp_jaw width_fell_back": true,
+      "grasp_cloud_too_sparse_for_jaw_width": true,
+      "grasp_ranked_by": "score",
+      "grasp_stages": [
+        [
+          "generated",
+          100,
+          100,
+          false
+        ],
+        [
+          "visibility",
+          100,
+          88,
+          false
+        ],
+        [
+          "support",
+          88,
+          32,
+          false
+        ],
+        [
+          "place zone",
+          32,
+          26,
+          false
+        ],
+        [
+          "on target",
+          26,
+          26,
+          false
+        ],
+        [
+          "jaw width",
+          26,
+          26,
+          true
+        ],
+        [
+          "collision",
+          26,
+          15,
+          false
+        ],
+        [
+          "centred",
+          15,
+          11,
+          false
+        ],
+        [
+          "distinct",
+          11,
+          9,
+          false
+        ]
+      ],
+      "grasp_path_check": {
+        "chosen": 1,
+        "rank_examined": 2,
+        "fell_back": false,
+        "examined": [
+          {
+            "index": 0,
+            "violations": 1,
+            "first_violation": 0,
+            "reachable_fraction": 1.0,
+            "faults": {
+              "approach: gripper0_right_right_fingertip_collision in the scene cloud": 1
+            },
+            "rejected": "collision"
+          },
+          {
+            "index": 1,
+            "violations": 0,
+            "first_violation": null,
+            "reachable_fraction": 0.8,
+            "faults": {}
+          }
+        ]
+      },
+      "grasp_chosen_index": 1,
+      "grasp_chosen_score": 0.9134974479675293,
+      "grasp_chosen_approach_mismatch_deg": 5.077518587110282,
+      "grasp_n_candidates": 100,
+      "grasp_n_survivors": 9,
+      "grasp_offset_mm": 8.251004050137222,
+      "grasp_height_mm": 20.324774249463662,
+      "object": "can"
+    },
+    {
+      "variant": "2_cube_grasp_pose",
+      "gripper": "robotiq85",
+      "selected_only": true,
+      "cloud_points": 167,
+      "grasp_place_approach_blocked_by": {
+        "shelf_top_back": 4,
+        "shelf_top_wall_l": 6,
+        "shelf_top_wall_r": 7
+      },
+      "grasp_jaw_width": {
+        "fits": 17,
+        "too_wide": 0,
+        "unverified": 0
+      },
+      "grasp_ranked_by": "score",
+      "grasp_stages": [
+        [
+          "generated",
+          100,
+          100,
+          false
+        ],
+        [
+          "visibility",
+          100,
+          80,
+          false
+        ],
+        [
+          "support",
+          80,
+          34,
+          false
+        ],
+        [
+          "place zone",
+          34,
+          17,
+          false
+        ],
+        [
+          "on target",
+          17,
+          17,
+          false
+        ],
+        [
+          "jaw width",
+          17,
+          17,
+          false
+        ],
+        [
+          "collision",
+          17,
+          17,
+          false
+        ],
+        [
+          "centred",
+          17,
+          7,
+          false
+        ],
+        [
+          "distinct",
+          7,
+          5,
+          false
+        ]
+      ],
+      "grasp_path_check": {
+        "chosen": 31,
+        "rank_examined": 2,
+        "fell_back": false,
+        "examined": [
+          {
+            "index": 26,
+            "violations": 1,
+            "first_violation": 0,
+            "reachable_fraction": 1.0,
+            "faults": {
+              "approach: gripper0_right_right_inner_finger_collision in the target's cloud": 1,
+              "approach: gripper0_right_right_fingertip_collision in the target's cloud": 1,
+              "approach: gripper0_right_right_fingerpad_collision in the target's cloud": 1
+            },
+            "rejected": "collision"
+          },
+          {
+            "index": 31,
+            "violations": 0,
+            "first_violation": null,
+            "reachable_fraction": 1.0,
+            "faults": {}
+          }
+        ]
+      },
+      "grasp_chosen_index": 31,
+      "grasp_chosen_score": 0.6449354290962219,
+      "grasp_chosen_approach_mismatch_deg": 10.515392514652225,
+      "grasp_n_candidates": 100,
+      "grasp_n_survivors": 5,
+      "grasp_offset_mm": 7.63552354325112,
+      "grasp_height_mm": 12.808186988072844,
+      "object": "bread"
+    },
+    {
+      "variant": "2_cube_grasp_pose",
+      "gripper": "robotiq140",
+      "selected_only": true,
+      "cloud_points": 601,
+      "grasp_place_approach_blocked_by": {
+        "shelf_top_wall_l": 2,
+        "shelf_top_back": 6,
+        "shelf_top_wall_r": 1
+      },
+      "grasp_jaw_width": {
+        "fits": 22,
+        "too_wide": 1,
+        "unverified": 0
+      },
+      "grasp_ranked_by": "score",
+      "grasp_stages": [
+        [
+          "generated",
+          100,
+          100,
+          false
+        ],
+        [
+          "visibility",
+          100,
+          86,
+          false
+        ],
+        [
+          "support",
+          86,
+          32,
+          false
+        ],
+        [
+          "place zone",
+          32,
+          23,
+          false
+        ],
+        [
+          "on target",
+          23,
+          23,
+          false
+        ],
+        [
+          "jaw width",
+          23,
+          22,
+          false
+        ],
+        [
+          "collision",
+          22,
+          20,
+          false
+        ],
+        [
+          "centred",
+          20,
+          3,
+          false
+        ],
+        [
+          "distinct",
+          3,
+          3,
+          false
+        ]
+      ],
+      "grasp_path_check": {
+        "chosen": 24,
+        "rank_examined": 3,
+        "fell_back": true,
+        "fell_back_to": "the candidate that got furthest before its first fault",
+        "examined": [
+          {
+            "index": 24,
+            "violations": 1,
+            "first_violation": 68,
+            "reachable_fraction": 1.0,
+            "faults": {
+              "carry: the carried object hits something sideways": 1
+            },
+            "rejected": "collision"
+          },
+          {
+            "index": 44,
+            "violations": 1,
+            "first_violation": 68,
+            "reachable_fraction": 1.0,
+            "faults": {
+              "carry: the carried object hits something sideways": 1
+            },
+            "rejected": "collision"
+          },
+          {
+            "index": 81,
+            "violations": 1,
+            "first_violation": 68,
+            "reachable_fraction": 1.0,
+            "faults": {
+              "carry: the carried object hits something sideways": 1
+            },
+            "rejected": "collision"
+          }
+        ]
+      },
+      "grasp_path_check_fell_back": true,
+      "grasp_chosen_index": 24,
+      "grasp_chosen_score": 0.8438221216201782,
+      "grasp_chosen_approach_mismatch_deg": 7.728728090369448,
+      "grasp_n_candidates": 100,
+      "grasp_n_survivors": 3,
+      "grasp_offset_mm": 12.630463121819304,
+      "grasp_height_mm": 10.253788159605314,
+      "object": "cereal"
+    },
+    {
+      "variant": "2_cube_grasp_pose",
+      "gripper": "robotiq140",
+      "selected_only": true,
+      "cloud_points": 279,
+      "grasp_place_approach_blocked_by": {
+        "shelf_top_wall_l": 9,
+        "shelf_top_back": 4,
+        "shelf_top_wall_r": 1
+      },
+      "grasp_jaw_width": {
+        "fits": 27,
+        "too_wide": 0,
+        "unverified": 0
+      },
+      "grasp_ranked_by": "score",
+      "grasp_stages": [
+        [
+          "generated",
+          100,
+          100,
+          false
+        ],
+        [
+          "visibility",
+          100,
+          90,
+          false
+        ],
+        [
+          "support",
+          90,
+          41,
+          false
+        ],
+        [
+          "place zone",
+          41,
+          27,
+          false
+        ],
+        [
+          "on target",
+          27,
+          27,
+          false
+        ],
+        [
+          "jaw width",
+          27,
+          27,
+          false
+        ],
+        [
+          "collision",
+          27,
+          23,
+          false
+        ],
+        [
+          "centred",
+          23,
+          18,
+          false
+        ],
+        [
+          "distinct",
+          18,
+          14,
+          false
+        ]
+      ],
+      "grasp_path_check": {
+        "chosen": 24,
+        "rank_examined": 14,
+        "fell_back": true,
+        "fell_back_to": "the candidate that got furthest before its first fault",
+        "examined": [
+          {
+            "index": 24,
+            "violations": 1,
+            "first_violation": 52,
+            "reachable_fraction": 1.0,
+            "faults": {
+              "carry: the carried object hits something sideways": 1
+            },
+            "rejected": "collision"
+          },
+          {
+            "index": 32,
+            "violations": 1,
+            "first_violation": 52,
+            "reachable_fraction": 1.0,
+            "faults": {
+              "carry: the carried object hits something sideways": 1
+            },
+            "rejected": "collision"
+          },
+          {
+            "index": 33,
+            "violations": 1,
+            "first_violation": 52,
+            "reachable_fraction": 1.0,
+            "faults": {
+              "carry: the carried object hits something sideways": 1
+            },
+            "rejected": "collision"
+          },
+          {
+            "index": 39,
+            "violations": 1,
+            "first_violation": 0,
+            "reachable_fraction": 1.0,
+            "faults": {
+              "approach: gripper0_right_hand_collision in the scene cloud": 1,
+              "approach: gripper0_right_right_inner_knuckle_collision in the scene cloud": 4
+            },
+            "rejected": "collision"
+          },
+          {
+            "index": 52,
+            "violations": 1,
+            "first_violation": 52,
+            "reachable_fraction": 1.0,
+            "faults": {
+              "carry: the carried object hits something sideways": 1
+            },
+            "rejected": "collision"
+          },
+          {
+            "index": 63,
+            "violations": 1,
+            "first_violation": 52,
+            "reachable_fraction": 1.0,
+            "faults": {
+              "carry: the carried object hits something sideways": 1
+            },
+            "rejected": "collision"
+          },
+          {
+            "index": 72,
+            "violations": 1,
+            "first_violation": 0,
+            "reachable_fraction": 1.0,
+            "faults": {
+              "approach: gripper0_right_left_fingertip_collision in the scene cloud": 1
+            },
+            "rejected": "collision"
+          },
+          {
+            "index": 74,
+            "violations": 1,
+            "first_violation": 52,
+            "reachable_fraction": 1.0,
+            "faults": {
+              "carry: the carried object hits something sideways": 1
+            },
+            "rejected": "collision"
+          },
+          {
+            "index": 81,
+            "violations": 1,
+            "first_violation": 0,
+            "reachable_fraction": 1.0,
+            "faults": {
+              "approach: gripper0_right_left_outer_finger_collision in the scene cloud": 2,
+              "approach: gripper0_right_left_fingertip_collision in the scene cloud": 1,
+              "approach: gripper0_right_left_inner_knuckle_collision in the scene cloud": 3
+            },
+            "rejected": "collision"
+          },
+          {
+            "index": 84,
+            "violations": 1,
+            "first_violation": 0,
+            "reachable_fraction": 1.0,
+            "faults": {
+              "approach: gripper0_right_left_inner_finger_collision in the scene cloud": 1,
+              "approach: gripper0_right_left_fingertip_collision in the scene cloud": 1
+            },
+            "rejected": "collision"
+          },
+          {
+            "index": 86,
+            "violations": 1,
+            "first_violation": 0,
+            "reachable_fraction": 1.0,
+            "faults": {
+              "approach: gripper0_right_left_fingertip_collision in the scene cloud": 1
+            },
+            "rejected": "collision"
+          },
+          {
+            "index": 87,
+            "violations": 1,
+            "first_violation": 0,
+            "reachable_fraction": 1.0,
+            "faults": {
+              "approach: gripper0_right_left_fingertip_collision in the scene cloud": 1
+            },
+            "rejected": "collision"
+          },
+          {
+            "index": 96,
+            "violations": 0,
+            "first_violation": null,
+            "reachable_fraction": 0.42,
+            "faults": {},
+            "rejected": "kinematics"
+          },
+          {
+            "index": 97,
+            "violations": 1,
+            "first_violation": 52,
+            "reachable_fraction": 1.0,
+            "faults": {
+              "carry: the carried object hits something sideways": 1
+            },
+            "rejected": "collision"
+          }
+        ]
+      },
+      "grasp_path_check_fell_back": true,
+      "grasp_chosen_index": 24,
+      "grasp_chosen_score": 0.9026153087615967,
+      "grasp_chosen_approach_mismatch_deg": 7.19243853253781,
+      "grasp_n_candidates": 100,
+      "grasp_n_survivors": 14,
+      "grasp_offset_mm": 9.949564404929802,
+      "grasp_height_mm": 25.151391644480547,
+      "object": "milk"
+    },
+    {
+      "variant": "2_cube_grasp_pose",
+      "gripper": "robotiq140",
+      "selected_only": true,
+      "cloud_points": 57,
+      "grasp_place_approach_blocked_by": {
+        "shelf_top_back": 11,
+        "shelf_top_wall_l": 3,
+        "shelf_top_wall_r": 2
+      },
+      "grasp_jaw_width": {
+        "fits": 0,
+        "too_wide": 0,
+        "unverified": 18
+      },
+      "grasp_jaw_width_unverified": 18,
+      "grasp_jaw width_fell_back": true,
+      "grasp_cloud_too_sparse_for_jaw_width": true,
+      "grasp_ranked_by": "score",
+      "grasp_stages": [
+        [
+          "generated",
+          100,
+          100,
+          false
+        ],
+        [
+          "visibility",
+          100,
+          80,
+          false
+        ],
+        [
+          "support",
+          80,
+          34,
+          false
+        ],
+        [
+          "place zone",
+          34,
+          18,
+          false
+        ],
+        [
+          "on target",
+          18,
+          18,
+          false
+        ],
+        [
+          "jaw width",
+          18,
+          18,
+          true
+        ],
+        [
+          "collision",
+          18,
+          6,
+          false
+        ],
+        [
+          "centred",
+          6,
+          6,
+          false
+        ],
+        [
+          "distinct",
+          6,
+          6,
+          false
+        ]
+      ],
+      "grasp_path_check": {
+        "chosen": 33,
+        "rank_examined": 3,
+        "fell_back": false,
+        "examined": [
+          {
+            "index": 27,
+            "violations": 1,
+            "first_violation": 0,
+            "reachable_fraction": 1.0,
+            "faults": {
+              "approach: gripper0_right_right_inner_finger_collision in the scene cloud": 1,
+              "approach: gripper0_right_right_fingertip_collision in the scene cloud": 2,
+              "approach: gripper0_right_right_fingerpad_collision in the scene cloud": 1
+            },
+            "rejected": "collision"
+          },
+          {
+            "index": 31,
+            "violations": 1,
+            "first_violation": 4,
+            "reachable_fraction": 1.0,
+            "faults": {
+              "approach: gripper0_right_right_fingertip_collision in the scene cloud": 1
+            },
+            "rejected": "collision"
+          },
+          {
+            "index": 33,
+            "violations": 0,
+            "first_violation": null,
+            "reachable_fraction": 0.76,
+            "faults": {}
+          }
+        ]
+      },
+      "grasp_chosen_index": 33,
+      "grasp_chosen_score": 0.8467041850090027,
+      "grasp_chosen_approach_mismatch_deg": 5.9685091539756465,
+      "grasp_n_candidates": 100,
+      "grasp_n_survivors": 6,
+      "grasp_offset_mm": 7.644008284929776,
+      "grasp_height_mm": 32.55940423813397,
+      "object": "can"
+    },
+    {
+      "variant": "2_cube_grasp_pose",
+      "gripper": "robotiq140",
+      "selected_only": true,
+      "cloud_points": 167,
+      "grasp_place_approach_blocked_by": {
+        "shelf_top_wall_r": 5,
+        "shelf_top_back": 4,
+        "shelf_top_wall_l": 2
+      },
+      "grasp_jaw_width": {
+        "fits": 24,
+        "too_wide": 0,
+        "unverified": 2
+      },
+      "grasp_jaw_width_unverified": 2,
+      "grasp_ranked_by": "score",
+      "grasp_stages": [
+        [
+          "generated",
+          100,
+          100,
+          false
+        ],
+        [
+          "visibility",
+          100,
+          80,
+          false
+        ],
+        [
+          "support",
+          80,
+          37,
+          false
+        ],
+        [
+          "place zone",
+          37,
+          26,
+          false
+        ],
+        [
+          "on target",
+          26,
+          26,
+          false
+        ],
+        [
+          "jaw width",
+          26,
+          24,
+          false
+        ],
+        [
+          "collision",
+          24,
+          14,
+          false
+        ],
+        [
+          "centred",
+          14,
+          6,
+          false
+        ],
+        [
+          "distinct",
+          6,
+          4,
+          false
+        ]
+      ],
+      "grasp_path_check": {
+        "chosen": 9,
+        "rank_examined": 4,
+        "fell_back": true,
+        "fell_back_to": "the candidate that got furthest before its first fault",
+        "examined": [
+          {
+            "index": 9,
+            "violations": 1,
+            "first_violation": 52,
+            "reachable_fraction": 1.0,
+            "faults": {
+              "carry: the carried object hits something sideways": 2
+            },
+            "rejected": "collision"
+          },
+          {
+            "index": 79,
+            "violations": 1,
+            "first_violation": 52,
+            "reachable_fraction": 1.0,
+            "faults": {
+              "carry: the carried object hits something sideways": 2
+            },
+            "rejected": "collision"
+          },
+          {
+            "index": 83,
+            "violations": 1,
+            "first_violation": 52,
+            "reachable_fraction": 1.0,
+            "faults": {
+              "carry: the carried object hits something sideways": 2
+            },
+            "rejected": "collision"
+          },
+          {
+            "index": 89,
+            "violations": 1,
+            "first_violation": 52,
+            "reachable_fraction": 1.0,
+            "faults": {
+              "carry: the carried object hits something sideways": 2
+            },
+            "rejected": "collision"
+          }
+        ]
+      },
+      "grasp_path_check_fell_back": true,
+      "grasp_chosen_index": 9,
+      "grasp_chosen_score": 0.7814409136772156,
+      "grasp_chosen_approach_mismatch_deg": 9.937153947967904,
+      "grasp_n_candidates": 100,
+      "grasp_n_survivors": 4,
+      "grasp_offset_mm": 14.599511554652059,
+      "grasp_height_mm": 9.409785131650473,
+      "object": "bread"
+    }
+  ],
+  "created": "2026-09-12T17:17:56",
+  "provenance": {
+    "commit": "ddcc8a458f889b4cbaac11d81bb6c29a30e6ab91",
+    "commit_short": "ddcc8a4",
+    "branch": "keypoints-grasp-cube",
+    "committed": "2026-09-12T17:16:44+05:30",
+    "dirty": [],
+    "diff_stat": null,
+    "untracked_code": [],
+    "reproducible": true,
+    "python": "3.10.12",
+    "platform": "Linux-6.8.0-138-generic-x86_64-with-glibc2.35",
+    "packages": {
+      "numpy": "2.2.6",
+      "scipy": "1.15.3",
+      "mujoco": "3.7.0",
+      "robosuite": "1.5.2",
+      "similaritymeasures": "1.4.0"
+    }
+  }
+}

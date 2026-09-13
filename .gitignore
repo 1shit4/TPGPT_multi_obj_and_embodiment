@@ -5,4 +5,10 @@ __pycache__/
 .coverage
 htmlcov/
 outputs/
+# ...but the written-up findings are the deliverable, not scratch data, and were
+# sitting untracked in an ignored directory -- exactly the provenance failure
+# ROBOTICS_NOTES 7.26 is about. Keep the prose, keep the manifests that name the
+# commit behind each run, and keep ignoring the bulk arrays.
+!outputs/**/*.md
+!outputs/**/manifest.json
 .ipynb_checkpoints/

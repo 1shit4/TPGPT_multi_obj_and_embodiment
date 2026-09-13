@@ -394,6 +394,124 @@ class TestClosingBudget:
         assert closing_budget(result) == 0.0
 
 
+    def test_the_placed_block_is_excluded_from_the_width(self):
+        """The bug this test exists for, and why the old fakes missed it.
+
+        ``scene_keypoints`` emits **two** blocks -- the object where it is picked
+        and the same object where it is placed -- and ``_select_parts`` keeps
+        both, so ``target_keypoints.points`` spans the whole pick-to-place
+        distance. Projected onto the closing axis that is 239 to 277 mm on the
+        real objects, against an aperture of at most 125 mm, so the budget
+        clamped to **0.0 for every object and every hand**.
+
+        Zero is a *plausible* number, which makes it worse than ``None``: it is
+        indistinguishable from a genuinely impossible grasp, and it is the same
+        class of failure the ``None`` return above exists to prevent.
+
+        It was invisible because every fake in this file carried ``points`` and
+        no ``labels`` -- simpler than the object the function actually receives.
+        So this fake carries both.
+        """
+        aperture = _aperture_or_skip()
+
+        class Keys:
+            #: A 20 mm-wide object picked at the origin and placed 355 mm away,
+            #: the real pick-to-place distance in this scene.
+            points = np.array([
+                [-0.010, 0, 0], [0.010, 0, 0],          # pick block
+                [0.345, 0, 0], [0.365, 0, 0],           # placed block
+            ])
+            labels = ["pick_nnn", "pick_pnn", "place_nnn", "place_pnn"]
+
+        result = RunResult(prompt="p", gripper="panda", shelf_variant="c", seed=0)
+        result.grasp, result.target_keypoints = _grasp(), Keys()
+        # The object is 20 mm wide, not 375 mm.
+        assert closing_budget(result) == pytest.approx((aperture - 0.020) / 2)
+
+    def test_without_labels_it_still_measures_something(self):
+        """Back-compatible: a set with no labels is used whole.
+
+        There is no way to tell which points are the pick block without them,
+        and refusing would turn every caller that passes a bare array into a
+        ``None``. The pick-only path is taken when the labels are there.
+        """
+        aperture = _aperture_or_skip()
+
+        class Keys:
+            points = np.array([[-0.010, 0, 0], [0.010, 0, 0]])
+
+        result = RunResult(prompt="p", gripper="panda", shelf_variant="c", seed=0)
+        result.grasp, result.target_keypoints = _grasp(), Keys()
+        assert closing_budget(result) == pytest.approx((aperture - 0.020) / 2)
+
+    def test_a_single_pick_point_falls_back_to_the_whole_set(self):
+        """One point has no extent, so the filter must not be applied."""
+        aperture = _aperture_or_skip()
+
+        class Keys:
+            points = np.array([[-0.010, 0, 0], [0.010, 0, 0], [0.345, 0, 0]])
+            labels = ["pick_center", "place_nnn", "place_pnn"]
+
+        result = RunResult(prompt="p", gripper="panda", shelf_variant="c", seed=0)
+        result.grasp, result.target_keypoints = _grasp(), Keys()
+        # Falls back to the full extent, which is 355 mm and yields no budget --
+        # a wrong answer, but a *visible* one, and the alternative is inventing
+        # a width from a single point.
+        assert closing_budget(result) == 0.0
+
+
+    def test_a_recorded_cloud_width_is_preferred_over_the_keypoints(self):
+        """Where the object's size is actually known.
+
+        With ``box="grasp_cube"`` the keypoints are a fixed cube, so the width
+        read from them is 40.0 mm for a lemon and for a milk carton alike. The
+        cloud knows the difference; the keypoints deliberately do not.
+        """
+        aperture = _aperture_or_skip()
+
+        class Keys:
+            points = np.array([[-0.020, 0, 0], [0.020, 0, 0]])
+            labels = ["pick_nnn", "pick_pnn"]
+
+        result = RunResult(prompt="p", gripper="panda", shelf_variant="c", seed=0)
+        result.grasp, result.target_keypoints = _grasp(), Keys()
+        result.metrics["object_width_closing"] = 0.060
+        # 60 mm from the cloud, not the 40 mm the keypoints would give.
+        assert closing_budget(result) == pytest.approx((aperture - 0.060) / 2)
+
+    def test_a_cube_keypoint_set_with_no_cloud_width_refuses(self):
+        """``None``, not the cube's own 40 mm.
+
+        Reporting the cube would give every object the same budget, which is a
+        plausible number and not a measurement of anything -- the failure this
+        function's ``None`` return exists to prevent.
+        """
+        _aperture_or_skip()
+
+        class Keys:
+            points = np.array([[-0.020, 0, 0], [0.020, 0, 0]])
+            labels = ["pick_nnn", "pick_pnn"]
+            metadata = {"tgt_pick": {"block_kind": "grasp_cube",
+                                     "cube_half_extent": 0.02}}
+
+        result = RunResult(prompt="p", gripper="panda", shelf_variant="c", seed=0)
+        result.grasp, result.target_keypoints = _grasp(), Keys()
+        assert closing_budget(result) is None
+
+    def test_a_fitted_box_keypoint_set_still_measures_from_the_keypoints(self):
+        """The cloud box does know the object's width, so it is used."""
+        aperture = _aperture_or_skip()
+
+        class Keys:
+            points = np.array([[-0.015, 0, 0], [0.015, 0, 0]])
+            labels = ["pick_nnn", "pick_pnn"]
+            metadata = {"tgt_pick": {"block_kind": "cloud"}}
+
+        result = RunResult(prompt="p", gripper="panda", shelf_variant="c", seed=0)
+        result.grasp, result.target_keypoints = _grasp(), Keys()
+        assert closing_budget(result) == pytest.approx((aperture - 0.030) / 2)
+
+
 class TestAttractorDrift:
     """Pointwise deviation of the integrated attractor from its planned path."""
 
@@ -430,3 +548,59 @@ class TestAttractorDrift:
         rollout = make_rollout()
         rollout.attractors = self._path()
         assert attractor_drift(rollout, None) == {}
+
+
+class TestWorstSegmentDoesNotAccuse:
+    """``worst_segment`` names where the arm could not hold its pose, or nothing.
+
+    It used to seed the comparison at -1.0, so a path with *no* unreachable
+    waypoint returned whichever segment happened to be tested first -- always
+    ``"approach"``. Every fully reachable cell in Experiment M is labelled that
+    way in the published table, which reads as a diagnosis and means the
+    opposite.
+
+    And "nothing unreachable" is not "the run succeeded": this function only
+    ever answers *where could the arm not hold its commanded pose*. A run can
+    fail with every pose reachable, by dropping the object or by putting it in
+    the wrong slot.
+    """
+
+    def _replay(self, reachable):
+        import numpy as np
+
+        n = len(reachable)
+        return type("R", (), {"metadata": {
+            "reachable_per_waypoint": np.array(reachable, dtype=bool),
+            "tracking_error_per_waypoint": np.zeros(n),
+        }})()
+
+    def _labels(self, n):
+        import numpy as np
+
+        from tpgpt.transport.labels import PolicyLabels
+
+        grip = np.full(n, -1.0)
+        grip[n // 3: 2 * n // 3] = 1.0
+        return PolicyLabels(
+            positions=np.zeros((n, 3)), velocities=np.zeros((n, 3)),
+            orientations=np.stack([np.eye(3)] * n), gripper=grip,
+            time_belief=np.linspace(0, 1, n),
+        )
+
+    def test_all_reachable_names_no_segment(self):
+        from tpgpt.experiments.diagnose import unreachable_segments
+
+        out = unreachable_segments(self._replay([True] * 90), self._labels(90))
+        assert out["worst_segment"] is None
+        assert out["worst_segment_share"] == 0.0
+
+    def test_it_still_names_the_segment_that_did_fail(self):
+        import numpy as np
+
+        from tpgpt.experiments.diagnose import unreachable_segments
+
+        reach = np.ones(90, dtype=bool)
+        reach[70:85] = False          # the place/retreat end
+        out = unreachable_segments(self._replay(reach), self._labels(90))
+        assert out["worst_segment"] in {"place", "retreat"}
+        assert out["worst_segment_share"] > 0.0

@@ -28,7 +28,13 @@ import numpy as np
 from tpgpt.experiments.diagnose import diagnose, object_probe
 from tpgpt.experiments.reshelving_pipeline import record_source_placement
 from tpgpt.grasp.filters import FilterFunnel, filter_grasps
-from tpgpt.grasp.grasps import Grasp6D, contact_offset, grasp_to_eef_pose
+from tpgpt.grasp.grasps import (
+    Grasp6D,
+    contact_offset,
+    grasp_to_eef_pose,
+    to_grasp_convention,
+    to_wrist_convention,
+)
 from tpgpt.grasp.grippers import resolve_pair
 from tpgpt.language.parser import parse_task
 from tpgpt.perception.cameras import object_point_cloud, scene_point_cloud
@@ -41,7 +47,7 @@ from tpgpt.sim.keypoints import (
     scene_keypoints,
 )
 from tpgpt.sim.rollout import rollout_policy, slot_score
-from tpgpt.transport.labels import transport_labels
+from tpgpt.transport.labels import PolicyLabels, transport_labels
 from tpgpt.transport.maps import TransportMap
 
 #: Why a run ended. Exactly one of these is reported.
@@ -306,6 +312,7 @@ def run(
             grasp_set.grasps, gripper, cloud.points, scene_points=scene,
             camera_positions=cloud.camera_positions, env=env, place_pose=provisional,
             reference_approach=_demonstrated_approach(labels),
+            target_name=result.object_name,
         )
         result.funnel = funnel
         if not len(funnel.survivors):
@@ -339,6 +346,22 @@ def run(
         source_offset = contact_offset(SOURCE_GRIPPER)
         target_offset = contact_offset(gripper)
         tool_labels = _to_tool_frame(labels, source_offset)
+        # **And into the grasp convention.** ``record_demonstration`` records the
+        # source hand's ``grip_site`` orientations, while every keypoint cube is
+        # built from a grasp pose, which is in GraspGen-X's convention -- the one
+        # frame that means the same thing on all nine hands. Working in it from
+        # end to end leaves exactly one per-hand step, putting the *executing*
+        # hand's alignment back on below. Without it the source Panda's own
+        # 180 degree alignment rides through the map and arrives attached to
+        # whichever hand is executing: 0.2 degrees of error on a Robotiq 2F-85,
+        # 90 on an XArm. 7.34.
+        tool_labels = PolicyLabels(
+            positions=tool_labels.positions,
+            velocities=tool_labels.velocities,
+            orientations=to_grasp_convention(tool_labels.orientations, SOURCE_GRIPPER),
+            gripper=tool_labels.gripper,
+            time_belief=tool_labels.time_belief,
+        )
 
         candidates = [grasp_set.grasps[i] for i in funnel.survivors[:MAX_CANDIDATES]]
         chosen = _choose_grasp(
@@ -348,6 +371,17 @@ def run(
             return _fail(result, "map_not_a_diffeomorphism",
                          "no surviving grasp produced a valid transportation map")
         result.grasp, sets, executable = chosen
+        # The object's width along **this grasp's own** closing axis, taken from
+        # the cloud. Recorded here because this is the only place both the cloud
+        # and the chosen grasp are in scope, and because ``closing_budget``
+        # cannot get it from the keypoints when they are a fixed grasp cube --
+        # their extent is then the cube's 40.0 mm for every object alike (7.28).
+        #
+        # Not an axis-aligned extent: a 30 x 100 mm box yawed 45 degrees
+        # measures 92 x 92 and reads as ungraspable (7.18).
+        result.metrics["object_width_closing"] = float(
+            np.ptp(cloud.points @ result.grasp.closing)
+        )
         result.alternatives = [g for g in candidates if g is not result.grasp][:5]
         result.metrics["executable_fraction"] = executable
         source_set, target_set = _select_parts(sets[0], sets[1], keypoint_parts)
@@ -388,6 +422,12 @@ def run(
         # map carries contact point to contact point, and each hand steps out to
         # its own wrist from there.
         transported = transport_labels(transport_map, tool_labels)
+        # Back into *this* hand's wrist convention, which is what the controller
+        # commands and what IK aims. See the conversion above.
+        if transported.orientations is not None:
+            transported.orientations = to_wrist_convention(
+                transported.orientations, gripper
+            )
         result.demonstration = labels.positions
         result.transported = transported.positions
         result.transported_labels = transported

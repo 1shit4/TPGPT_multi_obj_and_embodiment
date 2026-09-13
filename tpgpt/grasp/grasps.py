@@ -248,6 +248,58 @@ def contact_offset(pair: GripperPair | str) -> np.ndarray:
     return offset
 
 
+def to_grasp_convention(rotations: np.ndarray, gripper) -> np.ndarray:
+    """Re-express wrist (``grip_site``) orientations in the grasp convention.
+
+    Two coordinate systems are in play and they are **not** the same, by
+    0.2 degrees on a Robotiq 2F-85 and by 90 on an XArm:
+
+    * the **grasp convention** -- GraspGen-X's, ``+Z`` the approach and ``+X``
+      the closing direction. It is uniform across every hand, which is what
+      makes it the right place to do geometry that has to hold across
+      embodiments;
+    * the **wrist convention** -- each gripper model's own ``grip_site``, whose
+      orientation relative to the fingers was chosen by whoever authored that
+      model. Inverse kinematics aims this one, and the controller commands it.
+
+    :func:`alignment_rotation` is the measured, constant, per-hand rotation
+    between them, and :func:`grasp_to_eef_pose` already applies it for a single
+    grasp. These two helpers do the same for a whole trajectory, which is what a
+    transported demonstration is.
+
+    **Why this has to be explicit.** A demonstration is recorded in the
+    demonstrating hand's wrist convention, while a keypoint cube built from a
+    planner grasp is in the grasp convention. Transporting one into the other
+    without saying so silently attaches the *source* hand's alignment to the
+    *target* hand's command. Measured on the Tier 2 replay, the commanded wrist
+    orientation came out 0.6 to 91 degrees from the one ``grasp_to_eef_pose``
+    would have given, depending on the hand -- and neither
+    ``alignment_rotation`` nor ``grasp_to_eef_pose`` appeared anywhere in that
+    code path. Section 7.34.
+
+    Args:
+        rotations: ``(3, 3)`` or ``(n, 3, 3)`` wrist orientations.
+        gripper: Registry short name, robosuite name, or :class:`GripperPair`.
+
+    Returns:
+        The same shape, in the grasp convention.
+    """
+    R = np.asarray(rotations, dtype=float)
+    return np.einsum("...ij,jk->...ik", R, alignment_rotation(gripper).T)
+
+
+def to_wrist_convention(rotations: np.ndarray, gripper) -> np.ndarray:
+    """Re-express grasp-convention orientations as ``grip_site`` orientations.
+
+    The inverse of :func:`to_grasp_convention`; this is the direction a plan has
+    to travel before it can be commanded, because inverse kinematics aims the
+    ``grip_site``. See that function for why the two conventions differ and what
+    it cost to conflate them.
+    """
+    R = np.asarray(rotations, dtype=float)
+    return np.einsum("...ij,jk->...ik", R, alignment_rotation(gripper))
+
+
 def grasp_to_eef_pose(grasp: Grasp6D, gripper: str | GripperPair | None = None):
     """Convert a grasp into a robosuite end-effector target.
 

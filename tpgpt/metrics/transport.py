@@ -53,7 +53,28 @@ from tpgpt.utils.rotations import rotation_geodesic
 #: World "up" -- the support normal used throughout ``tpgpt.sim.keypoints``.
 UP = np.array([0.0, 0.0, 1.0])
 
-#: The parallel jaw's own symmetry: a half turn about the approach axis.
+#: A half turn about the approach axis, as a matrix.
+#:
+#: **Named, but never forgiven.** ``orientation_transport_error`` used to
+#: minimise over this and no longer offers the option, because a half turn is
+#: *not* the same grasp:
+#:
+#: * the wrist is somewhere else, which is a different joint configuration and
+#:   may not be reachable;
+#: * GraspGen-X's own config declares ``symmetric`` **per gripper**, and it is
+#:   ``False`` for both three-finger hands in this registry -- rolling those over
+#:   puts the fingers somewhere else entirely
+#:   (:func:`~tpgpt.grasp.grippers.declared_symmetric`);
+#: * and forgiving it concealed the half turn of 7.33 for the life of the
+#:   project, reporting 0.2 to 4.5 degrees for a plan that was 179 wrong.
+#:
+#: Measured after the frames were fixed, the minimisation changed the answer on
+#: **0 of 20** cells when compared against the grasp actually executed. So it
+#: was inert as well as dangerous.
+#:
+#: The matrix itself stays, because the *rotation* is a real object: it is what
+#: ``scene_keypoints`` applies when it chooses the other roll, and what a test
+#: needs to construct a rolled case.
 #:
 #: In the ``Grasp6D`` convention a grasp rotation's columns are
 #: ``(closing, jaw, approach)``, so the approach is the local ``z`` and the
@@ -68,7 +89,6 @@ def orientation_transport_error(
     X: np.ndarray,
     R_source: np.ndarray,
     R_target: np.ndarray,
-    symmetric: bool = True,
 ) -> np.ndarray:
     """How far Eq. 11 leaves the transported hand from the orientation it needs.
 
@@ -88,10 +108,6 @@ def orientation_transport_error(
             source grasp and release points.
         R_source: ``(n, 3, 3)`` or ``(3, 3)`` source hand orientations.
         R_target: ``(n, 3, 3)`` or ``(3, 3)`` orientations the hand must reach.
-        symmetric: Minimise over :data:`JAW_SYMMETRY`. Leave it on for any
-            parallel jaw. Turn it off only for a hand with no such symmetry, or
-            to see the raw signed disagreement.
-
     Returns:
         ``(n,)`` angles in **degrees**.
     """
@@ -106,11 +122,70 @@ def orientation_transport_error(
     )
     transported = np.einsum("nij,njk->nik", J_perp, R_source)
 
-    angle = rotation_geodesic(transported, R_target)
-    if symmetric:
-        flipped = np.einsum("nij,jk->nik", R_target, JAW_SYMMETRY)
-        angle = np.minimum(angle, rotation_geodesic(transported, flipped))
-    return np.degrees(angle)
+    return np.degrees(rotation_geodesic(transported, R_target))
+
+
+def carry_orientation_error(
+    transport_map,
+    x_grasp: np.ndarray,
+    x_release: np.ndarray,
+    R_grasp: np.ndarray,
+    R_release: np.ndarray,
+    R_grasp_target: np.ndarray,
+    R_release_target: np.ndarray,
+) -> float:
+    """How far the plan turns the carried object from how far it should turn.
+
+    Between the jaws closing and opening the object is rigidly attached to the
+    hand, so its placed orientation is fixed by the hand's *relative* rotation
+    over that span and by nothing else. This compares the relative rotation Eq.
+    11 delivers,
+
+    ``(J_perp(x_release) R_release) (J_perp(x_grasp) R_grasp)^T``
+
+    against the one the target configurations ask for,
+    ``R_release_target R_grasp_target^T``.
+
+    **Why this exists rather than two calls to**
+    :func:`orientation_transport_error`. That function minimises over
+    :data:`JAW_SYMMETRY` at each point independently, which is right for a
+    single grasp and destroys the pairing. A half turn about the approach taken
+    at *both* ends cancels here -- it is the same task with the wrist rolled
+    over -- while one taken at a *single* end does not, and that is exactly what
+    has to be caught: it reflects the object through the grasp point and lands
+    it twice its lateral grasp offset away.
+
+    Nothing else sees that. The map stays a valid diffeomorphism, the keypoint
+    residual stays at 1e-7, and **the aim stays at 0.00 mm** -- because a half
+    turn about the approach leaves the grasp point fixed, so it is the one point
+    a reflection cannot move. Measured over 40 cells before the frames were made
+    to agree, this read **178.5 to 180.0 degrees** while
+    ``orientation_transport_error`` read 0.2 to 4.5 at both ends. Section 7.33.
+
+    Args:
+        transport_map: A fitted map exposing ``orthogonal_jacobian``.
+        x_grasp: ``(3,)`` source-space position where the jaws close.
+        x_release: ``(3,)`` source-space position where they open.
+        R_grasp: ``(3, 3)`` source hand orientation at the grasp.
+        R_release: ``(3, 3)`` source hand orientation at the release.
+        R_grasp_target: ``(3, 3)`` orientation wanted at the target grasp.
+        R_release_target: ``(3, 3)`` orientation wanted at the target release.
+
+    Returns:
+        The angle in **degrees**.
+    """
+    X = np.vstack([
+        np.asarray(x_grasp, dtype=float).reshape(3),
+        np.asarray(x_release, dtype=float).reshape(3),
+    ])
+    J = transport_map.orthogonal_jacobian(X)
+    delivered = (J[1] @ np.asarray(R_release, dtype=float).reshape(3, 3)) @ (
+        J[0] @ np.asarray(R_grasp, dtype=float).reshape(3, 3)
+    ).T
+    wanted = np.asarray(R_release_target, dtype=float).reshape(3, 3) @ np.asarray(
+        R_grasp_target, dtype=float
+    ).reshape(3, 3).T
+    return float(np.degrees(rotation_geodesic(delivered[None], wanted[None])[0]))
 
 
 def vertical_tilt(transport_map, X: np.ndarray, up: np.ndarray = UP) -> np.ndarray:

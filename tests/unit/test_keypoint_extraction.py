@@ -102,15 +102,36 @@ class TestTaskFrame:
         frame = task_frame([0, 0, 1], [1.0, 0.0, 5.0])
         assert frame[2, 0] == pytest.approx(0.0, abs=1e-12)
 
-    def test_sign_is_invariant_to_flipping_the_closing_axis(self):
-        """A parallel jaw grasp is the same grasp with its jaws swapped.
+    def test_the_closing_sign_is_taken_from_the_grasp_and_not_re_derived(self):
+        """Reversing the closing axis must give the *reversed* frame.
 
-        Without a convention the two extractions would label opposite corners
-        identically and inject a 180 degree rotation into the map.
+        **This assertion is the reverse of the one it replaces**, which required
+        the two to come out equal. The reasoning behind that was: a parallel jaw
+        closing along ``+c`` and along ``-c`` grips the same object the same
+        way, so the sign is free and the frame should pick one by convention.
+
+        The flaw is that a grasp is not an axis, it is a **pose**. ``Grasp6D``
+        carries a full rotation whose first column *is* the closing direction,
+        with a definite sign fixed by the planner and by which finger of that
+        hand is which. There is nothing here to resolve, and resolving it anyway
+        discarded that sign and invented a replacement from a world-axis test
+        (``c . y >= 0``, tie-broken on ``c . x``) that depends on the object's
+        yaw in the scene and knows nothing about the gripper.
+
+        What it cost: the demonstration places its object square with the shelf,
+        so the placed closing axis lands on world ``x`` at ``[1, -1e-17, 0]``.
+        ``c[1]`` fell inside the epsilon, the ``c[0] < 0`` tie-break decided
+        instead, and it decided the opposite way to the pick, whose ``c[1]`` is
+        an unambiguous ``-0.581``. The source's own pick and place frames came
+        out 180 degrees apart, which reflects the carried object through the
+        grasp point and lands it twice its lateral grasp offset away -- measured
+        at 4 to 100 mm over 20 cells. `ROBOTICS_NOTES.md` 7.33.
         """
         a = task_frame([0, 0, 1], [0.6, 0.8, 0.0])
         b = task_frame([0, 0, 1], [-0.6, -0.8, 0.0])
-        assert np.allclose(a, b)
+        assert np.allclose(a[:, 0], -b[:, 0]), "the closing column must reverse"
+        assert np.allclose(a[:, 1], -b[:, 1]), "and so must the one it induces"
+        assert np.allclose(a[:, 2], b[:, 2]), "the support normal is untouched"
 
     def test_refuses_a_closing_axis_along_the_support_normal(self):
         with pytest.raises(ValueError, match="parallel to the support normal"):

@@ -131,10 +131,38 @@ class TestGraspPoseFrame:
         g = GraspFrame(tcp=np.zeros(3), approach=[0, 0.3, -1.0], closing=[1, 0.2, 0])
         assert is_rotation(grasp_pose_frame(g))
 
-    def test_it_refuses_exactly_what_the_task_frame_refuses(self):
+    def test_it_needs_no_support_plane_and_so_refuses_less(self):
+        """It used to refuse a vertically-closing grasp. It should not.
+
+        **This assertion is the reverse of the one it replaces.** The old
+        ``grasp_pose_frame`` called ``task_frame`` in order to re-derive the
+        closing axis's sign, and inherited that function's refusal: a closing
+        axis parallel to the support normal cannot be projected into the support
+        plane, so no task frame exists. The refusal was correct *for a task
+        frame* and was only reaching this function because of the borrowed sign
+        resolution.
+
+        With the sign taken from the grasp instead, this frame is the grasp's own
+        rotation and touches no support plane at all. A hand driving in along
+        ``+x`` with its jaws closing vertically along ``+z`` is a perfectly
+        ordinary grasp -- a side approach onto a flat object -- and there is
+        nothing left to object to. So the grasp-pose cube now admits grasps the
+        cloud box cannot express, which is a small gain in reach rather than a
+        regression.
+
+        The refusal itself is not lost. ``scene_keypoints`` still builds a task
+        frame for the cloud-fitted box and for the support contact, so a
+        vertically-closing grasp is still rejected there, by the function whose
+        geometry actually requires it.
+        """
         g = GraspFrame(tcp=np.zeros(3), approach=[1, 0, 0.0], closing=[0, 0, 1.0])
+        frame = grasp_pose_frame(g)
+        assert is_rotation(frame)
+        assert np.allclose(frame[:, 2], [1, 0, 0]), "third column is the approach"
+        assert np.allclose(frame[:, 0], [0, 0, 1]), "first column is the closing axis"
+        # and the task frame, which genuinely needs the support plane, still refuses it
         with pytest.raises(ValueError, match="parallel to the support normal"):
-            grasp_pose_frame(g)
+            task_frame([0, 0, 1], g.closing)
 
 
 class TestLayoutIsUnchanged:

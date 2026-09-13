@@ -18,6 +18,7 @@ from tpgpt.grasp.filters import (
     FilterFunnel,
     by_collision,
     by_jaw_width,
+    jaw_width_verdicts,
     by_target,
     by_visibility,
     filter_grasps,
@@ -133,11 +134,69 @@ class TestJawWidth:
         assert fits is True and does_not is False
 
     def test_too_little_cloud_is_not_treated_as_too_wide(self):
-        """Absence of evidence is not evidence of a wide object; a sparse cloud
-        is a perception problem and belongs in a different report line."""
+        """Absence of evidence is not evidence of a wide object.
+
+        It is not evidence of a *narrow* one either, which is what the previous
+        version of this test asserted by requiring the grasp to be kept. The
+        distinction it was protecting is preserved and now explicit: the verdict
+        is ``"unverified"``, never ``"too_wide"``, so the report can name a
+        perception failure instead of a grasping one -- the "different report
+        line" this docstring always asked for, which did not exist until it was
+        built.
+        """
         pair = resolve_pair(PAIR)
         grasp = grasp_at([0, 0, 0.9])
-        assert len(by_jaw_width([grasp], np.array([0]), np.zeros((2, 3)), pair)) == 1
+        verdicts = jaw_width_verdicts([grasp], np.array([0]), np.zeros((2, 3)), pair)
+        assert verdicts[0] == "unverified"
+
+    def test_an_unverifiable_grasp_is_not_certified_as_fitting(self):
+        """The measured case: ``yumi/can``.
+
+        An 11-point slab reported 5.9 mm across a 50.0 mm can, whose hand opens
+        to exactly 50.0 mm. Waving it through on "absence of evidence" is what
+        sent the arm to a grasp that cannot exist, and the jaws then travelled
+        39.6 mm through the can while the grip force bled from 20.3 N to 0.6 N.
+        """
+        pair = resolve_pair(PAIR)
+        grasp = grasp_at([0, 0, 0.9])
+        sparse = np.zeros((2, 3))
+        assert len(by_jaw_width([grasp], np.array([0]), sparse, pair)) == 0
+
+    def test_a_lower_bound_that_already_exceeds_the_aperture_needs_no_quorum(self):
+        """A sparse cloud can still prove an object too wide.
+
+        The observed extent is a *lower bound* on the object, so if the bound
+        alone does not fit the jaws, neither does the object -- and that holds
+        however few points drew it. Only the positive verdict needs a quorum.
+        """
+        pair = resolve_pair(PAIR)
+        aperture = gripper_geometry("franka_panda").aperture
+        depth = gripper_geometry("franka_panda").tcp_depth
+        grasp = grasp_at([0, 0, 0.85 + depth])
+        # Four points, fewer than MIN_JAW_WIDTH_POINTS, spanning more than the
+        # hand can open along this grasp's own closing axis.
+        span = aperture * 1.5
+        pts = np.array([grasp.closing * s + [0, 0, 0.85] for s in (-span / 2, span / 2)])
+        verdicts = jaw_width_verdicts([grasp], np.array([0]), pts, pair)
+        assert verdicts[0] == "too_wide"
+        assert len(by_jaw_width([grasp], np.array([0]), pts, pair)) == 0
+
+    def test_the_funnel_marks_a_cell_whose_width_could_not_be_verified(self):
+        """The mark is the point of the change.
+
+        Dropping unverifiable grasps would be useless on its own, because the
+        funnel restores them when the stage empties the set -- so the run still
+        goes ahead. What makes it honest is that the flag says the grasp was
+        chosen without a width check, and names the cloud as the reason.
+        """
+        pair = resolve_pair(PAIR)
+        grasp = grasp_at([0, 0, 0.9])
+        funnel = filter_grasps([grasp], pair, np.zeros((2, 3)))
+        assert funnel.flags["jaw_width"]["unverified"] == 1
+        assert funnel.flags["jaw_width"]["fits"] == 0
+        assert funnel.flags["cloud_too_sparse_for_jaw_width"] is True
+        # and it did not come back empty
+        assert len(funnel.survivors) == 1
 
 
 class TestCollision:
@@ -237,3 +296,153 @@ class TestFunnel:
         funnel = FilterFunnel()
         funnel.add("visibility", "x", np.arange(5), np.arange(5))
         assert funnel.rejected_by is None
+
+
+# ---------------------------------------------- the scene-derived zone filters
+def test_support_approach_keeps_a_descent_and_rejects_a_hand_coming_up():
+    """The table is solid, so nothing reaches an object from underneath it.
+
+    The constraint is the support's own normal and nothing else: no
+    demonstration is consulted, which is the whole point of replacing
+    ``by_demonstration_consistency`` with this.
+    """
+    from tpgpt.grasp.filters import by_support_approach
+
+    grasps = [
+        grasp_at((0, 0, 1.0), approach=(0, 0, -1)),        # straight down
+        grasp_at((0, 0, 1.0), approach=(1, 0, -1)),        # 45 deg, downward
+        grasp_at((0, 0, 1.0), approach=(1, 0, -0.02)),     # 88.9 deg, downward
+        grasp_at((0, 0, 1.0), approach=(1, 0, 0.3)),       # pointing upward
+        grasp_at((0, 0, 1.0), approach=(0, 0, 1)),         # straight up
+    ]
+    kept = by_support_approach(grasps, np.arange(5))
+    # The 88.9 degree one is inside the 90 degree geometric bound and outside
+    # the 85 degree limit: the fingers hang below the tool point, so a level
+    # hand still grazes the surface.
+    assert kept.tolist() == [0, 1]
+
+
+def test_support_approach_follows_the_normal_it_is_given():
+    """A sloped or vertical support changes the vector and nothing else."""
+    from tpgpt.grasp.filters import by_support_approach
+
+    sideways = grasp_at((0, 0, 1.0), approach=(1, 0, 0))
+    downward = grasp_at((0, 0, 1.0), approach=(0, 0, -1))
+    grasps = [sideways, downward]
+    # A wall whose outward normal points along -x: now the sideways grasp is
+    # the admissible one and the descent is the one arriving through the wall.
+    kept = by_support_approach(grasps, np.arange(2), support_normal=(-1, 0, 0))
+    assert kept.tolist() == [0]
+
+
+def test_hand_envelope_reads_the_hand_rather_than_assuming_one():
+    from tpgpt.grasp.filters import hand_envelope
+
+    length, radius = hand_envelope(resolve_pair(PAIR))
+    # A Panda hand is about 10 cm from fingertip to wrist and a few cm across.
+    assert 0.05 < length < 0.30
+    assert 0.01 < radius < 0.15
+
+
+def test_centre_offset_measures_horizontally_only():
+    """Gravity acts vertically, so where on the object's height it is gripped
+    changes no moment; only the lever arm in the horizontal plane does."""
+    from tpgpt.grasp.filters import offset_from_centre
+
+    grasp = grasp_at((0.10, 0.0, 1.0), approach=(0, 0, -1))
+    tcp = grasp.tcp_position()
+    directly_below = np.array([tcp[0], tcp[1], tcp[2] - 0.20])
+    assert offset_from_centre(grasp, directly_below) == 0.0
+    sideways = np.array([tcp[0] - 0.03, tcp[1] + 0.04, tcp[2]])
+    assert np.isclose(offset_from_centre(grasp, sideways), 0.05)
+
+
+def test_centre_offset_filter_keeps_the_centred_grip():
+    from tpgpt.grasp.filters import MAX_CENTRE_OFFSET, by_centre_offset
+
+    centre = np.array([0.0, 0.0, 0.9])
+    near = grasp_at((0.005, 0.0, 1.0), approach=(0, 0, -1))
+    far = grasp_at((MAX_CENTRE_OFFSET + 0.02, 0.0, 1.0), approach=(0, 0, -1))
+    kept = by_centre_offset([near, far], np.arange(2), centre)
+    assert kept.tolist() == [0]
+
+
+# ------------------------------------------------- the executed trajectory
+def straight_path(start, end, n=60, rotation=None):
+    """A straight fingertip path with a fixed orientation, as a transport would
+    hand it over: positions plus grasp-convention rotations."""
+    start, end = np.asarray(start, float), np.asarray(end, float)
+    t = np.linspace(0.0, 1.0, n)[:, None]
+    positions = start + t * (end - start)
+    # Approach straight down: +Z of the grasp frame is the approach axis.
+    R = np.array([[1.0, 0.0, 0.0], [0.0, -1.0, 0.0], [0.0, 0.0, -1.0]]) \
+        if rotation is None else np.asarray(rotation, float)
+    return positions, np.repeat(R[None], n, axis=0)
+
+
+def test_path_clearance_finds_a_wall_the_thirteen_pose_sample_would_miss():
+    """The failure 7.38 records: a path whose *ends* are clear and whose middle
+    is inside a panel. A sampled check passes it; this one does not."""
+    from tpgpt.grasp.filters import path_clearance
+    from tpgpt.perception.obstacles import Obstacle
+
+    wall = Obstacle("wall", "box", np.array([0.0, 0.0, 1.0]), np.eye(3),
+                    np.array([0.30, 0.01, 0.30]))
+    positions, rotations = straight_path((0.0, -0.40, 1.0), (0.0, 0.40, 1.0))
+    result = path_clearance(
+        None, positions, rotations, resolve_pair(PAIR), obstacles=[wall]
+    )
+    assert result["inside_fraction"] > 0.0
+    assert result["max_depth"] > 0.005
+    assert result["culprits"] == {"wall": result["inside_waypoints"]}
+
+
+def test_path_clearance_reports_a_clear_path_as_clear():
+    from tpgpt.grasp.filters import path_clearance
+    from tpgpt.perception.obstacles import Obstacle
+
+    far_away = Obstacle("wall", "box", np.array([0.0, 0.0, 0.0]), np.eye(3),
+                        np.array([0.05, 0.05, 0.05]))
+    positions, rotations = straight_path((0.0, -0.40, 1.0), (0.0, 0.40, 1.0))
+    result = path_clearance(
+        None, positions, rotations, resolve_pair(PAIR), obstacles=[far_away]
+    )
+    assert result["inside_fraction"] == 0.0
+    assert result["max_depth"] == 0.0
+    assert result["culprits"] == {}
+
+
+def test_the_carried_object_is_only_checked_while_it_is_being_carried():
+    """Outside the carry the object stands on a surface and is not attached to
+    the hand at all, so testing it there reports it colliding with the table it
+    is resting on."""
+    from tpgpt.grasp.filters import path_clearance
+    from tpgpt.perception.obstacles import Obstacle
+
+    # A slab the *object* passes through in the middle of the path, while the
+    # hand -- 100 mm above it -- stays clear.
+    slab = Obstacle("slab", "box", np.array([0.0, 0.0, 0.85]), np.eye(3),
+                    np.array([0.30, 0.02, 0.02]))
+    positions, rotations = straight_path((0.0, -0.40, 0.95), (0.0, 0.40, 0.95))
+    load = np.array([[0.0, -0.40, 0.85], [0.005, -0.40, 0.85]])
+
+    everywhere = path_clearance(
+        None, positions, rotations, resolve_pair(PAIR), obstacles=[slab],
+        carried_points=load, carry_span=(0, len(positions) - 1),
+    )
+    late = path_clearance(
+        None, positions, rotations, resolve_pair(PAIR), obstacles=[slab],
+        carried_points=load, carry_span=(50, len(positions) - 1),
+    )
+    assert (everywhere["depth_object"] > 0).any()
+    # Restricted to the last ten waypoints, the object is past the slab.
+    assert not (late["depth_object"] > 0).any()
+
+
+def test_path_clearance_refuses_mismatched_positions_and_rotations():
+    from tpgpt.grasp.filters import path_clearance
+
+    positions, rotations = straight_path((0, 0, 1), (0, 0.1, 1), n=10)
+    with pytest.raises(ValueError, match="against"):
+        path_clearance(None, positions, rotations[:5], resolve_pair(PAIR),
+                       obstacles=[])
