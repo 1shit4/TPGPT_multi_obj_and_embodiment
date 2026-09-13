@@ -341,6 +341,15 @@ class ConvexBody:
     geom_id: int
     planes: np.ndarray
     radius: float
+    #: ``"hull"`` for a mesh or box, given as half spaces; ``"cylinder"`` and
+    #: ``"sphere"`` for the two curved primitives, which are convex but have no
+    #: finite half-space form. Robosuite's hands use all three -- the Rethink
+    #: gripper has a cylinder and the Ability and Schunk hands have spheres --
+    #: and a hand whose base cannot be represented is a limb the check cannot
+    #: see, so each is handled rather than dropped.
+    kind: str = "hull"
+    #: ``(radius, half height)`` for a cylinder, ``(radius,)`` for a sphere.
+    size: tuple = ()
 
     def contains(self, points: np.ndarray, position, rotation, tolerance: float = 0.0):
         """Which of ``points`` lie inside this piece, at the given world pose.
@@ -355,6 +364,12 @@ class ConvexBody:
             ``(n,)`` boolean mask.
         """
         local = (np.atleast_2d(points) - position) @ rotation
+        if self.kind == "sphere":
+            return np.linalg.norm(local, axis=1) <= float(self.size[0]) - tolerance
+        if self.kind == "cylinder":
+            radial = np.linalg.norm(local[:, :2], axis=1) <= float(self.size[0]) - tolerance
+            axial = np.abs(local[:, 2]) <= float(self.size[1]) - tolerance
+            return radial & axial
         return np.all(local @ self.planes[:, :3].T + self.planes[:, 3] <= -tolerance,
                       axis=1)
 
@@ -406,7 +421,21 @@ def robot_bodies(env, prefixes: tuple[str, ...] = ROBOT_PREFIXES) -> list[Convex
                  [0, 0, 1, -half[2]], [0, 0, -1, -half[2]]], dtype=float,
             )
             radius = float(np.linalg.norm(half))
-        else:  # pragma: no cover - no robot in this project has one
+        elif kind == int(mujoco.mjtGeom.mjGEOM_CYLINDER):
+            size = np.array(model.geom_size[gid], dtype=float)
+            bodies.append(ConvexBody(
+                name, gid, np.empty((0, 4)),
+                float(np.hypot(size[0], size[1])),
+                kind="cylinder", size=(float(size[0]), float(size[1])),
+            ))
+            continue
+        elif kind == int(mujoco.mjtGeom.mjGEOM_SPHERE):
+            r = float(model.geom_size[gid][0])
+            bodies.append(ConvexBody(
+                name, gid, np.empty((0, 4)), r, kind="sphere", size=(r,),
+            ))
+            continue
+        else:  # pragma: no cover - guarded so a new hand fails loudly
             raise NotImplementedError(
                 f"robot geom {name!r} is a {mujoco.mjtGeom(kind).name} and this "
                 "has no convex form for it; a link the check cannot see is "

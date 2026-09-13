@@ -77,3 +77,42 @@ def test_clearance_turns_a_near_miss_into_a_reported_touch():
     assert deepest_penetration(point, [box()]) == (0.0, None)
     depth, name = deepest_penetration(point, [box()], clearance=0.010)
     assert name == "b" and np.isclose(depth, 0.004)
+
+
+def test_a_convex_body_handles_the_three_shapes_robot_hands_are_made_of():
+    """Mesh, box, cylinder and sphere, because robosuite's hands use all of them.
+
+    The Rethink gripper's base is a cylinder and the Ability and Schunk hands
+    carry spheres, and a hand whose base cannot be represented is a limb the
+    collision check cannot see. Dropping it silently would be worse than a slow
+    check, so an unrepresentable geom raises instead -- this pins the three that
+    do not have to.
+    """
+    from tpgpt.perception.obstacles import ConvexBody
+
+    eye = np.eye(3)
+    centre = np.zeros(3)
+
+    # A 100 mm cube as half spaces.
+    half = 0.05
+    planes = np.array([[1, 0, 0, -half], [-1, 0, 0, -half],
+                       [0, 1, 0, -half], [0, -1, 0, -half],
+                       [0, 0, 1, -half], [0, 0, -1, -half]], dtype=float)
+    box = ConvexBody("box", 0, planes, half * np.sqrt(3))
+    assert box.contains(np.array([[0.0, 0, 0]]), centre, eye)[0]
+    assert not box.contains(np.array([[0.06, 0, 0]]), centre, eye)[0]
+
+    # Radius 40 mm, half height 100 mm.
+    cyl = ConvexBody("cyl", 0, np.empty((0, 4)), 0.11, kind="cylinder",
+                     size=(0.04, 0.1))
+    assert cyl.contains(np.array([[0.03, 0, 0.05]]), centre, eye)[0]
+    assert not cyl.contains(np.array([[0.05, 0, 0.0]]), centre, eye)[0]   # too wide
+    assert not cyl.contains(np.array([[0.0, 0, 0.11]]), centre, eye)[0]   # too tall
+
+    sph = ConvexBody("sph", 0, np.empty((0, 4)), 0.03, kind="sphere", size=(0.03,))
+    assert sph.contains(np.array([[0.02, 0, 0]]), centre, eye)[0]
+    assert not sph.contains(np.array([[0.031, 0, 0]]), centre, eye)[0]
+
+    # The tolerance shrinks every shape, not only the polytope.
+    assert not sph.contains(np.array([[0.025, 0, 0]]), centre, eye, tolerance=0.01)[0]
+    assert not cyl.contains(np.array([[0.035, 0, 0]]), centre, eye, tolerance=0.01)[0]
