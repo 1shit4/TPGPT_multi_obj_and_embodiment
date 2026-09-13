@@ -1124,4 +1124,5 @@ as a flaky test whose outcome depends on another process.
 reports it reproducible and the parallel session's uncommitted work stays in its
 own tree. The nine files touched here do not overlap the three that session is
 editing, so the merge is clean apart from a possible renumbering of
-`ROBOTICS_NOTES` §7.28 if both sessions added one.
+`ROBOTICS_NOTES` §7.40 — it was written as §7.28 in an isolated worktree, collided
+with the keypoint session's own §7.28, and was renumbered on merge.

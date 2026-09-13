@@ -321,7 +321,7 @@ so they can be built and tested separately. Full detail in `ROBOTICS_NOTES.md`
   milliseconds per variant from a cached cloud and a cached grasp, so hundreds
   of designs can be swept offline. This is where the largest known error lives.
 - ~~**Thread B — policy execution.**~~ **Measured; `V` stays the default.**
-  §7.28 and `docs/dynamics_execution.md`. Five attractor laws x two query sites
+  §7.40 and `docs/dynamics_execution.md`. Five attractor laws x two query sites
   x 43 paired warps, run twice — once on a freely-tracking arm and once under a
   load that shuts the lag gate on 42% of steps instead of 2.5%.
 

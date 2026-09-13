@@ -1968,10 +1968,13 @@ negative, that a point mid-segment is on the path, that a late trajectory shows
 no drift, that a deep error does not pollute the closing axis, and that an
 untracked source file is fatal to reproducibility.
 
-### 7.28 The attractor law: query at the attractor, and switch to a light anchor
+### 7.40 The attractor law: query at the attractor, and switch to a light anchor
 
-> **Numbering note.** A parallel session is appending to this file too; if both
-> added a 7.28 the merge should renumber, not merge, the two.
+> **Numbered 7.40 on merge.** This was written as 7.28 in an isolated worktree
+> while the keypoint session was appending to the same file; both claimed 7.28,
+> and the collision was resolved by renumbering this one rather than merging the
+> two. Its neighbour 7.30, "the map transports across hands; the execution does
+> not", is the keypoint session's and is directly relevant to what follows.
 
 Executing a transported policy means moving an **attractor** -- the far end of
 an invisible spring whose near end is bolted to the gripper -- and the shipped
