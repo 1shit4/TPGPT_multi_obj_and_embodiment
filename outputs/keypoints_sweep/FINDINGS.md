@@ -3076,6 +3076,11 @@ it is not one a real system could run.
 | **Q** old shelf, sampled checks | 7/20 | 14 | 12 | 21.3 mm | **85.5 mm** |
 | **R** new shelf, phase check | **16/20** | **19** | **16** | **7.5 mm** | **13.8 mm** |
 
+Extended to seven hands by adding the three-finger `robotiq3f` and the
+`rethink`, the same conditions give **19 of 28** — and **all nine failures have
+the jaws at 0.99 or beyond**, with nothing above 0.94 among the nineteen that
+placed. See below.
+
 ### Reading it on its own
 
 **The placement failure is gone, and the number that says so is the tracking
@@ -3170,6 +3175,127 @@ serves every object.
 | robotiq140 | milk | #24* | 7° | 9.9 | 14 | 0.997 | 79% | 10.4 | **yes** | **yes** | 1.00 | 401 | **yes** | 19 |
 | robotiq140 | can | #33 | 6° | 7.6 | 6 | 0.911 | 62% | 12.7 | **yes** | **yes** | 1.00 | 404 | **yes** | 29 |
 | robotiq140 | bread | #9* | 10° | 14.6 | 4 | 0.639 | 100% | 7.4 | **yes** | no | 0.68 | 419 | no | 133 |
+
+### Two more hands, and one of them has three fingers
+
+`outputs/expT` and `outputs/expT_rethink`, run at the same conditions as the
+twenty cells above and against the identical seeded scene -- the objects sit
+where they sit for the other five hands, to the millimetre -- so these eight
+cells combine directly with them.
+
+**Why these two.** `robotiq3f` is the only gripper in the registry that is not
+two-fingered and that actuates, so it is the whole of the available finger-count
+diversity; see the survey below for why. `rethink` adds a seventh embodiment and
+extends the span of tool offsets downward, to **5.1 mm** against the 9.3 to
+38.3 mm of the rest.
+
+| hand | fingers | object | min det | reach | track | **grasped** | **traversed** | held | closure | **placed** | place err | why it failed |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| rethink | 2 | cereal | 0.941 | 60% | 25.4 | no | no | 0.16 | 1.00 | no | 320 | jaws closed fully (1.00) and the object was extruded |
+| rethink | 2 | milk | 0.985 | 82% | 6.8 | **yes** | **yes** | 1.00 | 0.50 | **yes** | 16 |  |
+| rethink | 2 | can | 0.858 | 89% | 5.5 | **yes** | no | 0.19 | 1.00 | no | 368 | jaws closed fully (1.00) and the object was extruded |
+| rethink | 2 | bread | 0.940 | 100% | 4.1 | **yes** | no | 0.55 | 1.02 | no | 212 | jaws closed fully (1.02) and the object was extruded |
+| robotiq3f | 3 | cereal | 0.947 | 86% | 6.1 | **yes** | **yes** | 1.00 | 0.94 | **yes** | 18 |  |
+| robotiq3f | 3 | milk | 0.996 | 75% | 12.1 | **yes** | **yes** | 1.00 | 0.92 | **yes** | 19 |  |
+| robotiq3f | 3 | can | 0.987 | 62% | 17.9 | **yes** | **yes** | 0.91 | 1.01 | no | 91 | jaws closed fully (1.01) and the object was extruded |
+| robotiq3f | 3 | bread | 0.935 | 78% | 10.5 | no | no | 0.22 | 1.00 | no | 371 | jaws closed fully (1.00) and the object was extruded |
+
+### The combined matrix, seven hands
+
+| hand | fingers | aperture | tool offset | placed |
+|---|---|---|---|---|
+| yumi | 2 | 50 mm | 9.3 mm | 3/4 |
+| xarm | 2 | 85 mm | 19.2 mm | 3/4 |
+| panda | 2 | 80 mm | 11.1 mm | **4/4** |
+| robotiq85 | 2 | 85 mm | 32.8 mm | 3/4 |
+| robotiq140 | 2 | 125 mm | 38.3 mm | 3/4 |
+| **rethink** | 2 | 66 mm | **5.1 mm** | 1/4 |
+| **robotiq3f** | **3** | 110 mm | 36.4 mm | 2/4 |
+| | | | **19/28** |
+
+**The three-finger hand transports.** `robotiq3f` places the cereal at 18.0 mm
+and the milk at 18.8 mm, from a demonstration recorded with a two-fingered Panda
+on a different object in a different scene. Its fingers group as three sets of
+six geoms at **−63.8, −61.6 and +71.9 mm** along its closing axis -- two on one
+side and one on the other -- which is why the grasp gate tests *opposition*
+rather than counting contacts, and the grouping resolved without incident.
+
+Its maps are the best in the run: `min det` 0.935 to 0.996, and a 0.996 on the
+milk is the highest of all 28 cells. So a hand with a fundamentally different
+finger arrangement is no harder for the transportation map than a parallel jaw,
+which is the claim the fixed-size grasp cube rests on -- the cube encodes the
+grasp pose and **nothing about the hand**, not the aperture, not the fingertip
+depth, not the finger count.
+
+**And every one of the nine failures is the same thing.** Across all 28 cells,
+the jaw closure separates outcomes **perfectly**:
+
+| | n | closure reached |
+|---|---|---|
+| placed | 19 | 0.23 – 0.94 |
+| failed | **9** | **0.99 – 1.02** |
+
+Nine of nine. Not one failure in the expanded matrix is a map failure, a
+selection failure or a reach failure -- every one is the jaws closing through the
+object, which is the open-loop gripper limitation written up below and which
+four closing rules have failed to fix.
+
+`rethink` is the hand it costs most: at 66 mm it has the second-narrowest
+aperture, and it extrudes the cereal, the can and the bread. `robotiq3f` loses
+the can and the bread the same way.
+
+### What grippers exist, and why there are no five-finger hands
+
+Recorded because the question will be asked again and the answer is a property
+of the **assets**, not of the method.
+
+A hand needs two things: a robosuite model to mount on the arm, and a
+GraspGen-X description to plan grasps with. They must be the **same** hand --
+mounting one and planning for another is the silent failure `§7.32` records,
+where a three-hand comparison ran a Panda three times and every number came out
+convincingly monotonic in the tool offset.
+
+| | available | multi-finger among them |
+|---|---|---|
+| robosuite gripper classes | 28 | Jaco ×2, RobotiqThreeFinger ×2, G1ThreeFinger ×2, Ability ×2, Fourier ×2, Inspire ×2, SchunkSvh ×2 |
+| GraspGen-X descriptions | 26 | **7** typed `revolute_3f`: barrett_hand, inspire_hand, robotiq_3f, sharpa_wave, surge_hand, unitree_g1, wuji_hand |
+
+GraspGen's taxonomy has only three categories, so `sharpa_wave` (**34 links**)
+and `wuji_hand` (**26 links**) are almost certainly full dexterous hands filed
+under `revolute_3f`. Neither has a robosuite model.
+
+Checked by comparing each hand's extent **in the grip-site frame**, which is the
+frame GraspGen's declared bounding box is in:
+
+| robosuite | GraspGen | robosuite extent | GraspGen bbox | worst disagreement |
+|---|---|---|---|---|
+| PandaGripper | franka_panda | 63 × 137 × 210 | 63 × 138 × 205 | **3%** |
+| RobotiqThreeFinger | robotiq_3f | 131 × 225 × 235 | 130 × 217 × 220 | **7%** |
+| RobotiqThreeFinger**Dexterous** | robotiq_3f | 131 × 225 × 235 | 130 × 217 × 220 | **7%** |
+| InspireRightHand | inspire_hand | 83 × 164 × 200 | 82 × 169 × 186 | **8%** |
+| RethinkGripper | sawyer_hand | 58 × 68 × 133 | 66 × 106 × 121 | 36% |
+| G1ThreeFingerRight | unitree_g1 | 88 × 131 × 185 | 82 × 89 × 222 | 47% |
+| BDGripper | bd_spot | 148 × 174 × 246 | 97 × 180 × 200 | 52% |
+| Jaco3Finger, Ability, Fourier, SchunkSvh | **no description** | — | — | cannot plan grasps at all |
+
+**Five-finger hands cannot be run.** robosuite offers four of them -- Ability,
+Fourier, SchunkSvh and the Inspire -- and GraspGen-X has a description for
+exactly one, the Inspire, whose fingers travel **6.5 mm** against 29 to 85 mm
+for every other hand and which therefore does not actuate (1 of 13 swept depths
+lifts the reference can, below the three-sample minimum). Without a description
+there are no grasp candidates to filter, and substituting another hand's model
+is the `§7.32` failure by construction.
+
+**A disagreement in that table is not proof of a mismatch**, and the `rethink`
+row is why: it disagrees by 36% and is nonetheless physics-verified and placing
+cells. The extent is measured at whatever finger configuration each model
+defaults to, so a jaw-opening convention shows up as a difference along one
+axis. The test **confirms** a pairing when it agrees and leaves one unresolved
+when it does not. So `G1ThreeFingerRight ↔ unitree_g1` and `BDGripper ↔ bd_spot`
+are **unverified rather than ruled out** -- each would need `measure_frames` for
+the closing axis and anisotropy, then a thirteen-grasp physics depth sweep, the
+same route every hand in the registry took.
+
 
 ### What this does not settle
 
@@ -3452,6 +3578,8 @@ it turns each placement into a partial lottery.
 |---|---|---|
 | 1 | **The plan commands the hand through the shelf's back wall on 15 of 20 cells**, by 4.8 to 79.9 mm, so the arm jams and every placement becomes a drop from a median 40 mm (§8j, `ROBOTICS_NOTES.md` §7.35) | `solve_ik` has no collision model, which is why the pose "solves to 3-5 mm" while being physically unreachable, and `by_collision` only ever checks the grasp. Candidate fixes — a collision-aware reachability gate, a front approach, or standing the release off the board — are all untried |
 | 1b | ~~The half-turn symmetry is applied to two hands that declare themselves asymmetric~~ — **closed, and it turned out to be redundant.** Compared against the grasp actually *executed*, minimising over the symmetry changes the answer on **0 of 20** cells, so it is now off by default | It was inert and could only hide a regression. The 13 cells where it still altered the reading were all comparisons against the grasp the planner *emitted* rather than the one executed — a reference mismatch, and forgiving it is what concealed §7.33 |
+| 1h | **Only one of the nine registered hands is not two-fingered, and no five-finger hand can be run at all.** `robotiq3f` is the whole of the available finger-count diversity; `inspire` is the only other multi-finger pairing and its fingers travel 6.5 mm, so it does not actuate. robosuite offers Ability, Fourier, SchunkSvh and Jaco hands and **GraspGen-X has a description for none of them**, so there are no grasp candidates to filter | Two pairings are *unverified rather than ruled out* -- `G1ThreeFingerRight ↔ unitree_g1` (a second three-finger hand) and `BDGripper ↔ bd_spot`. Each needs `measure_frames` for the closing axis and anisotropy, then a thirteen-grasp physics depth sweep. The extent comparison disagrees on both, but it disagrees on `rethink` too, which works — so it cannot settle them either way |
+| 1i | **The whole scene is scaled down and the gripper is not, and the properly-scaled experiment has never been run.** robosuite's meshes are 1.4 to 2.5 times smaller than the articles they stand for -- the cereal is 30 x 100 x 150 mm against a real 80 x 200 x 300, the loaf 40 x 48 x 49 against 200 x 110 x 110 -- while the hand is full size. The shelf has been deepened to 280 mm as a **clearance** fix, which is not the same thing | Real-sized objects admit far fewer grasps: an 80 mm jaw can take a 200 mm cereal box only across its 80 mm face. Every filter in the funnel is currently exercised on objects graspable almost anywhere, so "the filter kept enough candidates" means little. `MujocoXMLObject` takes a `scale` argument; uniform factors of about 2.0, 1.5, 1.4 and 2.5 reach realistic sizes. Deliberately **its own experiment**, because scaling changes which grasps exist and would confound anything measured with it, and because it needs the robot placement re-verified the way `§7.32` did |
 | 1f | **The candidate funnel is starved, and it is the place-side corridor that starves it** — a median of **2.5** candidates reach the ranking in Experiment Q against 7 in O-ii and 14 in O-iii, and three cells reach it with **one**. ``by_place_approach`` cuts 711 to 296 using a *straight* corridor the full length of the hand, while the hand actually arrives along the curved transported path -- which ``path_clearance`` already measures exactly (§8o) | Shortening the corridor, or deleting the stage and letting the path check carry the place side, is answerable as pure geometry in seconds per cell. The most informative unmeasured quantity: would the path check have kept candidates the place zone rejected? |
 | 1g | **``by_reachability`` falls back on 20 of 20 cells** and contributes nothing but a flag, at thirteen IK solves per candidate (§8o) | It is also the stage ``path_clearance`` replaces, so it is redundant and inert at once. Retiring it is its own commit and its own before/after |
 | 1c | **Why the funnel's grasps are lost during the carry** — six cells to zero, one-sided, p = 0.031 (§8k) | Six grasp properties measured, none separates them, and the *grasping* difference is not significant (p = 0.375). Re-running Tier 2 on the same filters would reproduce it: nothing upstream has changed since |

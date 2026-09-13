@@ -743,8 +743,28 @@ unmeasured).** Text prompt -> object and shelf -> cloud -> ranked 6-DoF grasps
 -> filters -> keypoints -> transport -> policy -> execute -> scored, with
 per-run HTML reports. Nine gripper pairs registered, eight verified in physics.
 
-**The current end-to-end result is 16/20 across five hands and four objects
-(`FINDINGS.md` §8p, Experiment R), from one demonstration.** Cereal, milk and
+**The current end-to-end result is 19/28 across seven hands and four objects
+(`FINDINGS.md` §8p, Experiment R), from one demonstration** -- 16/20 on the five
+hands the campaign was run with, plus the three-finger `robotiq3f` at 2/4 and
+the `rethink` at 1/4. **All nine failures have the jaws at 0.99 closure or
+beyond and nothing that placed went above 0.94**, so every one of them is the
+open-loop gripper and not the transport.
+
+**The three-finger hand transports as well as the parallel jaws do.** Its maps
+are the best in the run -- `min det` 0.935 to 0.996, the highest single value of
+all 28 cells -- which is the claim the fixed-size grasp cube rests on: the cube
+encodes the grasp pose and nothing about the hand, not the aperture, not the
+fingertip depth, not the finger count.
+
+**But it is the only non-two-fingered hand that can be run, and no five-finger
+hand can.** A gripper needs a robosuite model *and* a GraspGen-X description of
+the same hand; robosuite offers Ability, Fourier, SchunkSvh and Jaco hands and
+GraspGen-X has a description for none of them. `inspire` is the only other
+multi-finger pairing and its fingers travel 6.5 mm, so it does not actuate.
+Open item 1h in `§8z`.
+
+**The original five-hand figure was 16/20 and the shape of that result is
+this:** Cereal, milk and
 can are **15 of 15**; every one of the four failures is the bread. Nineteen of
 twenty grasps hold. That is up from 7/20 on the same cells three weeks of
 debugging earlier, and the whole of the gain is two changes that have nothing to
