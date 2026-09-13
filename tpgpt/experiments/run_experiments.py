@@ -36,7 +36,13 @@ from tpgpt.experiments.diagnose import (
     tally,
     tally_text,
 )
-from tpgpt.experiments.pipeline import DEFAULT_KEYPOINTS, build_scene, run
+from tpgpt.experiments.pipeline import (
+    DEFAULT_KEYPOINTS,
+    SCENE_OBJECTS,
+    build_scene,
+    run,
+)
+from tpgpt.experiments.run_keypoint_replay import REPLAY_GRIPPERS
 from tpgpt.experiments.reshelving_pipeline import record_source_placement
 from tpgpt.grasp.grippers import VERIFIED_PAIRS
 from tpgpt.reporting.html import write_index, write_manifest, write_report
@@ -279,6 +285,11 @@ def _blame_table(rows: list[dict]) -> str:
 
 
 CAMPAIGN_TEXT = {
+    "execution": (
+        "Experiment R's grid -- five hands, four objects -- executed by the "
+        "policy instead of replayed pose by pose. R placed 16/20 with the "
+        "executor removed; any shortfall here is the executor's."
+    ),
     "keypoints": "Every combination of the three keypoint families, to settle "
                  "which set describes an unseen object well enough to transport onto it.",
     "grippers": "One task, every hand whose frame is verified in physics. Jaw "
@@ -362,7 +373,32 @@ def shelf_settings(obj="can", seeds=(0, 1)):
     ]
 
 
+def execution_settings(slot="top middle", seeds=(0,)):
+    """Experiment R's grid, executed by the **policy** instead of replayed.
+
+    Five hands times four objects, the same cells and the same scene order as
+    ``FINDINGS.md`` §8p. That run drove the arm pose by pose under position
+    control -- no policy, no attractor integration, no lag gate -- and placed
+    **16 of 20**. It is therefore the executor-free ceiling, and this campaign
+    asks how much of it survives the thing that actually ships.
+
+    The comparison is only meaningful because the maps are now identical: the
+    grasp-pose cube, the same filters, the same whole-path check and the same
+    object order all reached ``pipeline.run`` in the two commits before this
+    one. Any shortfall against 16/20 is therefore the executor's, which is
+    precisely the split ``run_keypoint_replay``'s own docstring sets up.
+    """
+    return [
+        {"gripper": g, "obj": obj, "slot": slot, "seed": seed,
+         "objects": SCENE_OBJECTS}
+        for g in REPLAY_GRIPPERS
+        for obj in SCENE_OBJECTS
+        for seed in seeds
+    ]
+
+
 CAMPAIGNS = {
+    "execution": execution_settings,
     "keypoints": keypoint_settings,
     "grippers": gripper_settings,
     "objects": object_settings,
