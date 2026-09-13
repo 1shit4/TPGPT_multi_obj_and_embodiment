@@ -315,10 +315,49 @@ Each of these cost real debugging time. Full detail in `ROBOTICS_NOTES.md`.
   the list is empty**, so the Inspire hand, which lifts nothing, would quietly
   re-enter every campaign. It merges now. Any new per-hand measurement must
   merge too.
-- **The Inspire hand's fingers travel 0.7 mm.** It does not actuate, which is a
-  simpler explanation for its 24 failed grasp attempts than the registry
-  docstring's "five fingers cannot pinch a can from above". Against 29-90 mm for
-  every other hand.
+- ~~**The Inspire hand's fingers travel 0.7 mm.**~~ **Withdrawn: that was the
+  ruler, and the docstring it overruled was right.** Driven on all six of its
+  actuators the hand travels **53 mm**. The 0.7 mm came from commanding
+  `action[-1]`, which is one actuator -- see the next item. The registry
+  docstring's "five fingers cannot pinch a can from above" is what stands:
+  measured by casting rays across the hand along twelve axes, its fingertips
+  part by at most **28.0 mm** against a 65 mm can, and it lifts 0 of 13 swept
+  depths on a can, a lemon **and** bread. `docs/gripper_diversity.md` section 4.
+- **A gripper command must fill the whole gripper block, not `action[-1]`.**
+  robosuite lays an action vector out as the arm's degrees of freedom followed
+  by the gripper's, so a hand with `dof > 1` owns the **last `dof` entries**.
+  Two measurement sites wrote `action[-1] = 1.0` and drove one actuator.
+  Audited over all 26 robosuite hands: **11 of 13 multi-actuator hands were
+  under-driven** -- `AbilityLeftHand` by 148 mm of travel, `SchunkSvhRight` by
+  95, `InspireRight` by 43 -- and **0 of 13 single-actuator hands** were
+  affected beyond 0.01 mm. Two hands lost no travel at all and lost *fingers*:
+  the UMI and the Jaco-dexterous closed one-sidedly at full apparent travel,
+  which still yields a plausible closing axis and a plausible spread. Use
+  `grippers.gripper_action`. `run_gripper_audit` reports the gap per hand.
+- **The UMI's lateral contact offset was that bug, not the hand.** Its
+  `contact_offset` of `[0.0, -0.035, -0.112]` -- "the only one in the registry
+  with a large lateral component", and an open item -- became
+  `[0.0, 0.002, -0.1417]` once both its fingers were driven. Its travel doubled
+  and its anisotropy rose from 5.6e5 to 2.4e8. It still lifts nothing.
+- **Re-measuring a settled hand draws another sample; it does not refresh a
+  value.** Three fresh processes measuring `RobotiqThreeFingerGripper` with
+  identical code and an identical seed classified **28, 32 and 30** geoms as
+  fingers and gave contact offsets spanning **11.7 mm** -- its fingers settle
+  chaotically and several geoms sit on the `MIN_TRAVEL` threshold, so which
+  ones count changes, and `contact_offset` is the centroid of whichever set was
+  counted. Parallel jaws repeat to ~0.02 mm; `inspire` to 3.2 mm and 5 degrees.
+  Use `measure_frames --only <the hand you are adding>`.
+- **The arm does not hold still while a gripper is being measured.** A zero arm
+  action is not a command to stay put: with a heavy hand the wrist wandered
+  **800 mm** over three forty-step settles, which put the whole excursion into
+  `closed - opened` and flipped the derived approach axis end for end. Capture
+  geom positions in the **root body's own frame**, and freeze the arm's own
+  degrees of freedom only -- never the gripper's, which is `7.32`.
+- **`calibrate_depth` decides which hands campaigns may use, and it asks one
+  object.** `REFERENCE_OBJECT = "can"` is 65 mm across: a fine reference for a
+  jaw opening to 80 or 125 mm and a meaningless one for a hand opening to 28,
+  where the sweep measures "a can does not fit". `lift_height` now places the
+  object it is asked to measure; the default scene is unchanged.
 - **A grasp is a pose, not an axis. Never re-derive its closing direction.**
   `task_frame` used to pick the closing axis's sign with a world-axis test
   (`c[1] >= 0`, tie-broken on `c[0]`), run independently at each of
@@ -784,12 +823,25 @@ all 28 cells -- which is the claim the fixed-size grasp cube rests on: the cube
 encodes the grasp pose and nothing about the hand, not the aperture, not the
 fingertip depth, not the finger count.
 
-**But it is the only non-two-fingered hand that can be run, and no five-finger
-hand can.** A gripper needs a robosuite model *and* a GraspGen-X description of
-the same hand; robosuite offers Ability, Fourier, SchunkSvh and Jaco hands and
-GraspGen-X has a description for none of them. `inspire` is the only other
-multi-finger pairing and its fingers travel 6.5 mm, so it does not actuate.
-Open item 1h in `§8z`.
+**It is still the only non-two-fingered hand that can be run, but the reason
+given for that has changed.** A gripper needs a robosuite model *and* a
+GraspGen-X description of the same hand. The two halves overlap much more than
+item 1h in `§8z` assumed: **all ten unused robosuite hands mount on a Panda and
+actuate**, including three five-finger hands (`SchunkSvhRight` 20 DOF/150 mm of
+travel, `AbilityRight` 10 DOF/103 mm, `FourierRight` 6 DOF/30 mm), and a
+GraspGen-X description needs only a small JSON -- the released checkpoint
+declares `gripper_backbone: sweep_volume_v2`, so it conditions on the swept
+volume, the fingertip depth and the kinematic family, not on the point clouds
+and TSDF grids the shipped directories also carry. `tpgpt.grasp.describe`
+authors one from the robosuite model.
+
+What actually blocks the multi-finger hands is **physical**, and it is measured:
+`inspire` and `g1three` open by 28.0 and 26.1 mm at their fingertips on their
+best of twelve axes, and lift 0 of 13 on a can, a lemon and bread. And the
+description generator, which reproduces a shipped aperture to within 3% on four
+of five clean two-finger jaws, does **not** describe an anthropomorphic hand,
+whose graspable volume is not between two opposed fingertips.
+`docs/gripper_diversity.md`.
 
 **The original five-hand figure was 16/20 and the shape of that result is
 this:** Cereal, milk and

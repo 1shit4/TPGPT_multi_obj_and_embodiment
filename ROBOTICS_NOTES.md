@@ -4237,12 +4237,30 @@ rather than the difference of two separately-minimised distances.
   to cover the observed error, which rejects nearly everything a 50 mm jaw could
   hold. Excluding the yumi is the third option and the least informative one --
   it hides the perception defect rather than fixing it.
-- **The UMI hand.** Its contact offset `[0.0, -0.035, -0.112]` is the only one
-  in the registry with a large *lateral* component; every parallel jaw is almost
-  purely along the approach axis. 7.2 also measured it tolerating only 15 mm of
-  depth error against 120-135 mm for the parallel jaws. Both are properties of
-  the hand, independent of any campaign, and both are worth checking before
-  anything else about that gripper.
+- ~~**The UMI hand.** Its contact offset `[0.0, -0.035, -0.112]` is the only one
+  in the registry with a large *lateral* component.~~ **Answered, and it was not
+  a property of the hand.** That lateral component was an artefact of measuring
+  the UMI with **one jaw**: `measure_frame` commanded `action[-1]`, which is one
+  actuator, and the UMI has two. Driven properly its contact offset is
+  `[0.0, 0.002, -0.1417]`, its finger travel doubles from 44.78 to 89.19 mm and
+  its anisotropy rises from 5.6e5 to 2.4e8. The 15 mm depth tolerance of 7.2 was
+  measured through the same wrong frame and should be re-taken if it matters.
+  The hand still lifts nothing, so it stays out of `VERIFIED_PAIRS`; what is
+  withdrawn is the explanation, not the exclusion.
+  `docs/gripper_diversity.md` sections 3 and 4.
+- **Gripper diversity, and why the fleet is still nearly all two-finger jaws.**
+  `docs/gripper_diversity.md` is the running document, structured the way
+  `outputs/keypoints_sweep/FINDINGS.md` is. What it has settled so far:
+  the measurement bug above, across all 26 robosuite hands (11 of 13
+  multi-actuator hands under-driven, 0 of 13 single-actuator hands affected);
+  two new registry pairings, `g1three` and `bd`, both of which measure cleanly
+  and lift nothing; and the physical reason the two curling hands fail, which
+  is that they open by 26 to 28 mm at the fingertips against a 65 mm reference
+  can, on the best of twelve axes. Item 1h of `FINDINGS.md` 8z is **partly
+  withdrawn**: all ten unused robosuite hands mount and actuate, and a
+  GraspGen-X description needs only a small JSON because the released
+  checkpoint conditions on the swept volume rather than on meshes. What
+  actually blocks a five-finger hand is physical, not missing assets.
 - **Grasp filtering and selection.** Section 5.6 is the measured case, and 7.39
   is where it now stands. Built and measured in Experiment Q: a visibility
   criterion, scene-derived no-approach zones at the pick and the placement,

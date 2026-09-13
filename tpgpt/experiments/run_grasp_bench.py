@@ -104,8 +104,17 @@ ROTATIONAL_DAMPING = 12.0
 LIFT_TO = 0.15
 
 
-def _scene(gripper: str, obj: str, seed: int, camera_size: int = 256):
-    """One object, one hand, cameras on. Nothing else in the scene."""
+def _scene(gripper: str, obj: str, seed: int, camera_size: int = 256,
+           cameras: bool = True):
+    """One object, one hand. Nothing else in the scene.
+
+    ``cameras`` is off for the second and later grasps of a cell: the cloud is
+    extracted once and every grasp is planned from it, so re-rendering three
+    views per grasp would cost time and ~250 MB of resident memory for a
+    picture nothing reads. Rendering does not touch the dynamics, and the
+    placement is seeded, so the scene is otherwise identical -- which
+    ``diagnose.replay_preconditions`` re-checks per grasp anyway.
+    """
     from robosuite.controllers import load_composite_controller_config
 
     from tpgpt.sim.controllers.cartesian_impedance import make_torque_controller_config
@@ -115,11 +124,7 @@ def _scene(gripper: str, obj: str, seed: int, camera_size: int = 256):
     config = make_torque_controller_config(
         load_composite_controller_config(controller="BASIC", robot="Panda")
     )
-    env = TabletopShelf(
-        robots="Panda",
-        gripper_types=pair.robosuite,
-        controller_configs=config,
-        objects=(obj,),
+    vision = dict(
         has_offscreen_renderer=True,
         use_camera_obs=True,
         camera_names=["workspace", "sideview", "birdview"],
@@ -127,21 +132,43 @@ def _scene(gripper: str, obj: str, seed: int, camera_size: int = 256):
         camera_widths=camera_size,
         camera_depths=True,
         camera_segmentations="instance",
+    ) if cameras else dict(has_offscreen_renderer=False, use_camera_obs=False)
+    env = TabletopShelf(
+        robots="Panda",
+        gripper_types=pair.robosuite,
+        controller_configs=config,
+        objects=(obj,),
         control_freq=20,
         seed=seed,
+        **vision,
     )
     env.reset()
     return env
 
 
-def _grip_and_carry(env, controller, grasp, gripper, obj, probes):
+def _grip_and_carry(env, controller, grasp, gripper, obj, probes, closure=None):
     """Approach, close, lift, carry, and report what the hand did.
 
     Returns a dict of measurements. The phases are the same ones
     ``verify.execute_grasp`` uses, with a lateral carry added: a grip that
     survives a straight lift can still shed the object under lateral
     acceleration, and the carry is what a reshelving task actually asks for.
+
+    Args:
+        closure: Stop the jaws at this fraction of their travel, 0 open to 1
+            shut, instead of commanding them fully closed. ``None`` is the
+            plain ``+1`` every campaign so far has used and stays the default.
+
+            This exists because four closing rules have now failed the same
+            way: the window between gripping and crushing is per-object *and*
+            per-hand, and no constant sits inside all of them
+            (``FINDINGS.md`` 8z). A fraction is the knob a per-pair table would
+            set, and ``replay.set_closure`` already commands it linearly and
+            monotonically on every hand -- robosuite's own action interface
+            cannot, because it takes the *sign* of a command and discards its
+            size.
     """
+    from tpgpt.sim.replay import closing_direction, set_closure
     position, rotation = grasp_to_eef_pose(grasp, gripper)
     pre_grasp = approach_waypoint(grasp, standoff=0.12, gripper=gripper)
     K = np.eye(3) * STIFFNESS
@@ -181,10 +208,19 @@ def _grip_and_carry(env, controller, grasp, gripper, obj, probes):
     drive(pre_grasp, STEPS["pre"], -1.0, settle=STEPS["settle"])
     drive(position, STEPS["descend"], -1.0, settle=STEPS["settle"])
 
-    # Close, in place.
+    # Close, in place. ``hold`` of 0.0 means "stay where you are": robosuite's
+    # gripper interface integrates the *sign* of the command, and the sign of
+    # zero is zero.
+    grip_model = env.robots[0].gripper
+    grip_model = grip_model["right"] if isinstance(grip_model, dict) else grip_model
+    if closure is None:
+        command = 1.0
+    else:
+        set_closure(grip_model, closing_direction(grip_model), float(closure))
+        command = 0.0
     for _ in range(STEPS["close"]):
         env.step(controller.action(
-            position, K, D, gripper=1.0, rotation_desired=rotation,
+            position, K, D, gripper=command, rotation_desired=rotation,
             rotational_stiffness=ROTATIONAL_STIFFNESS,
             rotational_damping=ROTATIONAL_DAMPING,
         ))
@@ -193,14 +229,14 @@ def _grip_and_carry(env, controller, grasp, gripper, obj, probes):
     force_at_close = float(diagnose.grip_force(env, obj))
 
     lifted = position + np.array([0.0, 0.0, LIFT_TO])
-    drive(lifted, STEPS["lift"], 1.0, settle=STEPS["settle"], record=True)
+    drive(lifted, STEPS["lift"], command, settle=STEPS["settle"], record=True)
     lift_height = float(env.object_position(obj)[2]) - start_z
     closure_at_lift = float(probes["closure"]())
 
     # Carry sideways and back. Both directions, so the grip is loaded each way.
     across = lifted + np.array([0.0, CARRY_DISTANCE, 0.0])
-    drive(across, STEPS["carry"], 1.0, settle=STEPS["settle"], record=True)
-    drive(lifted, STEPS["carry"], 1.0, settle=STEPS["settle"], record=True)
+    drive(across, STEPS["carry"], command, settle=STEPS["settle"], record=True)
+    drive(lifted, STEPS["carry"], command, settle=STEPS["settle"], record=True)
 
     held = trace["held"]
     carry_start = STEPS["close"]
@@ -219,11 +255,13 @@ def _grip_and_carry(env, controller, grasp, gripper, obj, probes):
 
 
 def run_cell(gripper: str, obj: str, *, seed: int = 0, ranks: int = DEFAULT_RANKS,
-             plan_only: bool = False, camera_size: int = 256) -> list[dict]:
+             plan_only: bool = False, camera_size: int = 256,
+             closure: float | None = None) -> list[dict]:
     """Every grasp tried for one hand and one object."""
     from tpgpt.sim.controllers.cartesian_impedance import CartesianImpedanceController
 
-    base = {"gripper": gripper, "object": obj, "seed": seed}
+    base = {"gripper": gripper, "object": obj, "seed": seed,
+            "closure_commanded": closure}
     env = _scene(gripper, obj, seed, camera_size)
     try:
         cloud = object_point_cloud(env, obj)
@@ -249,7 +287,8 @@ def run_cell(gripper: str, obj: str, *, seed: int = 0, ranks: int = DEFAULT_RANK
             grasp = grasps.grasps[int(index)]
             row = {**base, "grasp_rank": rank, "grasp_index": int(index),
                    "score": float(grasp.score)}
-            cell = _scene(gripper, obj, seed, camera_size) if rank else env
+            cell = (_scene(gripper, obj, seed, camera_size, cameras=False)
+                    if rank else env)
             try:
                 checks = diagnose.replay_preconditions(cell, gripper, obj)
                 diagnose.require(checks, context=f"{gripper}/{obj} rank {rank}")
@@ -262,7 +301,7 @@ def run_cell(gripper: str, obj: str, *, seed: int = 0, ranks: int = DEFAULT_RANK
                 with warnings.catch_warnings():
                     warnings.simplefilter("ignore")
                     row.update(_grip_and_carry(cell, controller, grasp, gripper,
-                                               obj, probes))
+                                               obj, probes, closure=closure))
                 row["outcome"] = (
                     "held" if row["held_at_end"] and row["final_height"] > LIFT_HEIGHT
                     else "lifted_then_lost" if row["lift_height"] > LIFT_HEIGHT
@@ -293,6 +332,12 @@ def main(argv=None) -> Path:
              "manifest, so a partial run cannot be mistaken for a full one.",
     )
     parser.add_argument(
+        "--closure", type=float, default=None,
+        help="Stop the jaws at this fraction of travel (0 open, 1 shut) "
+             "instead of commanding them fully closed. Default is the plain "
+             "+1 every campaign so far has used.",
+    )
+    parser.add_argument(
         "--plan-only", action="store_true",
         help="Perception and grasp selection, no physics. Seconds per cell "
              "instead of minutes, and it answers 'is this grid even runnable' "
@@ -313,7 +358,8 @@ def main(argv=None) -> Path:
     for gripper, obj in cells:
         for row in run_cell(gripper, obj, seed=args.seed, ranks=args.ranks,
                             plan_only=args.plan_only,
-                            camera_size=args.camera_size):
+                            camera_size=args.camera_size,
+                            closure=args.closure):
             rows.append(row)
             print(
                 f"{row['gripper']:<11}{row['object']:<11}"
@@ -348,7 +394,10 @@ def main(argv=None) -> Path:
                 "grasps": "GraspGen-X via tpgpt.grasp.cache, ranked by its own "
                           "score. Cached because the planner is an unseeded "
                           "diffusion model (ROBOTICS_NOTES 7.15)",
-                "gripper_command": "plain +1 shut; no force target, no feedback",
+                "gripper_command": (
+                    "plain +1 shut; no force target, no feedback"
+                    if args.closure is None else
+                    f"jaws stopped at closure fraction {args.closure}"),
                 "control": "Cartesian impedance, stiffness 600, same as "
                            "verify.execute_grasp",
                 "carry": f"{CARRY_DISTANCE} m sideways and back, at "
