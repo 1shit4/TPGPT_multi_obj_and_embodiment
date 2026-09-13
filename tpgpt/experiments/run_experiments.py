@@ -173,6 +173,15 @@ def _row(result, label: str) -> dict:
         "executable_fraction": result.metrics.get("executable_fraction"),
         "path_fell_back": result.metrics.get("path_fell_back"),
         "path_rank_examined": result.metrics.get("path_rank_examined"),
+        # **Named exactly as ``run_keypoint_replay --grasp-from`` reads them.**
+        # That flag keys on ``gripper``/``object`` and executes
+        # ``grasp_chosen_index`` directly, skipping selection, so a replay can
+        # be pinned to the grasp *this* campaign ran. ``label`` alone could not
+        # do it -- it is a sentence, not two fields -- and re-deriving the
+        # choice is what 7.41 measured going wrong in 10 of 20 cells.
+        "gripper": result.gripper,
+        "object": result.object_name,
+        "grasp_chosen_index": result.metrics.get("grasp_chosen_index"),
         "steps": result.metrics.get("steps"),
         "seconds": round(result.seconds, 1),
     }
@@ -373,25 +382,47 @@ def shelf_settings(obj="can", seeds=(0, 1)):
     ]
 
 
+#: The replay set plus the two hands Experiment T added. ``robotiq3f`` is the
+#: only **three-finger** hand that can be run at all -- a gripper needs a
+#: robosuite model *and* a GraspGen-X description of the same hand, and the
+#: other multi-finger pairing (``inspire``) has fingers that travel 0.7 mm, so
+#: it does not actuate. ``rethink`` sits at 35.1 mm of tool offset, between the
+#: xarm and the panda. Seven hands times four objects is 28 cells.
+EXECUTION_GRIPPERS = REPLAY_GRIPPERS + ("robotiq3f", "rethink")
+
+
 def execution_settings(slot="top middle", seeds=(0,)):
     """Experiment R's grid, executed by the **policy** instead of replayed.
 
-    Five hands times four objects, the same cells and the same scene order as
-    ``FINDINGS.md`` §8p. That run drove the arm pose by pose under position
-    control -- no policy, no attractor integration, no lag gate -- and placed
-    **16 of 20**. It is therefore the executor-free ceiling, and this campaign
-    asks how much of it survives the thing that actually ships.
+    Seven hands times four objects, 28 cells, the same scene order as
+    ``FINDINGS.md`` §8p. The comparison run drives the arm pose by pose under
+    position control -- no policy, no attractor integration, no lag gate -- so
+    it is the **executor-free ceiling**, and this campaign asks how much of it
+    survives the thing that actually ships.
 
-    The comparison is only meaningful because the maps are now identical: the
-    grasp-pose cube, the same filters, the same whole-path check and the same
-    object order all reached ``pipeline.run`` in the two commits before this
-    one. Any shortfall against 16/20 is therefore the executor's, which is
-    precisely the split ``run_keypoint_replay``'s own docstring sets up.
+    **An earlier version of this docstring claimed the two runs' maps were
+    identical because the same settings "reached ``pipeline.run``". That was
+    wrong, and it is the whole of ``ROBOTICS_NOTES`` 7.41.** The two drivers
+    select grasps through structurally different code -- this one through
+    ``pipeline.filter_grasps`` and ``_choose_grasp``, the replay through
+    ``run_keypoint_transport.target_placement`` -- so equal settings buy
+    nothing. Measured: identical clouds, identical 100-candidate sets and
+    identical survivor counts in 20 of 20 cells, and a **different grasp chosen
+    in 10 of them**. The totals read as a clean 16/20 against 15/20 and the
+    grids in fact disagreed on six cells in both directions, at Fisher
+    p = 1.000.
+
+    So the pairing is no longer left to the code agreeing. This campaign records
+    ``grasp_chosen_index`` -- an index into the raw, cache-stable candidate list
+    -- for every cell, and the replay is then run with ``--grasp-from`` pointed
+    at its ``rows.json``. Selection is skipped there entirely and the two runs
+    execute the same grasp **by construction**, which is the only form of this
+    comparison that measures the executor rather than the selector.
     """
     return [
         {"gripper": g, "obj": obj, "slot": slot, "seed": seed,
          "objects": SCENE_OBJECTS}
-        for g in REPLAY_GRIPPERS
+        for g in EXECUTION_GRIPPERS
         for obj in SCENE_OBJECTS
         for seed in seeds
     ]

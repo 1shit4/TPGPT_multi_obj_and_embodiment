@@ -469,6 +469,26 @@ def run(
         check = path_flags.get("path_check", {})
         result.metrics["path_fell_back"] = bool(check.get("fell_back"))
         result.metrics["path_rank_examined"] = check.get("rank_examined")
+        # **The index into the *raw* candidate list, not into the survivors.**
+        # ``_choose_grasp`` enumerates ``candidates``, which is already filtered
+        # and truncated, so its ``chosen`` is a position in the survivor list
+        # and means nothing to anyone holding a different funnel.
+        # ``run_keypoint_transport.target_placement``'s ``forced_index`` indexes
+        # ``grasp_set.grasps`` -- all 100 of them -- and that list comes from
+        # the grasp cache, so it is identical for every driver and every commit
+        # that sees the same cloud. Mapping back through ``funnel.survivors``
+        # here is what lets a replay execute *this* run's grasp by construction
+        # rather than by re-deriving it and hoping the two agree.
+        #
+        # 7.41 is the cost of not having had it: two campaigns on the same grid
+        # picked differently in 10 of 20 cells from an identical candidate set,
+        # and the totals read as a clean one-cell difference.
+        survivors = list(funnel.survivors[:max_candidates])
+        rank = check.get("chosen")
+        result.metrics["grasp_chosen_index"] = (
+            int(survivors[rank])
+            if rank is not None and 0 <= rank < len(survivors) else None
+        )
         # The funnel's own stage tallies, so a rejection can be attributed to
         # the stage that made it rather than only to the funnel as a whole.
         if result.funnel is not None:
