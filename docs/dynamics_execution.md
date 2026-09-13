@@ -1,10 +1,13 @@
 # How should a transported policy actually be executed?
 
 **The answer, for a reader who wants it first.** Query the policy at the
-**attractor**, not at the measured arm — decisively. And **switch the attractor
-law from the shipped integrator to a light anchor, `VR-a k=0.20`**: it is better
-at both poses that decide the task, in both conditions, at `p < 0.0001`, and it
-never stalls. Full reasoning in §12; the measurement that settles it is §10.
+**attractor**, not at the measured arm — decisively, and confirmed on the one
+comparison with no confound. **Keep the shipped integrator `V` as the attractor
+law**: on the surrogate plant a light anchor looks better at the poses that
+decide the task (§10), but in physics with a real arm all three laws place the
+object on 8 of 8 seeds and no paired difference is significant (§11). The
+seed-to-seed spread is ~50 mm against law-to-law differences of 0.03–1.67 mm, so
+the choice sits far below the system's noise floor. Full reasoning in §13.
 
 **What this is.** A study of the **execution** half of the pipeline — the code
 that turns a fitted policy into motion — deciding between nine candidate rules
@@ -899,14 +902,96 @@ and would otherwise flatten every other bar. Compare the red bars for `V` betwee
 the top and bottom rows: nearly level with the anchors at the grasp, a factor of
 ten above them at the release.*
 
+
 ---
 
-## 11. Failures, and what caused each
+## 11. Experiment H — the same laws in physics, with no map at all
+
+**Question.** Experiments A–G all ran on the surrogate plant, which has no
+contact, no inverse kinematics and no orientation task. Experiment G concluded
+from it that a light anchor should replace the shipped integrator. **Does that
+survive a real robot?**
+
+**Conditions.** The policy is fitted on the source demonstration's **own
+labels** and executed in the **same scene at the same seed** — no transportation
+map, no keypoint construction, no grasp planner, so every millimetre belongs to
+policy execution. Torque control through the Cartesian impedance controller, the
+real reshelving scene, a real object that can be gripped or dropped. Ground
+truth is `metadata["measured_positions"]`, where the demonstrating arm actually
+was. Eight seeds × three laws, paired — the same scene for each law. Driver:
+`tpgpt/experiments/identity_execution.py`.
+
+**Result.** Medians over 8 seeds, millimetres:
+
+| law | placed | arm error, worst | arm error, median | placement error | excess lag | stalled |
+|---|---|---|---|---|---|---|
+| **V** (ships) | **8/8** | **48.4** | 7.2 | **5.4** | 11.4 | 0/8 |
+| VR-a k=0.20 | **8/8** | 49.8 | 7.9 | 7.3 | 10.3 | 0/8 |
+| VR-sched | **8/8** | 51.8 | 7.9 | 5.9 | 10.6 | 0/8 |
+
+Paired against V on the same seed — negative would mean better:
+
+| law | arm error, worst | p | placement error | p |
+|---|---|---|---|---|
+| VR-a k=0.20 | +1.67 | 0.195 (1/8 seeds better) | +0.62 | 0.109 |
+| VR-sched | +1.52 | 0.055 (1/8 seeds better) | +1.42 | 0.313 |
+
+### Results and why
+
+**All three laws place the object on all eight seeds.** There is no difference in
+task outcome at all.
+
+**And no law is better than the shipped one.** Every paired difference is
+*positive* — the anchors are nominally worse — and none reaches significance.
+The nearest is `VR-sched` at p=0.055 in the direction of being **worse**.
+
+**The number that settles it is the spread.** Arm error ranges from **22 mm to
+74 mm across seeds**, a spread of about 50 mm, while the differences between
+laws are 0.03–1.67 mm. **Seed-to-seed variation is roughly thirty times
+law-to-law variation.** The executor choice sits far below the noise floor of the
+real system, and no realistic number of seeds would change that: to resolve a
+1.7 mm difference against a 50 mm spread would take on the order of a thousand
+paired runs at 40 s each.
+
+*Why physics disagrees with the surrogate plant.* On the bed the arm error was
+5–7 mm and the anchors won at the decisive poses by 1.6–2.2 mm — a third of the
+total, easily visible. In physics the error is 40–70 mm, and the extra 35–65 mm
+is contact, inverse kinematics and the orientation task competing for the arm's
+effort. Those dominate, and a 2 mm executor effect disappears underneath them.
+
+**So the recommendation reverts to `V`, the shipped law** — not because it beat
+the anchors, but because nothing beat anything and `V` is the incumbent behind a
+validated result. Changing a default requires evidence of improvement, and there
+is none here.
+
+> **This is the third reversal in this document, and the pattern is the point.**
+> Draft 1 said keep `V` (worst-over-run drift, undisturbed). Draft 2 said it was
+> conditional (drift, loaded). Draft 3 said switch to an anchor (error at the
+> decisive poses). Draft 4, this one, says keep `V` — because in physics no
+> difference exists to act on.
+>
+> Each time the bed got more faithful, the effect got smaller: 2.2 mm on the
+> surrogate plant at the poses, 1.7 mm in physics and not significant, 0 in task
+> outcome. **An effect that shrinks as the measurement improves is usually not
+> there**, and §2.1 said in advance that this bed ranks hypotheses rather than
+> confirming them. This is that caveat being cashed rather than ignored.
+
+**What this does not say.** It does not say the anchor is useless — it says the
+anchor's advantage is too small to matter *on this task, on this scene, with
+this demonstration*. The mechanisms behind it are real and measured (§5.5, §10):
+`reference` is genuinely more accurate than a running integral at a dwell, and
+an integrator genuinely accumulates. On a longer trajectory, or one where
+contact and IK contribute less, that could surface. `attractor_law` stays in the
+code with `V` as its default.
+
+---
+
+## 12. Failures, and what caused each
 
 Nothing here is left as "a run that didn't work". Every non-completing run in
 all 792 is accounted for below.
 
-### 11.1 Runs that raised an exception: **zero**
+### 12.1 Runs that raised an exception: **zero**
 
 | condition | runs | exceptions |
 |---|---|---|
@@ -919,7 +1004,7 @@ occurred. Note this is a meaningful check for `R-a` and `R-m`, which raise
 deliberately if the policy was fitted without the `reference` channel; they did
 not, confirming the channel is present and being read.
 
-### 11.2 Warps rejected before any law ran: **2 of 45, in both conditions**
+### 12.2 Warps rejected before any law ran: **2 of 45, in both conditions**
 
 | bump scale | resulting `min det(J)` | action |
 |---|---|---|
@@ -937,7 +1022,7 @@ the same problems.
 
 That leaves **43 valid warps**, which is what every table above is computed on.
 
-### 11.3 Runs the watchdog declared stuck: 33 undisturbed, 54 loaded
+### 12.3 Runs the watchdog declared stuck: 33 undisturbed, 54 loaded
 
 Not distributed evenly — this is Experiment D's table, read as a failure
 inventory:
@@ -977,7 +1062,7 @@ here it is a law that hands the clamp an attractor it must always correct. The
 prevent this one — the watchdog terminating the run is the designed and honest
 outcome, not a bug.
 
-### 11.4 Runs that ran out of step budget: **zero**
+### 12.4 Runs that ran out of step budget: **zero**
 
 | condition | budget exhausted |
 |---|---|
@@ -990,7 +1075,7 @@ as stuck, just crawls until the step limit. Every run in this study ended in a
 **named** state — completed, or stalled with a reason. That is one of the
 acceptance criteria and it is met.
 
-### 11.5 Not a failure, but worth recording: a 3 h 20 m false start
+### 12.5 Not a failure, but worth recording: a 3 h 20 m false start
 
 The loaded sweep sat for 3 hours 20 minutes without running a single case. The
 wrapper that chained it behind the undisturbed sweep waited with
@@ -1010,22 +1095,25 @@ match the waiter.**
 
 ---
 
-## 12. What this means, and what would make it false
+## 13. What this means, and what would make it false
 
-### 12.1 The conclusions
+### 13.1 The conclusions
 
 | question | answer | strength |
 |---|---|---|
 | Query at the attractor or the measured arm? | **attractor** | decisive, and confirmed on the one cell with no confound: `V-m` costs +3.34 mm undisturbed and +2.62 mm loaded on the release closing axis, `p ≤ 0.0006`. Measured-pose laws also stall 8–34 of 44 where attractor-queried ones stall none |
-| Which law should ship? | **`VR-a k=0.20`**, replacing `V` | better at both decisive poses in **both** conditions, `p < 0.0001`; ten-fold better at the release (0.15 mm against 1.83 mm); 0/44 stalls, matching `V` exactly |
+| Which law should ship? | **`V`, unchanged** | on the surrogate plant an anchor wins at the decisive poses (§10), but in physics (§11) all three laws place 8/8, every paired difference favours `V`, and none is significant. Changing a default needs evidence of improvement; there is none |
 | Constant gain or the speed schedule? | **constant, `k = 0.20`** | the two are statistically **tied** on the closing axis and trade signs on totals, so the numbers cannot separate them. The schedule's own stated mechanism fails its test — it is penalised identically to the constant gain in the transit-dominated regime it was designed to protect. Chosen on that, not on the millimetres |
 | Reference-only (`R-a`, `R-m`)? | **no** | `R-a` stalls 6/44; `R-m` reaches **144 mm** at the release under load and completes 10 of 44 |
 | Should the anchor be gated? | **immaterial** | ~0.1 mm; axis closed |
 | Is the dwell creep a defect? | **no** | 0.00 mm on the axis that decides the grasp |
 
-**How strong is "better"?** The advantage at the release closing axis is
-1.6–2.2 mm against a ~15 mm budget, so on this bed **neither law would lose a
-grasp**. This is a ranking, not a rescue. What raises it above the 4.8 mm
+**How strong is "better"?** On the surrogate plant the advantage at the release
+closing axis is 1.6–2.2 mm against a ~15 mm budget, so **neither law would lose a
+grasp** even there. In physics it disappears entirely: arm error spans 22–74 mm
+across seeds while the laws differ by under 2 mm. This was a ranking on an
+idealised bed, not a rescue, and the confirmation tier says there is nothing to
+act on. What raises it above the 4.8 mm
 practical-margin objection that kept `V` in the previous draft is that it is
 consistent across both poses, both conditions and both gains at `p < 0.0001`,
 rather than appearing in one regime only.
@@ -1040,7 +1128,7 @@ two instants the task is actually decided at, and the ranking inverts. That is
 the mistake after building the axis-decomposition tool specifically to prevent
 it.
 
-### 12.2 What would make these conclusions false
+### 13.2 What would make these conclusions false
 
 - **A real arm behaving differently from the surrogate.** The bed has no contact,
   no inverse kinematics, and no orientation task. If the queued
@@ -1059,7 +1147,7 @@ it.
 - **A load larger than 0.08 m/s.** That value shuts the gate on 42% of steps.
   How the ranking behaves at 80% is unmeasured.
 
-### 12.3 What is still missing
+### 13.3 What is still missing
 
 Two simulator tiers, specified and **queued** behind the parallel session's
 MuJoCo runs (currently 84% CPU, 357 MiB free; CLAUDE.md requires checking
@@ -1084,7 +1172,7 @@ possible moved arithmetic out of `rollout_policy`. Defaults are asserted bitwise
 identical at unit level; the end-to-end proof is three reshelving seeds against
 the baseline commit compared with `np.array_equal` — not `allclose`.
 
-### 12.4 A note on what "flawless" can mean
+### 13.4 A note on what "flawless" can mean
 
 By the rule of three, zero failures in 20 runs bounds the true per-run failure
 rate only at **14%**. No campaign in this budget can certify the absence of
@@ -1095,7 +1183,7 @@ conditions.
 
 ---
 
-## 13. Verification
+## 14. Verification
 
 ```bash
 export MUJOCO_GL=egl

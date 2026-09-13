@@ -150,8 +150,13 @@ def rollout_policy(
 ) -> SimRollout:
     """Run a fitted policy on the robot until its phase completes.
 
-    At every control step the policy is queried at the **measured** end-effector
-    position, so the loop is closed through the physics rather than replayed.
+    At every control step the policy is queried at the **attractor** by default,
+    not at the measured pose, which is what keeps the query on the ridge of
+    ``(position, phase)`` pairs the policy was fitted on. ``query_at="measured"``
+    selects the alternative; section 7.40 measures it as clearly worse, including
+    on the one comparison that isolates the query site with nothing else
+    attached. The physical loop closes through the impedance instead -- see the
+    module docstring.
 
     Args:
         env: Reshelving environment on the joint-torque controller.

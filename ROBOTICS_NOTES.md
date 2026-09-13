@@ -3759,9 +3759,35 @@ median over 44 warps, paired against `V`:
 | `R-a` | -1.46 | 0.004 better | -1.93 | 0.005 better |
 | `R-m` | -0.81 | 0.094 | **+138.12** | <0.0001 worse |
 
-**So the recommendation is to switch to `VR-a k=0.20`**, not to keep `V`. It is
-better at both decisive poses in **both** conditions, ten-fold better at the
-release (0.15 mm against 1.83 mm), and stalls 0 of 44 exactly as `V` does.
+**On the surrogate plant that says switch to `VR-a k=0.20`** -- better at both
+decisive poses in both conditions, ten-fold at the release (0.15 mm against
+1.83 mm), 0 of 44 stalls.
+
+**In physics it says keep `V`.** Fitting the policy on the demonstration's own
+labels and executing in the demonstration's own scene -- no map, no keypoints,
+exact ground truth from the recorded arm trace -- eight seeds x three laws:
+
+| law | placed | arm error, worst | placement error | paired vs `V` |
+|---|---|---|---|---|
+| `V` | **8/8** | **48.4 mm** | **5.4 mm** | - |
+| `VR-a k=0.20` | 8/8 | 49.8 mm | 7.3 mm | +1.67 mm, p=0.195 |
+| `VR-sched` | 8/8 | 51.8 mm | 5.9 mm | +1.52 mm, p=0.055 |
+
+Every paired difference favours `V`, none is significant, and all three place on
+every seed. **The decisive number is the spread**: arm error runs 22 to 74 mm
+across seeds while the laws differ by 0.03 to 1.67 mm, so seed-to-seed variation
+is about thirty times law-to-law variation. Resolving a 1.7 mm effect against a
+50 mm spread would need of order a thousand paired runs.
+
+*Why physics disagrees with the bed.* There the arm error was 5-7 mm and the
+anchor's 2 mm was a third of it. Here it is 40-70 mm, and the extra is contact,
+inverse kinematics and the orientation task -- none of which the surrogate plant
+has. A 2 mm executor effect disappears underneath them.
+
+**So `V` stays, because nothing beat it, not because it won.** The mechanisms
+behind the anchor are real and measured -- `reference` is genuinely better than a
+running integral at a dwell, and an integrator genuinely accumulates -- and
+`attractor_law` stays in the code for a task where they might surface.
 
 *Why the gap widens from grasp to release.* At the grasp (phase 0.28) `V` is at
 0.35 mm against the anchors' 0.10-0.14. At the release (phase 0.84) it is

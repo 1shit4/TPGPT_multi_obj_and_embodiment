@@ -830,15 +830,15 @@ so they can be built and tested separately. Full detail in `ROBOTICS_NOTES.md`
   `prediction.reference` is now read and measured; it does not rescue the
   measured-pose query.
 
-  **Switch the law to a light anchor, `attractor_law="anchor", anchor_gain=0.2`.**
-  Measured at the two poses that decide the task — not the worst error over the
-  run, which ranks them the other way and is what two earlier drafts got wrong —
-  the anchor beats the shipped integrator in **both** conditions at `p < 0.0001`,
-  ten-fold at the release (0.15 mm against 1.83 mm), and stalls 0 of 44 exactly
-  as `V` does. A plain constant gain matches the speed-scheduled one, so the
-  schedule does not earn its parameter. `anchor_gated` is measured and
-  immaterial. Defaults in code are still `V` and asserted bitwise identical;
-  flipping them waits on the simulator tiers.
+  **Keep the shipped integrator `V`.** On the surrogate plant a light anchor
+  looks clearly better at the two poses that decide the task. In physics it does
+  not: identity transport (no map, exact ground truth from the recorded arm
+  trace), eight seeds x three laws — all place **8/8**, every paired difference
+  favours `V`, none is significant. The decisive number is that arm error spans
+  **22–74 mm across seeds** while the laws differ by 0.03–1.67 mm, so the choice
+  is ~30x below the system's noise floor. `attractor_law`, `anchor_gain`,
+  `anchor_gated` and `query_at` stay in the code with defaults unchanged and
+  asserted bitwise identical.
 
   The dwell creep that looked like the one clear defect is a measurement
   artefact: 0.00 mm on the closing axis that decides the grasp.
