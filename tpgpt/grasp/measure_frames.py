@@ -130,6 +130,14 @@ def measure_frame(robosuite_name: str, robot: str = "Panda") -> dict:
     """
     import robosuite as suite
 
+    # Seeded before ``make`` and ``reset``, never after (CLAUDE.md). robosuite
+    # samples the object's placement at reset, and an unseeded sample moves the
+    # measured finger travel by a few tenths of a micrometre between two
+    # otherwise identical runs -- small, but it means re-measuring a hand that
+    # has not changed produces a different number, and the whole value of this
+    # cache is that a changed number means something changed.
+    np.random.seed(0)
+
     env = suite.make(
         "Lift",
         robots=robot,
@@ -246,12 +254,29 @@ def measure_frame(robosuite_name: str, robot: str = "Panda") -> dict:
             #: hands (the Panda's is ``[-1, +1]``, the Robotiq 2F-140's is
             #: ``[+1, -1]``), which looks like an inverted command and is not
             #: -- they compensate for opposite joint conventions in the two
-            #: models. All nine hands close on ``+1``.
+            #: models. Measured ``True`` for eight of the nine hands. The
+            #: Inspire hand reads ``False`` and still shuts -- see
+            #: ``finger_travel_mm`` below, where the spread definition rather
+            #: than the hand is what fails.
             "plus_one_closes": bool(spread_closed < spread_open - 1e-4),
-            #: How far the fingers travel, in mm. The Inspire hand's 0.7 mm is
-            #: why it lifts nothing: it does not actuate meaningfully, which is
-            #: a simpler explanation than its five fingers being unable to
-            #: pinch.
+            #: How far the fingers travel, in mm: ``spread_open`` minus
+            #: ``spread_closed``, so it is positive when the hand shuts.
+            #:
+            #: **Negative means this definition of spread does not describe
+            #: this hand**, not that the hand opens on ``+1``. Spread is the
+            #: extent of the moving geoms along one closing axis, which is
+            #: exactly right for a jaw whose fingers travel toward each other
+            #: along a line, and wrong for an anthropomorphic hand whose
+            #: fingers curl through an arc: the Inspire hand's five fingers
+            #: sweep *outward* in extent while closing *inward* on the thumb,
+            #: and it reads -1.1 mm. ``plus_one_closes`` then comes out False
+            #: for a hand that does shut, which is why nothing may threshold
+            #: these two numbers without checking that flag first.
+            #:
+            #: This field previously read 0.7 mm for the Inspire hand, and that
+            #: number is the reason it was excluded from every campaign. It was
+            #: measured with one of its six actuators driven -- see
+            #: ``grippers.gripper_action``. Driven fully it travels ~57 mm.
             "finger_travel_mm": (spread_open - spread_closed) * 1000.0,
         }
     finally:
