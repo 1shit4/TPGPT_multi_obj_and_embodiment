@@ -382,13 +382,44 @@ def shelf_settings(obj="can", seeds=(0, 1)):
     ]
 
 
-#: The replay set plus the two hands Experiment T added. ``robotiq3f`` is the
-#: only **three-finger** hand that can be run at all -- a gripper needs a
-#: robosuite model *and* a GraspGen-X description of the same hand, and the
-#: other multi-finger pairing (``inspire``) has fingers that travel 0.7 mm, so
-#: it does not actuate. ``rethink`` sits at 35.1 mm of tool offset, between the
-#: xarm and the panda. Seven hands times four objects is 28 cells.
-EXECUTION_GRIPPERS = REPLAY_GRIPPERS + ("robotiq3f", "rethink")
+#: The fleet, fixed on 2026-09-15 from the grasp bench. ROBOTICS_NOTES 7.42.
+#:
+#: These are the seven hands that held the most objects in
+#: ``tpgpt.experiments.run_grasp_bench`` -- grasp, close, lift and carry with no
+#: map, no policy and no shelf, so a failure there has one candidate cause
+#: instead of six. Ordered by what they held:
+#:
+#: ================ ========= ========= ==============
+#: hand             fingers   held      objects held
+#: ================ ========= ========= ==============
+#: xarm                     2  18 / 30   7 of 10
+#: robotiq3f                3  15 / 30   7 of 10
+#: robotiq140               2  13 / 28   7 of 10
+#: robotiq85                2  11 / 28   5 of 10
+#: robotiq3f_dex            3   7 / 15   4 of 5 tried
+#: panda                    2   6 / 28   5 of 10
+#: rethink                  2   5 / 25   5 of 10
+#: ================ ========= ========= ==============
+#:
+#: **Two are three-fingered.** ``robotiq3f_dex`` is the same robosuite model as
+#: ``robotiq3f`` with its fingers driven independently, so it shares the
+#: GraspGen-X description. ``yumi`` is dropped (3/22); no five-finger hand
+#: qualifies and 7.42 records why that is not yet known to be the hands' fault.
+EXECUTION_GRIPPERS = (
+    "xarm", "robotiq3f", "robotiq140", "robotiq85", "robotiq3f_dex",
+    "panda", "rethink",
+)
+
+#: The object set, fixed with the fleet. The five held by the most hands of ten
+#: tried: ``can`` by 8 of 11, the rest by 6 of 11. ``bread`` (4) and ``pot`` (3)
+#: are dropped as marginal; ``wrench`` and the two nuts are dropped as
+#: impossible -- one hold in 88 attempts, flat parts on a table offering a
+#: top-down hand nothing but a thin flange.
+#:
+#: **This is a different scene from the four-object one**, not a filter on it:
+#: the placement sampler works in the order it is given, so every object moves.
+#: Nothing measured under ``SCENE_OBJECTS`` is cell-by-cell comparable here.
+EXECUTION_OBJECTS = ("can", "cereal", "hammer", "milk", "mug")
 
 
 def execution_settings(slot="top middle", seeds=(0,)):
@@ -421,9 +452,9 @@ def execution_settings(slot="top middle", seeds=(0,)):
     """
     return [
         {"gripper": g, "obj": obj, "slot": slot, "seed": seed,
-         "objects": SCENE_OBJECTS}
+         "objects": EXECUTION_OBJECTS}
         for g in EXECUTION_GRIPPERS
-        for obj in SCENE_OBJECTS
+        for obj in EXECUTION_OBJECTS
         for seed in seeds
     ]
 
@@ -461,9 +492,25 @@ if __name__ == "__main__":
                         help="comma-separated: " + ",".join(CAMPAIGNS))
     parser.add_argument("--out", default="outputs/campaigns")
     parser.add_argument(
+        "--grippers", default=None,
+        help="comma-separated registry short names, overriding the campaign's "
+             "own grid. Recorded in the manifest.",
+    )
+    parser.add_argument(
+        "--objects", default=None,
+        help="comma-separated object names, overriding the campaign's own "
+             "grid. Changing this changes the scene -- the placement sampler "
+             "works in the order it is given -- so a run with a different set "
+             "is not cell-by-cell comparable with one without it.",
+    )
+    parser.add_argument(
         "--require-clean", action="store_true",
         help="refuse to run unless the results would be reproducible: "
              "committed, with no modified or untracked code files",
     )
     args = parser.parse_args()
+    if args.grippers:
+        EXECUTION_GRIPPERS = tuple(g.strip() for g in args.grippers.split(","))
+    if args.objects:
+        EXECUTION_OBJECTS = tuple(o.strip() for o in args.objects.split(","))
     main(tuple(args.campaigns.split(",")), args.out, strict=args.require_clean)

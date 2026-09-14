@@ -1,0 +1,163 @@
+{
+  "_README": "Commanded closure fraction per (gripper, object), measured by tpgpt.experiments.run_grasp_bench --closure over 0.3/0.5/0.7/0.9/+1, one grasp per cell, five hands and five objects. 'fraction' is the middle of the widest contiguous band that held; null means +1, fully shut. 'band' is how many of the five sampled fractions held -- a band of 1 is a single lucky sample, not a calibrated pair.",
+  "_default": {
+    "fraction": null,
+    "band": null,
+    "note": "plain +1, the rule every campaign so far has used and the one this sweep confirms for 15 of 25 pairs"
+  },
+  "panda": {
+    "cereal": {
+      "fraction": 0.9,
+      "band": 3,
+      "held_at": [
+        0.7,
+        0.9,
+        "+1"
+      ]
+    },
+    "milk": {
+      "fraction": 0.9,
+      "band": 3,
+      "held_at": [
+        0.7,
+        0.9,
+        "+1"
+      ]
+    }
+  },
+  "robotiq140": {
+    "bread": {
+      "fraction": 0.7,
+      "band": 2,
+      "held_at": [
+        0.5,
+        0.7
+      ]
+    },
+    "can": {
+      "fraction": 0.7,
+      "band": 1,
+      "held_at": [
+        0.7
+      ]
+    },
+    "cereal": {
+      "fraction": 0.9,
+      "band": 3,
+      "held_at": [
+        0.7,
+        0.9,
+        "+1"
+      ]
+    },
+    "mug": {
+      "fraction": 0.9,
+      "band": 4,
+      "held_at": [
+        0.5,
+        0.7,
+        0.9,
+        "+1"
+      ]
+    }
+  },
+  "robotiq3f": {
+    "cereal": {
+      "fraction": null,
+      "band": 1,
+      "held_at": [
+        "+1"
+      ]
+    },
+    "milk": {
+      "fraction": null,
+      "band": 2,
+      "held_at": [
+        0.9,
+        "+1"
+      ]
+    },
+    "mug": {
+      "fraction": null,
+      "band": 2,
+      "held_at": [
+        0.9,
+        "+1"
+      ]
+    }
+  },
+  "robotiq85": {
+    "can": {
+      "fraction": 0.9,
+      "band": 3,
+      "held_at": [
+        0.7,
+        0.9,
+        "+1"
+      ]
+    },
+    "cereal": {
+      "fraction": null,
+      "band": 2,
+      "held_at": [
+        0.9,
+        "+1"
+      ]
+    },
+    "milk": {
+      "fraction": null,
+      "band": 2,
+      "held_at": [
+        0.9,
+        "+1"
+      ]
+    },
+    "mug": {
+      "fraction": 0.9,
+      "band": 4,
+      "held_at": [
+        0.5,
+        0.7,
+        0.9,
+        "+1"
+      ]
+    }
+  },
+  "xarm": {
+    "bread": {
+      "fraction": 0.9,
+      "band": 3,
+      "held_at": [
+        0.7,
+        0.9,
+        "+1"
+      ]
+    },
+    "can": {
+      "fraction": 0.9,
+      "band": 3,
+      "held_at": [
+        0.7,
+        0.9,
+        "+1"
+      ]
+    },
+    "milk": {
+      "fraction": 0.9,
+      "band": 3,
+      "held_at": [
+        0.7,
+        0.9,
+        "+1"
+      ]
+    },
+    "mug": {
+      "fraction": null,
+      "band": 2,
+      "held_at": [
+        0.9,
+        "+1"
+      ]
+    }
+  }
+}

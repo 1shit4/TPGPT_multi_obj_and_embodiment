@@ -355,9 +355,53 @@ Each of these cost real debugging time. Full detail in `ROBOTICS_NOTES.md`.
   degrees of freedom only -- never the gripper's, which is `7.32`.
 - **`calibrate_depth` decides which hands campaigns may use, and it asks one
   object.** `REFERENCE_OBJECT = "can"` is 65 mm across: a fine reference for a
-  jaw opening to 80 or 125 mm and a meaningless one for a hand opening to 28,
-  where the sweep measures "a can does not fit". `lift_height` now places the
-  object it is asked to measure; the default scene is unchanged.
+  jaw opening to 80 or 125 mm and meaningless for a much narrower hand, where
+  the sweep measures "a can does not fit". `lift_height` now places the object
+  it is asked to measure; the default scene is unchanged.
+- **A gripper's swept volume is the region its fingers *traverse* while
+  closing, not the gap between them.** GraspGen-X's own definition
+  (arXiv:2606.00998). The two nearly coincide for a parallel jaw and are
+  unrelated for a hand that curls, so measuring the gap reproduces the Panda,
+  Yumi and Robotiq 2F-140 apertures -- which looks like validation -- and then
+  reports a five-finger hand opening by 28 mm. The Panda's config settles it:
+  its fingers travel 0.04 m per side and `extents[0]` is **0.08**, their total
+  travel. `docs/gripper_diversity.md` section 9.
+- **`set_closure` is a silent no-op on every anthropomorphic hand.** robosuite's
+  grippers close two ways and nothing names the difference. Most *integrate*:
+  `format_action` reads `current_action` and adds a step in the command's
+  *sign*, so `+1` means "keep closing" and `set_closure` -- which writes
+  `current_action` -- is the only way to ask for a partial close. Inspire, G1,
+  Fourier, Ability and SchunkSvh *pass through*: `format_action` maps the action
+  onto their actuators and never reads `current_action`. Measured, a closure
+  sweep over 0.3/0.5/0.7/0.9/`+1` on the Inspire hand returned **identical**
+  lift, force and carry at every fraction. Read the kind with
+  `grippers.commands_position`; for a passthrough hand the action *is* the
+  position, so a fraction is `2f - 1`. **Not** predicted by finger count --
+  `robotiq3f` has three fingers and integrates.
+- **The arm does not hold still while a gripper is measured.** A zero arm action
+  is not a command to stay put: with a heavy hand the wrist wandered **800 mm**
+  over three settles, and that motion lands in `closed - opened` where it reads
+  as finger travel. It is what made the Inspire hand report `finger_travel_mm`
+  of -1.05 and `plus_one_closes: False`. Freeze the arm's own degrees of freedom
+  only -- never the gripper's, which is `7.32`.
+- **The closing axis from an SVD has no sign, and for an asymmetric hand that
+  matters.** `finger_axes` takes it from the first right singular vector, whose
+  sign is arbitrary. Harmless for a two-finger jaw -- a half turn swaps the
+  fingers -- and wrong for a hand GraspGen-X declares `symmetric: false`, where
+  it puts the thumb on the other side. The convention is in GraspGen-X's own
+  assets: driven to the `open` pose its config declares, the **odd finger sits
+  on +X** on all four multi-finger hands. Resolve it at the *open* pose; a hand
+  that curls brings every fingertip together and at the closed pose the sides
+  stop meaning anything.
+- **An authored GraspGen-X description gets a hand into the system and does not
+  make it grasp.** Six hands: the two on descriptions GraspGen-X wrote hold
+  objects (15/30, 7/15); the four on descriptions `tpgpt.grasp.describe` wrote
+  hold nothing (0/41). `jaco3f` reaches its grasps to **3.5 mm**, better than
+  the hand that works, and touches the object once in fourteen tries -- so the
+  arm goes where the description says and the object is not there. Suspect
+  `fingertip`, which sets the grasp point along the approach axis. Validate any
+  fix against `robotiq3f`, which has both a shipped description and a known
+  result. `docs/gripper_diversity.md` section 11.
 - **A grasp is a pose, not an axis. Never re-derive its closing direction.**
   `task_frame` used to pick the closing axis's sign with a world-axis test
   (`c[1] >= 0`, tie-broken on `c[0]`), run independently at each of

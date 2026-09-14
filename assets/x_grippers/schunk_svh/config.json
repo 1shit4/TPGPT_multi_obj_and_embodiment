@@ -1,0 +1,132 @@
+{
+    "open": {
+        "gripper0_right_right_hand_Thumb_Opposition": 0.00022725405684957786,
+        "gripper0_right_right_hand_Thumb_Flexion": 0.00038283199420502834,
+        "gripper0_right_right_hand_j3": -0.0005266615911735719,
+        "gripper0_right_right_hand_j4": -0.00027899945787258245,
+        "gripper0_right_right_hand_index_spread": 0.015743730921444224,
+        "gripper0_right_right_hand_Index_Finger_Proximal": -0.007294144398653336,
+        "gripper0_right_right_hand_Index_Finger_Distal": -0.007056925434031707,
+        "gripper0_right_right_hand_j14": -0.017790647255908783,
+        "gripper0_right_right_hand_Middle_Finger_Proximal": 0.0048882969000911035,
+        "gripper0_right_right_hand_Middle_Finger_Distal": 0.008363202760115316,
+        "gripper0_right_right_hand_j15": -0.015817853852498086,
+        "gripper0_right_right_hand_j5": -0.0013737432641755464,
+        "gripper0_right_right_hand_ring_spread": 0.008708414100710236,
+        "gripper0_right_right_hand_Ring_Finger": -0.0006090000725356643,
+        "gripper0_right_right_hand_j12": -0.010411580184311198,
+        "gripper0_right_right_hand_j16": -0.023617389719718558,
+        "gripper0_right_right_hand_Finger_Spread": 0.0028321913687630314,
+        "gripper0_right_right_hand_Pinky": -0.001074155192070086,
+        "gripper0_right_right_hand_j13": 0.0033833297615664206,
+        "gripper0_right_right_hand_j17": -0.0016603157158633132
+    },
+    "close": {
+        "gripper0_right_right_hand_Thumb_Opposition": -0.038155969139181525,
+        "gripper0_right_right_hand_Thumb_Flexion": -9.380580657074127,
+        "gripper0_right_right_hand_j3": -13.28023181935863,
+        "gripper0_right_right_hand_j4": 71.24272260350614,
+        "gripper0_right_right_hand_index_spread": 1.9292757502019602,
+        "gripper0_right_right_hand_Index_Finger_Proximal": 1.3081661690000572,
+        "gripper0_right_right_hand_Index_Finger_Distal": 42.95900830353323,
+        "gripper0_right_right_hand_j14": 41.32026481214395,
+        "gripper0_right_right_hand_Middle_Finger_Proximal": -8.259804328916724,
+        "gripper0_right_right_hand_Middle_Finger_Distal": 13.521252421180842,
+        "gripper0_right_right_hand_j15": 45.62770293223897,
+        "gripper0_right_right_hand_j5": 5.2764441997574485,
+        "gripper0_right_right_hand_ring_spread": -58.72121934027133,
+        "gripper0_right_right_hand_Ring_Finger": -112.91040071397398,
+        "gripper0_right_right_hand_j12": 566.9687137040506,
+        "gripper0_right_right_hand_j16": -439.4314505263764,
+        "gripper0_right_right_hand_Finger_Spread": 8.025783702330639,
+        "gripper0_right_right_hand_Pinky": 7.028256105157081,
+        "gripper0_right_right_hand_j13": 30.607263622111017,
+        "gripper0_right_right_hand_j17": 54.87346924282315
+    },
+    "fingertip": [
+        0.0,
+        0.0,
+        0.19801935255174802
+    ],
+    "sweep_volume": {
+        "extents": [
+            0.19033,
+            0.18061,
+            0.20687
+        ],
+        "offset": [
+            0.01681,
+            0.01027,
+            0.09459
+        ],
+        "extents2": [
+            0.18956,
+            0.16898,
+            0.15729
+        ],
+        "offset2": [
+            0.01386,
+            0.01622,
+            0.08062
+        ]
+    },
+    "links": [
+        "gripper0_right_right_gripper",
+        "gripper0_right_eef",
+        "gripper0_right_hand_mount",
+        "gripper0_right_right_hand_base_link",
+        "gripper0_right_right_hand_e1",
+        "gripper0_right_right_hand_z",
+        "gripper0_right_right_hand_a",
+        "gripper0_right_right_hand_b",
+        "gripper0_right_right_hand_c",
+        "gripper0_right_thumb_tip",
+        "gripper0_right_right_hand_virtual_l",
+        "gripper0_right_right_hand_l",
+        "gripper0_right_right_hand_p",
+        "gripper0_right_right_hand_t",
+        "gripper0_right_index_tip",
+        "gripper0_right_right_hand_virtual_k",
+        "gripper0_right_right_hand_k",
+        "gripper0_right_right_hand_o",
+        "gripper0_right_right_hand_s",
+        "gripper0_right_middle_tip",
+        "gripper0_right_right_hand_e2",
+        "gripper0_right_right_hand_virtual_j",
+        "gripper0_right_right_hand_j",
+        "gripper0_right_right_hand_n",
+        "gripper0_right_right_hand_r",
+        "gripper0_right_ring_tip",
+        "gripper0_right_right_hand_virtual_i",
+        "gripper0_right_right_hand_i",
+        "gripper0_right_right_hand_m",
+        "gripper0_right_right_hand_q",
+        "gripper0_right_pinky_tip"
+    ],
+    "standoff": [
+        0.0,
+        0.0
+    ],
+    "bbox": [
+        [
+            -0.0665922892925219,
+            -0.0620435913843515,
+            -0.043300340203466896
+        ],
+        [
+            0.13464332043936475,
+            0.06235934661647924,
+            0.2144179624099189
+        ]
+    ],
+    "symmetric": false,
+    "type": "revolute_3f",
+    "tpgpt_measured": {
+        "robosuite": "SchunkSvhRightHand",
+        "robot": "Panda",
+        "n_fingers": 5,
+        "seed": 0,
+        "sweep_samples": 9,
+        "moving_geoms": 40
+    }
+}

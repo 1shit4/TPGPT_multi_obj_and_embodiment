@@ -4094,6 +4094,83 @@ No support. Recorded rather than dropped, because it was stated as a prediction.
 0.864 to 0.976 -- among the best maps in the run. Whatever defeats `robotiq3f`
 is neither the map nor the executor, and it is open.
 
+### 7.42 The fleet and the object set are fixed, on measurement
+
+**Decided 2026-09-15, from the grasp bench.** Everything after this date uses
+seven hands and five objects, and both lists are the measured top of a wider
+grid rather than a choice of convenience. The bench that produced them
+(`tpgpt.experiments.run_grasp_bench`) grasps, closes, lifts and carries with
+**no transportation map, no policy and no shelf**, so a cell that fails there
+has one candidate cause instead of six. Full detail in
+`docs/gripper_diversity.md`.
+
+**The seven hands**, from `outputs/grasp_bench_v2` (eleven hands x ten objects,
+294 grasps) and `outputs/grasp_bench_new` (five more hands x five objects):
+
+=============== ========= ========== ==================
+hand            fingers   held       objects held
+=============== ========= ========== ==================
+xarm                    2  18 / 30    7 of 10
+robotiq3f               3  15 / 30    7 of 10
+robotiq140              2  13 / 28    7 of 10
+robotiq85               2  11 / 28    5 of 10
+robotiq3f_dex           3   7 / 15    4 of 5 tried
+panda                   2   6 / 28    5 of 10
+rethink                 2   5 / 25    5 of 10
+=============== ========= ========== ==================
+
+**Two of the seven are three-fingered**, which is what the whole gripper-
+diversity exercise was for. `robotiq3f_dex` is the same robosuite model as
+`robotiq3f` with its three fingers driven independently rather than together, so
+it shares the GraspGen-X description and needed no new assets.
+
+Nine hands were measured and dropped: `yumi` (3/22), `umi` (2/24), `bd` (1/23),
+`inspire` (0/27), `g1three` (0/29), `jaco3f` (0/14), `ability` (0/15),
+`fourier` (0/12) and `schunk` (refused before physics -- its spread travel
+measures -61.8 mm, so its closure is uncalibrated). They stay in the registry,
+measured and convertible, exactly as the registry already treats a hand that
+converts and does not lift.
+
+**No five-finger hand is in the fleet, and the reason is not settled.** Section
+11 of `docs/gripper_diversity.md` has the elimination: the Inspire hand
+actuates (53 mm), opens wide enough (156 mm swept volume against a 65 mm can),
+reaches its grasps to 2.3 mm, is not short of actuator gain, is not a half turn
+out and does not disturb the object on the way in. What *is* established is a
+clean split across six hands -- every hand running a description **GraspGen-X**
+wrote holds objects, every hand running one `tpgpt.grasp.describe` wrote holds
+nothing, 0 of 41 -- so the suspect is the authored `fingertip` depth rather than
+the hands.
+
+**The five objects**, held by the most hands of the ten tried:
+
+============= ================== ==========================================
+object        hands that held    note
+============= ================== ==========================================
+can           8 of 11
+cereal        6 of 11
+hammer        6 of 11            a handle, and its mass somewhere else
+milk          6 of 11
+mug           6 of 11            a thin wall and a rim, not a solid body
+============= ================== ==========================================
+
+`bread` (4 of 11) and `pot` (3 of 11) are dropped as marginal. `wrench`,
+`nut_square` and `nut_round` are dropped as **impossible**: one hold in 88
+attempts across the whole fleet, with the same signature every time -- reach
+error small, closure 1.00, the jaws shut on air. All three are flat parts lying
+on a table, so a top-down hand is offered a thin flange and would have to
+descend past it into the table to enclose anything.
+
+**Two of the five are new**, and neither is a box. That matters for what the
+set can show: four grocery cartons and a can are all things a parallel jaw is
+good at, so a fleet measured only on them cannot demonstrate that more fingers
+buy anything.
+
+**Read this as a change of scene, not a filter.** The placement sampler lays
+objects out in the order it is given, so a five-object scene is a *different*
+scene from the four-object one every campaign before this used -- different
+positions, different occlusions, different clouds. Nothing measured under the
+old set is cell-by-cell comparable with anything measured under the new one.
+
 ## 8. Open items
 
 > **Read 7.26 first.** Every end-to-end campaign has been deleted, so the items

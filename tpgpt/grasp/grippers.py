@@ -168,6 +168,37 @@ GRIPPER_PAIRS: dict[str, GripperPair] = {
     "bd": GripperPair(
         "BDGripper", "bd_spot", ("Panda",), 0.0, 85179.5, 0.000
     ),
+    # Multi-finger hands onboarded by **authoring** their GraspGen-X
+    # description from the robosuite model (`tpgpt.grasp.describe`). The
+    # released checkpoint conditions on the swept volume, the fingertip depth
+    # and the kinematic family, so a description is a small JSON and needs
+    # neither a URDF nor retraining.
+    #
+    # Chosen on two properties that correlate with a hand that works, rather
+    # than on availability: finger travel, and whether `format_action`
+    # integrates (see `commands_position`). `robotiq3f`, the one multi-finger
+    # hand that already held objects, is an integrator with 84 mm of travel;
+    # `inspire`, which holds nothing, is a passthrough hand with the least
+    # travel of any five-finger hand in robosuite.
+    "robotiq3f_dex": GripperPair(
+        # The **same physical hand** as `robotiq3f` -- same robosuite XML --
+        # with its three fingers driven independently instead of together, so
+        # it pairs to the same GraspGen-X description and needed no authoring.
+        "RobotiqThreeFingerDexterousGripper", "robotiq_3f", ("Panda",),
+        -4.1, 2.7, 0.000,
+    ),
+    "jaco3f": GripperPair(
+        "JacoThreeFingerGripper", "jaco_3f", ("Panda",), -4.4, 5.5, 0.000
+    ),
+    "schunk": GripperPair(
+        "SchunkSvhRightHand", "schunk_svh", ("Panda",), 51.7, 1.8, 0.000
+    ),
+    "ability": GripperPair(
+        "AbilityRightHand", "ability_hand", ("Panda",), 31.6, 2.3, 0.000
+    ),
+    "fourier": GripperPair(
+        "FourierRightHand", "fourier_hand", ("Panda",), -63.2, 4.2, 0.000
+    ),
 }
 
 #: Pairs whose GraspGen-X side is already loaded on the running server.

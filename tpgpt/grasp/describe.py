@@ -111,6 +111,7 @@ import numpy as np
 from tpgpt.grasp.grippers import (
     DEFAULT_DESCRIPTIONS_ROOT,
     GRIPPER_PAIRS,
+    commands_position,
     gripper_action,
     gripper_config_path,
 )
@@ -204,7 +205,15 @@ def _swept_volume(env, gripper, geom_ids, root_id, root_to_grasp, moving,
     from tpgpt.sim.replay import closing_direction, set_closure
 
     sim = env.sim
-    direction = closing_direction(gripper)
+    # How a partial closure is commanded depends on the hand -- see
+    # ``grippers.commands_position``. On a passthrough hand ``set_closure``
+    # writes a field ``format_action`` never reads, so driving the sweep with
+    # it would hold the hand at one pose and report the open box for both
+    # states. The Schunk hand read an identical 151.9 mm at open **and** at
+    # half closure before this, which is that bug's signature.
+    passthrough = commands_position(gripper)
+    direction = None if passthrough else closing_direction(gripper)
+
     action = gripper_action(env, gripper, -1.0)
     for _ in range(SETTLE_STEPS):
         env.step(action)
@@ -212,10 +221,13 @@ def _swept_volume(env, gripper, geom_ids, root_id, root_to_grasp, moving,
 
     traversed = []
     for fraction in np.linspace(float(start_fraction), 1.0, SWEEP_SAMPLES):
-        set_closure(gripper, direction, float(fraction))
-        hold = np.zeros(env.action_dim)
+        if passthrough:
+            command = gripper_action(env, gripper, 2.0 * float(fraction) - 1.0)
+        else:
+            set_closure(gripper, direction, float(fraction))
+            command = np.zeros(env.action_dim)
         for _ in range(SWEEP_HOLD):
-            env.step(hold)
+            env.step(command)
             freeze()
         traversed.append(_root_local(sim, geom_ids, root_id)[moving] @ root_to_grasp)
 

@@ -114,9 +114,25 @@ def _closing_travel(robosuite_name, *, whole_block):
         env.close()
 
 
-#: Registry hands with more than one gripper actuator — the cases the defect
-#: could reach at all.
-MULTI_DOF = ("inspire", "umi")
+def _multi_dof():
+    """Registry hands with more than one gripper actuator.
+
+    Derived, not listed. A hardcoded list went stale the moment five
+    multi-actuator hands were registered, and the control below asserts
+    ``dof == 1`` of everything not in it -- so a stale list fails the *control*
+    rather than the case it was guarding, which is the least useful place for
+    it to break.
+    """
+    from robosuite.models.grippers import GRIPPER_MAPPING
+
+    return tuple(
+        short for short, pair in GRIPPER_PAIRS.items()
+        if GRIPPER_MAPPING[pair.robosuite]().dof > 1
+    )
+
+
+#: The cases the defect could reach at all.
+MULTI_DOF = _multi_dof()
 
 
 def test_the_inspire_hand_actuates():

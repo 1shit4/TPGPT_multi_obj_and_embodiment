@@ -30,9 +30,9 @@ all?** Nothing here involves a transportation map, a policy, or a shelf.
 > | — | §6 how reproducible the frame measurement is | **stands.** One hand's contact offset spans 11.7 mm over three identical runs |
 > | E | §7 object census — what the cameras see, per object | **stands.** 70 of 70 cells plan; every new object resolves better than the can, and the single-object scene nearly doubles the bread |
 > | F | §8 the bench — grasp, close, lift, carry | **stands.** 74 of 294 grasps and 40 of 110 pairs held. The three-finger `robotiq3f` is joint-second of eleven hands and covers 7 of 10 objects; `wrench` and `nut_square` are refused by every hand |
-> | D | §9 GraspGen-X descriptions authored from the MuJoCo model | *partial* — the generator reproduces a shipped aperture to 3% on clean two-finger jaws and does not describe an anthropomorphic hand |
-> | G | §10 the closure sweep, and how wide each pair's band is | *not started* |
-> | H | §11 the closure table applied, paired grasp for grasp | *not started* |
+> | D | §9 descriptions, and four defects the multi-finger hands were failing on | **the §4 withdrawal, explained.** The swept volume is the region the fingers *traverse*, not the gap between them: the Inspire hand sweeps 156 mm, not 28. Four defects fixed — a drifting arm, an unsigned closing axis, a bench measuring its own controller, and a closure command that did nothing. The generator measures the right quantity now with a known bias |
+> | G | §10 the closure sweep, and how wide each pair's band is | **stands.** 17 of 25 pairs hold somewhere; `+1` is inside the band for 15 of those 17. Per-pair closure is worth **two cells in twenty-five**, both on the `robotiq140` |
+> | H | §11 five more hands, and the split that explains them | **stands.** A second three-finger configuration works (7/15). Every hand on a GraspGen-X-written description grips; every hand on a description written here does not — 6 hands, 0/41 |
 
 ---
 
@@ -1163,3 +1163,402 @@ it looks.
 | `yumi` | `pot` | 1 | 6 | 5.5 | +4.5 | 0 | 1.00 | 241.9 | 0.0 | 0 | never_lifted |
 | `yumi` | `pot` | 2 | 6 | 10.5 | +1.8 | 0 | 1.00 | 254.2 | 34.3 | 0 | never_lifted |
 | `yumi` | `wrench` | 0 | 2 | 4.5 | -0.8 | 0 | 1.00 | 243.9 | 0.0 | 0 | never_lifted |
+
+---
+
+## 9. Experiment D — describing a hand, and four defects the multi-finger hands were failing on
+
+Commits `4e0c750` and `598a0e5`. Prompted by an objection that a 26 mm
+fingertip gap for a five-finger hand was not credible. It was not, and finding
+out why turned up four separate faults, **none of them the hand**.
+
+### Why the objection was right
+
+Section 4 measured the space *between* the Inspire hand's fingers as 28 mm and
+concluded it could not accept a 65 mm can. That measurement is of the wrong
+quantity. GraspGen-X's paper (arXiv:2606.00998) defines its gripper encoding as
+**"the region traversed by the robot fingers during its grasping motion"** — the
+volume the fingers sweep *through* while closing, not the gap they leave.
+
+The two are nearly the same box for a parallel jaw, and that is precisely how
+the error survived: the old measurement reproduced the shipped apertures for the
+Panda, the Yumi and the Robotiq 2F-140, and that agreement looked like
+validation. The Panda's own config settles the definition beyond argument — its
+finger joint travels **0.04 m per side** and `extents[0]` is **0.08**, their
+total travel, with `extents2[0]` = 0.04, the travel from half-closed.
+
+Measured properly, the Inspire hand sweeps **156.3 mm** and `g1three`
+**127.4 mm**, against declared apertures of 80 and 100. These are not hands that
+open by 26 mm. The paper also reports the released model scoring **0.363 on the
+Inspire Hand** and 0.404 on the Surge Hand, so five-finger hands are inside what
+it is expected to handle.
+
+### The four defects, in the order they were found
+
+**1. The arm does not hold still while a gripper is measured.** A zero arm
+action is not a command to stay put. With a heavy hand the wrist wandered
+**800 mm** over three forty-step settles, and that motion lands in
+`closed - opened` where it reads as finger travel. It is what made the Inspire
+hand report `finger_travel_mm` of −1.05 and `plus_one_closes: False`. With the
+arm frozen — its own degrees of freedom only, never the gripper's, which would
+be §7.32's error — the same hand reads +1.5 mm and True, and **`g1three`'s
+anisotropy goes from 1.2 to 116.3**: from "no closing axis at all" to a cleanly
+single-axis hand.
+
+**2. The closing axis had no sign.** `finger_axes` takes it from the first right
+singular vector of the finger displacements, and **the sign of a singular vector
+is arbitrary**. Harmless for a two-finger jaw, where a half turn about the
+approach swaps the fingers and is the same grasp — which is why
+`closing_angle_deg` is folded into [−90, 90) in the first place. Not harmless
+for a hand GraspGen-X declares `symmetric: false`, where it puts the thumb on
+the wrong side.
+
+The convention was read from GraspGen-X's own assets rather than guessed.
+Loading each multi-finger URDF and driving it to the `open` pose its config
+declares puts the **odd finger on +X** every time:
+
+| gripper | bodies on +X | bodies on −X | odd finger |
+|---|---|---|---|
+| `inspire_hand` | 4 | 8 | +X |
+| `unitree_g1` | 3 | 4 | +X |
+| `barrett_hand` | 2 | 4 | +X |
+| `sharpa_wave` | 5 | 17 | +X |
+
+Resolved at the **open** pose, because a hand that curls brings every fingertip
+together and at the closed pose the sides stop meaning anything. `g1three`'s
+axis flips 179 degrees; `robotiq3f` moves 1.1; the symmetric hands are
+untouched. `ROBOTICS_NOTES.md` §7.33 is this same lesson one level up — *a grasp
+is a pose, not an axis*.
+
+Measured as reachability, over five planner grasps on a can:
+
+| hand | as measured | sign flipped |
+|---|---|---|
+| `inspire` | **0/5** | 2/5 |
+| `g1three` | 2/5 | 3/5 |
+| `robotiq3f` | 3/5 | 4/5 |
+| `panda` (symmetric) | **5/5** | 3/5 |
+
+**3. The bench was measuring the controller, not the gripper.** Two parts. It
+never asked whether the arm could reach a candidate — on `inspire/can`, **46 of
+100** candidates are reachable and **0 of the 8** the funnel kept were, so the
+hand was scored on grasps it never had a chance to attempt. And it drove the arm
+by Cartesian impedance, under which the hand finished **43 to 100 mm** from poses
+inverse kinematics reports as reachable. It now screens for reachability and
+drives by joint position through IK, as the Tier 2 replay does.
+`robotiq3f/can` went from 25–32 mm of reach error to **3.0–4.4 mm** and from 1
+of 3 grasps held to 2 of 3.
+
+The effect on the whole fleet was large. Against the first bench run:
+
+| hand | before | after |
+|---|---|---|
+| `xarm` | 7/27 | **18/30** |
+| `robotiq85` | 5/22 | **11/28** |
+| `robotiq3f` | 13/28 | **15/30** |
+| `rethink` | 3/27 | 5/25 |
+| `panda` | 6/24 | 6/28 |
+
+**4. `set_closure` is a silent no-op on every anthropomorphic hand.** See
+section 10 — it is the mechanism the closing table is commanded through, so it
+belongs there.
+
+### Where the generator stands
+
+`describe` now measures the swept volume as the paper defines it. It
+**over-reads uniformly** against the shipped figures — panda 104.5 mm against
+80.0, robotiq85 131.4 against 85.0, yumi 58.4 against 50.0 — and the cause is
+visible rather than mysterious: the box here contains every *moving geom*,
+including knuckles and outer links that swing wide, where the shipped value is
+the finger travel alone. Tightening it to the distal geoms is the obvious next
+step and has not been done.
+
+So the module is **not finished**. What it is now is a measurement of the right
+quantity with a known bias, rather than a measurement of the wrong quantity that
+happened to agree on five hands.
+
+### What it does not settle
+
+**The Inspire hand still holds nothing, and the cause is not established.**
+Six candidates have been tested and eliminated:
+
+| hypothesis | test | verdict |
+|---|---|---|
+| it does not actuate | 53 mm of finger travel | **no** |
+| it cannot open wide enough | 156 mm swept volume against a 65 mm can | **no** |
+| it cannot reach its grasps | reaches to 2.3 mm under position control | **no** |
+| its actuators are too weak | `kp` 2 → 200, force limit 20 → 50 N: 0/6 both ways | **no** |
+| the contact point is wrong | swept centre instead of closed fingertips: 1/6 against 0/6 | marginal |
+| the roll is a half turn out | 0/6 against 0/6 | **no** |
+| it knocks the object on the way in | approached and descended with the hand held open: **0.0 mm** of object motion | **no** |
+| the contact depth is wrong | swept along the approach axis from −60 to +60 mm, two objects, 14 runs: **no band works** | **no** |
+| the jaws close too far | closure swept 0.3, 0.5, 0.7, 0.9, `+1`, three objects: no fraction holds | **no** |
+
+One row of the depth sweep is worth keeping rather than averaging away. At
+−60 mm on the milk the hand applies **0 N** — it never touches the object at the
+close — and the milk still ends **43 mm** down. So something other than the
+fingers disturbs it, and the approach test above says it is not the descent
+either. That is unexplained and is the thread to pull next.
+
+What is measured is that it reaches the grasp, touches the object on **16 of
+27** attempts with 50 to 332 N, and has **0%** contact through the carry. It
+grips and the object is expelled. The remaining candidate is where the fingers
+meet the object — a contact point for a hand that closes into its palm is not
+the centroid of its fingertips, and the swept volume's centre is only a first
+guess at a better one.
+
+`g1three` is in the same position at 0 of 29, with the added doubt that its two
+models may not be the same hand: GraspGen-X's `unitree_g1` measures
+[182, 70, 71] mm across its own base frame against robosuite's
+[122, 49, 116] mm. `bd`/`bd_spot` by contrast agree to within 4 mm on every
+axis, so the comparison is meaningful and that pairing is sound.
+
+---
+
+## 10. Experiment G — the closing sweep, and what a per-pair table is worth
+
+125 runs: five hands × five objects × five commanded closures (0.3, 0.5, 0.7,
+0.9 and plain `+1`), one grasp per cell, otherwise Experiment F's conditions.
+
+### Why
+
+Four closing rules have failed the same way, and `FINDINGS.md` §8z states the
+reason: the window between gripping and crushing is per-object **and** per-hand,
+and no constant sits inside all of them. The response here is not a fifth
+constant but a **measurement** of where each pair's window is.
+
+### One distinction that has to be made first
+
+**Commanded closure and measured closure are different quantities and they
+point opposite ways.** Experiment F found that a *measured* closure of 1.00 at
+the lift always means failure — the jaws travelled their whole range, which they
+can only do with nothing between them. This experiment finds that *commanding*
+`+1` is usually fine, because a commanded `+1` that meets an object stops early
+and then measures around 0.5.
+
+Both are true. One is an outcome, the other an input, and conflating them would
+produce exactly the wrong table.
+
+### And one defect it exposed before it could produce anything
+
+`set_closure` is how a partial closure is commanded, and it is a **silent no-op
+on every anthropomorphic hand**. robosuite's grippers close two ways: most
+*integrate*, so `format_action` reads `current_action` and adds a step in the
+command's direction — for those `set_closure`, which writes `current_action`
+directly, is the only way to ask for a partial close. The Inspire, G1, Fourier,
+Ability and SchunkSvh hands *pass through*: `format_action` maps the action onto
+their actuators and never reads `current_action`.
+
+Measured before the fix, a sweep over all five fractions on `inspire/can` and
+`inspire/milk` returned **identical lift, force and carry at every fraction**.
+`grippers.commands_position` now reads which kind a hand is, and for a
+passthrough hand the fraction is commanded directly as `2f − 1`. The split is
+**not** by finger count — `robotiq3f` has three fingers and integrates.
+
+### Result: 17 of 25 pairs hold somewhere, and `+1` is not always inside the band
+
+| hand | object | 0.3 | 0.5 | 0.7 | 0.9 | `+1` | band | chosen |
+|---|---|---|---|---|---|---|---|---|
+| `panda` | `bread` | n | n | n | n | n | 0/5 | — |
+| `panda` | `can` | n | n | n | n | n | 0/5 | — |
+| `panda` | `cereal` | n | n | **Y** | **Y** | **Y** | 3/5 | 0.9 |
+| `panda` | `milk` | n | n | **Y** | **Y** | **Y** | 3/5 | 0.9 |
+| `panda` | `mug` | n | n | n | n | n | 0/5 | — |
+| `robotiq140` | `bread` | n | **Y** | **Y** | n | n | 2/5 | 0.7 |
+| `robotiq140` | `can` | n | n | **Y** | n | n | 1/5 | 0.7 |
+| `robotiq140` | `cereal` | n | n | **Y** | **Y** | **Y** | 3/5 | 0.9 |
+| `robotiq140` | `milk` | n | n | n | n | n | 0/5 | — |
+| `robotiq140` | `mug` | n | **Y** | **Y** | **Y** | **Y** | 4/5 | 0.9 |
+| `robotiq3f` | `bread` | n | n | n | n | n | 0/5 | — |
+| `robotiq3f` | `can` | n | n | n | n | n | 0/5 | — |
+| `robotiq3f` | `cereal` | n | n | n | n | **Y** | 1/5 | `+1` |
+| `robotiq3f` | `milk` | n | n | n | **Y** | **Y** | 2/5 | `+1` |
+| `robotiq3f` | `mug` | n | n | n | **Y** | **Y** | 2/5 | `+1` |
+| `robotiq85` | `bread` | n | n | n | n | n | 0/5 | — |
+| `robotiq85` | `can` | n | n | **Y** | **Y** | **Y** | 3/5 | 0.9 |
+| `robotiq85` | `cereal` | n | n | n | **Y** | **Y** | 2/5 | `+1` |
+| `robotiq85` | `milk` | n | n | n | **Y** | **Y** | 2/5 | `+1` |
+| `robotiq85` | `mug` | n | **Y** | **Y** | **Y** | **Y** | 4/5 | 0.9 |
+| `xarm` | `bread` | n | n | **Y** | **Y** | **Y** | 3/5 | 0.9 |
+| `xarm` | `can` | n | n | **Y** | **Y** | **Y** | 3/5 | 0.9 |
+| `xarm` | `cereal` | n | n | n | n | n | 0/5 | — |
+| `xarm` | `milk` | n | n | **Y** | **Y** | **Y** | 3/5 | 0.9 |
+| `xarm` | `mug` | n | n | n | **Y** | **Y** | 2/5 | `+1` |
+
+### Reading it
+
+**`+1` is right far more often than not, and the sweep confirms rather than
+replaces it.** It is inside the holding band for 15 of the 17 pairs that hold at
+all, which is why `FINDINGS.md` §8z's decision to keep it stands.
+
+**The two exceptions are the case a table exists for.** `robotiq140/bread` holds
+at 0.5 and 0.7 and **fails at 0.9 and `+1`** — the squeeze-out, the same
+phenomenon that makes the bread the worst object in every campaign. The same
+hand's `can` holds **only** at 0.7. Both are the widest-jawed hand in the fleet
+closing on the two objects it can most easily crush.
+
+So the table's value, scored honestly: per-pair closure holds **17 of 25** pairs
+against **15 of 25** for always-`+1`. Two cells, both on one hand.
+
+**What the table is more useful for is margin.** `robotiq140/mug` and
+`robotiq85/mug` hold across four of the five fractions; `robotiq140/can` holds at
+exactly one. A pair with a band of 1 is a single lucky sample, not a calibrated
+pair, and that is worth knowing before a campaign leans on it.
+
+### Consequences
+
+`tpgpt/grasp/closing_table.json` records the measurement — the chosen fraction,
+the band width and every fraction that held, per pair, with `+1` as the default.
+**It is not wired into any driver.** Doing that is its own commit with its own
+before-and-after, and on this evidence it would be worth two cells in
+twenty-five, which is not yet a reason to move a default that every existing
+result depends on.
+
+### What it does not settle
+
+One grasp per cell. Experiment P measured the spread *within* a pair to exceed
+the spread between pairs, so a cell reading 0/5 may be one bad grasp rather than
+a bad closure window, and a band of 1 may be noise. Five hands and five objects,
+none of them the hands that hold nothing.
+
+---
+
+## 11. Experiment H — five more hands, and the split that explains them
+
+`outputs/grasp_bench_new`, 56 grasps. Five hands × five objects × three grasps,
+Experiment F's conditions exactly.
+
+### Why
+
+Three-finger diversity rested on a single hand and five-finger diversity on
+none. robosuite has five more multi-finger hands that had never been tried, and
+`describe` can author the GraspGen-X description each of them needs. Four were
+authored; the fifth needed nothing, because
+`RobotiqThreeFingerDexterousGripper` is the **same robosuite XML** as
+`robotiq3f` with its fingers driven independently, so it pairs to the same
+shipped description.
+
+### Result
+
+| hand | fingers | config | closing | held | reach mm | touched object |
+|---|---|---|---|---|---|---|
+| `robotiq3f_dex` | 3 | **GraspGen-X's own** (`robotiq_3f`) | integrator | **7/15** | 3.0 | 13/15 |
+| `jaco3f` | 3 | authored here | integrator | **0/14** | 3.5 | 1/14 |
+| `ability` | 5 | authored here | passthrough | **0/15** | 26.0 | 4/15 |
+| `fourier` | 5 | authored here | passthrough | **0/12** | 20.7 | 5/12 |
+| `schunk` | 5 | authored here | passthrough | **refused** — uncalibrated closure | — | — |
+
+### Reading it
+
+**A second three-finger configuration works.** `robotiq3f_dex` holds 7 of 15
+across four of the five objects it saw — `cereal` 3/3, `milk` 2/3, `mug` 1/3,
+`hammer` 1/3, `can` 0/3.
+
+**Every hand running a description GraspGen-X wrote grips; every hand running a
+description written here does not.** That is six hands and it is the clearest
+signal in this document:
+
+| description | hands | result |
+|---|---|---|
+| GraspGen-X's own | `robotiq3f`, `robotiq3f_dex` | 15/30 and 7/15 |
+| authored by `describe` | `jaco3f`, `ability`, `fourier`, `schunk` | 0/41 |
+
+**`jaco3f` is the proof that this is the description and not the hand.** It
+reaches its commanded grasp to a median **3.5 mm** — *better* than the 3.0 mm of
+the hand that works — and touches the object **once in fourteen attempts**. The
+arm goes exactly where the description says, and the object is not there. A
+depth sweep from −80 to +20 mm along its approach axis finds no offset that
+rescues it.
+
+The suspect is `fingertip`, which sets where along the approach GraspGen-X puts
+the grasp point and which feeds `grasp_to_eef_pose` directly. `describe` takes
+it as the far face of the swept box; on the one hand where a shipped value
+exists to compare, the Panda, it comes out 93.4 mm against a declared 103.4.
+
+### What it does not settle
+
+Whether the five-finger hands can grasp at all. Three of the four failures are
+five-fingered, but so is the fourth failure's cause — `jaco3f` has three fingers
+and an integrator close, and fails identically. Until an authored description is
+validated against a hand that already works, nothing about the five-finger hands
+can be concluded from these zeros.
+
+`schunk` was **refused before any physics**, by the `closure_calibrated`
+precondition: its spread travel measures −61.8 mm. That is the Inspire hand's
+failure again — `spread` does not describe a hand whose fingers curl — and the
+precondition doing its job rather than guessing.
+
+---
+
+## 12. Where this leaves the two questions
+
+### Which hands work
+
+Sixteen hands are registered, up from nine. Eleven have been run through the
+bench on ten objects, five more on five objects.
+
+| hand | fingers | held | objects held | note |
+|---|---|---|---|---|
+| `xarm` | 2 | 18/30 | 7 of 10 | best overall |
+| **`robotiq3f`** | **3** | **15/30** | **7 of 10** | |
+| `robotiq140` | 2 | 13/28 | 7 of 10 | |
+| `robotiq85` | 2 | 11/28 | 5 of 10 | |
+| **`robotiq3f_dex`** | **3** | **7/15** | **4 of 5 tried** | same hand as `robotiq3f`, fingers driven independently |
+| `panda` | 2 | 6/28 | 5 of 10 | the demonstration's own hand |
+| `rethink` | 2 | 5/25 | 5 of 10 | |
+| `yumi` | 2 | 3/22 | 2 of 10 | |
+| `umi` | 2 | 2/24 | 2 of 10 | |
+| `bd` | 2 | 1/23 | 1 of 10 | |
+| `inspire` | 5 | 0/27 | 0 | |
+| `g1three` | 3 | 0/29 | 0 | |
+| `jaco3f` | 3 | 0/14 | 0 | authored description |
+| `ability` | 5 | 0/15 | 0 | authored description |
+| `fourier` | 5 | 0/12 | 0 | authored description |
+| `schunk` | 5 | refused | — | uncalibrated closure |
+
+**Three-finger diversity is established**: two working configurations, covering
+7 of 10 objects, competitive with the best parallel jaws. `robotiq3f` is the
+only hand besides `xarm` and `robotiq140` to hold the `pot` by its handles.
+
+**Five-finger diversity is not**, and the reason is **not yet known to be the
+hands** — see §11. No five-finger hand in this project has ever run on a
+description its own authors wrote.
+
+**Three fingers is competitive, not superior.** On the same ten objects `xarm`
+holds 18 and `robotiq3f` 15. Nothing here shows that more fingers buy anything;
+it shows they cost nothing. Demonstrating an advantage needs objects chosen to
+require enclosure rather than pinching, and the three candidates for that here
+— `wrench` and the two nuts — defeat every hand.
+
+### Which objects work
+
+| verdict | objects | held by |
+|---|---|---|
+| **good** | `can` | 8 of 11 hands |
+| | `cereal`, `hammer`, `milk`, `mug` | 6 of 11 each |
+| marginal | `bread` | 4 of 11 |
+| | `pot` | 3 of 11 |
+| **refused by every hand** | `wrench`, `nut_square` | 0 of 11 |
+| | `nut_round` | 1 of 11 |
+
+**The recommended set is the six good ones**: `can`, `cereal`, `hammer`, `milk`,
+`mug`, `bread`. Two of those are new and neither is a box — the `hammer` has a
+handle and a centre of mass away from it, the `mug` a thin wall and a rim — so
+the working set is not merely "things a parallel jaw likes".
+
+**The three failures are diagnosed, not merely dropped.** One hold in 88
+attempts across the fleet, with an identical signature everywhere: reach error
+small, closure 1.00, jaws shut on air. All three are flat metal parts lying on a
+table. A top-down hand is offered a thin flange and would have to descend past
+it into the table to enclose anything. They are the candidates to replace with
+sized primitives, which is what a shape-controlled comparison would want anyway.
+
+### The largest open item
+
+`describe` authors a GraspGen-X description that gets a hand into the system —
+the planner accepts it, the funnel filters it, the arm flies to its grasps to
+3.5 mm — and the hand then touches nothing. Four hands, 0 of 41. Fixing
+`fingertip` is the single change that would most extend this fleet, and
+`robotiq3f` provides the control to validate it against: author a description
+for a hand that already works on a shipped one, and require the authored version
+to reproduce its result.

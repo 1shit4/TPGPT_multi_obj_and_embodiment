@@ -1,0 +1,82 @@
+{
+    "open": {
+        "gripper0_right_joint_thumb": 1.056145350642629,
+        "gripper0_right_joint_thumb_distal": 0.4462273775797671,
+        "gripper0_right_joint_index": 1.0561316829335943,
+        "gripper0_right_joint_index_distal": 0.4462136681630319,
+        "gripper0_right_joint_pinky": 1.0561398224790215,
+        "gripper0_right_joint_pinky_distal": 0.4462219061491821
+    },
+    "close": {
+        "gripper0_right_joint_thumb": 0.7557055075529641,
+        "gripper0_right_joint_thumb_distal": 0.19834744849162586,
+        "gripper0_right_joint_index": 0.7556914733821974,
+        "gripper0_right_joint_index_distal": 0.19833334516511428,
+        "gripper0_right_joint_pinky": 0.7557006929523237,
+        "gripper0_right_joint_pinky_distal": 0.19834247360421103
+    },
+    "fingertip": [
+        0.0,
+        0.0,
+        0.17986379839609154
+    ],
+    "sweep_volume": {
+        "extents": [
+            0.12965,
+            0.05724,
+            0.06271
+        ],
+        "offset": [
+            0.01049,
+            -0.00605,
+            0.14851
+        ],
+        "extents2": [
+            0.12961,
+            0.05723,
+            0.0622
+        ],
+        "offset2": [
+            0.01049,
+            -0.00604,
+            0.14826
+        ]
+    },
+    "links": [
+        "gripper0_right_right_gripper",
+        "gripper0_right_palm",
+        "gripper0_right_eef",
+        "gripper0_right_thumb_proximal",
+        "gripper0_right_thumb_distal",
+        "gripper0_right_index_proximal",
+        "gripper0_right_index_distal",
+        "gripper0_right_pinky_proximal",
+        "gripper0_right_pinky_distal"
+    ],
+    "standoff": [
+        0.0,
+        0.0
+    ],
+    "bbox": [
+        [
+            -0.06283719487711927,
+            -0.05153461090426809,
+            -0.012197423772822735
+        ],
+        [
+            0.0834245943940383,
+            0.05130950120100943,
+            0.20047539704696937
+        ]
+    ],
+    "symmetric": false,
+    "type": "revolute_3f",
+    "tpgpt_measured": {
+        "robosuite": "JacoThreeFingerGripper",
+        "robot": "Panda",
+        "n_fingers": 3,
+        "seed": 0,
+        "sweep_samples": 9,
+        "moving_geoms": 18
+    }
+}
