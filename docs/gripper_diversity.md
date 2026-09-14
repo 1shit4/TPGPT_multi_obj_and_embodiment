@@ -26,11 +26,13 @@ all?** Nothing here involves a transportation map, a policy, or a shelf.
 > | A | §3 the ruler — what a one-actuator command mis-measures | **stands.** 11 of 13 multi-actuator hands were under-driven; 0 of 13 single-actuator hands affected |
 > | B | §4 the Inspire and UMI hands, re-measured and re-calibrated | **stands.** Frames repaired and two false claims removed; both hands still lift 0 of 13, and the reason is measured — their fingertips part by 28 mm against a 65 mm can. One 132 mm lift is **withdrawn** as irreproducible |
 > | C | §5 two hands paired from halves already on disk | **stands.** `g1three` and `bd` measured and registered; both lift 0 of 13. Every hand with `grip_site` at its base fails and every hand with it at the fingertips passes, 11 of 11 |
-> | D | §6 GraspGen-X descriptions authored from the MuJoCo model | *not started* |
+> | ⚠ | **the 26–28 mm "fingertip gap" of §4 is WITHDRAWN** | It measured the free space *between* the fingers. GraspGen-X's swept volume is **the region the fingers traverse while closing** (arXiv:2606.00998), which for a curling hand is a completely different and much larger quantity. Every conclusion in §4 that rests on that number is suspended pending re-measurement |
+> | — | §6 how reproducible the frame measurement is | **stands.** One hand's contact offset spans 11.7 mm over three identical runs |
 > | E | §7 object census — what the cameras see, per object | **stands.** 70 of 70 cells plan; every new object resolves better than the can, and the single-object scene nearly doubles the bread |
-> | F | §8 the bench — grasp, close, lift, carry | *not started* |
-> | G | §9 the closure sweep, and how wide each pair's band is | *not started* |
-> | H | §10 the closure table applied, paired grasp for grasp | *not started* |
+> | F | §8 the bench — grasp, close, lift, carry | *running* |
+> | D | §9 GraspGen-X descriptions authored from the MuJoCo model | *partial* — the generator reproduces a shipped aperture to 3% on clean two-finger jaws and does not describe an anthropomorphic hand |
+> | G | §10 the closure sweep, and how wide each pair's band is | *not started* |
+> | H | §11 the closure table applied, paired grasp for grasp | *not started* |
 
 ---
 
@@ -363,7 +365,43 @@ So the UMI's grasp of a can under this test is **chaotic**, not marginal, and no
 number from it should be quoted. This is `ROBOTICS_NOTES.md` §7.37 arriving
 before the write-up rather than after it.
 
-### The real obstacle, measured: these hands cannot accept a can on any axis
+### ~~The real obstacle, measured: these hands cannot accept a can on any axis~~ — WITHDRAWN
+
+> **This subsection is wrong, and the error is in the measurement, not the
+> arithmetic.** It reports the free space *between* the fingers, and concludes
+> from a 26–28 mm reading that neither hand can accept a 65 mm can.
+>
+> GraspGen-X's swept volume is not that quantity. The paper (arXiv:2606.00998)
+> defines it as **"the region traversed by the robot fingers during its grasping
+> motion"** — the volume the fingers *sweep through* as they close, not the gap
+> they leave. The two nearly coincide for a parallel jaw, which is why the
+> figures below reproduce the shipped apertures for the Panda, Yumi and Robotiq
+> 2F-140 and why that agreement looked like validation. For a hand whose fingers
+> curl inward they are entirely different: the Panda's config declares
+> `extents[0] = 0.08` against a finger travel of 0.04 per side, i.e. the **total
+> travel of the two fingers**, and `extents2[0] = 0.04`, the travel from
+> half-closed.
+>
+> So the 10.4 mm and 26.1 mm readings describe a gap that is not what the
+> representation encodes, and no conclusion about whether these hands can hold
+> anything follows from them. The paper also reports GraspGen-X scoring **0.363
+> on the Inspire Hand** and 0.404 on the Surge Hand, so five-finger hands are
+> within what the released model is expected to handle.
+>
+> What survives independently of this: both hands lift 0 of 13 on the depth
+> sweep, on a can, a lemon and bread. That is a physics result and it stands.
+> But its *explanation* is now open, and one candidate is that the sweep uses a
+> synthesised top-down grasp converted through an `alignment` these two hands
+> measure unreliably (3.2 mm and 5 degrees between runs), rather than a grasp
+> GraspGen-X actually proposed for them. Neither hand has yet been run through
+> the bench, which is the test that uses real planner grasps.
+>
+> The subsection is kept rather than deleted because the axis search in it is
+> still a correct measurement of the thing it measured, and because
+> `ROBOTICS_NOTES.md` §7.26 is about what happens when superseded numbers are
+> quietly removed instead of marked.
+
+### The measurement as taken, now known to be of the wrong quantity
 
 The pocket is measured along the axis the fingers *travel* along, which for a
 parallel jaw is the axis they grip across, by construction. For a hand whose

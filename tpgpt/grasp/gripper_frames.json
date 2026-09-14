@@ -2,37 +2,37 @@
   "bd": {
     "alignment": [
       [
-        0.9984796911768093,
-        -5.982379130096403e-05,
-        -0.05512080123308777
+        0.9984799100260969,
+        -6.432708036375738e-05,
+        -0.0551168316968983
       ],
       [
-        -5.195419505597967e-05,
-        -0.9999999882531359,
-        0.00014420294672016533
+        -5.645122257692928e-05,
+        -0.9999999879736193,
+        0.00014445075497886338
       ],
       [
-        -0.055120809212358186,
-        -0.00014111995684903082,
-        -0.9984796825559008
+        -0.05511684032613762,
+        -0.0001411197643006405,
+        -0.9984799016493396
       ]
     ],
-    "anisotropy": 85179.50090273104,
+    "anisotropy": 77092.48979011034,
     "approach_in_site": [
-      -0.055120809212358186,
-      -0.00014111995684903082,
-      -0.9984796825559008
+      -0.05511684032613762,
+      -0.0001411197643006405,
+      -0.9984799016493396
     ],
-    "closing_angle_deg": -0.003432869774115943,
+    "closing_angle_deg": -0.003691281287814263,
     "closing_in_site": [
-      0.9984796911768093,
-      -5.982379130096403e-05,
-      -0.05512080123308777
+      0.9984799100260969,
+      -6.432708036375738e-05,
+      -0.0551168316968983
     ],
     "contact_offset": [
-      -0.02483301988231892,
-      -1.2713167330119512e-06,
-      -0.20824559703865242
+      -0.024831980736367814,
+      -1.2713167330102165e-06,
+      -0.20824605085616657
     ],
     "finger_geoms": [
       "gripper0_right_g2_vis",
@@ -44,52 +44,49 @@
       "gripper0_right_g8_col",
       "gripper0_right_g9_col"
     ],
-    "finger_travel_mm": 51.97367015099985,
+    "finger_travel_mm": 51.9752431384376,
     "n_moving_geoms": 8,
     "plus_one_closes": true,
     "robosuite": "BDGripper",
-    "spread_closed": 0.04486575260588532,
-    "spread_open": 0.09683942275688517
+    "spread_closed": 0.04486494370721039,
+    "spread_open": 0.09684018684564799
   },
   "g1three": {
     "alignment": [
       [
-        -0.6814054876631653,
-        -0.7299875494772348,
-        -0.05295978654361856
+        0.0014724878705489218,
+        0.9871134067825369,
+        0.16001548028126827
       ],
       [
-        -0.731905302734058,
-        0.6795107347941023,
-        0.050791624598412424
+        0.9999975735965035,
+        -0.0011913311749011956,
+        -0.0018529789900018324
       ],
       [
-        -0.0010905101057696656,
-        0.07337124033162387,
-        -0.9973041020069596
+        -0.0016384689733913106,
+        0.16001782050823457,
+        -0.98711276586782
       ]
     ],
-    "anisotropy": 1.1840213401867694,
+    "anisotropy": 116.3031454231798,
     "approach_in_site": [
-      -0.0010905101057696656,
-      0.07337124033162387,
-      -0.9973041020069596
+      -0.0016384689733913106,
+      0.16001782050823457,
+      -0.98711276586782
     ],
-    "closing_angle_deg": 46.97142005558291,
+    "closing_angle_deg": 89.91453132212678,
     "closing_in_site": [
-      -0.6814054876631653,
-      -0.7299875494772348,
-      -0.05295978654361856
+      0.0014724878705489218,
+      0.9871134067825369,
+      0.16001548028126827
     ],
     "contact_offset": [
-      -0.000511714968527744,
-      -0.018975063144918713,
-      -0.13015138081072858
+      -0.0005117149685277406,
+      -0.006948950828125123,
+      -0.12971105373049086
     ],
     "finger_geoms": [
-      "gripper0_right_g0_vis",
-      "gripper0_right_g0_col",
-      "gripper0_right_g1_vis",
       "gripper0_right_g2_vis",
       "gripper0_right_g1_col",
       "gripper0_right_g3_vis",
@@ -103,36 +100,36 @@
       "gripper0_right_g7_vis",
       "gripper0_right_g6_col"
     ],
-    "finger_travel_mm": 8.055980589742523,
-    "n_moving_geoms": 15,
+    "finger_travel_mm": 22.19208813670931,
+    "n_moving_geoms": 12,
     "plus_one_closes": true,
     "robosuite": "G1ThreeFingerRightGripper",
-    "spread_closed": 0.09269633860964181,
-    "spread_open": 0.10075231919938434
+    "spread_closed": 0.11170224385732999,
+    "spread_open": 0.1338943319940393
   },
   "inspire": {
     "alignment": [
       [
-        0.23887944328523622,
-        0.16775175888269137,
-        0.9564496635827204
+        -0.03885775547819134,
+        0.220545207317663,
+        0.9746024247704324
       ],
       [
-        -0.9687892842302624,
-        0.10833126805867827,
-        0.22296111571620467
+        -0.9966998420561072,
+        0.06101102052447582,
+        -0.05354512321297896
       ],
       [
-        -0.06621128556637171,
-        -0.979859012181121,
-        0.18839421942057086
+        -0.071270608840729,
+        -0.9734667261410485,
+        0.2174466219827311
       ]
     ],
-    "anisotropy": 7.275762093813085,
+    "anisotropy": 5.573691065978617,
     "approach_in_site": [
-      -0.06621128556637171,
-      -0.979859012181121,
-      0.18839421942057086
+      -0.071270608840729,
+      -0.9734667261410485,
+      0.2174466219827311
     ],
     "calibrated_depth": null,
     "calibration_note": "No usable depth band on the corrected scene: 1 of 13 swept offsets lift the reference can (a band 15 mm wide), below the 3-offset minimum. A single working sample is a coincidence of one grasp, not a calibration. Consistent with this hand's finger travel of 0.7 to 6.5 mm against 29 to 90 mm for every other hand: it does not actuate. ROBOTICS_NOTES 7.32.",
@@ -190,21 +187,19 @@
         0.00010653549989581013
       ]
     ],
-    "closing_angle_deg": 35.07823557488392,
+    "closing_angle_deg": -80.00763829182571,
     "closing_in_site": [
-      0.23887944328523622,
-      0.16775175888269137,
-      0.9564496635827204
+      -0.03885775547819134,
+      0.220545207317663,
+      0.9746024247704324
     ],
     "contact_offset": [
-      0.004931497268025346,
-      -0.12900070879168263,
-      0.0014168431629948373
+      0.004732316100156115,
+      -0.13092667563040186,
+      0.0028432719508389025
     ],
     "depth_band": 0.0,
     "finger_geoms": [
-      "gripper0_right_r_palm_vis",
-      "gripper0_right_r_palm_col",
       "gripper0_right_r_thumb_proximal_vis",
       "gripper0_right_r_thumb_proximal_col",
       "gripper0_right_r_thumb_proximal_2_vis",
@@ -230,12 +225,12 @@
       "gripper0_right_r_pinky_distal_vis",
       "gripper0_right_r_pinky_distal_col"
     ],
-    "finger_travel_mm": -1.0527691593093802,
-    "n_moving_geoms": 26,
-    "plus_one_closes": false,
+    "finger_travel_mm": 1.5258917656905402,
+    "n_moving_geoms": 24,
+    "plus_one_closes": true,
     "robosuite": "InspireRightHand",
-    "spread_closed": 0.12388280595406664,
-    "spread_open": 0.12283003679475726
+    "spread_closed": 0.14860795222597178,
+    "spread_open": 0.15013384399166232
   },
   "panda": {
     "alignment": [
@@ -589,26 +584,26 @@
   "robotiq3f": {
     "alignment": [
       [
-        0.9958634369722762,
-        0.00722470420758263,
-        0.09057493334735768
+        0.9928750368885292,
+        0.008024960876241199,
+        0.11888970151588733
       ],
       [
-        -0.004406890401027628,
-        0.9995012030997561,
-        -0.031271781515187086
+        -0.004246612916533306,
+        0.9994788601726469,
+        -0.03199959916505417
       ],
       [
-        -0.09075568422285558,
-        0.03074327001561812,
-        0.9953985418564707
+        -0.11908453888872021,
+        0.03126672465932114,
+        0.9923916890657334
       ]
     ],
-    "anisotropy": 4.263098315900318,
+    "anisotropy": 4.2449822779688855,
     "approach_in_site": [
-      -0.09075568422285558,
-      0.03074327001561812,
-      0.9953985418564707
+      -0.11908453888872021,
+      0.03126672465932114,
+      0.9923916890657334
     ],
     "calibrated_depth": 0.014999999999999998,
     "calibration_band": 0.16499999999999998,
@@ -668,21 +663,19 @@
       ]
     ],
     "calibration_working": 11,
-    "closing_angle_deg": 0.4156571896205037,
+    "closing_angle_deg": 0.4630858464682319,
     "closing_in_site": [
-      0.9958634369722762,
-      0.00722470420758263,
-      0.09057493334735768
+      0.9928750368885292,
+      0.008024960876241199,
+      0.11888970151588733
     ],
     "contact_offset": [
-      -0.007546471102578693,
-      0.0044500339888004295,
-      -0.020711370690925046
+      -0.00595453598680443,
+      0.00483074157189996,
+      -0.009355203634201637
     ],
     "depth_band": 0.03,
     "finger_geoms": [
-      "gripper0_right_palm_visual",
-      "gripper0_right_palm",
       "gripper0_right_f1_l0_vis",
       "gripper0_right_f1_l0",
       "gripper0_right_f1_l1_vis",
@@ -703,8 +696,6 @@
       "gripper0_right_f2_l3",
       "gripper0_right_f2_tip_collision",
       "gripper0_right_f2_pad_collision",
-      "gripper0_right_f3_l0_vis",
-      "gripper0_right_f3_l0",
       "gripper0_right_f3_l1_vis",
       "gripper0_right_f3_l1",
       "gripper0_right_f3_l2_vis",
@@ -714,12 +705,12 @@
       "gripper0_right_finger_middle_tip_collision",
       "gripper0_right_finger_middle_pad_collision"
     ],
-    "finger_travel_mm": 84.74125190782279,
-    "n_moving_geoms": 32,
+    "finger_travel_mm": 84.04927531279745,
+    "n_moving_geoms": 28,
     "plus_one_closes": true,
     "robosuite": "RobotiqThreeFingerGripper",
-    "spread_closed": 0.07965073758209444,
-    "spread_open": 0.16439198948991723
+    "spread_closed": 0.0806415763550976,
+    "spread_open": 0.16469085166789504
   },
   "robotiq85": {
     "alignment": [
@@ -849,26 +840,26 @@
   "umi": {
     "alignment": [
       [
-        2.0349371539898093e-11,
-        -0.9998951934810496,
-        -0.014477639776377012
+        2.943423182824536e-15,
+        0.9998962476897302,
+        0.014404647027885745
       ],
       [
-        -1.0,
-        -2.0347230360618445e-11,
-        -2.9519325871058746e-13
+        1.0,
+        -2.93794242429045e-15,
+        -4.0164655453517294e-16
       ],
       [
-        5.824489247287845e-16,
-        0.01447763977637701,
-        -0.9998951934810495
+        -3.5928485916707303e-16,
+        0.014404647027885742,
+        -0.99989624768973
       ]
     ],
-    "anisotropy": 237289012.9738443,
+    "anisotropy": 89188381925.63205,
     "approach_in_site": [
-      5.824489247287845e-16,
-      0.01447763977637701,
-      -0.9998951934810495
+      -3.5928485916707303e-16,
+      0.014404647027885742,
+      -0.99989624768973
     ],
     "calibrated_depth": null,
     "calibration_note": "No working depth band on a correctly-settled scene: 0 of 13 swept offsets lift the reference can, best lift 5.4 mm against a 50 mm threshold and most samples negative (-16.4 mm, the hand pushing the can down). The previous stored value of 0.030 was measured before ROBOTICS_NOTES 7.32, in a scene where objects were dropped 25 mm and ejected by an interpenetrating arm, and is withdrawn. The UMI is also the only registered hand that cannot be placed at a shared home pose: it reaches 0 of 48 candidates where the other eight reach 48 of 48, because its 117.2 mm contact offset -- the registry's only one with a large lateral component -- puts the wrist target outside the Panda arm's envelope. Convertible, not executable.",
@@ -926,16 +917,16 @@
         0.03517765127633321
       ]
     ],
-    "closing_angle_deg": -89.99999999883394,
+    "closing_angle_deg": 89.99999999999983,
     "closing_in_site": [
-      2.0349371539898093e-11,
-      -0.9998951934810496,
-      -0.014477639776377012
+      2.943423182824536e-15,
+      0.9998962476897302,
+      0.014404647027885745
     ],
     "contact_offset": [
-      9.526748964358567e-17,
-      0.0020050403986852233,
-      -0.141732168282862
+      -2.0464316005663896e-17,
+      0.001994929367985101,
+      -0.1417321682828621
     ],
     "depth_band": 0.015,
     "finger_geoms": [
@@ -944,12 +935,12 @@
       "gripper0_right_left_finger_visual",
       "gripper0_right_left_finger_collision"
     ],
-    "finger_travel_mm": 89.18688994030217,
+    "finger_travel_mm": 89.18838170091337,
     "n_moving_geoms": 4,
     "plus_one_closes": true,
     "robosuite": "UMIGripper",
-    "spread_closed": 0.03364136300117938,
-    "spread_open": 0.12282825294148154
+    "spread_closed": 0.03363997724691721,
+    "spread_open": 0.12282835894783058
   },
   "xarm": {
     "alignment": [

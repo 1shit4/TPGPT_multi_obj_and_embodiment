@@ -78,7 +78,11 @@ from pathlib import Path
 
 import numpy as np
 
-from tpgpt.grasp.grippers import GRIPPER_PAIRS, gripper_action
+from tpgpt.grasp.grippers import (
+    GRIPPER_PAIRS,
+    declared_symmetric,
+    gripper_action,
+)
 
 #: Where the measured frames are cached.
 FRAMES_PATH = Path(__file__).with_name("gripper_frames.json")
@@ -223,6 +227,27 @@ def measure_frame(robosuite_name: str, robot: str = "Panda") -> dict:
         site = sim.model.site_name2id(gripper.important_sites["grip_site"])
         root = sim.model.body_name2id(gripper.root_body)
 
+        # Hold the arm where it started. A zero arm action is **not** a command
+        # to stay put, and every quantity here is a property of the hand alone.
+        # Measured on a heavy hand, the wrist wandered 800 mm over three
+        # settles; the arm's motion then lands in ``closed - opened`` and is
+        # read as finger travel. It is what made the Inspire hand report
+        # ``finger_travel_mm`` of -1.05 and ``plus_one_closes: False`` -- with
+        # the arm held, the same hand reads 150.1 mm open to 148.2 mm closed,
+        # which is small but in the right direction.
+        #
+        # Only the arm's own degrees of freedom are touched. Freezing the
+        # gripper's too would be 7.32's error: a settle that freezes what it is
+        # meant to settle looks exactly like a settle that works.
+        arm_dofs = np.asarray(env.robots[0]._ref_joint_pos_indexes)
+        arm_vels = np.asarray(env.robots[0]._ref_joint_vel_indexes)
+        arm_home = np.array(sim.data.qpos[arm_dofs])
+
+        def freeze_arm():
+            sim.data.qpos[arm_dofs] = arm_home
+            sim.data.qvel[arm_vels] = 0.0
+            sim.forward()
+
         def geom_positions():
             return np.array([sim.data.geom_xpos[i].copy() for i in geom_ids])
 
@@ -233,11 +258,13 @@ def measure_frame(robosuite_name: str, robot: str = "Panda") -> dict:
         action = gripper_action(env, gripper, -1.0)
         for _ in range(SETTLE_STEPS):
             env.step(action)
+            freeze_arm()
         opened = geom_positions()
 
         action = gripper_action(env, gripper, 1.0)
         for _ in range(SETTLE_STEPS):
             env.step(action)
+            freeze_arm()
         closed = geom_positions()
 
         rotation = np.array(sim.data.site_xmat[site]).reshape(3, 3)
@@ -253,6 +280,51 @@ def measure_frame(robosuite_name: str, robot: str = "Panda") -> dict:
             raise RuntimeError(f"{robosuite_name}: {exc}") from None
 
         fingers_local = (closed[moving] - site_position) @ rotation
+
+        # Resolve the closing axis's **sign**, for hands where it means
+        # something. ``finger_axes`` takes the axis from the first right
+        # singular vector of the finger displacements, and the sign of a
+        # singular vector is arbitrary. For a two-finger jaw that is harmless:
+        # a half turn about the approach swaps the fingers and is the same
+        # grasp, which is why ``closing_angle_deg`` is folded into [-90, 90).
+        #
+        # For a hand GraspGen-X declares ``symmetric: false`` it is not
+        # harmless -- a half turn puts the thumb on the other side. Measured,
+        # the arbitrary sign came out wrong on all three such hands in the
+        # registry, and it costs reachability rather than accuracy: of five
+        # planner grasps on a can, the Inspire hand could reach **0** as
+        # measured and **2** with the sign flipped, ``g1three`` 2 and 3,
+        # ``robotiq3f`` 3 and 4. The Panda, which is symmetric, goes the other
+        # way (5 and 3) and is deliberately left alone.
+        #
+        # The convention is read from GraspGen-X's own assets rather than
+        # guessed. Loading each multi-finger URDF and driving it to the ``open``
+        # pose its config declares puts the **odd finger on +X** every time:
+        # inspire_hand 4 bodies on +X against 8 on -X, unitree_g1 3 against 4,
+        # barrett_hand 2 against 4, sharpa_wave 5 against 17.
+        #
+        # ROBOTICS_NOTES 7.33 is this same lesson one level up -- "a grasp is a
+        # pose, not an axis. Never re-derive its closing direction."
+        short = next(
+            (k for k, v in GRIPPER_PAIRS.items() if v.robosuite == robosuite_name),
+            None,
+        )
+        if short is not None and not declared_symmetric(GRIPPER_PAIRS[short].graspgen):
+            # Read at the **open** pose, which is where GraspGen-X reads its
+            # own convention and the only pose where the question is
+            # well posed: a hand that curls brings every fingertip together, so
+            # at the closed pose the thumb and the fingers interleave and which
+            # side each is on stops meaning anything.
+            side = ((opened[moving] - site_position) @ rotation) @ closing
+            n_plus, n_minus = int((side > 0).sum()), int((side < 0).sum())
+            # Only meaningful when the two sides differ: an equal split has no
+            # odd finger to put anywhere, so nothing is resolved and the sign
+            # is left as the decomposition found it.
+            if n_plus > n_minus:
+                closing = -closing
+            basis = np.column_stack(
+                [closing, np.cross(approach, closing), approach]
+            )
 
         # Contact region: the distal part of the fingers, where an object is
         # actually held, rather than the whole finger including its knuckle.

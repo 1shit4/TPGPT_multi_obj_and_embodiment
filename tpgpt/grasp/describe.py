@@ -69,11 +69,35 @@ What each key means, and how it is obtained here:
     True for a two-finger jaw, where the fingers merely swap. False otherwise:
     for three fingers the half turn lands them somewhere else entirely.
 
-**The acceptance test is reproduction, not inspection.** Nine of the registered
-hands have a description written by someone else, so this module can be asked to
-describe those nine and the answers compared. ``--validate`` does that. A
-generator that recovers the shipped numbers for hands it did not write can be
-believed about hands nobody has written.
+**The acceptance test is reproduction, not inspection.** Eleven of the
+registered hands have a description written by someone else, so this module can
+be asked to describe those eleven and the answers compared. ``--validate`` does
+that. A generator that recovers the shipped numbers for hands it did not write
+can be believed about hands nobody has written.
+
+**Measured, it passes for two-finger jaws and fails for anthropomorphic hands.**
+Against the shipped apertures: panda **78.2 mm** against 80.0, yumi **50.0**
+against 50.0, robotiq140 126.3 against 125.0, xarm 86.0 against 85.0 -- within
+3%. Less good but the same order: rethink 58.7 against 66.0, robotiq85 104.0
+against 85.0. The first three of those were each confirmed by a second,
+independent run with the arm frozen, agreeing to 0.3 mm.
+
+For the multi-finger hands it does not work, and the reason is structural rather
+than a tuning problem. Repeating the measurement along **twelve axes**
+perpendicular to the approach finds, for a Panda, **no pocket on any axis but
+the closing one** -- which is what a parallel jaw should look like. For the
+Inspire hand it finds 10.4 mm along the axis its fingers travel and a widest gap
+of **28.0 mm at 75 degrees away from it**, against a declared 80. For
+``g1three`` it finds **no pocket at all** on the travel axis and 26.1 mm at 90
+degrees, against a declared 100.
+
+A hand whose five fingers curl into a palm does not hold things between two
+opposed fingertips, so a box fitted between two opposed fingertips is not its
+graspable volume, and no choice of axis rescues that. Do not use this on a hand
+with more than two fingers without checking the result against something.
+
+So: usable for onboarding a two-finger jaw, and an open problem for anything
+else. ``docs/gripper_diversity.md``.
 
 Usage::
 

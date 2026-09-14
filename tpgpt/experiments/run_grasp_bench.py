@@ -55,8 +55,9 @@ import numpy as np
 
 from tpgpt.experiments import diagnose
 from tpgpt.grasp.grasps import approach_waypoint, grasp_to_eef_pose
+from tpgpt.sim.kinematics import solve_ik
 from tpgpt.grasp.grippers import VERIFIED_PAIRS, resolve_pair
-from tpgpt.grasp.filters import filter_grasps
+from tpgpt.grasp.filters import filter_grasps, offset_from_centre
 from tpgpt.grasp.pipeline import grasps_for_cloud
 from tpgpt.perception.cameras import object_point_cloud, scene_point_cloud
 from tpgpt.reporting.html import write_manifest
@@ -77,6 +78,12 @@ DEFAULT_OBJECTS = (
 
 #: Grasp candidates tried per pair, best-scoring first.
 DEFAULT_RANKS = 5
+
+#: Position tolerance for the reachability screen, in metres. Matches
+#: ``solve_ik``'s own default, which sits below the impedance controller's
+#: tracking error -- so a pose that passes is not one the controller will
+#: miss for kinematic reasons.
+IK_TOLERANCE = 5e-3
 
 #: Below this many points the object is too thinly seen to plan on. Matches
 #: ``pipeline.MIN_CLOUD_POINTS`` so the bench and the pipeline agree about what
@@ -118,11 +125,18 @@ def _scene(gripper: str, obj: str, seed: int, camera_size: int = 256,
     """
     from robosuite.controllers import load_composite_controller_config
 
-    from tpgpt.sim.controllers.cartesian_impedance import make_torque_controller_config
+    from tpgpt.sim.replay import make_position_controller_config
     from tpgpt.sim.scenes.tabletop_shelf import TabletopShelf
 
     pair = resolve_pair(gripper)
-    config = make_torque_controller_config(
+    # **Position control, not Cartesian impedance.** The bench asks whether a
+    # hand can hold an object, so the arm must be able to put the hand where
+    # the grasp says. Under impedance the arm could not: on `inspire/can` the
+    # hand ended 43 to 100 mm from poses inverse kinematics reports as
+    # reachable, and a grasp attempted 100 mm away measures the controller
+    # rather than the gripper. This is the same reasoning that makes the Tier 2
+    # replay position-controlled -- it is a measurement, not a better robot.
+    config = make_position_controller_config(
         load_composite_controller_config(controller="BASIC", robot="Panda")
     )
     vision = dict(
@@ -147,7 +161,32 @@ def _scene(gripper: str, obj: str, seed: int, camera_size: int = 256,
     return env
 
 
-def _grip_and_carry(env, controller, grasp, gripper, obj, probes, closure=None):
+def _drive(env, position, rotation, steps, command, seed, arm="right"):
+    """Move the arm so the gripper site traces a straight line to ``position``.
+
+    Each waypoint is solved by inverse kinematics, warm-started from the
+    previous solution, and commanded as an absolute joint target -- the same
+    mechanism ``replay.replay_labels`` uses. Returns the final seed
+    configuration so the next leg continues from it.
+    """
+    from tpgpt.sim.replay import _joint_action
+
+    robot = env.robots[0]
+    start = np.array(env.sim.data.site_xpos[
+        robot.eef_site_id[arm] if isinstance(robot.eef_site_id, dict)
+        else robot.eef_site_id])
+    for step in range(steps):
+        alpha = (step + 1) / steps
+        target = start + alpha * (np.asarray(position) - start)
+        result = solve_ik(env, target, rotation, arm,
+                          position_tolerance=IK_TOLERANCE, seed_qpos=seed)
+        seed = result.qpos
+        env.step(_joint_action(env, robot, arm, seed, command))
+    return seed
+
+
+def _grip_and_carry(env, grasp, gripper, obj, probes, closure=None,
+                    grasp_qpos=None):
     """Approach, close, lift, carry, and report what the hand did.
 
     Returns a dict of measurements. The phases are the same ones
@@ -170,10 +209,16 @@ def _grip_and_carry(env, controller, grasp, gripper, obj, probes, closure=None):
             size.
     """
     from tpgpt.sim.replay import closing_direction, set_closure
+    from tpgpt.sim.replay import _joint_action, closing_direction, set_closure
+
     position, rotation = grasp_to_eef_pose(grasp, gripper)
     pre_grasp = approach_waypoint(grasp, standoff=0.12, gripper=gripper)
-    K = np.eye(3) * STIFFNESS
-    D = np.eye(3) * (2 * np.sqrt(STIFFNESS) * 0.9)
+    arm = "right"
+    robot = env.robots[0]
+    site_id = (robot.eef_site_id[arm] if isinstance(robot.eef_site_id, dict)
+               else robot.eef_site_id)
+    seed = np.array(env.sim.data.qpos[np.asarray(
+        robot.composite_controller.part_controllers[arm].qpos_index)])
 
     trace = {"closure": [], "force": [], "slip": [], "held": []}
 
@@ -183,31 +228,31 @@ def _grip_and_carry(env, controller, grasp, gripper, obj, probes, closure=None):
         trace["slip"].append(float(probes["slip"](env)))
         trace["held"].append(bool(diagnose._gripper_touches(env, obj)))
 
-    def drive(target, steps, command, settle=0, record=False):
-        start = controller.eef_state()[0]
-        for step in range(steps):
-            alpha = (step + 1) / steps
-            env.step(controller.action(
-                start + alpha * (target - start), K, D, gripper=command,
-                rotation_desired=rotation,
-                rotational_stiffness=ROTATIONAL_STIFFNESS,
-                rotational_damping=ROTATIONAL_DAMPING,
-            ))
+    def hold(steps, command, record=False):
+        for _ in range(steps):
+            env.step(_joint_action(env, robot, arm, seed, command))
             if record:
                 sample()
-        for _ in range(settle):
-            env.step(controller.action(
-                target, K, D, gripper=command, rotation_desired=rotation,
-                rotational_stiffness=ROTATIONAL_STIFFNESS,
-                rotational_damping=ROTATIONAL_DAMPING,
-            ))
-            if record:
-                sample()
+
+    def go(target, steps, command, settle=0, record=False):
+        nonlocal seed
+        seed = _drive(env, target, rotation, steps, command, seed, arm)
+        hold(settle, command, record)
 
     start_z = float(env.object_position(obj)[2])
 
-    drive(pre_grasp, STEPS["pre"], -1.0, settle=STEPS["settle"])
-    drive(position, STEPS["descend"], -1.0, settle=STEPS["settle"])
+    go(pre_grasp, STEPS["pre"], -1.0, settle=STEPS["settle"])
+    go(position, STEPS["descend"], -1.0, settle=STEPS["settle"])
+
+    # NOTE: the screened inverse-kinematics solution is deliberately **not**
+    # commanded directly here. ``_drive`` warm-starts each waypoint from the
+    # previous one, so it can diverge and end far from a pose the screen
+    # solved -- `panda/can` finishes 272 mm away on two of its grasps. Jumping
+    # the command to the screened configuration instead makes it worse, not
+    # better: the arm then swings toward a distant target it cannot track, and
+    # `robotiq3f/can` went from 3.0-4.4 mm of reach error to 274-627 mm.
+    # Measured, both ways; the honest reading is that the path is the limit,
+    # and ``reach_total_mm`` reports it per grasp rather than hiding it.
 
     # How close the hand actually got, before the jaws move. Without this a
     # cell that failed because the arm could not reach the pose is
@@ -216,16 +261,15 @@ def _grip_and_carry(env, controller, grasp, gripper, obj, probes, closure=None):
     # component along the **closing** axis decides whether the object ends up
     # between the jaws -- the approach axis tolerates 120 to 135 mm on a
     # parallel jaw (ROBOTICS_NOTES 7.2, 7.27).
-    reached, reached_rot = controller.eef_state()[0], None
+    reached = np.array(env.sim.data.site_xpos[site_id])
     reach_error = position - reached
     axes = {"closing": rotation[:, 0], "jaw": rotation[:, 1],
             "approach": rotation[:, 2]}
     reach = {f"reach_{k}_mm": float(reach_error @ v) * 1000 for k, v in axes.items()}
     reach["reach_total_mm"] = float(np.linalg.norm(reach_error)) * 1000
 
-    # Close, in place. ``hold`` of 0.0 means "stay where you are": robosuite's
-    # gripper interface integrates the *sign* of the command, and the sign of
-    # zero is zero.
+    # Close, in place. ``command`` of 0.0 means "stay where you are": robosuite's
+    # gripper interface integrates the *sign* of the command, and sign(0) is 0.
     grip_model = env.robots[0].gripper
     grip_model = grip_model["right"] if isinstance(grip_model, dict) else grip_model
     if closure is None:
@@ -233,25 +277,19 @@ def _grip_and_carry(env, controller, grasp, gripper, obj, probes, closure=None):
     else:
         set_closure(grip_model, closing_direction(grip_model), float(closure))
         command = 0.0
-    for _ in range(STEPS["close"]):
-        env.step(controller.action(
-            position, K, D, gripper=command, rotation_desired=rotation,
-            rotational_stiffness=ROTATIONAL_STIFFNESS,
-            rotational_damping=ROTATIONAL_DAMPING,
-        ))
-        sample()
+    hold(STEPS["close"], command, record=True)
     closure_at_close = float(probes["closure"]())
     force_at_close = float(diagnose.grip_force(env, obj))
 
     lifted = position + np.array([0.0, 0.0, LIFT_TO])
-    drive(lifted, STEPS["lift"], command, settle=STEPS["settle"], record=True)
+    go(lifted, STEPS["lift"], command, settle=STEPS["settle"], record=True)
     lift_height = float(env.object_position(obj)[2]) - start_z
     closure_at_lift = float(probes["closure"]())
 
     # Carry sideways and back. Both directions, so the grip is loaded each way.
     across = lifted + np.array([0.0, CARRY_DISTANCE, 0.0])
-    drive(across, STEPS["carry"], command, settle=STEPS["settle"], record=True)
-    drive(lifted, STEPS["carry"], command, settle=STEPS["settle"], record=True)
+    go(across, STEPS["carry"], command, settle=STEPS["settle"], record=True)
+    go(lifted, STEPS["carry"], command, settle=STEPS["settle"], record=True)
 
     held = trace["held"]
     carry_start = STEPS["close"]
@@ -274,8 +312,6 @@ def run_cell(gripper: str, obj: str, *, seed: int = 0, ranks: int = DEFAULT_RANK
              plan_only: bool = False, camera_size: int = 256,
              closure: float | None = None) -> list[dict]:
     """Every grasp tried for one hand and one object."""
-    from tpgpt.sim.controllers.cartesian_impedance import CartesianImpedanceController
-
     base = {"gripper": gripper, "object": obj, "seed": seed,
             "closure_commanded": closure}
     env = _scene(gripper, obj, seed, camera_size)
@@ -311,17 +347,45 @@ def run_cell(gripper: str, obj: str, *, seed: int = 0, ranks: int = DEFAULT_RANK
             target_name=obj,
             support_normal=(0.0, 0.0, 1.0),
             check_place_approach=False,
-            centre_of_mass=env.object_position(obj),
+            # ``by_centre_offset`` deliberately NOT run as a rejection. The
+            # funnel's own docstring calls it "a tie-break among grasps that
+            # are already admissible, not a reason to reject one outright", and
+            # on a hand with few options it is the stage that empties the set:
+            # on `inspire/can` it cut 20 candidates to 9 and took every
+            # reachable one with it. It is recorded per grasp below instead.
         )
         survivors = np.asarray(funnel.survivors, dtype=int)
-        base["survivors"] = int(len(survivors))
         base["rejected_by"] = funnel.rejected_by
         base["funnel_flags"] = sorted(funnel.flags)
         if len(survivors) == 0:
             return [{**base, "outcome": "no_grasp_survived", "grasp_rank": None}]
 
-        scores = np.array([grasps.grasps[i].score for i in survivors])
-        order = survivors[np.argsort(-scores)][:ranks]
+        # Screen for reachability, which the funnel does not do -- its own
+        # reachability stage is retired as inert (FINDINGS.md 8z item 1g).
+        # Executing a pose the arm cannot hold measures the arm, not the hand:
+        # on `inspire/can` **46 of 100** candidates are reachable and **0 of
+        # the 8** the funnel kept were, so without this the hand is scored on
+        # grasps it was never able to attempt.
+        reachable, solutions = [], {}
+        for i in survivors:
+            position, rotation = grasp_to_eef_pose(grasps.grasps[int(i)], gripper)
+            result = solve_ik(env, position, rotation, "right",
+                              position_tolerance=IK_TOLERANCE)
+            if result.reachable:
+                reachable.append(int(i))
+                solutions[int(i)] = np.array(result.qpos)
+        base["survivors"] = int(len(survivors))
+        base["reachable_survivors"] = len(reachable)
+        # Falling back rather than failing, the way every funnel stage does:
+        # a cell with nothing reachable still reports what happened when its
+        # best-scoring candidate was tried, flagged so it cannot be read as a
+        # clean run.
+        pool = np.asarray(reachable or survivors, dtype=int)
+        base["reachability_fell_back"] = not reachable
+
+        scores = np.array([grasps.grasps[i].score for i in pool])
+        order = pool[np.argsort(-scores)][:ranks]
+        centre = env.object_position(obj)
         if plan_only:
             return [
                 {**base, "grasp_rank": int(r), "grasp_index": int(i),
@@ -333,22 +397,23 @@ def run_cell(gripper: str, obj: str, *, seed: int = 0, ranks: int = DEFAULT_RANK
         for rank, index in enumerate(order):
             grasp = grasps.grasps[int(index)]
             row = {**base, "grasp_rank": rank, "grasp_index": int(index),
-                   "score": float(grasp.score)}
+                   "score": float(grasp.score),
+                   "offset_from_centre_mm": float(
+                       offset_from_centre(grasp, centre, resolve_pair(gripper))) * 1000}
             cell = (_scene(gripper, obj, seed, camera_size, cameras=False)
                     if rank else env)
             try:
                 checks = diagnose.replay_preconditions(cell, gripper, obj)
                 diagnose.require(checks, context=f"{gripper}/{obj} rank {rank}")
-                controller = CartesianImpedanceController(cell)
-                controller.reset()
                 probes = {
                     "closure": diagnose.jaw_closure_probe(cell, gripper),
                     "slip": diagnose.slip_probe(cell, obj),
                 }
                 with warnings.catch_warnings():
                     warnings.simplefilter("ignore")
-                    row.update(_grip_and_carry(cell, controller, grasp, gripper,
-                                               obj, probes, closure=closure))
+                    row.update(_grip_and_carry(
+                        cell, grasp, gripper, obj, probes, closure=closure,
+                        grasp_qpos=solutions.get(int(index))))
                 row["outcome"] = (
                     "held" if row["held_at_end"] and row["final_height"] > LIFT_HEIGHT
                     else "lifted_then_lost" if row["lift_height"] > LIFT_HEIGHT
