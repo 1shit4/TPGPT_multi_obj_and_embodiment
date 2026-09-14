@@ -75,6 +75,12 @@ PROMPTS = {
     "can": "put the can on the {slot}",
     "bread": "put the bread on the {slot}",
     "lemon": "put the lemon on the {slot}",
+    "hammer": "put the hammer on the {slot}",
+    "mug": "put the mug on the {slot}",
+    "pot": "put the pot on the {slot}",
+    "wrench": "put the wrench on the {slot}",
+    "nut_square": "put the square nut on the {slot}",
+    "nut_round": "put the round nut on the {slot}",
 }
 
 

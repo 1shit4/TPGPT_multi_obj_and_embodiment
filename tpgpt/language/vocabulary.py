@@ -16,6 +16,15 @@ OBJECT_ALIASES: dict[str, tuple[str, ...]] = {
     "bread": ("loaf", "bread loaf", "bun"),
     "bottle": ("water bottle", "flask"),
     "lemon": ("citrus", "fruit"),
+    # Added with the fixed object set of ROBOTICS_NOTES 7.42. Two of these are
+    # deliberately not boxes: a fleet measured only on cartons and a can cannot
+    # show that more fingers buy anything.
+    "hammer": ("mallet", "claw hammer"),
+    "mug": ("cup", "hollow cylinder", "tumbler"),
+    "pot": ("pan", "saucepan", "cooking pot"),
+    "wrench": ("spanner", "ratcheting wrench"),
+    "nut_square": ("square nut", "square peg"),
+    "nut_round": ("round nut", "round peg"),
 }
 
 #: Words naming a shelf level.

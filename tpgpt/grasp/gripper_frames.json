@@ -942,6 +942,8 @@
       0.0030377538827555408,
       0.9951552814353533
     ],
+    "calibrated_depth": null,
+    "calibration_note": "0 of 13 swept depths lift the reference can, so no depth is stored. **This hand nonetheless holds objects**: 7 of 15 grasps in the bench (outputs/grasp_bench_new), across 4 of the 5 objects it was given. The two instruments disagree because they are not the same test -- calibrate_depth executes a *synthesised* top-down grasp under Cartesian impedance control, and the bench executes *planner* grasps under joint position control through IK. The impedance controller finishes tens of millimetres from poses inverse kinematics reports as reachable, which is why the bench was switched away from it. Read a None here as 'the depth sweep found no band', not as 'this hand cannot grasp'. docs/gripper_diversity.md section 11.",
     "closing_angle_deg": -4.1007152011330135,
     "closing_in_site": [
       0.9926155046969987,
