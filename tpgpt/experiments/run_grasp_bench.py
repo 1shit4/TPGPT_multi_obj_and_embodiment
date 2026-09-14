@@ -56,7 +56,11 @@ import numpy as np
 from tpgpt.experiments import diagnose
 from tpgpt.grasp.grasps import approach_waypoint, grasp_to_eef_pose
 from tpgpt.sim.kinematics import solve_ik
-from tpgpt.grasp.grippers import VERIFIED_PAIRS, resolve_pair
+from tpgpt.grasp.grippers import (
+    VERIFIED_PAIRS,
+    commands_position,
+    resolve_pair,
+)
 from tpgpt.grasp.filters import filter_grasps, offset_from_centre
 from tpgpt.grasp.pipeline import grasps_for_cloud
 from tpgpt.perception.cameras import object_point_cloud, scene_point_cloud
@@ -274,6 +278,12 @@ def _grip_and_carry(env, grasp, gripper, obj, probes, closure=None,
     grip_model = grip_model["right"] if isinstance(grip_model, dict) else grip_model
     if closure is None:
         command = 1.0
+    elif commands_position(grip_model):
+        # A passthrough hand's action *is* its position, so the fraction is
+        # commanded directly. ``set_closure`` writes ``current_action``, which
+        # such a hand never reads -- a sweep over 0.3 to 1.0 on the Inspire
+        # hand returned identical results at every fraction before this.
+        command = 2.0 * float(closure) - 1.0
     else:
         set_closure(grip_model, closing_direction(grip_model), float(closure))
         command = 0.0

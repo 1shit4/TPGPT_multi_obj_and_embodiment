@@ -359,6 +359,57 @@ def summary_table() -> str:
 SINGLE_AXIS_ANISOTROPY = 50.0
 
 
+def commands_position(gripper) -> bool:
+    """Does this hand's ``format_action`` pass the action straight through?
+
+    robosuite's grippers close in one of two ways and the difference is
+    invisible from the action interface.
+
+    Most **integrate**: ``format_action`` reads ``self.current_action``, adds a
+    step in the direction of the command's *sign* and discards its size, so
+    ``+1`` means "keep closing" rather than "go to fully closed". For those,
+    :func:`tpgpt.sim.replay.set_closure` works -- it writes ``current_action``
+    directly, which is the only way to ask such a hand for a partial closure.
+
+    The anthropomorphic hands **pass through**: ``format_action`` maps the
+    action onto their actuators and never reads ``current_action`` at all. For
+    those, ``set_closure`` writes a field nothing consults and is a **silent
+    no-op** -- measured, a closure sweep over 0.3, 0.5, 0.7, 0.9 and ``+1`` on
+    the Inspire hand returned byte-identical results at every fraction.
+
+    That is not a limitation, once known: for a passthrough hand the action
+    *is* the position, so a closure fraction is commanded directly as
+    ``2 * fraction - 1``. It is simpler than the integrator case, not harder.
+
+    Split this way, and not by finger count: ``robotiq3f`` has three fingers and
+    integrates, ``umi`` has two and integrates, while every hand that passes
+    through -- Inspire, G1, Fourier, Ability, SchunkSvh -- is multi-fingered.
+    The correlation is real and the mechanism is the author's choice of
+    ``format_action``, so it is read from the class rather than assumed.
+
+    Returns:
+        True if the action is a position command, False if it is an increment.
+    """
+    import ast
+    import inspect
+
+    try:
+        source = inspect.getsource(type(gripper).format_action)
+    except (TypeError, OSError):  # pragma: no cover - builtin or missing source
+        return False
+    tree = ast.parse(source.lstrip())
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Assign):
+            if any(isinstance(sub, ast.Attribute) and sub.attr == "current_action"
+                   for sub in ast.walk(node.value)):
+                return False
+        if isinstance(node, ast.AugAssign):
+            target = node.target
+            if isinstance(target, ast.Attribute) and target.attr == "current_action":
+                return False
+    return True
+
+
 def gripper_action(env, gripper, command: float) -> np.ndarray:
     """A full action vector whose **whole** gripper block carries ``command``.
 

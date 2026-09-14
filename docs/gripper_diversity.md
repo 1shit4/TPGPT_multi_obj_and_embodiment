@@ -29,7 +29,7 @@ all?** Nothing here involves a transportation map, a policy, or a shelf.
 > | ⚠ | **the 26–28 mm "fingertip gap" of §4 is WITHDRAWN** | It measured the free space *between* the fingers. GraspGen-X's swept volume is **the region the fingers traverse while closing** (arXiv:2606.00998), which for a curling hand is a completely different and much larger quantity. Every conclusion in §4 that rests on that number is suspended pending re-measurement |
 > | — | §6 how reproducible the frame measurement is | **stands.** One hand's contact offset spans 11.7 mm over three identical runs |
 > | E | §7 object census — what the cameras see, per object | **stands.** 70 of 70 cells plan; every new object resolves better than the can, and the single-object scene nearly doubles the bread |
-> | F | §8 the bench — grasp, close, lift, carry | *running* |
+> | F | §8 the bench — grasp, close, lift, carry | **stands.** 74 of 294 grasps and 40 of 110 pairs held. The three-finger `robotiq3f` is joint-second of eleven hands and covers 7 of 10 objects; `wrench` and `nut_square` are refused by every hand |
 > | D | §9 GraspGen-X descriptions authored from the MuJoCo model | *partial* — the generator reproduces a shipped aperture to 3% on clean two-finger jaws and does not describe an anthropomorphic hand |
 > | G | §10 the closure sweep, and how wide each pair's band is | *not started* |
 > | H | §11 the closure table applied, paired grasp for grasp | *not started* |
@@ -712,3 +712,454 @@ Nor does it settle the lemon, which is excluded from this grid because it is
 excluded from the pipeline. A single-object scene would very likely lift it over
 the floor — the bread nearly doubled — but that was not tested and should not be
 assumed.
+
+---
+
+## 8. Experiment F — the bench: eleven hands, ten objects, can it hold it?
+
+`outputs/grasp_bench_v2`, commit `4e0c750`, clean tree. 294 grasps, about three
+hours. Three planner grasps per hand-object pair.
+
+### Why
+
+Every other driver in this package measures a *transported* plan, which puts
+the map, the keypoints, grasp selection, the controller and the shelf in series:
+when a cell fails, six things could be responsible. This one removes all of
+them. It asks the planner for grasps on the object in front of it, executes
+them directly, and reports whether the object was still in the hand at the end.
+
+### Conditions, held fixed
+
+Eleven hands — every pair in the registry — times ten objects. **One object on
+the table at a time**, so cells are independent; the cost is that they are
+**not** comparable with the four-object campaigns. Cameras at 256 x 256, three
+views, seed 0. Grasps from GraspGen-X through `tpgpt.grasp.cache`, put through
+the funnel's pick-side stages, screened for reachability, then ranked by the
+planner's own score. Arm under **joint-position control through inverse
+kinematics**, jaws commanded shut with plain `+1`.
+
+### What each column means
+
+| column | what it is |
+|---|---|
+| held | the object was still in the hand, above the table, after being lifted 150 mm and carried 200 mm sideways and back |
+| lifted then lost | it left the table by more than 20 mm and was dropped |
+| never lifted | it never left the table |
+| reach error | distance from the gripper site to the commanded grasp pose, at the moment before the jaws move |
+| closure at lift | 0 is fully open, 1 is shut on air. Above 1 means pressed past the free-air closed spread |
+| slip | how far the object drifted **in the hand's own frame**, where a held object is motionless by definition |
+
+### Result: 74 of 294 grasps held, 40 of 110 pairs
+
+### Held, per cell (of the grasps tried)
+
+| hand | `bread` | `can` | `cereal` | `hammer` | `milk` | `mug` | `nut_round` | `nut_square` | `pot` | `wrench` | total |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| `bd` | 0/1 | 0/3 | 0/3 | 0/1 | 0/3 | **1**/3 | 0/3 | 0/3 | 0/2 | 0/1 | **1/23** |
+| `g1three` | 0/3 | 0/3 | 0/3 | 0/2 | 0/3 | 0/3 | 0/3 | 0/3 | 0/3 | 0/3 | **0/29** |
+| `inspire` | 0/3 | 0/3 | 0/3 | 0/3 | 0/3 | 0/3 | 0/2 | 0/3 | 0/3 | 0/1 | **0/27** |
+| `panda` | **1**/3 | **1**/3 | **1**/3 | **1**/1 | **2**/3 | 0/3 | 0/3 | 0/3 | 0/3 | 0/3 | **6/28** |
+| `rethink` | 0/3 | **1**/3 | **1**/2 | 0/3 | **2**/3 | **1**/1 | 0/2 | 0/3 | 0/3 | 0/2 | **5/25** |
+| `robotiq140` | **2**/3 | **1**/3 | **3**/3 | **1**/1 | **2**/3 | **3**/3 | 0/3 | 0/3 | **1**/3 | 0/3 | **13/28** |
+| `robotiq3f` | **1**/3 | **2**/3 | **3**/3 | **2**/3 | **3**/3 | **2**/3 | 0/3 | 0/3 | **2**/3 | 0/3 | **15/30** |
+| `robotiq85` | 0/3 | **2**/3 | **2**/3 | **2**/3 | **2**/3 | **3**/3 | 0/1 | 0/3 | 0/3 | 0/3 | **11/28** |
+| `umi` | 0/3 | **1**/3 | 0/3 | **1**/1 | 0/3 | 0/3 | 0/3 | 0/3 | 0/1 | 0/1 | **2/24** |
+| `xarm` | **2**/3 | **3**/3 | **2**/3 | **3**/3 | **2**/3 | **3**/3 | 0/3 | 0/3 | **3**/3 | 0/3 | **18/30** |
+| `yumi` | 0/3 | **2**/3 | 0/1 | 0/3 | 0/3 | 0/1 | **1**/3 | 0/1 | 0/3 | 0/1 | **3/22** |
+| **total** | **6**/31 | **13**/33 | **12**/30 | **10**/24 | **13**/33 | **13**/29 | **1**/29 | **0**/31 | **6**/30 | **0**/24 | **74/294** |
+
+
+### Pairs where at least one grasp held
+
+40 of 110 hand-object pairs held the object with at least one of the grasps tried.
+
+| object | hands that held it | hands that did not |
+|---|---|---|
+| `bread` | 4/11 — `panda`, `robotiq140`, `robotiq3f`, `xarm` | `bd`, `g1three`, `inspire`, `rethink`, `robotiq85`, `umi`, `yumi` |
+| `can` | 8/11 — `panda`, `rethink`, `robotiq140`, `robotiq3f`, `robotiq85`, `umi`, `xarm`, `yumi` | `bd`, `g1three`, `inspire` |
+| `cereal` | 6/11 — `panda`, `rethink`, `robotiq140`, `robotiq3f`, `robotiq85`, `xarm` | `bd`, `g1three`, `inspire`, `umi`, `yumi` |
+| `hammer` | 6/11 — `panda`, `robotiq140`, `robotiq3f`, `robotiq85`, `umi`, `xarm` | `bd`, `g1three`, `inspire`, `rethink`, `yumi` |
+| `milk` | 6/11 — `panda`, `rethink`, `robotiq140`, `robotiq3f`, `robotiq85`, `xarm` | `bd`, `g1three`, `inspire`, `umi`, `yumi` |
+| `mug` | 6/11 — `bd`, `rethink`, `robotiq140`, `robotiq3f`, `robotiq85`, `xarm` | `g1three`, `inspire`, `panda`, `umi`, `yumi` |
+| `nut_round` | 1/11 — `yumi` | `bd`, `g1three`, `inspire`, `panda`, `rethink`, `robotiq140`, `robotiq3f`, `robotiq85`, `umi`, `xarm` |
+| `nut_square` | 0/11 — — | `bd`, `g1three`, `inspire`, `panda`, `rethink`, `robotiq140`, `robotiq3f`, `robotiq85`, `umi`, `xarm`, `yumi` |
+| `pot` | 3/11 — `robotiq140`, `robotiq3f`, `xarm` | `bd`, `g1three`, `inspire`, `panda`, `rethink`, `robotiq85`, `umi`, `yumi` |
+| `wrench` | 0/11 — — | `bd`, `g1three`, `inspire`, `panda`, `rethink`, `robotiq140`, `robotiq3f`, `robotiq85`, `umi`, `xarm`, `yumi` |
+
+
+### Reading it
+
+**A three-finger hand is among the best in the fleet.** `robotiq3f` holds 15 of
+30 and covers **seven of the ten object classes** — level with `robotiq140` and
+one behind `xarm`, and ahead of five of the eight two-finger jaws including the
+Panda the demonstration was recorded with. It is the only hand besides `xarm`
+and `robotiq140` to hold the `pot`, which has handles rather than flat sides.
+That is the finger-count claim this document set out to test, and for three
+fingers it holds.
+
+**Two objects are refused by every hand.** `wrench` 0 of 11 and `nut_square` 0
+of 11, with `nut_round` managing 1. All three are flat metal parts lying on a
+table, and their failure signature is identical and unlike any other: reach
+error is small — the arm gets where it was told — and **closure reaches 1.00**,
+which means the jaws shut on air. The grasp point is not on graspable material.
+A flat part offers a top-down hand only a thin flange, and the fingers would
+have to descend past it into the table to enclose anything.
+
+**The objects that work are the ones with a graspable section**: `can` 8 of 11,
+then `cereal`, `hammer`, `milk` and `mug` at 6 of 11. Two of those are new here
+and neither is a box — the `hammer` has a handle and an offset centre of mass,
+the `mug` a thin wall and a rim — so the working set is not just "things a
+parallel jaw likes".
+
+**Four hands hold almost nothing**: `inspire` 0 of 27, `g1three` 0 of 29, `bd`
+1 of 23, `umi` 2 of 24. These are exactly the four whose `grip_site` sits at the
+gripper's base rather than at its fingertips, which is discussed in section 9.
+
+### What separates a grasp that holds from one that does not
+
+### What separates a grasp that holds from one that does not
+
+| quantity | held | lifted then lost | never lifted |
+|---|---|---|---|
+| reach error, total mm | 3.0 (2.3–71.3) | 8.3 (2.4–180.7) | 51.2 (2.3–505.0) |
+| reach error, closing axis mm | 0.3 (0.0–30.7) | 2.8 (0.0–114.4) | 8.0 (0.0–284.4) |
+| closure at lift | 0.80 (0.22–1.24) | 0.86 (0.48–1.00) | 1.00 (0.97–25.72) |
+| lift height mm | 143 (39–182) | 124 (37–150) | 0 (-841–19) |
+| slip max mm | 17.3 (1.9–201.2) | 247.6 (22.0–1869.0) | 248.2 (48.7–1429.6) |
+| grip force at close, N | 71.3 (0.0–730.8) | 15.1 (0.0–404.9) | 0.0 (0.0–332.2) |
+| survivors in the funnel | 17 (1–29) | 16 (2–28) | 14 (1–31) |
+
+(median, with the full range in brackets)
+
+
+**Reach error is the strongest single discriminator, and the closing-axis
+component is the sharpest form of it**: a held grasp misses by a median of
+**0.3 mm** along the axis that decides whether the object ends up between the
+jaws, against 8.0 mm for one that never lifts. The scalar distance separates
+too (3.0 mm against 51.2 mm) but less cleanly, which is the point section 7.27
+of `ROBOTICS_NOTES.md` makes about mixing a millimetre-scale budget with a
+130 mm one.
+
+**Closure at the lift separates almost perfectly, and it is not a threshold.**
+Grasps that hold reach a median 0.80; grasps that never lift reach **1.00**,
+with a minimum of 0.97. A reading of 1.00 means the jaws travelled their whole
+range, which they can only do with nothing between them. But the *value* that
+means "gripping" is hand-dependent: `robotiq3f` holds objects at 0.92 to 0.99,
+where a Panda at 0.99 has closed on air. That is the evidence for a per-pair
+closing table rather than one more universal threshold, and it is section 10.
+
+**Grip force is not a discriminator on its own.** The median at the close is
+71 N for a held grasp and 0 N for one that never lifts — but the range for
+"never lifted" runs to **332 N**. A hand can hit an object very hard and not
+hold it, which is what three of the four failing hands do.
+
+### What it does not settle
+
+Whether a *filtered* failure is a hand failure. The bench selects with the
+funnel's pick-side stages and screens for reachability, so a pair scored 0 may
+still have a grasp neither stage would have kept. `inspire` is the clearest
+case: 46 of its 100 candidates on a can are reachable and the funnel kept 8 of
+them, none reachable, before the screen was added.
+
+And three grasps per pair is few. Experiment P measured the spread *within* a
+pair to exceed the spread *between* pairs, so a 0 of 3 is weaker evidence than
+it looks.
+
+### Every grasp
+
+| hand | object | rank | surv | reach mm | closing mm | lift mm | closure | slip mm | force N | held % | outcome |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| `bd` | `bread` | 0 | 9 | 10.0 | -2.5 | -0 | 1.00 | 268.3 | 0.0 | 0 | never_lifted |
+| `bd` | `can` | 0 | 31 | 228.4 | +169.7 | -16 | 1.00 | 510.1 | 0.0 | 0 | never_lifted |
+| `bd` | `can` | 1 | 31 | 13.4 | -7.7 | -16 | 1.00 | 346.8 | 0.0 | 0 | never_lifted |
+| `bd` | `can` | 2 | 31 | 10.5 | -3.6 | -0 | 1.00 | 244.8 | 113.3 | 0 | never_lifted |
+| `bd` | `cereal` | 0 | 6 | 3.1 | -0.2 | -64 | 1.00 | 243.6 | 0.0 | 0 | never_lifted |
+| `bd` | `cereal` | 1 | 6 | 4.9 | -0.4 | -64 | 1.00 | 243.2 | 0.0 | 0 | never_lifted |
+| `bd` | `cereal` | 2 | 6 | 2.6 | +0.1 | -64 | 1.00 | 242.5 | 0.0 | 0 | never_lifted |
+| `bd` | `hammer` | 0 | 4 | 18.5 | +2.7 | -0 | 1.00 | 231.9 | 162.9 | 3 | never_lifted |
+| `bd` | `milk` | 0 | 24 | 505.0 | +49.6 | -43 | 1.47 | 144.4 | 0.0 | 0 | never_lifted |
+| `bd` | `milk` | 1 | 24 | 2.5 | +0.0 | -43 | 1.00 | 243.5 | 0.0 | 0 | never_lifted |
+| `bd` | `milk` | 2 | 24 | 2.5 | -0.1 | -43 | 1.00 | 245.2 | 0.0 | 0 | never_lifted |
+| `bd` | `mug` | 0 | 28 | 2.7 | -0.0 | 150 | 1.24 | 22.4 | 730.8 | 100 | **held** |
+| `bd` | `mug` | 1 | 28 | 66.0 | -14.0 | -11 | 1.00 | 168.8 | 62.6 | 0 | never_lifted |
+| `bd` | `mug` | 2 | 28 | 255.3 | +196.7 | -11 | 1.00 | 723.2 | 0.0 | 0 | never_lifted |
+| `bd` | `nut_round` | 0 | 31 | 229.1 | +120.8 | 0 | 1.00 | 571.2 | 0.0 | 0 | never_lifted |
+| `bd` | `nut_round` | 1 | 31 | 70.2 | +52.7 | 0 | 1.00 | 545.4 | 0.0 | 0 | never_lifted |
+| `bd` | `nut_round` | 2 | 31 | 302.6 | +171.0 | 0 | 1.00 | 97.1 | 0.0 | 0 | never_lifted |
+| `bd` | `nut_square` | 0 | 20 | 102.8 | +77.6 | 0 | 1.00 | 600.5 | 0.0 | 0 | never_lifted |
+| `bd` | `nut_square` | 1 | 20 | 66.3 | +23.0 | 0 | 1.00 | 390.1 | 0.0 | 0 | never_lifted |
+| `bd` | `nut_square` | 2 | 20 | 315.5 | +205.9 | 0 | 1.00 | 711.6 | 0.0 | 0 | never_lifted |
+| `bd` | `pot` | 0 | 4 | 439.6 | +284.4 | 0 | 1.00 | 468.3 | 0.0 | 0 | never_lifted |
+| `bd` | `pot` | 1 | 4 | 11.3 | -4.5 | -800 | 1.00 | 219.3 | 0.0 | 0 | never_lifted |
+| `bd` | `wrench` | 0 | 1 | 78.1 | +15.6 | 0 | 1.00 | 403.2 | 0.0 | 0 | never_lifted |
+| `g1three` | `bread` | 0 | 7 | 27.0 | +4.2 | -0 | 1.03 | 229.8 | 0.0 | 0 | never_lifted |
+| `g1three` | `bread` | 1 | 7 | 40.4 | +14.7 | -0 | 1.02 | 224.9 | 0.0 | 0 | never_lifted |
+| `g1three` | `bread` | 2 | 7 | 24.0 | -14.5 | -4 | 1.05 | 175.8 | 0.0 | 0 | never_lifted |
+| `g1three` | `can` | 0 | 25 | 8.8 | -5.4 | -800 | 1.05 | 795.6 | 0.0 | 0 | never_lifted |
+| `g1three` | `can` | 1 | 25 | 25.9 | +0.5 | -0 | 1.02 | 235.8 | 133.9 | 0 | never_lifted |
+| `g1three` | `can` | 2 | 25 | 12.5 | -0.3 | -16 | 1.02 | 252.9 | 0.0 | 0 | never_lifted |
+| `g1three` | `cereal` | 0 | 19 | 19.8 | +15.6 | -64 | 0.97 | 250.4 | 0.0 | 0 | never_lifted |
+| `g1three` | `cereal` | 1 | 19 | 48.7 | +34.4 | -64 | 1.02 | 295.1 | 0.0 | 0 | never_lifted |
+| `g1three` | `cereal` | 2 | 19 | 10.2 | +0.3 | -64 | 1.02 | 283.5 | 0.0 | 0 | never_lifted |
+| `g1three` | `hammer` | 0 | 2 | 51.1 | +23.9 | 0 | 1.14 | 238.2 | 0.0 | 0 | never_lifted |
+| `g1three` | `hammer` | 1 | 2 | 27.2 | +15.9 | -0 | 1.02 | 249.5 | 96.0 | 0 | never_lifted |
+| `g1three` | `milk` | 0 | 18 | 8.5 | +0.7 | -841 | 0.97 | 980.6 | 0.0 | 0 | never_lifted |
+| `g1three` | `milk` | 1 | 18 | 10.4 | +1.1 | -841 | 1.03 | 964.5 | 0.0 | 0 | never_lifted |
+| `g1three` | `milk` | 2 | 18 | 3.4 | +1.9 | -33 | 1.03 | 257.6 | 0.0 | 0 | never_lifted |
+| `g1three` | `mug` | 0 | 22 | 64.8 | +18.6 | 0 | 1.02 | 218.2 | 191.2 | 0 | never_lifted |
+| `g1three` | `mug` | 1 | 22 | 6.8 | +2.5 | -11 | 1.03 | 285.7 | 0.0 | 0 | never_lifted |
+| `g1three` | `mug` | 2 | 22 | 88.5 | +69.6 | 0 | 1.02 | 261.7 | 299.5 | 0 | never_lifted |
+| `g1three` | `nut_round` | 0 | 21 | 96.1 | +42.4 | 0 | 1.13 | 306.3 | 27.9 | 0 | never_lifted |
+| `g1three` | `nut_round` | 1 | 21 | 65.9 | +1.5 | 0 | 1.06 | 260.8 | 23.9 | 0 | never_lifted |
+| `g1three` | `nut_round` | 2 | 21 | 51.6 | +2.3 | 0 | 1.02 | 216.3 | 0.0 | 0 | never_lifted |
+| `g1three` | `nut_square` | 0 | 17 | 66.3 | -12.2 | 0 | 1.06 | 233.0 | 13.8 | 0 | never_lifted |
+| `g1three` | `nut_square` | 1 | 17 | 87.9 | -10.0 | 0 | 1.06 | 248.6 | 10.5 | 0 | never_lifted |
+| `g1three` | `nut_square` | 2 | 17 | 89.5 | +32.9 | 0 | 1.07 | 268.1 | 12.1 | 0 | never_lifted |
+| `g1three` | `pot` | 0 | 8 | 8.7 | -4.6 | 18 | 1.02 | 246.4 | 0.0 | 0 | never_lifted |
+| `g1three` | `pot` | 1 | 8 | 10.9 | -7.9 | -0 | 1.02 | 237.6 | 10.2 | 0 | never_lifted |
+| `g1three` | `pot` | 2 | 8 | 4.1 | -3.6 | 19 | 1.15 | 240.6 | 0.0 | 0 | never_lifted |
+| `g1three` | `wrench` | 0 | 13 | 6.6 | -2.0 | -11 | 1.02 | 242.9 | 0.0 | 0 | never_lifted |
+| `g1three` | `wrench` | 1 | 13 | 16.7 | +1.6 | -11 | 1.02 | 234.6 | 0.0 | 0 | never_lifted |
+| `g1three` | `wrench` | 2 | 13 | 66.7 | -15.8 | 0 | 1.02 | 202.0 | 0.0 | 0 | never_lifted |
+| `inspire` | `bread` | 0 | 18 | 63.7 | -21.8 | -0 | 25.61 | 221.2 | 0.0 | 0 | never_lifted |
+| `inspire` | `bread` | 1 | 18 | 24.4 | -2.4 | -0 | 25.61 | 275.2 | 0.0 | 0 | never_lifted |
+| `inspire` | `bread` | 2 | 18 | 24.6 | +6.6 | -0 | 25.49 | 243.8 | 0.0 | 0 | never_lifted |
+| `inspire` | `can` | 0 | 18 | 38.2 | -3.7 | -16 | 25.72 | 272.8 | 49.6 | 0 | never_lifted |
+| `inspire` | `can` | 1 | 18 | 34.5 | +14.0 | -16 | 25.58 | 220.4 | 97.6 | 0 | never_lifted |
+| `inspire` | `can` | 2 | 18 | 7.4 | +0.1 | -16 | 25.51 | 243.1 | 14.8 | 0 | never_lifted |
+| `inspire` | `cereal` | 0 | 14 | 70.1 | -28.3 | -64 | 25.49 | 345.3 | 0.0 | 0 | never_lifted |
+| `inspire` | `cereal` | 1 | 14 | 77.4 | +38.9 | 0 | 25.59 | 231.2 | 219.6 | 0 | never_lifted |
+| `inspire` | `cereal` | 2 | 14 | 54.3 | +17.4 | -0 | 25.59 | 218.6 | 193.3 | 0 | never_lifted |
+| `inspire` | `hammer` | 0 | 3 | 219.4 | +59.2 | 0 | 25.49 | 322.1 | 0.0 | 0 | never_lifted |
+| `inspire` | `hammer` | 1 | 3 | 82.3 | -19.7 | 0 | 25.60 | 170.9 | 0.0 | 0 | never_lifted |
+| `inspire` | `hammer` | 2 | 3 | 80.4 | -26.0 | 0 | 25.57 | 151.2 | 0.0 | 0 | never_lifted |
+| `inspire` | `milk` | 0 | 13 | 13.0 | +4.9 | -43 | 25.45 | 274.5 | 57.5 | 0 | never_lifted |
+| `inspire` | `milk` | 1 | 13 | 8.9 | +3.5 | -43 | 25.53 | 255.1 | 0.0 | 0 | never_lifted |
+| `inspire` | `milk` | 2 | 13 | 2.3 | +0.2 | -43 | 25.55 | 258.3 | 0.0 | 0 | never_lifted |
+| `inspire` | `mug` | 0 | 3 | 70.3 | -2.2 | 0 | 25.58 | 284.5 | 189.9 | 0 | never_lifted |
+| `inspire` | `mug` | 1 | 3 | 97.3 | +86.1 | 0 | 25.46 | 293.7 | 332.2 | 0 | never_lifted |
+| `inspire` | `mug` | 2 | 3 | 87.4 | -55.0 | 0 | 25.56 | 229.6 | 219.0 | 0 | never_lifted |
+| `inspire` | `nut_round` | 0 | 2 | 185.8 | +125.8 | 0 | 25.62 | 48.7 | 0.0 | 0 | never_lifted |
+| `inspire` | `nut_round` | 1 | 2 | 47.3 | +3.1 | 0 | 25.46 | 188.1 | 77.2 | 0 | never_lifted |
+| `inspire` | `nut_square` | 0 | 18 | 42.0 | -9.9 | 0 | 25.55 | 235.3 | 0.6 | 0 | never_lifted |
+| `inspire` | `nut_square` | 1 | 18 | 51.3 | -8.3 | 0 | 25.37 | 262.9 | 55.7 | 0 | never_lifted |
+| `inspire` | `nut_square` | 2 | 18 | 79.0 | -8.0 | 0 | 25.52 | 293.2 | 17.9 | 0 | never_lifted |
+| `inspire` | `pot` | 0 | 8 | 73.7 | +15.2 | 0 | 25.67 | 195.1 | 226.4 | 0 | never_lifted |
+| `inspire` | `pot` | 1 | 8 | 66.6 | +7.2 | 0 | 25.68 | 195.1 | 259.7 | 0 | never_lifted |
+| `inspire` | `pot` | 2 | 8 | 39.8 | +0.6 | 0 | 25.66 | 230.2 | 135.1 | 0 | never_lifted |
+| `inspire` | `wrench` | 0 | 1 | 172.8 | -16.5 | 0 | 25.53 | 120.0 | 0.0 | 0 | never_lifted |
+| `panda` | `bread` | 0 | 24 | 2.5 | +0.2 | -0 | 1.00 | 252.8 | 1.2 | 0 | never_lifted |
+| `panda` | `bread` | 1 | 24 | 2.7 | +0.1 | -0 | 0.99 | 221.7 | 22.7 | 0 | never_lifted |
+| `panda` | `bread` | 2 | 24 | 2.7 | +0.0 | 145 | 0.53 | 18.2 | 39.0 | 100 | **held** |
+| `panda` | `can` | 0 | 25 | 272.6 | +12.7 | -0 | 1.00 | 226.3 | 0.0 | 0 | never_lifted |
+| `panda` | `can` | 1 | 25 | 206.9 | -1.2 | -0 | 1.00 | 215.6 | 0.0 | 0 | never_lifted |
+| `panda` | `can` | 2 | 25 | 3.3 | +0.4 | 142 | 0.38 | 2.9 | 40.0 | 100 | **held** |
+| `panda` | `cereal` | 0 | 15 | 4.9 | -4.6 | 146 | 0.62 | 14.5 | 32.8 | 100 | **held** |
+| `panda` | `cereal` | 1 | 15 | 80.2 | -19.8 | 0 | 1.00 | 240.3 | 0.0 | 0 | never_lifted |
+| `panda` | `cereal` | 2 | 15 | 3.5 | -0.2 | 0 | 1.00 | 242.5 | 31.2 | 0 | never_lifted |
+| `panda` | `hammer` | 0 | 1 | 2.8 | -0.0 | 136 | 0.51 | 23.3 | 34.9 | 100 | **held** |
+| `panda` | `milk` | 0 | 17 | 2.4 | +0.1 | 147 | 0.51 | 1.9 | 39.4 | 100 | **held** |
+| `panda` | `milk` | 1 | 17 | 2.3 | -0.1 | -43 | 1.00 | 378.3 | 37.4 | 0 | never_lifted |
+| `panda` | `milk` | 2 | 17 | 2.4 | -0.2 | 149 | 0.33 | 5.0 | 39.8 | 100 | **held** |
+| `panda` | `mug` | 0 | 11 | 7.2 | -1.2 | 0 | 1.00 | 245.2 | 31.6 | 0 | never_lifted |
+| `panda` | `mug` | 1 | 11 | 5.4 | -2.3 | 0 | 1.00 | 238.4 | 27.8 | 0 | never_lifted |
+| `panda` | `mug` | 2 | 11 | 15.5 | -3.7 | 0 | 1.00 | 239.7 | 42.8 | 0 | never_lifted |
+| `panda` | `nut_round` | 0 | 15 | 75.7 | +3.2 | 0 | 1.00 | 282.9 | 0.0 | 0 | never_lifted |
+| `panda` | `nut_round` | 1 | 15 | 95.9 | +51.0 | 0 | 1.00 | 296.0 | 0.0 | 0 | never_lifted |
+| `panda` | `nut_round` | 2 | 15 | 96.8 | -2.0 | 0 | 1.00 | 312.5 | 0.0 | 0 | never_lifted |
+| `panda` | `nut_square` | 0 | 15 | 167.3 | -103.8 | 0 | 1.00 | 169.0 | 0.0 | 0 | never_lifted |
+| `panda` | `nut_square` | 1 | 15 | 106.4 | +59.3 | 0 | 1.00 | 290.1 | 0.0 | 0 | never_lifted |
+| `panda` | `nut_square` | 2 | 15 | 94.4 | -42.6 | 0 | 1.00 | 300.7 | 0.0 | 0 | never_lifted |
+| `panda` | `pot` | 0 | 6 | 9.4 | +9.3 | 0 | 1.00 | 240.0 | 0.0 | 0 | never_lifted |
+| `panda` | `pot` | 1 | 6 | 9.9 | +0.9 | 0 | 1.00 | 254.5 | 2.1 | 0 | never_lifted |
+| `panda` | `pot` | 2 | 6 | 2.8 | -0.1 | 0 | 1.00 | 235.8 | 0.0 | 0 | never_lifted |
+| `panda` | `wrench` | 0 | 7 | 7.3 | +2.2 | 0 | 1.00 | 250.2 | 0.0 | 0 | never_lifted |
+| `panda` | `wrench` | 1 | 7 | 7.8 | +2.8 | 0 | 1.00 | 234.5 | 0.0 | 0 | never_lifted |
+| `panda` | `wrench` | 2 | 7 | 19.2 | -6.4 | 0 | 1.00 | 213.0 | 0.0 | 0 | never_lifted |
+| `rethink` | `bread` | 0 | 22 | 5.7 | -2.1 | -0 | 1.00 | 353.3 | 22.4 | 0 | never_lifted |
+| `rethink` | `bread` | 1 | 22 | 2.7 | -0.0 | -0 | 1.00 | 246.6 | 7.4 | 0 | never_lifted |
+| `rethink` | `bread` | 2 | 22 | 6.6 | +2.2 | -0 | 1.00 | 280.1 | 36.0 | 0 | never_lifted |
+| `rethink` | `can` | 0 | 24 | 2.3 | +0.1 | 147 | 0.32 | 12.5 | 39.4 | 100 | **held** |
+| `rethink` | `can` | 1 | 24 | 2.6 | +0.0 | 145 | 0.48 | 250.1 | 37.2 | 33 | lifted_then_lost |
+| `rethink` | `can` | 2 | 24 | 2.4 | -0.0 | 5 | 1.00 | 309.9 | 36.8 | 17 | never_lifted |
+| `rethink` | `cereal` | 0 | 13 | 26.1 | -2.2 | 0 | 1.00 | 241.5 | 82.7 | 0 | never_lifted |
+| `rethink` | `cereal` | 1 | 13 | 2.8 | +0.1 | 145 | 0.67 | 9.7 | 34.0 | 100 | **held** |
+| `rethink` | `hammer` | 0 | 5 | 259.8 | -253.1 | 0 | 1.00 | 271.3 | 0.0 | 0 | never_lifted |
+| `rethink` | `hammer` | 1 | 5 | 29.0 | +24.8 | 0 | 1.00 | 394.4 | 61.0 | 0 | never_lifted |
+| `rethink` | `hammer` | 2 | 5 | 79.9 | +43.2 | 0 | 1.00 | 221.3 | 0.0 | 0 | never_lifted |
+| `rethink` | `milk` | 0 | 17 | 2.4 | -0.1 | 142 | 0.61 | 15.8 | 35.4 | 100 | **held** |
+| `rethink` | `milk` | 1 | 17 | 2.6 | +0.1 | -43 | 1.00 | 245.4 | 0.0 | 0 | never_lifted |
+| `rethink` | `milk` | 2 | 17 | 4.7 | +0.6 | 145 | 0.56 | 12.8 | 38.2 | 100 | **held** |
+| `rethink` | `mug` | 0 | 4 | 3.0 | +0.0 | 149 | 0.86 | 18.1 | 21.9 | 100 | **held** |
+| `rethink` | `nut_round` | 0 | 2 | 111.0 | -52.9 | 0 | 1.00 | 335.2 | 0.0 | 0 | never_lifted |
+| `rethink` | `nut_round` | 1 | 2 | 10.3 | -3.3 | 0 | 1.00 | 365.5 | 0.3 | 0 | never_lifted |
+| `rethink` | `nut_square` | 0 | 13 | 79.8 | -29.1 | 0 | 1.00 | 299.0 | 0.0 | 0 | never_lifted |
+| `rethink` | `nut_square` | 1 | 13 | 82.3 | -32.2 | 0 | 1.00 | 295.3 | 0.0 | 0 | never_lifted |
+| `rethink` | `nut_square` | 2 | 13 | 23.7 | +22.6 | 0 | 1.00 | 236.7 | 0.0 | 0 | never_lifted |
+| `rethink` | `pot` | 0 | 6 | 28.1 | -9.9 | 0 | 1.00 | 258.2 | 39.6 | 0 | never_lifted |
+| `rethink` | `pot` | 1 | 6 | 11.1 | +0.9 | 0 | 1.00 | 205.2 | 8.8 | 0 | never_lifted |
+| `rethink` | `pot` | 2 | 6 | 9.2 | +0.7 | 0 | 1.00 | 255.6 | 4.2 | 0 | never_lifted |
+| `rethink` | `wrench` | 0 | 4 | 85.4 | +79.0 | 0 | 1.00 | 368.0 | 0.0 | 0 | never_lifted |
+| `rethink` | `wrench` | 1 | 4 | 106.7 | -67.3 | 0 | 1.00 | 186.0 | 0.0 | 0 | never_lifted |
+| `robotiq140` | `bread` | 0 | 9 | 17.8 | +13.3 | -0 | 1.00 | 336.9 | 0.0 | 0 | never_lifted |
+| `robotiq140` | `bread` | 1 | 9 | 36.9 | -5.7 | 138 | 0.90 | 17.1 | 12.9 | 100 | **held** |
+| `robotiq140` | `bread` | 2 | 9 | 7.3 | -1.0 | 134 | 0.90 | 19.7 | 0.0 | 100 | **held** |
+| `robotiq140` | `can` | 0 | 17 | 4.3 | -0.4 | 126 | 0.85 | 416.7 | 0.0 | 33 | lifted_then_lost |
+| `robotiq140` | `can` | 1 | 17 | 11.2 | +7.7 | 120 | 0.89 | 144.3 | 7.2 | 67 | lifted_then_lost |
+| `robotiq140` | `can` | 2 | 17 | 12.9 | +6.6 | 120 | 0.87 | 29.7 | 6.3 | 100 | **held** |
+| `robotiq140` | `cereal` | 0 | 23 | 3.3 | +0.2 | 146 | 0.93 | 29.0 | 31.6 | 100 | **held** |
+| `robotiq140` | `cereal` | 1 | 23 | 2.4 | +0.0 | 136 | 0.93 | 31.4 | 32.2 | 100 | **held** |
+| `robotiq140` | `cereal` | 2 | 23 | 2.4 | +0.0 | 135 | 0.93 | 30.5 | 30.2 | 100 | **held** |
+| `robotiq140` | `hammer` | 0 | 3 | 8.1 | +2.9 | 103 | 0.93 | 45.1 | 0.0 | 100 | **held** |
+| `robotiq140` | `milk` | 0 | 25 | 2.3 | -0.1 | 0 | 1.00 | 249.4 | 4.6 | 0 | never_lifted |
+| `robotiq140` | `milk` | 1 | 25 | 2.6 | -0.2 | 142 | 0.91 | 24.5 | 27.4 | 100 | **held** |
+| `robotiq140` | `milk` | 2 | 25 | 2.4 | -0.0 | 144 | 0.91 | 20.1 | 30.1 | 100 | **held** |
+| `robotiq140` | `mug` | 0 | 20 | 2.8 | -0.4 | 130 | 0.80 | 14.9 | 74.6 | 100 | **held** |
+| `robotiq140` | `mug` | 1 | 20 | 3.1 | -0.3 | 137 | 0.79 | 23.2 | 67.9 | 100 | **held** |
+| `robotiq140` | `mug` | 2 | 20 | 2.6 | -0.3 | 136 | 0.84 | 33.9 | 42.9 | 100 | **held** |
+| `robotiq140` | `nut_round` | 0 | 19 | 83.0 | +23.3 | 0 | 1.00 | 241.1 | 2.3 | 0 | never_lifted |
+| `robotiq140` | `nut_round` | 1 | 19 | 88.1 | -29.3 | 0 | 0.99 | 265.0 | 0.0 | 0 | never_lifted |
+| `robotiq140` | `nut_round` | 2 | 19 | 60.7 | +51.4 | 0 | 1.00 | 164.8 | 71.6 | 0 | never_lifted |
+| `robotiq140` | `nut_square` | 0 | 11 | 106.0 | -16.0 | 0 | 1.00 | 302.3 | 0.0 | 0 | never_lifted |
+| `robotiq140` | `nut_square` | 1 | 11 | 109.6 | -9.1 | 0 | 1.00 | 320.3 | 0.0 | 0 | never_lifted |
+| `robotiq140` | `nut_square` | 2 | 11 | 101.5 | +20.2 | 0 | 1.00 | 303.9 | 0.1 | 0 | never_lifted |
+| `robotiq140` | `pot` | 0 | 8 | 20.2 | +2.9 | 39 | 0.94 | 194.5 | 22.3 | 100 | **held** |
+| `robotiq140` | `pot` | 1 | 8 | 133.3 | +101.6 | 0 | 1.00 | 156.8 | 0.0 | 0 | never_lifted |
+| `robotiq140` | `pot` | 2 | 8 | 18.7 | +3.2 | 0 | 1.00 | 235.0 | 14.5 | 0 | never_lifted |
+| `robotiq140` | `wrench` | 0 | 18 | 114.4 | +92.1 | -811 | 1.00 | 1429.6 | 0.0 | 0 | never_lifted |
+| `robotiq140` | `wrench` | 1 | 18 | 25.0 | -3.4 | 95 | 0.75 | 79.0 | 0.0 | 0 | lifted_then_lost |
+| `robotiq140` | `wrench` | 2 | 18 | 111.0 | -74.6 | -811 | 1.00 | 1334.6 | 0.0 | 0 | never_lifted |
+| `robotiq3f` | `bread` | 0 | 28 | 118.0 | -89.0 | -0 | 0.99 | 253.8 | 0.0 | 0 | never_lifted |
+| `robotiq3f` | `bread` | 1 | 28 | 40.5 | +4.8 | 135 | 0.98 | 265.0 | 37.3 | 67 | lifted_then_lost |
+| `robotiq3f` | `bread` | 2 | 28 | 22.0 | -15.8 | 121 | 0.98 | 31.6 | 64.0 | 100 | **held** |
+| `robotiq3f` | `can` | 0 | 14 | 3.1 | +0.1 | 4 | 0.99 | 412.5 | 129.2 | 0 | never_lifted |
+| `robotiq3f` | `can` | 1 | 14 | 4.4 | +1.9 | 145 | 0.94 | 19.9 | 196.4 | 100 | **held** |
+| `robotiq3f` | `can` | 2 | 14 | 3.0 | -1.6 | 141 | 0.95 | 9.9 | 129.4 | 100 | **held** |
+| `robotiq3f` | `cereal` | 0 | 17 | 3.8 | -1.2 | 143 | 0.93 | 19.6 | 150.7 | 100 | **held** |
+| `robotiq3f` | `cereal` | 1 | 17 | 2.7 | -0.3 | 144 | 0.94 | 13.2 | 122.7 | 100 | **held** |
+| `robotiq3f` | `cereal` | 2 | 17 | 4.1 | -0.9 | 143 | 0.93 | 15.8 | 162.6 | 100 | **held** |
+| `robotiq3f` | `hammer` | 0 | 19 | 18.6 | +12.8 | 127 | 0.99 | 23.1 | 22.1 | 100 | **held** |
+| `robotiq3f` | `hammer` | 1 | 19 | 24.3 | +10.9 | 129 | 0.95 | 10.9 | 63.4 | 100 | **held** |
+| `robotiq3f` | `hammer` | 2 | 19 | 130.5 | +10.4 | 0 | 0.99 | 175.0 | 0.0 | 0 | never_lifted |
+| `robotiq3f` | `milk` | 0 | 24 | 2.5 | -0.3 | 148 | 0.92 | 24.8 | 139.0 | 100 | **held** |
+| `robotiq3f` | `milk` | 1 | 24 | 2.6 | -0.1 | 151 | 0.94 | 11.3 | 174.3 | 100 | **held** |
+| `robotiq3f` | `milk` | 2 | 24 | 2.4 | -0.3 | 146 | 0.93 | 21.3 | 195.8 | 100 | **held** |
+| `robotiq3f` | `mug` | 0 | 22 | 2.4 | -0.2 | 139 | 0.74 | 20.5 | 331.8 | 100 | **held** |
+| `robotiq3f` | `mug` | 1 | 22 | 13.8 | +8.5 | 122 | 0.79 | 245.0 | 84.5 | 63 | lifted_then_lost |
+| `robotiq3f` | `mug` | 2 | 22 | 4.0 | +1.2 | 134 | 0.78 | 32.8 | 256.3 | 100 | **held** |
+| `robotiq3f` | `nut_round` | 0 | 25 | 121.4 | -6.1 | 0 | 0.99 | 157.1 | 0.0 | 0 | never_lifted |
+| `robotiq3f` | `nut_round` | 1 | 25 | 107.2 | -38.0 | 0 | 1.00 | 333.1 | 0.0 | 0 | never_lifted |
+| `robotiq3f` | `nut_round` | 2 | 25 | 98.7 | -18.6 | 0 | 0.99 | 220.7 | 0.0 | 0 | never_lifted |
+| `robotiq3f` | `nut_square` | 0 | 7 | 71.7 | +17.1 | 0 | 1.01 | 274.2 | 0.0 | 0 | never_lifted |
+| `robotiq3f` | `nut_square` | 1 | 7 | 66.4 | -43.2 | 0 | 1.00 | 254.6 | 0.0 | 0 | never_lifted |
+| `robotiq3f` | `nut_square` | 2 | 7 | 104.1 | -29.1 | 0 | 0.99 | 256.4 | 0.1 | 0 | never_lifted |
+| `robotiq3f` | `pot` | 0 | 8 | 3.3 | +0.2 | 51 | 0.99 | 201.2 | 16.9 | 100 | **held** |
+| `robotiq3f` | `pot` | 1 | 8 | 3.4 | +0.6 | 146 | 0.96 | 11.3 | 115.5 | 100 | **held** |
+| `robotiq3f` | `pot` | 2 | 8 | 15.8 | +4.5 | 0 | 1.00 | 181.4 | 9.7 | 0 | never_lifted |
+| `robotiq3f` | `wrench` | 0 | 12 | 4.3 | +2.2 | 147 | 0.68 | 22.0 | 0.0 | 0 | lifted_then_lost |
+| `robotiq3f` | `wrench` | 1 | 12 | 109.6 | -63.7 | 0 | 0.99 | 512.2 | 0.0 | 0 | never_lifted |
+| `robotiq3f` | `wrench` | 2 | 12 | 12.9 | -2.6 | 0 | 0.99 | 241.9 | 0.0 | 0 | never_lifted |
+| `robotiq85` | `bread` | 0 | 23 | 2.6 | +0.3 | -0 | 0.99 | 246.6 | 0.0 | 0 | never_lifted |
+| `robotiq85` | `bread` | 1 | 23 | 15.0 | -9.8 | -0 | 0.99 | 551.1 | 0.0 | 0 | never_lifted |
+| `robotiq85` | `bread` | 2 | 23 | 22.5 | -10.6 | -0 | 1.01 | 429.7 | 15.3 | 0 | never_lifted |
+| `robotiq85` | `can` | 0 | 17 | 2.4 | +0.0 | 144 | 0.74 | 7.7 | 83.9 | 100 | **held** |
+| `robotiq85` | `can` | 1 | 17 | 259.5 | -0.1 | -0 | 0.99 | 98.0 | 0.0 | 0 | never_lifted |
+| `robotiq85` | `can` | 2 | 17 | 2.4 | +0.1 | 146 | 0.73 | 7.3 | 92.8 | 100 | **held** |
+| `robotiq85` | `cereal` | 0 | 16 | 2.6 | +0.1 | 141 | 0.88 | 8.4 | 60.5 | 100 | **held** |
+| `robotiq85` | `cereal` | 1 | 16 | 94.2 | -15.7 | 0 | 0.99 | 219.1 | 0.0 | 0 | never_lifted |
+| `robotiq85` | `cereal` | 2 | 16 | 4.0 | +0.5 | 150 | 0.88 | 23.0 | 39.6 | 100 | **held** |
+| `robotiq85` | `hammer` | 0 | 7 | 16.5 | -6.6 | 130 | 0.88 | 13.4 | 15.8 | 100 | **held** |
+| `robotiq85` | `hammer` | 1 | 7 | 12.1 | -7.8 | 137 | 0.87 | 18.5 | 0.4 | 100 | **held** |
+| `robotiq85` | `hammer` | 2 | 7 | 142.9 | +25.3 | 0 | 1.01 | 229.0 | 0.0 | 0 | never_lifted |
+| `robotiq85` | `milk` | 0 | 23 | 2.4 | -0.1 | 149 | 0.79 | 11.1 | 101.8 | 100 | **held** |
+| `robotiq85` | `milk` | 1 | 23 | 19.6 | +6.2 | 152 | 0.84 | 9.3 | 48.3 | 100 | **held** |
+| `robotiq85` | `milk` | 2 | 23 | 3.1 | -0.1 | -43 | 1.00 | 323.8 | 73.3 | 0 | never_lifted |
+| `robotiq85` | `mug` | 0 | 9 | 7.1 | +1.3 | 144 | 0.61 | 15.4 | 121.5 | 100 | **held** |
+| `robotiq85` | `mug` | 1 | 9 | 5.5 | -3.0 | 133 | 0.50 | 17.3 | 221.1 | 100 | **held** |
+| `robotiq85` | `mug` | 2 | 9 | 35.7 | -26.8 | 178 | 0.59 | 23.4 | 215.1 | 100 | **held** |
+| `robotiq85` | `nut_round` | 0 | 1 | 32.5 | +19.9 | 0 | 0.98 | 230.3 | 10.5 | 0 | never_lifted |
+| `robotiq85` | `nut_square` | 0 | 15 | 223.3 | +89.2 | 0 | 1.25 | 386.6 | 0.0 | 0 | never_lifted |
+| `robotiq85` | `nut_square` | 1 | 15 | 67.9 | -10.0 | 0 | 0.99 | 354.7 | 0.0 | 0 | never_lifted |
+| `robotiq85` | `nut_square` | 2 | 15 | 72.6 | -27.8 | 0 | 1.00 | 272.5 | 0.0 | 0 | never_lifted |
+| `robotiq85` | `pot` | 0 | 9 | 20.3 | +0.4 | 0 | 1.01 | 237.5 | 32.4 | 0 | never_lifted |
+| `robotiq85` | `pot` | 1 | 9 | 2.4 | +0.1 | 48 | 0.92 | 365.8 | 58.2 | 67 | lifted_then_lost |
+| `robotiq85` | `pot` | 2 | 9 | 48.7 | +32.9 | 0 | 1.00 | 195.3 | 0.0 | 0 | never_lifted |
+| `robotiq85` | `wrench` | 0 | 14 | 16.8 | -5.7 | 0 | 1.00 | 225.5 | 0.0 | 0 | never_lifted |
+| `robotiq85` | `wrench` | 1 | 14 | 3.2 | +0.1 | 111 | 0.95 | 253.5 | 0.0 | 0 | lifted_then_lost |
+| `robotiq85` | `wrench` | 2 | 14 | 5.4 | -2.0 | 0 | 0.99 | 259.2 | 0.0 | 0 | never_lifted |
+| `umi` | `bread` | 0 | 21 | 68.8 | +9.5 | -0 | 1.01 | 190.9 | 0.0 | 0 | never_lifted |
+| `umi` | `bread` | 1 | 21 | 53.9 | +6.5 | -4 | 1.01 | 221.5 | 0.0 | 0 | never_lifted |
+| `umi` | `bread` | 2 | 21 | 54.4 | +8.2 | -0 | 1.01 | 215.2 | 0.0 | 0 | never_lifted |
+| `umi` | `can` | 0 | 29 | 2.3 | +0.1 | -16 | 1.01 | 247.7 | 0.0 | 0 | never_lifted |
+| `umi` | `can` | 1 | 29 | 61.0 | +9.0 | 87 | 0.53 | 3.9 | 0.0 | 100 | **held** |
+| `umi` | `can` | 2 | 29 | 6.0 | +0.4 | -16 | 1.01 | 241.5 | 0.0 | 0 | never_lifted |
+| `umi` | `cereal` | 0 | 26 | 5.0 | -0.8 | -64 | 1.01 | 251.3 | 0.0 | 0 | never_lifted |
+| `umi` | `cereal` | 1 | 26 | 5.0 | -0.4 | -64 | 1.01 | 250.7 | 0.0 | 0 | never_lifted |
+| `umi` | `cereal` | 2 | 26 | 5.0 | -1.8 | -64 | 1.01 | 250.4 | 0.0 | 0 | never_lifted |
+| `umi` | `hammer` | 0 | 1 | 71.3 | -30.7 | 106 | 0.70 | 20.6 | 32.9 | 100 | **held** |
+| `umi` | `milk` | 0 | 18 | 7.6 | +5.1 | -43 | 1.01 | 244.1 | 0.0 | 0 | never_lifted |
+| `umi` | `milk` | 1 | 18 | 133.1 | +109.7 | 0 | 1.00 | 441.7 | 0.0 | 0 | never_lifted |
+| `umi` | `milk` | 2 | 18 | 2.3 | -0.1 | -43 | 1.01 | 250.2 | 23.1 | 0 | never_lifted |
+| `umi` | `mug` | 0 | 7 | 172.4 | -17.0 | 8 | 1.01 | 191.3 | 40.8 | 0 | never_lifted |
+| `umi` | `mug` | 1 | 7 | 2.4 | +0.1 | -11 | 1.01 | 309.7 | 0.0 | 0 | never_lifted |
+| `umi` | `mug` | 2 | 7 | 93.2 | +34.9 | -0 | 1.00 | 319.1 | 0.0 | 0 | never_lifted |
+| `umi` | `nut_round` | 0 | 25 | 207.6 | -11.8 | 0 | 1.00 | 448.7 | 0.0 | 0 | never_lifted |
+| `umi` | `nut_round` | 1 | 25 | 109.9 | +5.6 | 0 | 1.00 | 294.0 | 0.0 | 0 | never_lifted |
+| `umi` | `nut_round` | 2 | 25 | 162.6 | +44.7 | 0 | 1.00 | 113.5 | 0.0 | 0 | never_lifted |
+| `umi` | `nut_square` | 0 | 25 | 57.1 | -1.5 | 0 | 1.00 | 160.1 | 0.0 | 0 | never_lifted |
+| `umi` | `nut_square` | 1 | 25 | 78.3 | -15.8 | 0 | 1.00 | 582.0 | 0.0 | 0 | never_lifted |
+| `umi` | `nut_square` | 2 | 25 | 67.6 | +3.7 | -800 | 1.00 | 240.4 | 0.0 | 0 | never_lifted |
+| `umi` | `pot` | 0 | 2 | 180.7 | +114.4 | 37 | 1.00 | 23.8 | 404.9 | 33 | lifted_then_lost |
+| `umi` | `wrench` | 0 | 2 | 2.6 | +0.1 | 0 | 1.01 | 262.4 | 0.0 | 0 | never_lifted |
+| `xarm` | `bread` | 0 | 16 | 2.6 | -0.6 | 147 | 0.71 | 11.8 | 428.1 | 100 | **held** |
+| `xarm` | `bread` | 1 | 16 | 2.6 | +0.3 | -0 | 1.01 | 251.4 | 5.7 | 0 | never_lifted |
+| `xarm` | `bread` | 2 | 16 | 2.3 | +0.1 | 146 | 0.71 | 3.2 | 475.3 | 100 | **held** |
+| `xarm` | `can` | 0 | 19 | 3.1 | +0.2 | 144 | 0.55 | 2.7 | 723.4 | 100 | **held** |
+| `xarm` | `can` | 1 | 19 | 2.6 | -0.3 | 145 | 0.55 | 10.1 | 716.2 | 100 | **held** |
+| `xarm` | `can` | 2 | 19 | 2.4 | -0.3 | 146 | 0.56 | 12.0 | 704.9 | 100 | **held** |
+| `xarm` | `cereal` | 0 | 14 | 107.8 | -71.4 | 0 | 1.01 | 315.4 | 0.0 | 0 | never_lifted |
+| `xarm` | `cereal` | 1 | 14 | 4.1 | -1.0 | 154 | 0.74 | 19.3 | 437.1 | 100 | **held** |
+| `xarm` | `cereal` | 2 | 14 | 2.6 | +0.2 | 182 | 0.76 | 50.7 | 387.7 | 100 | **held** |
+| `xarm` | `hammer` | 0 | 3 | 2.8 | -0.2 | 138 | 0.67 | 17.3 | 540.6 | 100 | **held** |
+| `xarm` | `hammer` | 1 | 3 | 2.9 | +0.1 | 142 | 0.74 | 11.8 | 414.2 | 100 | **held** |
+| `xarm` | `hammer` | 2 | 3 | 2.9 | +0.0 | 137 | 0.71 | 15.2 | 457.6 | 100 | **held** |
+| `xarm` | `milk` | 0 | 17 | 2.5 | -0.3 | 162 | 0.65 | 30.9 | 587.5 | 100 | **held** |
+| `xarm` | `milk` | 1 | 17 | 8.7 | -0.2 | 143 | 0.64 | 40.3 | 728.2 | 100 | **held** |
+| `xarm` | `milk` | 2 | 17 | 220.6 | +195.5 | 0 | 1.02 | 54.9 | 0.0 | 0 | never_lifted |
+| `xarm` | `mug` | 0 | 14 | 2.4 | +0.0 | 140 | 0.81 | 14.6 | 414.1 | 100 | **held** |
+| `xarm` | `mug` | 1 | 14 | 38.3 | +9.5 | 141 | 0.86 | 23.6 | 364.7 | 100 | **held** |
+| `xarm` | `mug` | 2 | 14 | 38.7 | +1.2 | 147 | 0.86 | 43.4 | 282.3 | 100 | **held** |
+| `xarm` | `nut_round` | 0 | 21 | 108.0 | -15.0 | 0 | 1.02 | 151.5 | 0.0 | 0 | never_lifted |
+| `xarm` | `nut_round` | 1 | 21 | 69.6 | -1.7 | 0 | 1.02 | 191.5 | 0.0 | 0 | never_lifted |
+| `xarm` | `nut_round` | 2 | 21 | 340.1 | +75.0 | 0 | 1.02 | 119.1 | 0.0 | 0 | never_lifted |
+| `xarm` | `nut_square` | 0 | 19 | 301.2 | -79.9 | 0 | 1.02 | 67.8 | 0.0 | 0 | never_lifted |
+| `xarm` | `nut_square` | 1 | 19 | 106.2 | -37.5 | 0 | 1.02 | 225.8 | 0.0 | 0 | never_lifted |
+| `xarm` | `nut_square` | 2 | 19 | 95.5 | -1.0 | 0 | 1.02 | 271.7 | 0.0 | 0 | never_lifted |
+| `xarm` | `pot` | 0 | 6 | 2.3 | +0.0 | 138 | 0.74 | 17.3 | 424.9 | 100 | **held** |
+| `xarm` | `pot` | 1 | 6 | 2.5 | +0.2 | 88 | 0.83 | 63.9 | 385.7 | 100 | **held** |
+| `xarm` | `pot` | 2 | 6 | 2.7 | -0.4 | 87 | 0.84 | 65.8 | 367.3 | 100 | **held** |
+| `xarm` | `wrench` | 0 | 12 | 110.8 | +67.0 | 0 | 1.02 | 301.6 | 0.0 | 0 | never_lifted |
+| `xarm` | `wrench` | 1 | 12 | 5.0 | +2.6 | 0 | 1.01 | 269.9 | 0.0 | 0 | never_lifted |
+| `xarm` | `wrench` | 2 | 12 | 28.0 | -14.6 | 125 | 0.88 | 80.3 | 0.0 | 0 | lifted_then_lost |
+| `yumi` | `bread` | 0 | 7 | 89.8 | -12.1 | -0 | 1.00 | 229.8 | 0.0 | 0 | never_lifted |
+| `yumi` | `bread` | 1 | 7 | 4.7 | +2.2 | -0 | 1.00 | 278.9 | 28.3 | 0 | never_lifted |
+| `yumi` | `bread` | 2 | 7 | 5.3 | -1.0 | 150 | 0.49 | 1869.0 | 22.9 | 33 | lifted_then_lost |
+| `yumi` | `can` | 0 | 14 | 3.3 | -0.2 | 152 | 0.22 | 3.3 | 37.8 | 100 | **held** |
+| `yumi` | `can` | 1 | 14 | 5.3 | +1.0 | 146 | 0.22 | 2.2 | 43.9 | 100 | **held** |
+| `yumi` | `can` | 2 | 14 | 5.5 | +1.8 | -815 | 1.00 | 1126.5 | 49.9 | 0 | never_lifted |
+| `yumi` | `cereal` | 0 | 5 | 264.0 | -6.3 | 0 | 1.00 | 61.3 | 0.0 | 0 | never_lifted |
+| `yumi` | `hammer` | 0 | 4 | 6.3 | -0.3 | 0 | 1.00 | 249.1 | 28.4 | 0 | never_lifted |
+| `yumi` | `hammer` | 1 | 4 | 4.1 | +0.7 | 0 | 1.00 | 267.3 | 7.1 | 0 | never_lifted |
+| `yumi` | `hammer` | 2 | 4 | 142.5 | +25.6 | 0 | 1.00 | 180.2 | 0.0 | 0 | never_lifted |
+| `yumi` | `milk` | 0 | 14 | 93.8 | -4.7 | 0 | 1.00 | 214.0 | 4.6 | 0 | never_lifted |
+| `yumi` | `milk` | 1 | 14 | 255.0 | +37.3 | 0 | 1.00 | 304.0 | 0.0 | 0 | never_lifted |
+| `yumi` | `milk` | 2 | 14 | 2.7 | +0.2 | -43 | 1.00 | 261.0 | 0.0 | 0 | never_lifted |
+| `yumi` | `mug` | 0 | 1 | 216.9 | +52.7 | 0 | 1.00 | 79.2 | 0.0 | 0 | never_lifted |
+| `yumi` | `nut_round` | 0 | 4 | 5.2 | -0.3 | 0 | 1.00 | 240.9 | 0.0 | 0 | never_lifted |
+| `yumi` | `nut_round` | 1 | 4 | 5.5 | -1.4 | 141 | 0.61 | 5.8 | 24.7 | 100 | **held** |
+| `yumi` | `nut_round` | 2 | 4 | 3.6 | +0.4 | 0 | 1.00 | 244.8 | 0.0 | 0 | never_lifted |
+| `yumi` | `nut_square` | 0 | 1 | 11.0 | -5.8 | 0 | 1.00 | 376.9 | 0.0 | 0 | never_lifted |
+| `yumi` | `pot` | 0 | 6 | 16.4 | -7.2 | 0 | 1.00 | 234.8 | 12.5 | 0 | never_lifted |
+| `yumi` | `pot` | 1 | 6 | 5.5 | +4.5 | 0 | 1.00 | 241.9 | 0.0 | 0 | never_lifted |
+| `yumi` | `pot` | 2 | 6 | 10.5 | +1.8 | 0 | 1.00 | 254.2 | 34.3 | 0 | never_lifted |
+| `yumi` | `wrench` | 0 | 2 | 4.5 | -0.8 | 0 | 1.00 | 243.9 | 0.0 | 0 | never_lifted |
