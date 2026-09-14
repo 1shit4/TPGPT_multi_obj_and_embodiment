@@ -39,17 +39,19 @@ What each key means, and how it is obtained here:
     ``[0, 0, depth]``: how far along the approach axis the grasp point sits
     from the gripper's base. Becomes ``XGripperInfo.depth``.
 ``sweep_volume``
-    The box enclosing the free space **between** the fingers -- the pocket an
-    object has to fit into -- at the open state (``extents``/``offset``) and at
-    half closure (``extents2``/``offset2``). This is the box the wizard asks a
-    human to drag, and it is measured here by casting rays outward from the
-    hand's mid-plane along the closing axis: where a ray going one way and a ray
-    going the other both strike a finger, that point is inside the pocket, and
-    the two hit distances add up to the local aperture.
+    **The region the fingers traverse while closing**, as an axis-aligned box,
+    for two states: sweeping from fully open (``extents``/``offset``) and from
+    half closed (``extents2``/``offset2``). Measured by driving the hand
+    through its closing motion and taking the box that contains every position
+    its fingers occupied.
 
-    Ray casting rather than arithmetic on geom positions, because a finger is a
-    mesh with no analytic half-width, and ``geom_rbound`` -- a bounding
-    *sphere* -- overestimates a long link badly.
+    This is the paper's own definition -- *"the region traversed by the robot
+    fingers during its grasping motion"* -- and it is **not** the free space
+    between the fingers, which is the reading an earlier version of this module
+    took. The two nearly coincide for a parallel jaw and are unrelated for a
+    hand whose fingers curl inward. The Panda's shipped config is the check:
+    its finger joint travels 0.04 m per side and ``extents[0]`` is **0.08**,
+    the total travel of the two fingers, with ``extents2[0]`` = 0.04.
 ``bbox``
     The hand's own extent, from MuJoCo's exact per-geom ``geom_aabb`` rather
     than bounding spheres. Feeds the control points GraspGen-X scores with.
@@ -75,26 +77,12 @@ be asked to describe those eleven and the answers compared. ``--validate`` does
 that. A generator that recovers the shipped numbers for hands it did not write
 can be believed about hands nobody has written.
 
-**Measured, it passes for two-finger jaws and fails for anthropomorphic hands.**
-Against the shipped apertures: panda **78.2 mm** against 80.0, yumi **50.0**
-against 50.0, robotiq140 126.3 against 125.0, xarm 86.0 against 85.0 -- within
-3%. Less good but the same order: rethink 58.7 against 66.0, robotiq85 104.0
-against 85.0. The first three of those were each confirmed by a second,
-independent run with the arm frozen, agreeing to 0.3 mm.
-
-For the multi-finger hands it does not work, and the reason is structural rather
-than a tuning problem. Repeating the measurement along **twelve axes**
-perpendicular to the approach finds, for a Panda, **no pocket on any axis but
-the closing one** -- which is what a parallel jaw should look like. For the
-Inspire hand it finds 10.4 mm along the axis its fingers travel and a widest gap
-of **28.0 mm at 75 degrees away from it**, against a declared 80. For
-``g1three`` it finds **no pocket at all** on the travel axis and 26.1 mm at 90
-degrees, against a declared 100.
-
-A hand whose five fingers curl into a palm does not hold things between two
-opposed fingertips, so a box fitted between two opposed fingertips is not its
-graspable volume, and no choice of axis rescues that. Do not use this on a hand
-with more than two fingers without checking the result against something.
+**An earlier version of this module measured the wrong quantity** -- the gap
+between the fingers rather than the region they sweep -- and reported the
+Inspire hand opening by 28 mm against a declared 80. It reproduced the shipped
+apertures for the Panda, the Yumi and the Robotiq 2F-140 while doing so, which
+is exactly how the error survived: for a parallel jaw the gap and the sweep are
+nearly the same box. Any figure quoted from that version is withdrawn.
 
 So: usable for onboarding a two-finger jaw, and an open problem for anything
 else. ``docs/gripper_diversity.md``.
@@ -135,21 +123,16 @@ ASSETS_ROOT = Path(__file__).resolve().parents[2] / "assets" / "x_grippers"
 #: names. Mirrors ``grippers._CONFIG_SUBPATH``.
 INSTALL_SUBPATH = "gripper_descriptions/assets/x_grippers"
 
-#: Rays longer than this are treated as missing the hand entirely. No registered
-#: hand is wider than 200 mm across its jaw axis.
-MAX_REACH = 0.20
+#: Closure fractions sampled across a sweep. The box is the union over these,
+#: so more samples can only grow it; nine is where the Panda's aperture stops
+#: moving.
+SWEEP_SAMPLES = 9
 
-#: Samples per axis across the search window when mapping the pocket. 41 gives
-#: 4 mm resolution over the window, which resolves a 18 mm finger pad.
-GRID = 41
+#: Control steps held at each sampled fraction, to let the jaws arrive.
+SWEEP_HOLD = 12
 
-#: Half-width, in metres, of the window searched for the pocket in the two axes
-#: perpendicular to the closing direction.
-WINDOW = 0.16
-
-#: Closure fraction the second sweep box is measured at. GraspGen-X calls it the
-#: "half-open" box and its own wizard sets the closed pose for it; half of the
-#: commanded travel is the reading of that this module uses.
+#: Closure the second sweep box starts from. GraspGen-X calls it the
+#: "half-open" box.
 MID_CLOSURE = 0.5
 
 #: Number of surface points written to ``points.json`` per closure state.
@@ -188,70 +171,57 @@ def _local_frame(opened_local, closed_local):
     return basis, moving
 
 
-def _pocket(sim, gripper_geoms, root_p, root_R, root_to_grasp, z_lo, z_hi):
-    """Map the free space between the fingers, by casting rays across it.
+def _swept_volume(env, gripper, geom_ids, root_id, root_to_grasp, moving,
+                  start_fraction, freeze):
+    """The region the fingers **traverse** while closing, as an axis-aligned box.
 
-    The window is bounded to the **distal band of the fingers** rather than the
-    whole hand. Searching from the base upward measures the wrong thing: on a
-    Panda the rays pass either side of the palm and report a 168 mm "aperture"
-    for a hand whose jaws open to 80, because the widest gap between two
-    gripper surfaces is not the gap an object goes into. The band is the same
-    one :func:`measure_frames.measure_frame` uses for the contact point --
-    ``DISTAL_FRACTION`` of the fingers, measured back from their tips.
+    This is GraspGen-X's own definition (arXiv:2606.00998): *"the region
+    traversed by the robot fingers during its grasping motion"*, recorded for
+    two states -- from fully open, and from halfway closed -- and fed to the
+    model as 3 extents plus 3 offsets per state.
 
-    Returns ``(extents, offset, cells)`` in the local frame, or ``None`` if no
-    point in the window has a finger on both sides of it.
+    **Not the free space between the fingers**, which is what an earlier
+    version of this module measured. The two nearly coincide for a parallel
+    jaw, which is why that version reproduced the shipped apertures for the
+    Panda, Yumi and Robotiq 2F-140 and why the agreement looked like
+    validation. For a hand whose fingers curl inward they are unrelated
+    quantities, and the error read as a five-finger hand that could not open
+    more than 28 mm.
+
+    The Panda's shipped config is the check: its finger joint travels 0.04 m
+    per side, and ``extents[0]`` is **0.08** -- the total travel of the two
+    fingers, not the gap between them -- with ``extents2[0]`` = 0.04, the
+    travel from half-closed.
+
+    Args:
+        start_fraction: Closure to sweep from. 0 gives the open-state box,
+            0.5 the half-closed one.
+        freeze: Callable holding the arm still between steps.
+
+    Returns:
+        ``(extents, offset)`` in the grasp frame.
     """
-    import mujoco
+    from tpgpt.sim.replay import closing_direction, set_closure
 
-    ys = np.linspace(-WINDOW / 2, WINDOW / 2, GRID)
-    zs = np.linspace(z_lo, z_hi, GRID)
-    hit_geom = np.zeros(1, dtype=np.int32)
-    # Local (grasp convention) -> world, via the root body's current pose.
-    local_to_world = root_R @ root_to_grasp
+    sim = env.sim
+    direction = closing_direction(gripper)
+    action = gripper_action(env, gripper, -1.0)
+    for _ in range(SETTLE_STEPS):
+        env.step(action)
+        freeze()
 
-    aperture = np.full((GRID, GRID), np.nan)
-    centre_x = np.full((GRID, GRID), np.nan)
-    for i, y in enumerate(ys):
-        for j, z in enumerate(zs):
-            start = root_p + local_to_world @ np.array([0.0, y, z])
-            hits = {}
-            for sign in (+1.0, -1.0):
-                direction = local_to_world @ np.array([sign, 0.0, 0.0])
-                distance = mujoco.mj_ray(
-                    sim.model._model, sim.data._data, start, direction,
-                    None, 1, -1, hit_geom,
-                )
-                if 0.0 <= distance <= MAX_REACH and int(hit_geom[0]) in gripper_geoms:
-                    hits[sign] = float(distance)
-            if len(hits) == 2:
-                aperture[i, j] = hits[+1.0] + hits[-1.0]
-                # Midpoint of the gap, as an x offset from the mid-plane.
-                centre_x[i, j] = (hits[+1.0] - hits[-1.0]) / 2.0
+    traversed = []
+    for fraction in np.linspace(float(start_fraction), 1.0, SWEEP_SAMPLES):
+        set_closure(gripper, direction, float(fraction))
+        hold = np.zeros(env.action_dim)
+        for _ in range(SWEEP_HOLD):
+            env.step(hold)
+            freeze()
+        traversed.append(_root_local(sim, geom_ids, root_id)[moving] @ root_to_grasp)
 
-    inside = ~np.isnan(aperture)
-    if not inside.any():
-        return None
-
-    yi, zi = np.where(inside)
-    y_low, y_high = ys[yi.min()], ys[yi.max()]
-    z_low, z_high = zs[zi.min()], zs[zi.max()]
-    # The aperture varies across the pocket -- a curved finger is closer at its
-    # tip than at its knuckle -- so one number has to be chosen. The median is
-    # used rather than the maximum, because the box is meant to be the space an
-    # object fits into and the widest single ray is usually one that has found
-    # a way past the fingers rather than between them.
-    extents = np.array([
-        float(np.nanmedian(aperture)),
-        float(y_high - y_low),
-        float(z_high - z_low),
-    ])
-    offset = np.array([
-        float(np.nanmedian(centre_x)),
-        float((y_high + y_low) / 2.0),
-        float((z_high + z_low) / 2.0),
-    ])
-    return extents, offset, int(inside.sum())
+    points = np.vstack(traversed)
+    lo, hi = points.min(axis=0), points.max(axis=0)
+    return hi - lo, (hi + lo) / 2.0
 
 
 def _bbox(sim, geom_ids, root_p, root_R, root_to_grasp):
@@ -433,49 +403,31 @@ def describe_gripper(
         root_to_grasp, moving = _local_frame(opened, closed)
         root_p, root_R = root_pose()
         local_open = positions() @ root_to_grasp
-        # The distal band of the fingers: where the pads are, and where an
-        # object is actually held. Measured on the *open* hand, and reused for
-        # the half-closed measurement so both boxes describe the same part of
-        # the hand rather than two different parts of it.
-        along = local_open[moving][:, 2]
-        z_hi = float(along.max()) + 0.01
-        z_lo = float(along.max() - DISTAL_FRACTION * (np.ptp(along) or 0.01))
-        open_sweep = _pocket(sim, geom_set, root_p, root_R, root_to_grasp, z_lo, z_hi)
         bbox_lo, bbox_hi = _bbox(sim, geom_ids, root_p, root_R, root_to_grasp)
-        open_points = _surface_points(sim, geom_ids, root_p, root_R, root_to_grasp, rng)
+        open_points = _surface_points(sim, geom_ids, root_p, root_R,
+                                      root_to_grasp, rng)
 
-        direction = closing_direction(gripper)
-        set_closure(gripper, direction, MID_CLOSURE)
-        hold = np.zeros(env.action_dim)
-        for _ in range(SETTLE_STEPS):
-            env.step(hold)
-            freeze_arm()
-        root_p, root_R = root_pose()
-        mid_sweep = _pocket(sim, geom_set, root_p, root_R, root_to_grasp, z_lo, z_hi)
+        # The two boxes the model conditions on: the region the fingers cover
+        # sweeping from fully open to shut, and from half-closed to shut.
+        extents, offset = _swept_volume(
+            env, gripper, geom_ids, root_id, root_to_grasp, moving, 0.0, freeze_arm)
+        extents2, offset2 = _swept_volume(
+            env, gripper, geom_ids, root_id, root_to_grasp, moving,
+            MID_CLOSURE, freeze_arm)
 
         settle(1.0)
-        close_points = _surface_points(sim, geom_ids, root_p, root_R, root_to_grasp, rng)
+        close_points = _surface_points(sim, geom_ids, root_p, root_R,
+                                       root_to_grasp, rng)
 
-        if open_sweep is None:
-            raise RuntimeError(
-                f"{robosuite_name}: no point in the search window has a finger "
-                "on both sides of it, so this hand has no measurable pocket "
-                "between its fingers and cannot be described this way."
-            )
-        extents, offset, cells = open_sweep
-        if mid_sweep is None:
-            # A hand whose pocket closes completely at half travel. Keep the
-            # open box's shape and collapse its aperture, rather than emitting
-            # a box measured at a different state than it claims.
-            extents2, offset2 = extents * np.array([0.5, 1.0, 1.0]), offset
-            mid_cells = 0
-        else:
-            extents2, offset2, mid_cells = mid_sweep
+        # The grasp point: the far face of the swept box along the approach
+        # axis, which is where the fingertips are when the hand is open and so
+        # where an object first meets them.
+        fingertip_z = float(offset[2] + extents[2] / 2.0)
 
         config = {
             "open": open_qpos,
             "close": close_qpos,
-            "fingertip": [0.0, 0.0, float(offset[2] + extents[2] / 2.0)],
+            "fingertip": [0.0, 0.0, fingertip_z],
             "sweep_volume": {
                 "extents": [round(float(v), 5) for v in extents],
                 "offset": [round(float(v), 5) for v in offset],
@@ -499,8 +451,7 @@ def describe_gripper(
                 "robot": robot,
                 "n_fingers": int(n_fingers),
                 "seed": int(seed),
-                "pocket_cells_open": cells,
-                "pocket_cells_mid": mid_cells,
+                "sweep_samples": SWEEP_SAMPLES,
                 "moving_geoms": int(moving.sum()),
             },
         }
@@ -588,7 +539,7 @@ def validate(shorts=None, robot: str = "Panda") -> list[dict]:
             "fingertip_measured_mm": config["fingertip"][2] * 1000,
             "mid_aperture_shipped_mm": sv_s["extents2"][0] * 1000,
             "mid_aperture_measured_mm": sv_m["extents2"][0] * 1000,
-            "pocket_cells": config["tpgpt_measured"]["pocket_cells_open"],
+            "sweep_samples": config["tpgpt_measured"]["sweep_samples"],
         })
     return rows
 
