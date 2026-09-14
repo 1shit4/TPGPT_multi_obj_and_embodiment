@@ -790,26 +790,26 @@
   "robotiq3f": {
     "alignment": [
       [
-        0.9928750368885292,
-        0.008024960876241199,
-        0.11888970151588733
+        0.9958595521076674,
+        0.00719618084651423,
+        0.09061990651694816
       ],
       [
-        -0.004246612916533306,
-        0.9994788601726469,
-        -0.03199959916505417
+        -0.004376687523849496,
+        0.9995012736871145,
+        -0.03127376702852572
       ],
       [
-        -0.11908453888872021,
-        0.03126672465932114,
-        0.9923916890657334
+        -0.09079976366838596,
+        0.030747664611482022,
+        0.9953943861800232
       ]
     ],
-    "anisotropy": 4.2449822779688855,
+    "anisotropy": 4.262753322035843,
     "approach_in_site": [
-      -0.11908453888872021,
-      0.03126672465932114,
-      0.9923916890657334
+      -0.09079976366838596,
+      0.030747664611482022,
+      0.9953943861800232
     ],
     "calibrated_depth": 0.014999999999999998,
     "calibration_band": 0.16499999999999998,
@@ -869,19 +869,21 @@
       ]
     ],
     "calibration_working": 11,
-    "closing_angle_deg": 0.4630858464682319,
+    "closing_angle_deg": 0.41401783413303406,
     "closing_in_site": [
-      0.9928750368885292,
-      0.008024960876241199,
-      0.11888970151588733
+      0.9958595521076674,
+      0.00719618084651423,
+      0.09061990651694816
     ],
     "contact_offset": [
-      -0.00595453598680443,
-      0.00483074157189996,
-      -0.009355203634201637
+      -0.007553464688484492,
+      0.004450711616262127,
+      -0.020710903092747444
     ],
     "depth_band": 0.03,
     "finger_geoms": [
+      "gripper0_right_palm_visual",
+      "gripper0_right_palm",
       "gripper0_right_f1_l0_vis",
       "gripper0_right_f1_l0",
       "gripper0_right_f1_l1_vis",
@@ -902,6 +904,8 @@
       "gripper0_right_f2_l3",
       "gripper0_right_f2_tip_collision",
       "gripper0_right_f2_pad_collision",
+      "gripper0_right_f3_l0_vis",
+      "gripper0_right_f3_l0",
       "gripper0_right_f3_l1_vis",
       "gripper0_right_f3_l1",
       "gripper0_right_f3_l2_vis",
@@ -911,12 +915,13 @@
       "gripper0_right_finger_middle_tip_collision",
       "gripper0_right_finger_middle_pad_collision"
     ],
-    "finger_travel_mm": 84.04927531279745,
-    "n_moving_geoms": 28,
+    "finger_travel_mm": 84.73680064055215,
+    "n_moving_geoms": 32,
     "plus_one_closes": true,
+    "restoration_note": "Frame restored to its ec76c0d value on 2026-09-15. It had been re-measured while adding the closing-axis sign resolution, and moved 11.5 mm in contact_offset and 1.63 degrees in alignment. The sign did **not** flip for this hand, so that movement is the measurement's own irreproducibility -- three fresh processes span 11.7 mm on it -- and keeping the new draw would have substituted one sample for another under every campaign this hand appears in, which is ROBOTICS_NOTES 7.41. Measure only the hand you are adding.",
     "robosuite": "RobotiqThreeFingerGripper",
-    "spread_closed": 0.0806415763550976,
-    "spread_open": 0.16469085166789504
+    "spread_closed": 0.0796500876498736,
+    "spread_open": 0.16438688829042575
   },
   "robotiq3f_dex": {
     "alignment": [
