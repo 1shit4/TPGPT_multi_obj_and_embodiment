@@ -39,7 +39,9 @@ from tpgpt.grasp.grasps import (
 from tpgpt.grasp.grippers import resolve_pair
 from tpgpt.language.parser import parse_task
 from tpgpt.perception.cameras import object_point_cloud, scene_point_cloud
+from tpgpt.metrics.transport import orientation_transport_error
 from tpgpt.perception.scene_graph import build_scene_graph
+from tpgpt.reporting.record import Timings, fingerprint, pose_matrix
 from tpgpt.policy.gp_policy import GPPolicy
 from tpgpt.sim.keypoints import (
     GRASP_CUBE_HALF_EXTENT,
@@ -175,10 +177,42 @@ class RunResult:
     diagnosis: object = None
     source_capture: dict | None = None
     seconds: float = 0.0
+    #: ``phi(x) - x`` on the common grid, float32. See
+    #: :mod:`tpgpt.reporting.record`. Held on the result rather than written
+    #: into ``metrics`` because it is 96 kB and ``metrics`` goes into JSON.
+    map_fingerprint: np.ndarray | None = None
+    #: Wall-clock cost of each stage of the method, in seconds.
+    timings: dict = field(default_factory=dict)
 
     @property
     def success(self) -> bool:
         return self.outcome == "success"
+
+    #: Outcomes in which the **construction declined to build a map**, rather
+    #: than a map being built and the plan failing.
+    #:
+    #: The distinction is not bookkeeping. If no grasp exists for this hand on
+    #: this object, there is no anchor, so no keypoints, so no map -- the cell is
+    #: outside the method's domain. Counting it as a failure understates the
+    #: method and misattributes the cause, and counting it as a success is
+    #: obviously worse; it belongs in its own column. Before this existed a
+    #: refused cell simply vanished into the failure count, silently shrinking
+    #: the denominator of every rate reported.
+    REFUSALS = (
+        "no_object_cloud",
+        "no_grasps_generated",
+        "no_grasp_survived",
+        "keypoints_degenerate",
+        "map_not_a_diffeomorphism",
+    )
+
+    @property
+    def refused(self) -> bool:
+        return self.outcome in self.REFUSALS
+
+    @property
+    def refusal_reason(self) -> str:
+        return self.detail if self.refused else ""
 
     def summary(self) -> str:
         error = self.metrics.get("placement_error_xy")
@@ -212,10 +246,21 @@ def build_scene(
     seed: int = 0,
     camera_size: int = 256,
     controller_config: dict | None = None,
+    world: str = "benchmark",
+    pick_config: str | None = None,
 ):
     """A tabletop-shelf scene with depth, segmentation and torque control.
 
     Args:
+        world: ``"benchmark"`` for robosuite's shipped object and shelf sizes,
+            which every campaign before 2026-09-15 used, or ``"real"`` for the
+            objects and furniture at the size of the real articles. See
+            :mod:`tpgpt.sim.objects`.
+        pick_config: A key of
+            :data:`~tpgpt.sim.scenes.tabletop_shelf.REAL_PICK_CONFIGS`. Places
+            the scene's single object at a fixed written-down pose instead of
+            sampling one, which is what makes a cell's condition identical
+            across grippers and objects.
         controller_config: Override the Cartesian-impedance torque controller,
             e.g. with
             :func:`~tpgpt.sim.replay.make_position_controller_config`. The
@@ -238,6 +283,8 @@ def build_scene(
         controller_configs=config,
         objects=objects,
         shelf_variant=shelf_variant,
+        world=world,
+        pick_config=pick_config,
         has_offscreen_renderer=True,
         use_camera_obs=True,
         camera_names=list(SCENE_CAMERAS),
@@ -283,6 +330,7 @@ def run(
     max_steps: int = 600,
     env=None,
     rollout_kwargs: dict | None = None,
+    executor: str = "policy",
 ) -> RunResult:
     """One end-to-end attempt.
 
@@ -296,7 +344,33 @@ def run(
         rollout_kwargs: Extra arguments for
             :func:`~tpgpt.sim.rollout.rollout_policy`, for sweeping a control
             parameter without editing its default.
+        executor: ``"policy"`` fits the GP policy and integrates an attractor
+            through the Cartesian impedance controller, which is what ships.
+            ``"replay"`` drives the arm onto each transported waypoint under
+            position control -- no policy, no attractor, no lag gate -- which is
+            the **executor-free ceiling**, and the comparison Experiment I is.
+
+            **Both arms of that comparison must come through this one function.**
+            Running them through two drivers is what invalidated the previous
+            attempt: the two select grasps through structurally different code,
+            so identical settings bought nothing and the same 20-cell grid
+            produced *different grasps in 10 cells* from an identical cloud and
+            an identical 100-candidate set. The totals read as a clean one-cell
+            difference and the truth was six cells disagreeing in both
+            directions at Fisher p = 1.000 (``ROBOTICS_NOTES`` 7.41). Here
+            everything up to the moment of execution is the same code on the
+            same inputs, so the grasp is identical by construction rather than
+            by agreement -- and ``grasp_chosen_index`` is recorded so it can be
+            checked rather than assumed.
+
+            The environment must be built with a matching controller:
+            :func:`~tpgpt.sim.replay.make_position_controller_config` for
+            ``"replay"``. robosuite instantiates its part controllers during
+            ``__init__``, so this cannot be chosen after the fact.
     """
+    if executor not in ("policy", "replay"):
+        raise ValueError(
+            f"unknown executor {executor!r}; expected 'policy' or 'replay'")
     started = time.time()
     result = RunResult(prompt=prompt, gripper=gripper, shelf_variant=shelf_variant, seed=seed)
     owned = env is None
@@ -506,8 +580,11 @@ def run(
             return _fail(result, "keypoints_degenerate",
                          f"{len(source_set)} keypoints do not span three dimensions")
 
-        transport_map = TransportMap().fit(source_set.points, target_set.points)
+        timings = Timings()
+        with timings.stage("map_fit"):
+            transport_map = TransportMap().fit(source_set.points, target_set.points)
         result.transport_map = transport_map
+        result.timings = timings.stages
         # Checked on the positions the map is actually applied to -- the tool
         # path -- not on the wrist path it is no longer used for.
         report = transport_map.check_diffeomorphism(tool_labels.positions)
@@ -536,7 +613,8 @@ def run(
         # the executing hand's, which is exactly right across embodiments: the
         # map carries contact point to contact point, and each hand steps out to
         # its own wrist from there.
-        transported = transport_labels(transport_map, tool_labels)
+        with timings.stage("label_transport"):
+            transported = transport_labels(transport_map, tool_labels)
         # Back into *this* hand's wrist convention, which is what the controller
         # commands and what IK aims. See the conversion above.
         if transported.orientations is not None:
@@ -548,8 +626,104 @@ def run(
         result.transported_labels = transported
         result.metrics["tool_offset_mm"] = float(np.linalg.norm(target_offset) * 1000)
 
+        # --- what the map *is*, recorded before anything is executed --------
+        #
+        # A campaign has always stored ``min_det``, and ``min_det`` is one
+        # scalar: two entirely different maps can share it, so it cannot support
+        # a comparison *between* maps. The map is a deformation of space, so it
+        # is recorded as one -- ``phi(x) - x`` on a grid identical in every cell.
+        # Recorded here, at the point the map exists and before the rollout can
+        # fail, because a cell that fails still has a map worth comparing.
+        result.map_fingerprint = fingerprint(transport_map)
+        grasp_index, release_index = carry_indices(labels)
+        # ``det J`` at the two poses that decide the task, not only its minimum
+        # over the path. Property (R2) and the conditioning table are about
+        # these two points specifically: the grasp, where the plan has to land
+        # on the object, and the release, where it has to land in the slot.
+        determinants = np.linalg.det(
+            transport_map.jacobian(tool_labels.positions[[grasp_index,
+                                                          release_index]])
+        )
+        result.metrics["det_J_at_grasp"] = float(determinants[0])
+        result.metrics["det_J_at_release"] = float(determinants[1])
+        # Both poses as 4x4 matrices, in GraspGen-X's convention so they are
+        # comparable across hands. The pick pose is the chosen grasp; the place
+        # pose is where the plan commands the hand when the jaws open. Until now
+        # only the *index* of the chosen candidate was stored, which identifies
+        # the grasp only to someone holding the same cache.
+        #
+        # **The grasp as executed, not as the planner emitted it.**
+        # ``scene_keypoints`` may roll the incoming candidate a half turn about
+        # its approach when that agrees better with the demonstration, and its
+        # own docstring warns that anything converting a grasp into a robot
+        # command must be given *that* pose: the two differ by 180 degrees, and
+        # once the jaws are shut a half turn at one end reflects the object
+        # through the grasp point rather than leaving it where it was -- 4 to
+        # 100 mm over twenty cells (7.33).
+        frames = sets[2]
+
+        def _pose(frame):
+            """``(position, rotation)`` from a ``GraspFrame`` or a ``Grasp6D``.
+
+            The two coexist on purpose -- ``GraspFrame`` is deliberately not
+            ``Grasp6D`` so keypoint extraction stays usable without the gripper
+            registry -- and they name the same point differently, ``tcp``
+            against ``position``.
+            """
+            position = getattr(frame, "tcp", None)
+            if position is None:
+                position = frame.position
+            return (np.asarray(position, dtype=float).reshape(3),
+                    np.asarray(frame.rotation, dtype=float).reshape(3, 3))
+
+        executed = frames["target_grasp"]
+        placed = frames["target_place_grasp"]
+        result.metrics["grasp_rolled"] = bool(frames.get("target_grasp_rolled"))
+        executed_p, executed_R = _pose(executed)
+        placed_p, placed_R = _pose(placed)
+        result.metrics["grasp_pose_target"] = pose_matrix(executed_p, executed_R)
+        result.metrics["grasp_pose_release"] = pose_matrix(placed_p, placed_R)
+        # Orientation error at **both** ends, against the frames the keypoints
+        # were actually built on.
+        #
+        # Two things this deliberately is not. It is not measured against the
+        # *transported* orientation, which would compare the map's output with
+        # itself and return zero by construction -- the first version of this
+        # did exactly that and read 0.0 on every cell, which looked like a
+        # perfect result. And the release column is not assumed to equal the
+        # grasp column: a roll taken at both ends cancels, and one taken at a
+        # single end does not, so the two have to be measured separately. Only
+        # the grasp end has ever been recorded here.
+        source_pick_p, source_pick_R = _pose(placement.grasp)
+        source_place_p, source_place_R = _pose(frames["source_place_grasp"])
+        errors = orientation_transport_error(
+            transport_map,
+            np.stack([source_pick_p, source_place_p]),
+            np.stack([source_pick_R, source_place_R]),
+            np.stack([executed_R, placed_R]),
+        )
+        result.metrics["orientation_error_grasp_deg"] = float(errors[0])
+        result.metrics["orientation_error_release_deg"] = float(errors[1])
+
         # --- execute --------------------------------------------------------
-        policy = GPPolicy().fit(transported)
+        if executor == "replay":
+            rollout = _replay_execution(env, result, transported, target_offset,
+                                        gripper, rollout_kwargs or {})
+            result.rollout = rollout
+            result.diagnosis = diagnose(result, env)
+            result.metrics.update(rollout.metadata)
+            result.timings = timings.stages
+            _record_errors(result, env, rollout)
+            if not rollout.success:
+                return _fail(
+                    result, "placed_in_the_wrong_place",
+                    "the position-controlled replay finished without leaving the "
+                    "object in its slot",
+                )
+            return result
+
+        with timings.stage("policy_refit"):
+            policy = GPPolicy().fit(transported)
         # Built as a dict so ``rollout_kwargs`` can override any of it. Passing
         # these as explicit keywords made a sweep over one of them a TypeError
         # rather than a sweep, which defeats the point of the argument.
@@ -564,6 +738,8 @@ def run(
         result.rollout = rollout
         result.diagnosis = diagnose(result, env)
         result.metrics.update(rollout.metadata)
+        result.timings = timings.stages
+        _record_errors(result, env, rollout)
         _, release = carry_indices(labels)
         result.metrics["release_index"] = release
 
@@ -587,6 +763,124 @@ def run(
         result.seconds = time.time() - started
         if owned:
             env.close()
+
+
+
+def _replay_execution(env, result, transported, tool_offset, gripper, extra):
+    """Drive the transported waypoints under position control.
+
+    The **executor-free ceiling**: no policy is fitted, no attractor is
+    integrated and no lag gate runs, so whatever the arm fails to do here is not
+    the executor's doing.
+
+    ``time_belief`` is attached because :func:`~tpgpt.experiments.diagnose.diagnose`
+    reads it to say how far the clock got, and a replay has no clock of its own.
+    Its phase is simply its progress through the waypoint list, which is exactly
+    what the policy's time belief is an estimate *of*, so the two are comparable
+    -- and a replay's trace is recorded per waypoint rather than per control
+    step, so the phase has to be per waypoint too or the arrays disagree in
+    length and every stage is attributed to the wrong moment.
+    """
+    from tpgpt.experiments.diagnose import object_probe
+    from tpgpt.experiments.run_keypoint_replay import _fingers_gate
+    from tpgpt.sim.replay import replay_labels
+    from tpgpt.sim.rollout import slot_score
+
+    settings = {
+        "tool_offset": tool_offset,
+        "score": slot_score(result.object_name, result.slot),
+        "probe": object_probe(env, result.object_name, gripper),
+        # The lift waits for the jaws rather than for a step count. Opted into
+        # here, as the Tier 2 driver does, because the delay between commanding
+        # a close and having hold of anything is not derivable: 0, 0, 10 and 15
+        # waypoints across four objects on one hand, and not monotonic in
+        # object width.
+        #
+        # The gate tests **opposition** -- at least one finger from each side of
+        # the closing axis -- rather than counting contacts. A count is safe on a
+        # parallel jaw, where two fingers is both of them, and wrong on a
+        # three-finger hand, which carries two fingers on one side and one on
+        # the other, so two of its fingers touching can be the pair shoving the
+        # object.
+        "grasp_gate": _fingers_gate(env, gripper, result.object_name),
+    }
+    settings.update(extra)
+    replay = replay_labels(env, transported, **settings)
+    replay.time_belief = np.linspace(0.0, 1.0, len(replay.positions))
+    # **A position-controlled replay's attractor is its commanded pose.** The
+    # diagnosis measures how far the setpoint wandered from the transported
+    # path, and under position control the setpoint is exactly the waypoint --
+    # there is no spring and nothing to integrate -- so the drift it reports for
+    # a replay is identically zero by construction. That is the correct answer
+    # and it is worth having: it is the baseline the policy's drift is read
+    # against.
+    replay.attractors = np.asarray(replay.targets, dtype=float)[:, :3]
+    replay.metadata.setdefault("tool_offset", tool_offset)
+    return replay
+
+
+def _record_errors(result, env, rollout):
+    """Placement and release error, in three dimensions, from the object trace."""
+    # --- errors, in three dimensions and at both moments ----------------
+    #
+    # Only a horizontal placement error has ever been recorded, and only at
+    # the end. Two things are missing from that and both are load-bearing.
+    #
+    # **Components, not a magnitude.** A scalar distance cannot say whether
+    # the object landed short, beside, or on top of the slot, and those are
+    # different faults with different causes. The vertical component in
+    # particular is the one a horizontal-only ruler is blind to -- which is
+    # the same blindness that made ``stage_outcome``'s ``placed_on_shelf``
+    # flag pass a cell sitting 84.4 mm from its slot.
+    #
+    # **At the release, not only at rest.** Every placement in this system
+    # is a *drop*: the arm stops short of the commanded release pose and the
+    # jaws open above the board. Whether that is the mechanism behind the
+    # marginal cells or merely a coincidence is unresolved **precisely
+    # because one side of the comparison never recorded where the object was
+    # when the jaws opened.** It does now.
+    # **Where the object's origin should end up, not where the board is.**
+    # ``slot_poses`` gives the board surface, and the probe watches the
+    # object's body origin, which sits half the object's height above
+    # whatever it rests on. Differencing those directly makes the vertical
+    # component read +61.8 mm for a correctly placed can -- its own half
+    # height -- so the 3-D magnitude would be dominated by a constant that
+    # is not an error at all. The object's height above its support is
+    # measured at the pick, where it is known to be resting properly, and
+    # carried across.
+    destination = np.asarray(env.slot_poses()[result.slot], dtype=float)
+    probe = rollout.metadata.get("probe", {})
+    traces = [np.asarray(probe.get(f"object_{a}", []), dtype=float)
+              for a in "xyz"]
+    positions = (np.stack(traces, axis=1)
+                 if all(t.ndim == 1 and len(t) for t in traces)
+                 else np.zeros((0, 3)))
+    if len(positions):
+        stand_off = float(positions[0][2] - env.table_offset[2])
+        destination = destination + np.array([0.0, 0.0, stand_off])
+        result.metrics["object_stand_off_mm"] = stand_off * 1000
+        final = positions[-1]
+        result.metrics["placement_error_3d_mm"] = float(
+            np.linalg.norm(final - destination)) * 1000
+        result.metrics["placement_error_components_mm"] = (
+            (final - destination) * 1000).round(3).tolist()
+        release_step = result.diagnosis.measurements.get("release_step")
+        if release_step is not None:
+            at_release = positions[min(int(release_step), len(positions) - 1)]
+            result.metrics["release_error_3d_mm"] = float(
+                np.linalg.norm(at_release - destination)) * 1000
+            result.metrics["release_error_components_mm"] = (
+                (at_release - destination) * 1000).round(3).tolist()
+            # How far the object still had to fall when it was let go: the
+            # drop itself, which is the quantity the mechanism is about.
+            result.metrics["release_drop_mm"] = float(
+                np.linalg.norm(final - at_release)) * 1000
+    # The **first** stage that failed, which is not the same question as
+    # which phase carried the most unreachable waypoints. That one reads
+    # "approach" whenever nothing was unreachable at all, which is an
+    # accusation rather than an attribution.
+    failure = result.diagnosis.first_failure
+    result.metrics["first_failure_stage"] = failure.name if failure else None
 
 
 #: Extra samples taken on each side of the grasp and the release, and how far

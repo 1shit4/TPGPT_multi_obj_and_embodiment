@@ -46,6 +46,11 @@ from tpgpt.experiments.run_keypoint_replay import REPLAY_GRIPPERS
 from tpgpt.experiments.reshelving_pipeline import record_source_placement
 from tpgpt.grasp.grippers import VERIFIED_PAIRS
 from tpgpt.reporting.html import write_index, write_manifest, write_report
+from tpgpt.reporting.record import (
+    condition_block,
+    condition_id,
+    fingerprint_spec,
+)
 from tpgpt.reporting.overlay import build_figures
 
 #: The seven non-empty combinations of the keypoint families.
@@ -140,12 +145,17 @@ def _label(setting: dict) -> str:
     return " ".join(parts)
 
 
-def _row(result, label: str) -> dict:
+def _row(result, label: str, setting: dict | None = None) -> dict:
     """One line of the index, including *where* the run broke.
 
     ``blame`` is the stage that failed rather than the point the run stopped at;
     see :mod:`tpgpt.experiments.diagnose` for why those are different questions.
+
+    Args:
+        setting: The cell's own settings, so the row can carry which condition
+            it faced. Optional only so the older campaigns keep running.
     """
+    setting = setting or {}
     diagnosis = result.diagnosis
     row = {
         "label": label,
@@ -190,10 +200,89 @@ def _row(result, label: str) -> dict:
         "grasp_chosen_index": result.metrics.get("grasp_chosen_index"),
         "steps": result.metrics.get("steps"),
         "seconds": round(result.seconds, 1),
+        # --- which condition this row faced ------------------------------
+        #
+        # Without these four a row cannot be paired with its counterpart in
+        # another campaign, and a mixed-effects model with condition as a random
+        # effect cannot be fitted at all -- there is nothing to group on. They
+        # are cheap and they are unrecoverable: no amount of work on a finished
+        # campaign reconstructs which pick pose a cell was given.
+        "world": setting.get("world", "benchmark"),
+        "executor": setting.get("executor", "policy"),
+        "seed": setting.get("seed", 0),
+        "pick_config_id": setting.get("pick_config"),
+        "destination": setting.get("slot"),
+        "condition_id": (condition_id(setting["pick_config"], setting["slot"])
+                         if setting.get("pick_config") else None),
+        # --- refusal kept apart from failure ------------------------------
+        #
+        # A construction that declines to build a map has not failed the task;
+        # it has declared the cell outside its domain. Pooled with the failures
+        # it silently shrinks the denominator of every rate reported.
+        "refused": result.refused,
+        "refusal_reason": result.refusal_reason,
+        # --- the map, at the two poses that decide the task ---------------
+        "det_J_at_grasp": result.metrics.get("det_J_at_grasp"),
+        "det_J_at_release": result.metrics.get("det_J_at_release"),
+        "grasp_pose_target": result.metrics.get("grasp_pose_target"),
+        "grasp_pose_release": result.metrics.get("grasp_pose_release"),
+        "orientation_error_grasp_deg":
+            result.metrics.get("orientation_error_grasp_deg"),
+        "orientation_error_release_deg":
+            result.metrics.get("orientation_error_release_deg"),
+        # --- errors in three dimensions, at release and at rest -----------
+        "placement_error_3d_mm": result.metrics.get("placement_error_3d_mm"),
+        "placement_error_components_mm":
+            result.metrics.get("placement_error_components_mm"),
+        "release_error_3d_mm": result.metrics.get("release_error_3d_mm"),
+        "release_error_components_mm":
+            result.metrics.get("release_error_components_mm"),
+        "release_drop_mm": result.metrics.get("release_drop_mm"),
+        # How high the object's origin sits above whatever it rests on,
+        # measured at the pick. It is the reference the vertical error
+        # component above is taken against, so a reader can check that
+        # component rather than take it on trust.
+        "object_stand_off_mm": result.metrics.get("object_stand_off_mm"),
+        "first_failure_stage": result.metrics.get("first_failure_stage"),
+        # --- what the method cost ----------------------------------------
+        #
+        # Wall-clock, deliberately: the no-wall-clock rule governs recorded
+        # *task* data, where time must come from the step index so a trace means
+        # the same thing on a fast machine and a slow one. This is a
+        # measurement of software, and how long the software takes is the
+        # quantity being measured.
+        **{k: v for k, v in result.timings.items()},
+        # --- the funnel's internals ---------------------------------------
+        "survivors_per_stage": result.metrics.get("funnel_stages"),
+        "funnel_fallbacks": result.metrics.get("funnel_fallbacks"),
     }
     if diagnosis is not None:
         row.update({f"m_{k}": v for k, v in diagnosis.measurements.items()})
     return row
+
+
+def _design_record(settings: list[dict]) -> dict:
+    """The experiment's design, written into the manifest once.
+
+    Three things that a per-row record cannot carry and that no later reader can
+    reconstruct: the condition block by value, the grid the map fingerprints
+    were evaluated on, and the graspability screen that decided which cells were
+    run at all.
+    """
+    from tpgpt.sim.scenes.tabletop_shelf import REAL_DESTINATIONS, REAL_PICK_CONFIGS
+
+    picks = sorted({s["pick_config"] for s in settings if s.get("pick_config")})
+    destinations = sorted({s["slot"] for s in settings if s.get("pick_config")})
+    record = {"map_fingerprint_grid": fingerprint_spec()}
+    if picks:
+        record["condition_block"] = condition_block(
+            picks, destinations or REAL_DESTINATIONS,
+            {k: v for k, v in REAL_PICK_CONFIGS.items() if k in picks},
+        )
+    screen = Path("outputs/graspability.json")
+    if screen.exists():
+        record["graspability"] = json.loads(screen.read_text())
+    return record
 
 
 def campaign(
@@ -220,12 +309,48 @@ def campaign(
             # A prompt naming an object the scene does not contain is a broken
             # experiment, not a language failure: the parser is right to refuse.
             scene_objects = scene_objects + (setting["obj"],)
-        env = build_scene(
-            scene_objects,
-            gripper=setting.get("gripper", "panda"),
-            shelf_variant=setting.get("shelf_variant", "cubby"),
-            seed=setting.get("seed", 0),
-        )
+        # Building the scene is outside the try below, so a scene that cannot
+        # be built used to kill the whole campaign. It does: robosuite's
+        # placement sampler raises ``RandomizationError`` when it cannot fit
+        # every object, and with the hammer in a five-object scene it does so
+        # intermittently -- the hammer is 0.21 m across against an x-range of
+        # 0.18, so the packing is tight and some draws have no solution. One
+        # such draw on the twelfth cell threw away the eleven before it.
+        #
+        # A cell that cannot be built is recorded and skipped, the way
+        # ``run_keypoint_replay`` already treats one that cannot be run. Losing
+        # a campaign to one bad draw is the failure mode ROBOTICS_NOTES 7.26 is
+        # about, in a smaller way.
+        # **The controller is chosen at construction, not after.** robosuite
+        # instantiates its part controllers during ``__init__``, so assigning
+        # one to a built environment does nothing at all -- silently.
+        executor = setting.get("executor", "policy")
+        controller_config = None
+        if executor == "replay":
+            from robosuite.controllers import load_composite_controller_config
+
+            from tpgpt.sim.replay import make_position_controller_config
+
+            controller_config = make_position_controller_config(
+                load_composite_controller_config(controller="BASIC", robot="Panda")
+            )
+        try:
+            env = build_scene(
+                scene_objects,
+                gripper=setting.get("gripper", "panda"),
+                shelf_variant=setting.get("shelf_variant", "cubby"),
+                seed=setting.get("seed", 0),
+                world=setting.get("world", "benchmark"),
+                pick_config=setting.get("pick_config"),
+                controller_config=controller_config,
+            )
+        except Exception as exc:
+            print(f"  {label:<34} SKIP  scene could not be built: "
+                  f"{type(exc).__name__}: {exc}")
+            rows.append({"label": label, "gripper": setting.get("gripper"),
+                         "object": setting.get("obj"),
+                         "skipped": f"{type(exc).__name__}: {exc}"})
+            continue
         try:
             result = run(
                 prompt_for(setting["obj"], setting["slot"]),
@@ -236,8 +361,36 @@ def campaign(
                 keypoint_parts=setting.get("keypoints", DEFAULT_KEYPOINTS),
                 max_steps=MAX_STEPS,
                 env=env,
+                executor=executor,
             )
-            rows.append(_row(result, label))
+            rows.append(_row(result, label, setting))
+            # **The map and the plan, to disk, for every cell.**
+            #
+            # Neither survives a campaign otherwise. ``min_det`` is a scalar
+            # summary of a map and two different maps can share it, so a
+            # comparison *between* maps needs the map itself; and the planned
+            # waypoints -- the map as it is actually used, and what the figures
+            # draw -- have simply been discarded up to now. Both go in one
+            # compressed ``.npz`` a cell, which at a 20-cubed fingerprint and a
+            # 200-waypoint path is about 100 kB.
+            if result.map_fingerprint is not None:
+                arrays = {"map_fingerprint": result.map_fingerprint}
+                if result.transported_labels is not None:
+                    path = result.transported_labels
+                    arrays["transported_positions"] = np.asarray(
+                        path.positions, dtype=np.float32)
+                    if path.orientations is not None:
+                        arrays["transported_orientations"] = np.asarray(
+                            path.orientations, dtype=np.float32)
+                    if getattr(path, "gripper", None) is not None:
+                        arrays["transported_gripper"] = np.asarray(
+                            path.gripper, dtype=np.float32)
+                if result.demonstration is not None:
+                    arrays["demonstration"] = np.asarray(
+                        result.demonstration, dtype=np.float32)
+                name = f"cell_{index:03d}.npz"
+                np.savez_compressed(out_dir / name, **arrays)
+                rows[-1]["arrays"] = name
             if result.diagnosis is not None:
                 diagnoses.append(result.diagnosis)
             if verbose:
@@ -269,7 +422,16 @@ def campaign(
         # (ROBOTICS_NOTES section 7.26). "Varied" is the campaign's own axis;
         # "fixed" is everything a reader would otherwise have to guess at.
         settings=_settings_record(name, settings, objects),
-        results={"runs": len(rows), "succeeded": successes, "stages": counts},
+        # The block's definition, once. A reader must be able to see that every
+        # cell faced the same six conditions -- and what those conditions were,
+        # by value -- without finding the commit the campaign ran at. Likewise
+        # the fingerprint grid: a stored ``phi(x) - x`` means nothing without
+        # the ``x`` it was taken on, and repeating the grid in 210 rows is 210
+        # chances for one of them to differ.
+        design=_design_record(settings),
+        results={"runs": len(rows), "succeeded": successes,
+                 "refused": sum(1 for r in rows if r.get("refused")),
+                 "stages": counts},
         thresholds={
             "reach_tolerance_m": REACH_TOLERANCE,
             "closing_budget_fraction": CLOSING_BUDGET_FRACTION,
@@ -428,6 +590,48 @@ EXECUTION_GRIPPERS = (
 EXECUTION_OBJECTS = ("can", "cereal", "hammer", "milk", "mug")
 
 
+def real_settings(grippers=None, objects=None, picks=None, destinations=None,
+                  seed: int = 0):
+    """The real-sized grid: every hand x every object x the condition block.
+
+    **One object per scene**, which is the campaign default rather than a
+    fallback. The claim under test concerns the keypoints and the map; a
+    neighbouring object introduces a failure mode that is about neither, and a
+    cell attributed to "approach -- collided with a neighbour" dilutes the grid
+    without testing anything the paper asserts. It also makes the pick pose a
+    *direct* control instead of something reached indirectly through a seed.
+
+    **Gripper and object are fully crossed; pick pose and destination are the
+    block.** The claim is that the gripper does not predict success, and that
+    claim dies if one gripper can draw an easier set of conditions than another.
+    So the nuisance factors are sampled once -- written down in
+    :data:`~tpgpt.sim.scenes.tabletop_shelf.REAL_PICK_CONFIGS` -- and the
+    identical sample is faced by every cell. That is what makes the comparison
+    paired, and what licenses McNemar and Wilcoxon rather than their weaker
+    unpaired counterparts.
+
+    Three picks rather than two, because two cannot distinguish "works
+    anywhere" from "works at two points". Two destinations rather than one,
+    because the paper claims transport to destinations the demonstration never
+    visited and one destination does not support that.
+    """
+    from tpgpt.sim.scenes.tabletop_shelf import REAL_DESTINATIONS, REAL_PICK_CONFIGS
+
+    grippers = tuple(grippers or EXECUTION_GRIPPERS)
+    objects = tuple(objects or EXECUTION_OBJECTS)
+    picks = tuple(picks or REAL_PICK_CONFIGS)
+    destinations = tuple(destinations or REAL_DESTINATIONS)
+    return [
+        {"gripper": g, "obj": obj, "slot": destination.replace("_", " "),
+         "pick_config": pick, "seed": seed, "world": "real",
+         "objects": (obj,)}
+        for g in grippers
+        for obj in objects
+        for pick in picks
+        for destination in destinations
+    ]
+
+
 def execution_settings(slot="top middle", seeds=(0,)):
     """Experiment R's grid, executed by the **policy** instead of replayed.
 
@@ -465,7 +669,22 @@ def execution_settings(slot="top middle", seeds=(0,)):
     ]
 
 
+def real_replay_settings(**kwargs):
+    """The same grid under position control -- the executor-free ceiling.
+
+    Every cell is the same cell: the same scene, the same recorded rest pose,
+    the same condition, and -- because both arms go through
+    :func:`tpgpt.experiments.pipeline.run` -- the same selection code on the
+    same cached candidates, so the same grasp. What differs is the last step
+    and only the last step, which is the only form of this comparison that
+    measures the executor rather than the selector.
+    """
+    return [dict(s, executor="replay") for s in real_settings(**kwargs)]
+
+
 CAMPAIGNS = {
+    "real": real_settings,
+    "real_replay": real_replay_settings,
     "execution": execution_settings,
     "keypoints": keypoint_settings,
     "grippers": gripper_settings,

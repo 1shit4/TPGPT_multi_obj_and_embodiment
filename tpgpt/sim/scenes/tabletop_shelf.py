@@ -45,6 +45,8 @@ from robosuite.utils.observables import Observable, sensor
 from robosuite.utils.placement_samplers import UniformRandomSampler
 from robosuite.utils.transform_utils import convert_quat
 
+from tpgpt.sim.objects import BENCHMARK, REAL, WORLDS, make_object, rest_quat
+
 #: Selectable objects, keyed by the short name the language layer resolves to.
 #:
 #: The first six are the grocery meshes every campaign so far has used. The rest
@@ -166,6 +168,142 @@ ENCLOSED_HEIGHT = {"bottom": 0.14, "top": 0.22}
 #:               Top-down grasps become impossible.
 SHELF_VARIANTS = ("open", "cubby", "enclosed")
 
+# ---------------------------------------------------------------------------
+# The real-sized world.
+#
+# Everything above this line describes robosuite's benchmark scene and is left
+# exactly as it was, so every result measured in it stays reproducible. What
+# follows is the same scene built to the dimensions of the real articles and the
+# real furniture, selected with ``world="real"``.
+#
+# **Why a second set of numbers rather than a scale factor on the first.** The
+# benchmark shelf is not a small real shelf: its 12 mm boards are thinner than
+# any real board, its 100 mm bottom level is shallower than any real shelf, and
+# its 280 mm top level was widened as a *clearance fix* for the hand rather than
+# chosen as a depth. Scaling it would preserve those choices. These are chosen
+# from what a real shelf is, and then checked against what the arm can reach.
+# ---------------------------------------------------------------------------
+
+#: Real shelf board thickness: 18 mm, the standard furniture-board thickness.
+REAL_SHELF_THICKNESS = 0.018
+
+#: Real board depth, front to back: 300 mm on both levels, a standard pantry or
+#: bookcase shelf. The benchmark scene's 100 mm bottom and 280 mm top were a
+#: clearance fix for the hand (see ``SHELF_BOARD_DEPTH``); 300 mm is what a
+#: shelf is. Depth costs nothing in reach, because it extends *backwards* from
+#: the slot: the slot centre is the placement target and the board grows away
+#: from the robot behind it.
+REAL_SHELF_BOARD_DEPTH = {"bottom": 0.30, "top": 0.30}
+
+#: Real board width: 640 mm, a standard bookcase bay.
+REAL_SHELF_BOARD_WIDTH = 0.64
+
+#: Real shelf levels: ``(label, x of the board centre, height above the table)``.
+#:
+#: **Stacked, not a staircase, and only the top level is a destination.** The
+#: benchmark scene offsets the upper level further out so that both are
+#: reachable from directly above. At real size that is not achievable and the
+#: staircase buys nothing, because a real object is too tall for the lower
+#: level anyway. The measurement:
+#:
+#: A real cereal carton is 300 mm tall, so a hand grasping one standing on a
+#: board sits about 150 mm above that board. Swept with ``solve_ik`` over the
+#: whole workspace for a top-down hand, the deepest hand in the fleet (the
+#: Robotiq 2F-140, contact offset 38.2 mm) reaches:
+#:
+#: ===========  ===============================================
+#: board x      highest fingertip z, at y = 0 / 0.15 / 0.20
+#: ===========  ===============================================
+#: 0.18                    1.25 / 1.25 / 1.20
+#: 0.20                    1.20 / 1.20 / 1.15
+#: 0.22                    1.15 / 1.10 / --
+#: 0.24                    1.10 / --   / --
+#: ===========  ===============================================
+#:
+#: The board height was then chosen by sweeping it against all seven hands
+#: rather than argued: for each candidate height the check asks whether every
+#: hand can reach both the placement pose (the object's mid-height above the
+#: board) and a clearance pose 80 mm above it, at the middle slot and at the
+#: outer one. Measured, with the cereal carton as the tallest object:
+#:
+#: ==========  =======  =========  ==================================
+#: board       place z  clear z    hands reaching both, of seven
+#: ==========  =======  =========  ==================================
+#: 0.14          1.124     1.204   7
+#: **0.16**    **1.144** **1.224** **7**
+#: 0.18          1.164     1.244   5  (robotiq3f, robotiq3f_dex out)
+#: 0.20          1.184     1.264   4
+#: ==========  =======  =========  ==================================
+#:
+#: So 0.16, the highest that every hand clears, with 20 mm of margin below the
+#: first failure. The benchmark scene's ``x = 0.22`` would be out of reach for
+#: every hand in the fleet at any of these heights, which is why the board moves
+#: in as it grows deeper.
+#:
+#: A second level is kept because a real shelf unit has one, and because it is a
+#: real obstacle below the destination. It is not used as a destination: with
+#: the top board 160 mm up and 18 mm thick, the lower compartment is 102 mm
+#: clear, which holds nothing in this object set standing up. That is a property of a
+#: real shelf, not a modelling shortcut.
+REAL_SHELF_LEVELS = (
+    ("bottom", 0.18, 0.04),
+    ("top", 0.18, 0.16),
+)
+
+#: Real lateral slot positions. 160 mm apart, against the benchmark's 130.
+#:
+#: Wide enough that the three destinations are genuinely different places for a
+#: 190 mm cereal carton, and narrow enough that the outer slots stay inside the
+#: envelope measured above (``y = 0.16`` reaches 1.25, ``y = 0.20`` only 1.20).
+#: Only one object is ever in the scene, so slots never have to hold two
+#: objects side by side.
+REAL_SHELF_SLOTS = (("left", 0.16), ("middle", 0.0), ("right", -0.16))
+
+#: Interior clear height of each real cubby.
+#:
+#: The top is 320 mm, a standard pantry shelf spacing, which clears a 300 mm
+#: cereal carton. The bottom is what is left between the two boards, 102 mm, and
+#: is derived rather than chosen: a cubby's interior cannot extend past the
+#: shelf above it, which is the modelling defect recorded against
+#: ``CUBBY_HEIGHT``.
+REAL_CUBBY_HEIGHT = {"bottom": 0.102, "top": 0.32}
+
+#: ``enclosed`` adds a roof, so each interior loses the roof's own thickness.
+REAL_ENCLOSED_HEIGHT = {"bottom": 0.084, "top": 0.30}
+
+#: Where a real-world object is put on the table, as ``(x, y, yaw degrees)``
+#: relative to the table centre.
+#:
+#: **Three fixed poses, written down once and reused for every cell**, rather
+#: than three draws of a random sampler. This is the rule that decides whether a
+#: cross-gripper experiment measures anything, and it is stated in
+#: ``PAPER_PLAN.md``: the factors the claim is about -- gripper and object --
+#: are fully crossed, and the nuisance factors -- where the object starts and
+#: where it has to go -- are sampled *once* and the identical sample used
+#: everywhere. Drawing a pick pose per cell confounds the gripper with the
+#: difficulty of the pose it happened to draw, and no analysis afterwards
+#: separates them.
+#:
+#: Three rather than two, because two cannot distinguish "works anywhere" from
+#: "works at these two points". They span the reachable table region and differ
+#: in yaw by roughly 55 degrees each, so a fixed-yaw grasp cannot serve all
+#: three: ``P0`` is near and to the right at 0 degrees, ``P1`` central at 55,
+#: ``P2`` far and to the left at 110.
+#:
+#: The x values keep every object clear of the shelf's front edge, which at real
+#: size sits at ``x = 0.03``: the nearest pose is 170 mm in front of it, against
+#: the ~120 mm at which a Panda's hand catches the underside of a board
+#: (``ROBOTICS_NOTES.md`` 2.9).
+REAL_PICK_CONFIGS = {
+    "P0": (-0.14, -0.15, 0.0),
+    "P1": (-0.21, 0.02, 55.0),
+    "P2": (-0.28, 0.16, 110.0),
+}
+
+#: The destinations the campaign varies over. Both on the top level, because the
+#: lower one is 142 mm clear and does not admit a real carton.
+REAL_DESTINATIONS = ("top_middle", "top_left")
+
 #: An extra camera that can actually see the workspace.
 #:
 #: robosuite's stock ``agentview`` and ``frontview`` sit on the far side of the
@@ -221,6 +359,8 @@ class TabletopShelf(ManipulationEnv):
         robots="Panda",
         objects=DEFAULT_OBJECTS,
         shelf_variant="cubby",
+        world=BENCHMARK,
+        pick_config=None,
         env_configuration="default",
         controller_configs=None,
         gripper_types="default",
@@ -266,7 +406,41 @@ class TabletopShelf(ManipulationEnv):
             raise ValueError(
                 f"unknown shelf variant {shelf_variant!r}; expected one of {SHELF_VARIANTS}"
             )
+        if world not in WORLDS:
+            raise ValueError(
+                f"unknown world {world!r}; expected one of {WORLDS}"
+            )
+        if pick_config is not None:
+            if world != REAL:
+                raise ValueError(
+                    "pick_config is only defined for the real-sized world; the "
+                    "benchmark scene samples its placements"
+                )
+            if pick_config not in REAL_PICK_CONFIGS:
+                raise ValueError(
+                    f"unknown pick configuration {pick_config!r}; expected one "
+                    f"of {sorted(REAL_PICK_CONFIGS)}"
+                )
+            if len(objects) != 1:
+                raise ValueError(
+                    "a pick configuration places one object; got "
+                    f"{len(objects)}. One object per scene is the campaign "
+                    "default -- a neighbouring object is a failure mode that "
+                    "has nothing to do with the keypoints."
+                )
         self.shelf_variant = shelf_variant
+        self.world = world
+        self.pick_config = pick_config
+        # Every piece of geometry below is read from these, not from the module
+        # constants, so the two worlds share one implementation.
+        real = world == REAL
+        self.shelf_levels = REAL_SHELF_LEVELS if real else SHELF_LEVELS
+        self.shelf_slots = REAL_SHELF_SLOTS if real else SHELF_SLOTS
+        self.shelf_board_depth = REAL_SHELF_BOARD_DEPTH if real else SHELF_BOARD_DEPTH
+        self.shelf_board_width = REAL_SHELF_BOARD_WIDTH if real else SHELF_BOARD_WIDTH
+        self.shelf_thickness = REAL_SHELF_THICKNESS if real else SHELF_THICKNESS
+        self.cubby_height = REAL_CUBBY_HEIGHT if real else CUBBY_HEIGHT
+        self.enclosed_height = REAL_ENCLOSED_HEIGHT if real else ENCLOSED_HEIGHT
         self.object_names = tuple(objects)
         self.table_full_size = table_full_size
         self.table_friction = table_friction
@@ -313,9 +487,9 @@ class TabletopShelf(ManipulationEnv):
         the pose is directly usable as a placement target.
         """
         poses = {}
-        for level, x, height in SHELF_LEVELS:
-            z = self.table_top + height + SHELF_THICKNESS / 2
-            for slot, y in SHELF_SLOTS:
+        for level, x, height in self.shelf_levels:
+            z = self.table_top + height + self.shelf_thickness / 2
+            for slot, y in self.shelf_slots:
                 poses[f"{level}_{slot}"] = np.array([x, y, z])
         return poses
 
@@ -334,27 +508,29 @@ class TabletopShelf(ManipulationEnv):
     def _add_shelf(self, arena: TableArena) -> None:
         """Append the staircase shelf to the arena as static geometry."""
         friction = " ".join(str(f) for f in self.table_friction)
-        for level, x, height in SHELF_LEVELS:
+        for level, x, height in self.shelf_levels:
             body = ET.SubElement(
                 arena.worldbody,
                 "body",
                 name=f"shelf_{level}",
                 pos=f"{x} 0 {self.table_top + height}",
             )
-            half_x, half_y = SHELF_BOARD_DEPTH[level] / 2, SHELF_BOARD_WIDTH / 2
+            half_x, half_y = (self.shelf_board_depth[level] / 2,
+                              self.shelf_board_width / 2)
             leg_half = height / 2
             panels = [
-                ("board", "0 0 0", f"{half_x} {half_y} {SHELF_THICKNESS / 2}"),
+                ("board", "0 0 0", f"{half_x} {half_y} {self.shelf_thickness / 2}"),
                 ("lip", f"{half_x - 0.008} 0 0.028", f"0.008 {half_y} 0.022"),
                 ("leg_l", f"0 {half_y - 0.012} {-leg_half}", f"{half_x} 0.012 {leg_half}"),
                 ("leg_r", f"0 {-(half_y - 0.012)} {-leg_half}", f"{half_x} 0.012 {leg_half}"),
             ]
             if self.shelf_variant != "open":
                 interior = (
-                    CUBBY_HEIGHT if self.shelf_variant == "cubby" else ENCLOSED_HEIGHT
+                    self.cubby_height if self.shelf_variant == "cubby"
+                    else self.enclosed_height
                 )[level]
-                half_t = SHELF_THICKNESS / 2
-                mid = SHELF_THICKNESS / 2 + interior / 2
+                half_t = self.shelf_thickness / 2
+                mid = self.shelf_thickness / 2 + interior / 2
                 panels = [p for p in panels if p[0] != "lip"]
                 panels += [
                     # Back panel, on the far side from the robot.
@@ -367,7 +543,7 @@ class TabletopShelf(ManipulationEnv):
                 ]
                 if self.shelf_variant == "enclosed":
                     panels.append(
-                        ("roof", f"0 0 {SHELF_THICKNESS / 2 + interior}",
+                        ("roof", f"0 0 {self.shelf_thickness / 2 + interior}",
                          f"{half_x} {half_y} {half_t}")
                     )
 
@@ -406,17 +582,27 @@ class TabletopShelf(ManipulationEnv):
             fovy="55",
         )
 
+        # ``make_object`` builds either robosuite's shipped asset unchanged or
+        # the same asset scaled to the real article and given its real mass.
+        # It also seeds the objects that sample their own dimensions -- the
+        # hammer draws its handle length from a range, so before this every
+        # scene containing one built a *different hammer on every call*.
         self.objects = [
-            OBJECT_CLASSES[name](name=name) for name in self.object_names
+            make_object(name, self.world, rng=np.random.default_rng(0))
+            for name in self.object_names
         ]
         # Objects stay clear of the shelf: the Panda's hand is deeper than its
         # fingers, so a grasp taken within ~0.12 m of a board's front edge
-        # catches the hand on the underside of the board.
+        # catches the hand on the underside of the board. At real size the
+        # shelf's front edge moves in to x = 0.03 and the objects are up to
+        # 330 mm long, so the region moves back with it.
+        x_range = [-0.32, -0.12] if self.world == REAL else [-0.22, -0.04]
+        y_range = [-0.20, 0.20] if self.world == REAL else [-0.18, 0.18]
         self.placement_initializer = UniformRandomSampler(
             name="ObjectSampler",
             mujoco_objects=self.objects,
-            x_range=[-0.22, -0.04],
-            y_range=[-0.18, 0.18],
+            x_range=x_range,
+            y_range=y_range,
             rotation=None,
             rotation_axis="z",
             ensure_object_boundary_in_range=False,
@@ -503,6 +689,30 @@ class TabletopShelf(ManipulationEnv):
     #: on this measurement rather than by omission.
     HOME_TCP = np.array([-0.10, 0.0, 1.15])
 
+    #: Where the fingertips start in the real-sized world.
+    #:
+    #: **The same point 100 mm higher, and the height is the whole change.**
+    #: :data:`HOME_TCP` was chosen above the benchmark objects, the tallest of
+    #: which is a 150 mm cereal carton topping out at z = 0.975. The real carton
+    #: is 300 mm and tops out at **1.0997**, leaving the old home pose 50 mm of
+    #: clearance -- enough for the fingertips, not enough for a hand whose
+    #: unactuated fingers sag under gravity while the objects settle.
+    #:
+    #: Measured, that cost exactly one hand one cell: at the old home pose the
+    #: **Robotiq 3F** moved the cereal carton **4.79 mm** at pick P1 within 250
+    #: steps of reset, while the other six hands moved it 0.061 mm -- and it
+    #: registered **no interpenetration at placement at all**, so the check that
+    #: caught the original defect could not have caught this one. The 3F's own
+    #: dexterous variant was unaffected, which is what points at the hand's pose
+    #: rather than its model: the two share a MuJoCo model and differ by a
+    #: 25.6 mm contact offset, so IK puts their wrists at different heights.
+    #:
+    #: At 1.25 -- 150 mm above the tallest object -- all three hands tried move
+    #: it 0.061 mm at all three picks, and so do 1.30 and 1.35, so the choice is
+    #: not perched on a threshold. The x is left alone so nothing else about the
+    #: start pose moves.
+    REAL_HOME_TCP = np.array([-0.10, 0.0, 1.25])
+
     #: Orientation the hand starts in: approach straight down, jaws along y.
     HOME_ROTATION = np.array([[1.0, 0.0, 0.0],
                               [0.0, -1.0, 0.0],
@@ -519,10 +729,11 @@ class TabletopShelf(ManipulationEnv):
             return None
 
     def _move_arm_home(self):
-        """Put the fingertips at :data:`HOME_TCP`, whatever hand is mounted."""
+        """Put the fingertips at the world's home pose, whatever hand is mounted."""
         from tpgpt.grasp.grasps import contact_offset
         from tpgpt.sim.kinematics import solve_ik
 
+        home = self.REAL_HOME_TCP if self.world == REAL else self.HOME_TCP
         pair = self._gripper_short_name()
         if pair is None:
             return
@@ -533,7 +744,7 @@ class TabletopShelf(ManipulationEnv):
         # ``solve_ik`` targets the grip_site, so step back from the fingertips
         # by this hand's own contact offset -- the same conversion the replay
         # does, and the reason every hand lands with its *fingertips* together.
-        wrist = self.HOME_TCP - self.HOME_ROTATION @ offset
+        wrist = home - self.HOME_ROTATION @ offset
         result = solve_ik(self, wrist, self.HOME_ROTATION, arm="right")
         controller = self.robots[0].composite_controller.part_controllers["right"]
         index = np.asarray(controller.qpos_index)
@@ -668,6 +879,90 @@ class TabletopShelf(ManipulationEnv):
                 worst = max(worst, -float(contact.dist))
         return worst
 
+    #: Where recorded rest poses live, relative to the repository root.
+    #:
+    #: A file rather than a computation at reset, and read-only from the scene,
+    #: because the whole point is that every gripper sees the **same** bytes.
+    #: A scene that quietly settled and cached its own answer would record
+    #: whichever hand happened to build the scene first, and the block would
+    #: silently become that hand's scene.
+    SETTLED_STATES = "configs/settled_states.json"
+
+    def _object_by_name(self, name):
+        for obj in self.objects:
+            if obj.name == name:
+                return obj
+        raise KeyError(name)
+
+    def _state_key(self) -> str:
+        """Identifies a settled scene: world, shelf, objects and pick pose."""
+        return "|".join([
+            self.world, self.shelf_variant, ",".join(self.object_names),
+            self.pick_config or "sampled",
+        ])
+
+    def _recorded_settled_state(self):
+        """Rest poses recorded for this exact scene, or ``None``.
+
+        ``None`` is the benchmark scene's answer and always will be: the file
+        only ever holds real-world scenes with an explicit pick configuration,
+        because a sampled placement depends on the seed and is not a condition
+        anything is blocked on.
+        """
+        if self.pick_config is None:
+            return None
+        from pathlib import Path
+        import json
+
+        path = Path(__file__).resolve().parents[3] / self.SETTLED_STATES
+        if not path.exists():
+            return None
+        try:
+            return json.loads(path.read_text())[self._state_key()]
+        except KeyError:
+            return None
+
+    def _initial_poses(self):
+        """Pose every object starts at, before settling.
+
+        Two sources, and which one is used is the difference between a sampled
+        scene and a condition. With no ``pick_config`` the placement sampler
+        draws from its range, which is what every benchmark campaign has done.
+        With one, the object is placed at a **written-down pose reused by every
+        cell** -- see :data:`REAL_PICK_CONFIGS` for why that is the rule and not
+        a convenience.
+
+        The height comes from the object's own ``bottom_offset`` exactly as the
+        sampler computes it, so a placed object falls the same small distance a
+        sampled one does and nothing else about the scene changes.
+        """
+        if self.pick_config is None:
+            return {obj.name: (pos, quat)
+                    for pos, quat, obj in self.placement_initializer.sample().values()}
+        from robosuite.utils.transform_utils import quat_multiply
+
+        x, y, yaw = REAL_PICK_CONFIGS[self.pick_config]
+        obj = self.objects[0]
+        # Generous: the exact height is set by ``_seat_objects`` from the
+        # object's own geometry in whatever orientation it ends up in, which
+        # ``bottom_offset`` cannot give once a rest rotation is composed in.
+        z = float(self.table_offset[2]) + 0.5
+        half = np.deg2rad(yaw) / 2.0
+        # robosuite's ``quat_multiply`` works in ``(x, y, z, w)``; the scene
+        # stores ``(w, x, y, z)``. Rest first, then yaw about the world z.
+        def to_xyzw(q):
+            return np.array([q[1], q[2], q[3], q[0]])
+
+        def to_wxyz(q):
+            return np.array([q[3], q[0], q[1], q[2]])
+
+        yaw_q = np.array([0.0, 0.0, np.sin(half), np.cos(half)])
+        quat = to_wxyz(quat_multiply(yaw_q, to_xyzw(rest_quat(obj.name))))
+        return {obj.name: (
+            (float(self.table_offset[0]) + x, float(self.table_offset[1]) + y, z),
+            quat,
+        )}
+
     def _object_positions(self):
         """World position of every object, as one array."""
         return np.array([
@@ -681,15 +976,33 @@ class TabletopShelf(ManipulationEnv):
             # **Arm out of the way before the objects exist.** Otherwise they are
             # created inside it and thrown clear on the first step.
             self._move_arm_home()
-            for pos, quat, obj in self.placement_initializer.sample().values():
+            for name, (pos, quat) in self._initial_poses().items():
                 self.sim.data.set_joint_qpos(
-                    obj.joints[0], np.concatenate([np.array(pos), np.array(quat)])
+                    self._object_by_name(name).joints[0],
+                    np.concatenate([np.array(pos), np.array(quat)]),
                 )
             self.sim.forward()
             # Recorded, not acted on. Seating the objects on the table was tried
             # and made things worse -- see 7.32 -- so the scene still drops them
             # ~25 mm and this says how bad the starting state is. It reads 0.00
             # for every registered hand now that the arm starts clear.
+            if self.world == REAL:
+                # **Seat the object, do not drop it.** The sampler places an
+                # object at ``table_z + z_offset + |bottom_offset|`` and every
+                # one of these assets declares a ``bottom_offset`` about 25 mm
+                # larger than its true half height, so ``z_offset = 2 mm``
+                # actually drops it 25 and it lands at roughly 0.7 m/s (7.32).
+                # A 150 mm benchmark carton survives that by toppling; a 300 mm
+                # real one does not, and a 333 mm hammer laid on its side
+                # bounces off the table entirely -- measured resting at
+                # z = 0.488 against a table surface at 0.800.
+                #
+                # Seating also makes the rest rotations usable at all:
+                # ``bottom_offset`` is quoted in the asset's own upright frame
+                # and says nothing about how far below the origin a hammer lying
+                # on its side reaches. ``_seat_objects`` reads that from the
+                # geometry as placed.
+                self._seat_objects()
             self.placement_penetration = self._robot_penetration()
             # **Settle until the objects stop, not for a fixed count.**
             #
@@ -710,6 +1023,30 @@ class TabletopShelf(ManipulationEnv):
             # the physics. Section 7.32.
             self._hold_arm()
             self.settle_steps_taken = 0
+            self.settled_state_restored = False
+            recorded = self._recorded_settled_state()
+            if recorded is not None:
+                # **The block is exact, not nominal.** Settling *in this scene*
+                # would settle against this gripper's model, and the same seed
+                # does not settle identically across hands -- a can comes to
+                # rest 14.6 mm apart between a Panda and a Robotiq 2F-140
+                # (ROBOTICS_NOTES 7.28), because a different hand is a different
+                # MuJoCo model and the constraint solver's arithmetic differs.
+                # That 15 mm travels through every cross-gripper comparison as a
+                # confound. Restoring one recorded rest pose makes "the same
+                # condition" mean the same scene to machine precision, which is
+                # what a randomised block design requires.
+                for name, qpos in recorded.items():
+                    self.sim.data.set_joint_qpos(
+                        self._object_by_name(name).joints[0], np.asarray(qpos))
+                    self.sim.data.set_joint_qvel(
+                        self._object_by_name(name).joints[0], np.zeros(6))
+                self.sim.forward()
+                self.settled_state_restored = True
+                self.sim.data.qfrc_applied[:] = 0.0
+                self._move_arm_home()
+                self.sim.forward()
+                return
             reference = self._object_positions()
             moved, still = float("inf"), 0
             for step in range(self.MAX_SETTLE_STEPS):
