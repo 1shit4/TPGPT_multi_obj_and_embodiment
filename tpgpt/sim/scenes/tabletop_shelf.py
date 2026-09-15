@@ -1117,13 +1117,54 @@ class TabletopShelf(ManipulationEnv):
         """Segmentation instance name for a spawned object."""
         return name
 
+    #: How far above or below the board an object may rest and still count as
+    #: being on it, in metres.
+    #:
+    #: Measured against the object's **lowest point**, so it is the gap under
+    #: the object rather than anything about its size. 30 mm admits an object
+    #: that has come to rest slightly proud -- on the lip of another, or on a
+    #: crumb of solver jitter -- and refuses one balanced on top of something
+    #: else.
+    SLOT_HEIGHT_TOLERANCE = 0.03
+
     def is_object_in_slot(self, name: str, slot: str, tolerance: float = 0.06) -> bool:
-        """Whether an object is resting in a named slot."""
+        """Whether an object is resting in a named slot.
+
+        **The vertical test is on the object's base, not on its origin, and the
+        difference is not a refinement.** This used to ask whether the object's
+        *body origin* was within 120 mm of the board. A body origin sits half
+        the object's height above whatever it rests on, so that test asked how
+        tall the object was: a 300 mm cereal carton standing perfectly in its
+        slot has its origin 150 mm up and **could never be scored a success**,
+        while a 230 mm milk carton passed by 5 mm and would flip on a
+        millimetre of settling. Measured in the real-sized scene, a cell whose
+        object came to rest **5 mm** from the centre of its slot was scored
+        ``placed_in_the_wrong_place``.
+
+        It survived in the benchmark scene because nothing there is tall enough
+        to trip it -- the largest object's origin sits 75 mm up, comfortably
+        inside 120 -- so the vertical clause was satisfied by every run and the
+        verdict came from the horizontal test alone. The same defect is
+        recorded against ``stage_outcome``'s ``placed_on_shelf`` flag in
+        ``docs/dynamics_execution.md`` section 12, where it disagreed with the
+        scored outcome on 8 of 28 cells; what was missed is that it was in the
+        **scored outcome** as well, not only in the diagnostic.
+
+        Taking the base makes the test say what it is for: the object is over
+        the slot, and it is resting on the board rather than hovering above it
+        or perched on something else. It is also size-independent, which is the
+        property a cross-object comparison needs.
+        """
         poses = self.slot_poses()
         if slot not in poses:
             raise KeyError(f"unknown slot {slot!r}; scene has {sorted(poses)}")
         offset = self.object_position(name) - poses[slot]
-        return bool(np.linalg.norm(offset[:2]) < tolerance and abs(offset[2]) < 0.12)
+        vertices = self._geom_vertices(self.object_body_ids[name])
+        if not len(vertices):  # pragma: no cover - an object with no geoms
+            return False
+        gap = float(vertices[:, 2].min()) - float(poses[slot][2])
+        return bool(np.linalg.norm(offset[:2]) < tolerance
+                    and abs(gap) < self.SLOT_HEIGHT_TOLERANCE)
 
     def reward(self, action=None):
         """Placeholder: this scene is for perception and grasping, not a task.
