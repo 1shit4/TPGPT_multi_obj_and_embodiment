@@ -25,6 +25,7 @@ Five checks, in the order a defect would appear:
 ``upright``        the object still stands the way the pick configuration asked.
 ``reach``          every hand can put its fingertips where the task requires,
                    at the pick and at each destination.
+``destination``    the object *fits* the destination it is sent to.
 
 Usage::
 
@@ -280,6 +281,69 @@ def check_reach() -> list[dict]:
     return rows
 
 
+def check_destination_fit() -> list[dict]:
+    """Does each object fit the slot it is sent to, lying in its own footprint?
+
+    **The check that was missing, and it cost a 210-cell campaign nine cells.**
+    Every other check here asks whether the scene hands the task over cleanly.
+    None of them asks whether the task is *possible*: whether the object, once
+    carried to its destination, physically fits between the panels.
+
+    It does not always. The top cubby leaves **282 mm** of clear depth between
+    the board's front edge and the back panel, and the hammer is **333 mm**
+    long. Its footprint along that axis is 345 mm at 55 degrees of yaw, 330 at
+    90 and 355 at 110, so for most orientations it cannot be put there at all.
+    Measured against the poses actually commanded in the first real-world
+    campaign, **21 of 42 hammer cells** were sent to a pose that intersects the
+    shelf -- through the back panel by up to 36.7 mm and the side wall by 27.2.
+
+    This is a cheap, exact, physics-free computation, and running it after the
+    campaign rather than before is what makes those cells uninterpretable: a
+    cell whose destination cannot hold the object is outside the task, not a
+    failure of the method.
+
+    The bound here is the **worst case over yaw**, because the placed
+    orientation is not known until a grasp has been chosen: an object whose
+    longest horizontal footprint exceeds the clear depth *may* be commanded into
+    an impossible pose. An object that fits at every yaw never can be.
+    """
+    from tpgpt.sim.objects import make_object, real_size_mm, rest_quat
+    from tpgpt.sim.scenes.tabletop_shelf import (
+        REAL_CUBBY_HEIGHT,
+        REAL_SHELF_BOARD_DEPTH,
+        REAL_SHELF_BOARD_WIDTH,
+        REAL_SHELF_LEVELS,
+        REAL_SHELF_THICKNESS,
+    )
+    from robosuite.utils.transform_utils import quat2mat
+
+    level = {label: (x, height) for label, x, height in REAL_SHELF_LEVELS}["top"]
+    depth = REAL_SHELF_BOARD_DEPTH["top"]
+    clear_x = depth - REAL_SHELF_THICKNESS
+    clear_y = REAL_SHELF_BOARD_WIDTH - 2 * REAL_SHELF_THICKNESS
+    rows = []
+    for obj in OBJECTS:
+        size = np.asarray(real_size_mm(obj), dtype=float) / 1000.0
+        rest = quat2mat(np.roll(rest_quat(obj), -1))
+        worst_x = worst_yaw = 0.0
+        for yaw in np.linspace(0.0, np.pi, 181):
+            spin = np.array([[np.cos(yaw), -np.sin(yaw), 0.0],
+                             [np.sin(yaw), np.cos(yaw), 0.0], [0.0, 0.0, 1.0]])
+            extent = float(np.abs(spin @ rest)[0] @ size)
+            if extent > worst_x:
+                worst_x, worst_yaw = extent, float(np.degrees(yaw))
+        rows.append({
+            "object": obj,
+            "clear_depth_mm": clear_x * 1000,
+            "worst_footprint_mm": worst_x * 1000,
+            "worst_yaw_deg": round(worst_yaw, 1),
+            "fits_at_every_yaw": bool(worst_x <= clear_x),
+            "height_mm": size[2] * 1000,
+            "cubby_height_mm": REAL_CUBBY_HEIGHT["top"] * 1000,
+        })
+    return rows
+
+
 def _report(name: str, rows: list[dict], failures: list[dict]) -> None:
     mark = "PASS" if not failures else f"FAIL ({len(failures)}/{len(rows)})"
     print(f"\n### {name}: {mark}")
@@ -326,6 +390,16 @@ def main(record_states: bool = False) -> int:
     rows = check_reach()
     bad = [r for r in rows if not r["reachable"]]
     _report("reach", rows, bad)
+    failed += len(bad)
+
+    rows = check_destination_fit()
+    bad = [r for r in rows if not r["fits_at_every_yaw"]]
+    _report("destination fit", rows, bad)
+    for row in rows:
+        print(f"    {row['object']:8s} worst footprint {row['worst_footprint_mm']:6.1f} mm "
+              f"at {row['worst_yaw_deg']:5.1f} deg against {row['clear_depth_mm']:.0f} mm "
+              f"of clear depth"
+              + ("" if row["fits_at_every_yaw"] else "   <-- CAN BE COMMANDED INTO THE PANELS"))
     failed += len(bad)
 
     print(f"\n{'ALL CHECKS PASS' if not failed else f'{failed} CHECKS FAILED'}")
