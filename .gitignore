@@ -36,3 +36,8 @@ MUJOCO_LOG.TXT
 # Ported gripper meshes are copied verbatim from the GraspGen-X asset pack and
 # regenerate from `tpgpt.grasp.port_gripper.convert`; up to 29 MB per hand.
 assets/ported_grippers/*/meshes/
+
+# Third-party YCB scans: 196 MB, re-fetchable with `python -m tpgpt.sim.ycb`.
+# The generated convex decomposition in assets/ycb_mjcf IS tracked, because a
+# campaign is only reproducible against the same collision geometry.
+assets/ycb/

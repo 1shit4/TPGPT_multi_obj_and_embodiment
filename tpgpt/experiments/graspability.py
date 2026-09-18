@@ -113,13 +113,14 @@ def _object_model(name: str, world: str):
     import mujoco
     from robosuite.models.world import MujocoWorldBase
 
-    from tpgpt.sim.objects import make_object, rest_quat
+    from tpgpt.sim.objects import YCB, make_object, rest_quat
 
-    obj = make_object(name, world, rng=np.random.default_rng(0))
+    obj = (make_object(name, world) if world == YCB
+           else make_object(name, world, rng=np.random.default_rng(0)))
     world_base = MujocoWorldBase()
     world_base.merge_assets(obj)
     body = obj.get_obj()
-    quat = rest_quat(name)
+    quat = rest_quat(name, world)
     body.set("quat", " ".join(f"{v:.9f}" for v in quat))
     world_base.worldbody.append(body)
     model = world_base.get_model(mode="mujoco")

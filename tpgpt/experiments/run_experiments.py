@@ -75,6 +75,18 @@ ALL_SLOTS = ("top left", "top middle", "top right",
 MAX_STEPS = 800
 
 PROMPTS = {
+    "sugar": "put the sugar box on the {slot}",
+    "meat": "put the meat can on the {slot}",
+    "banana": "put the banana on the {slot}",
+    "cracker": "put the cracker box on the {slot}",
+    "soup": "put the soup can on the {slot}",
+    "mustard": "put the mustard bottle on the {slot}",
+    "bleach": "put the bleach bottle on the {slot}",
+    "masterchef": "put the coffee can on the {slot}",
+    "tuna": "put the tuna can on the {slot}",
+    "pudding": "put the pudding box on the {slot}",
+    "gelatin": "put the gelatin box on the {slot}",
+    "brick": "put the foam brick on the {slot}",
     "cereal": "put the cereal box on the {slot}",
     "milk": "put the milk carton on the {slot}",
     "can": "put the can on the {slot}",
@@ -669,6 +681,36 @@ def execution_settings(slot="top middle", seeds=(0,)):
     ]
 
 
+def ycb_settings(**kwargs):
+    """The YCB grid: seven hands x five scanned objects x the condition block.
+
+    Same design as :func:`real_settings` -- one object per scene, gripper and
+    object fully crossed, pick pose and destination sampled once and reused
+    identically -- with the objects replaced by the YCB set's own scans at their
+    scanned size and published mass, and the pick poses re-chosen by search so
+    that every object clears the robot's base and the shelf.
+    """
+    from tpgpt.sim.scenes.tabletop_shelf import REAL_DESTINATIONS, YCB_PICK_CONFIGS
+    from tpgpt.sim.ycb import DEFAULT_YCB_OBJECTS
+
+    grippers = tuple(kwargs.get("grippers") or EXECUTION_GRIPPERS)
+    objects = tuple(kwargs.get("objects") or DEFAULT_YCB_OBJECTS)
+    picks = tuple(kwargs.get("picks") or YCB_PICK_CONFIGS)
+    destinations = tuple(kwargs.get("destinations") or REAL_DESTINATIONS)
+    seed = int(kwargs.get("seed", 0))
+    return [
+        {"gripper": g, "obj": obj, "slot": destination.replace("_", " "),
+         "pick_config": pick, "seed": seed, "world": "ycb", "objects": (obj,)}
+        for g in grippers for obj in objects
+        for pick in picks for destination in destinations
+    ]
+
+
+def ycb_replay_settings(**kwargs):
+    """The same YCB grid under position control -- the executor-free ceiling."""
+    return [dict(s, executor="replay") for s in ycb_settings(**kwargs)]
+
+
 def real_replay_settings(**kwargs):
     """The same grid under position control -- the executor-free ceiling.
 
@@ -683,6 +725,8 @@ def real_replay_settings(**kwargs):
 
 
 CAMPAIGNS = {
+    "ycb": ycb_settings,
+    "ycb_replay": ycb_replay_settings,
     "real": real_settings,
     "real_replay": real_replay_settings,
     "execution": execution_settings,

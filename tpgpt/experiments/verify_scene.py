@@ -45,14 +45,20 @@ from tpgpt.sim.scenes.tabletop_shelf import (
     REAL_DESTINATIONS,
     REAL_PICK_CONFIGS,
     TabletopShelf,
+    YCB_PICK_CONFIGS,
 )
+
+#: Which world the checks run in. The YCB scene is the one campaigns use from
+#: 2026-09-19; ``"real"`` is kept so the scene measured before it can be
+#: re-verified rather than only remembered.
+WORLD = "ycb"
 
 #: Hands the campaign runs on. Fixed on measurement in ``ROBOTICS_NOTES`` 7.42.
 FLEET = ("xarm", "robotiq3f", "robotiq140", "robotiq85", "robotiq3f_dex",
          "panda", "rethink")
 
 #: Objects the campaign runs on, also fixed in 7.42.
-OBJECTS = ("can", "cereal", "hammer", "milk", "mug")
+OBJECTS = ("sugar", "meat", "mug", "hammer", "banana")
 
 #: The hand the rest poses are recorded with.
 #:
@@ -104,11 +110,25 @@ HOLD_STEPS = 500
 #: the divergence was the unfinished settle and not the hand.
 RECORD_SETTLE_STEPS = 2000
 
+#: The recording hold runs until the object has actually stopped, not for a
+#: fixed count, and these bound it.
+#:
+#: **A fixed hold is not enough for an object that can roll.** At 2000 steps the
+#: YCB hammer -- a round handle with the mass in the head -- was still moving
+#: 2.3 mm at pick P0 and **6.1 mm** at P2, against a block requirement of
+#: 0.1 mm. The flat-faced objects were long since still (0.000 to 0.008 mm), so
+#: a count tuned to them says nothing about the one object that needs it.
+#: Stepping until the motion over a window is genuinely small measures the
+#: thing itself.
+RECORD_WINDOW = 500
+RECORD_STILL = 5e-5
+RECORD_MAX_STEPS = 40000
+
 
 def _scene(gripper: str, obj: str, pick: str, **kwargs) -> TabletopShelf:
     from tpgpt.experiments.pipeline import build_scene
 
-    return build_scene((obj,), gripper=gripper, seed=0, world="real",
+    return build_scene((obj,), gripper=gripper, seed=0, world=WORLD,
                        pick_config=pick, **kwargs)
 
 
@@ -127,21 +147,29 @@ def record(path: Path) -> dict:
     """
     states = json.loads(path.read_text()) if path.exists() else {}
     for obj in OBJECTS:
-        for pick in REAL_PICK_CONFIGS:
+        for pick in TabletopShelf.pick_configs_for(WORLD):
             env = _scene(REFERENCE_HAND, obj, pick)
             if env.settled_state_restored:
                 env.close()
                 continue
             env._hold_arm()
+            held, moved = 0, np.inf
             before = _object_qpos(env, obj)[:3]
-            for _ in range(RECORD_SETTLE_STEPS):
-                env.sim.step()
-            after = _object_qpos(env, obj)[:3]
+            while held < RECORD_MAX_STEPS:
+                start = _object_qpos(env, obj)[:3]
+                for _ in range(RECORD_WINDOW):
+                    env.sim.step()
+                held += RECORD_WINDOW
+                moved = float(np.abs(_object_qpos(env, obj)[:3] - start).max())
+                if held >= RECORD_SETTLE_STEPS and moved < RECORD_STILL:
+                    break
+            total = float(np.abs(_object_qpos(env, obj)[:3] - before).max())
             states[env._state_key()] = {obj: _object_qpos(env, obj).tolist()}
-            print(f"  recorded {obj:7s} {pick}  settled at {env.settle_steps_taken} "
-                  f"steps, moved a further "
-                  f"{np.abs(after - before).max() * 1000:.3f} mm over "
-                  f"{RECORD_SETTLE_STEPS}")
+            flag = "" if moved < RECORD_STILL else "   STILL MOVING"
+            print(f"  recorded {obj:7s} {pick}  scene settled at "
+                  f"{env.settle_steps_taken:5d}; held a further {held:6d} steps, "
+                  f"drifting {total * 1000:7.3f} mm, last window "
+                  f"{moved * 1000:.4f} mm{flag}")
             env.close()
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(states, indent=1, sort_keys=True) + "\n")
@@ -152,7 +180,7 @@ def check_placement_and_settling() -> list[dict]:
     """No object starts inside the robot, and the scene settles by resting."""
     rows = []
     for obj in OBJECTS:
-        for pick in REAL_PICK_CONFIGS:
+        for pick in TabletopShelf.pick_configs_for(WORLD):
             env = _scene(REFERENCE_HAND, obj, pick)
             before = env._initial_poses()[obj][0]
             after = _object_qpos(env, obj)[:3]
@@ -183,7 +211,7 @@ def check_cross_gripper() -> list[dict]:
     """
     rows = []
     for obj in OBJECTS:
-        for pick in REAL_PICK_CONFIGS:
+        for pick in TabletopShelf.pick_configs_for(WORLD):
             at_reset, after_hold = {}, {}
             for hand in FLEET:
                 env = _scene(hand, obj, pick)
@@ -216,7 +244,7 @@ def check_upright() -> list[dict]:
 
     rows = []
     for obj in OBJECTS:
-        for pick in REAL_PICK_CONFIGS:
+        for pick in TabletopShelf.pick_configs_for(WORLD):
             env = _scene(REFERENCE_HAND, obj, pick)
             wanted = env._initial_poses()[obj][1]
             got = _object_qpos(env, obj)[3:]
@@ -257,7 +285,7 @@ def check_reach() -> list[dict]:
     for hand in FLEET:
         offset = contact_offset(hand)
         for obj in OBJECTS:
-            for pick in REAL_PICK_CONFIGS:
+            for pick in TabletopShelf.pick_configs_for(WORLD):
                 env = _scene(hand, obj, pick)
                 vertices = env._geom_vertices(env.object_body_ids[obj])
                 base, top = vertices[:, 2].min(), vertices[:, 2].max()
@@ -307,40 +335,119 @@ def check_destination_fit() -> list[dict]:
     longest horizontal footprint exceeds the clear depth *may* be commanded into
     an impossible pose. An object that fits at every yaw never can be.
     """
-    from tpgpt.sim.objects import make_object, real_size_mm, rest_quat
     from tpgpt.sim.scenes.tabletop_shelf import (
         REAL_CUBBY_HEIGHT,
         REAL_SHELF_BOARD_DEPTH,
         REAL_SHELF_BOARD_WIDTH,
-        REAL_SHELF_LEVELS,
         REAL_SHELF_THICKNESS,
     )
-    from robosuite.utils.transform_utils import quat2mat
 
-    level = {label: (x, height) for label, x, height in REAL_SHELF_LEVELS}["top"]
-    depth = REAL_SHELF_BOARD_DEPTH["top"]
-    clear_x = depth - REAL_SHELF_THICKNESS
+    clear_x = REAL_SHELF_BOARD_DEPTH["top"] - REAL_SHELF_THICKNESS
     clear_y = REAL_SHELF_BOARD_WIDTH - 2 * REAL_SHELF_THICKNESS
     rows = []
     for obj in OBJECTS:
-        size = np.asarray(real_size_mm(obj), dtype=float) / 1000.0
-        rest = quat2mat(np.roll(rest_quat(obj), -1))
-        worst_x = worst_yaw = 0.0
+        # **The object's own collision vertices at every yaw**, not a size tuple
+        # rotated. A size tuple is an axis-aligned box, and rotating a box
+        # over-reads: a 30 x 100 mm box yawed 45 degrees measures 92 x 92
+        # (7.18). The vertices give the true footprint at each angle.
+        points = _collision_vertices(obj)[:, :2]
+        worst_x = worst_y = 0.0
+        worst_yaw = 0.0
         for yaw in np.linspace(0.0, np.pi, 181):
-            spin = np.array([[np.cos(yaw), -np.sin(yaw), 0.0],
-                             [np.sin(yaw), np.cos(yaw), 0.0], [0.0, 0.0, 1.0]])
-            extent = float(np.abs(spin @ rest)[0] @ size)
-            if extent > worst_x:
-                worst_x, worst_yaw = extent, float(np.degrees(yaw))
+            spin = np.array([[np.cos(yaw), -np.sin(yaw)], [np.sin(yaw), np.cos(yaw)]])
+            turned = points @ spin.T
+            span = turned.max(axis=0) - turned.min(axis=0)
+            if span[0] > worst_x:
+                worst_x, worst_yaw = float(span[0]), float(np.degrees(yaw))
+            worst_y = max(worst_y, float(span[1]))
+        height = float(np.ptp(_collision_vertices(obj)[:, 2]))
         rows.append({
             "object": obj,
             "clear_depth_mm": clear_x * 1000,
             "worst_footprint_mm": worst_x * 1000,
+            "worst_width_mm": worst_y * 1000,
             "worst_yaw_deg": round(worst_yaw, 1),
-            "fits_at_every_yaw": bool(worst_x <= clear_x),
-            "height_mm": size[2] * 1000,
+            "fits_at_every_yaw": bool(worst_x <= clear_x and worst_y <= clear_y),
+            "height_mm": height * 1000,
             "cubby_height_mm": REAL_CUBBY_HEIGHT["top"] * 1000,
         })
+    return rows
+
+
+def _collision_vertices(obj: str) -> np.ndarray:
+    """World-frame vertices of ``obj``'s collision meshes, at identity pose.
+
+    From ``mesh_vert`` rather than ``geom_aabb``: a mesh geom's AABB is a local
+    axis-aligned box, and summing those boxes over a convex decomposition
+    over-reads badly -- the hammer's 23 parts read 251.6 x 235.7 x 132.3 mm
+    against a true 332.7 x 182.2 x 32.9.
+    """
+    import mujoco
+    from robosuite.models.world import MujocoWorldBase
+
+    from tpgpt.sim.objects import make_object
+
+    built = make_object(obj, WORLD)
+    world = MujocoWorldBase()
+    world.merge_assets(built)
+    world.worldbody.append(built.get_obj())
+    model = world.get_model(mode="mujoco")
+    data = mujoco.MjData(model)
+    mujoco.mj_forward(model, data)
+    body = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, built.root_body)
+    out = []
+    for geom in range(model.ngeom):
+        if model.geom_bodyid[geom] != body:
+            continue
+        if not (model.geom_contype[geom] or model.geom_conaffinity[geom]):
+            continue
+        mesh = model.geom_dataid[geom]
+        if mesh < 0:
+            continue
+        start, count = model.mesh_vertadr[mesh], model.mesh_vertnum[mesh]
+        rotation = data.geom_xmat[geom].reshape(3, 3)
+        out.append(model.mesh_vert[start:start + count] @ rotation.T
+                   + data.geom_xpos[geom])
+    return np.vstack(out)
+
+
+def check_rest_clearance() -> list[dict]:
+    """Where objects actually come to rest, against the robot base and the shelf.
+
+    **Not where they were commanded to.** The pick poses are chosen so every
+    object clears the pedestal by 40 mm and the shelf's front edge by 120 mm,
+    but an object that can roll does not stay where it is put: the YCB hammer
+    drifts **48.1 mm** from pick P2 before it stops, over 13 500 steps of
+    settling. A clearance guaranteed at the commanded pose says nothing about
+    the pose the scene hands over, and it is the handed-over pose the arm has to
+    work around -- an object with the pedestal close behind it cannot be nudged
+    clear, it jams, which is what ``robotiq3f/cereal`` did on the previous
+    scene.
+    """
+    from tpgpt.sim.scenes.tabletop_shelf import (
+        REAL_SHELF_BOARD_DEPTH, REAL_SHELF_LEVELS,
+    )
+
+    base_front = -0.400        # fixed_mount0_pedestal_col, the only base geom
+    shelf_x = {l: x for l, x, _ in REAL_SHELF_LEVELS}["bottom"]
+    shelf_front = shelf_x - REAL_SHELF_BOARD_DEPTH["bottom"] / 2
+    half_table = 0.40
+    rows = []
+    for obj in OBJECTS:
+        for pick in TabletopShelf.pick_configs_for(WORLD):
+            env = _scene(REFERENCE_HAND, obj, pick)
+            points = env._geom_vertices(env.object_body_ids[obj])
+            table = np.asarray(env.table_offset, dtype=float)
+            low = points.min(axis=0) - table
+            high = points.max(axis=0) - table
+            rows.append({
+                "object": obj, "pick": pick,
+                "base_mm": float(low[0] - base_front) * 1000,
+                "shelf_mm": float(shelf_front - high[0]) * 1000,
+                "table_edge_mm": float(half_table
+                                       - max(abs(low[1]), abs(high[1]))) * 1000,
+            })
+            env.close()
     return rows
 
 
@@ -390,6 +497,15 @@ def main(record_states: bool = False) -> int:
     rows = check_reach()
     bad = [r for r in rows if not r["reachable"]]
     _report("reach", rows, bad)
+    failed += len(bad)
+
+    rows = check_rest_clearance()
+    bad = [r for r in rows if min(r["base_mm"], r["shelf_mm"],
+                                  r["table_edge_mm"]) < 20.0]
+    _report("clearance at the settled pose", rows, bad)
+    print(f"    worst: base {min(r['base_mm'] for r in rows):.0f} mm, "
+          f"shelf {min(r['shelf_mm'] for r in rows):.0f} mm, "
+          f"table edge {min(r['table_edge_mm'] for r in rows):.0f} mm")
     failed += len(bad)
 
     rows = check_destination_fit()

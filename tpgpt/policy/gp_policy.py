@@ -76,7 +76,29 @@ class GPPolicy:
     """
 
     #: Channels that keep a zero prior mean (Appendix A).
-    ZERO_MEAN_CHANNELS = ("velocity",)
+    #:
+    #: **The gripper belongs here and its absence was a bug.** Appendix A's
+    #: argument for the velocity channel is that away from the data the safe
+    #: answer is "do not move"; the same argument applies verbatim to the jaws,
+    #: where the safe answer is "do not close". Centred on its label mean
+    #: instead, the gripper channel reverts off-manifold to the fraction of the
+    #: demonstration spent holding the object -- which on the reshelving
+    #: demonstration is **+0.1**, and ``rollout_policy`` reads anything above
+    #: zero as *shut*.
+    #:
+    #: Measured on the source policy: query it at phase 0.000 with a position
+    #: taken from anywhere past phase 0.10 and it returns +0.099 to +0.100 --
+    #: the prior, meaning "close" -- at every one. In the real-world campaign
+    #: that closed the jaws of ``robotiq3f/mug/P1`` at **step 5**, 261 mm from
+    #: the grasp, and six cells closed before phase 0.10 against a
+    #: demonstration that closes at 0.250. All six failed.
+    #:
+    #: This is not the lag gate, which works: the gate holds the *phase* back
+    #: when the arm falls behind, and the executed close phase is 0.247 to 0.251
+    #: on 204 of 210 cells. The gripper command is not a function of phase
+    #: alone -- it is a GP over position *and* phase, and off-manifold in
+    #: **position** the phase gate cannot help it.
+    ZERO_MEAN_CHANNELS = ("velocity", "gripper")
 
     #: Length-scale bounds in standardised input units.
     #:

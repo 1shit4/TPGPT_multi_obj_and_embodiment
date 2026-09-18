@@ -1,0 +1,33 @@
+{
+ "parts": [
+  "part_00.stl",
+  "part_01.stl",
+  "part_02.stl",
+  "part_03.stl",
+  "part_04.stl",
+  "part_05.stl",
+  "part_06.stl",
+  "part_07.stl",
+  "part_08.stl",
+  "part_09.stl",
+  "part_10.stl",
+  "part_11.stl",
+  "part_12.stl",
+  "part_13.stl",
+  "part_14.stl",
+  "part_15.stl",
+  "part_16.stl",
+  "part_17.stl",
+  "part_18.stl",
+  "part_19.stl",
+  "part_20.stl",
+  "part_21.stl",
+  "part_22.stl"
+ ],
+ "threshold": 0.05,
+ "centre_offset": [
+  -0.032784498296678066,
+  -0.026552500785328448,
+  0.03858350170776248
+ ]
+}

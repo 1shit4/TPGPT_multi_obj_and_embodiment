@@ -47,7 +47,13 @@ import numpy as np
 #: The two worlds a scene can be built in.
 BENCHMARK = "benchmark"
 REAL = "real"
-WORLDS = (BENCHMARK, REAL)
+#: Objects are the YCB set's own scans, at their scanned size and published
+#: mass, with collision geometry from a convex decomposition. See
+#: :mod:`tpgpt.sim.ycb`. This is the citable standard; ``REAL`` was this
+#: project's own sizing of robosuite's benchmark meshes and is kept so the
+#: campaign measured under it stays reproducible.
+YCB = "ycb"
+WORLDS = (BENCHMARK, REAL, YCB)
 
 
 @dataclass(frozen=True)
@@ -192,8 +198,25 @@ REST_ROTATIONS = {
 }
 
 
-def rest_quat(name: str) -> np.ndarray:
-    """Resting orientation for ``name`` as a ``(w, x, y, z)`` quaternion."""
+def rest_quat(name: str, world: str = BENCHMARK) -> np.ndarray:
+    """Resting orientation for ``name`` as a ``(w, x, y, z)`` quaternion.
+
+    The YCB scans are already in the pose the article rests in -- the set was
+    photographed and scanned on a turntable, standing -- so none of them needs
+    one. The rotation below exists for robosuite's own hammer asset, which lays
+    its handle along the body's z.
+    """
+    # **The world decides, not the name, and a name collision is why.**
+    # robosuite's hammer and the YCB hammer are both called ``hammer`` and need
+    # opposite treatment: robosuite's lays its handle along the body's z and
+    # must be turned a quarter circle to lie down, while the YCB scan is already
+    # flat. Consulting ``REST_ROTATIONS`` first put the YCB hammer on its head,
+    # from which it fell over -- measured tilting 89.7 degrees and rolling up to
+    # 50 mm, which then broke every clearance the pick poses were chosen for.
+    if world == YCB:
+        from tpgpt.sim.ycb import stable_rest_quat
+
+        return stable_rest_quat(name)
     spec = REST_ROTATIONS.get(name)
     if spec is None:
         return np.array([1.0, 0.0, 0.0, 0.0])
@@ -329,6 +352,11 @@ def make_object(name: str, world: str = BENCHMARK, rng=None):
         raise ValueError(f"unknown world {world!r}; expected one of {WORLDS}")
     if rng is None:
         rng = np.random.default_rng(0)
+
+    if world == YCB:
+        from tpgpt.sim.ycb import make_ycb_object
+
+        return make_ycb_object(name)
 
     cls = OBJECT_CLASSES[name]
 

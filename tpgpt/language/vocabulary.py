@@ -25,6 +25,20 @@ OBJECT_ALIASES: dict[str, tuple[str, ...]] = {
     "wrench": ("spanner", "ratcheting wrench"),
     "nut_square": ("square nut", "square peg"),
     "nut_round": ("round nut", "round peg"),
+    # The YCB set (2026-09-19). Named for the article each scan is of, so a
+    # prompt reads as a person would say it rather than as a catalogue id.
+    "sugar": ("sugar box", "sugar carton", "box of sugar"),
+    "meat": ("meat can", "potted meat", "spam", "tinned meat"),
+    "banana": ("plantain",),
+    "cracker": ("cracker box", "crackers", "biscuit box"),
+    "soup": ("soup can", "tomato soup", "tin of soup"),
+    "mustard": ("mustard bottle", "mustard"),
+    "bleach": ("bleach bottle", "cleanser", "bleach cleanser"),
+    "masterchef": ("coffee can", "master chef can"),
+    "tuna": ("tuna can", "tuna fish can"),
+    "pudding": ("pudding box",),
+    "gelatin": ("gelatin box", "jelly box"),
+    "brick": ("foam brick",),
 }
 
 #: Words naming a shelf level.

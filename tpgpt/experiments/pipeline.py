@@ -20,7 +20,7 @@ re-taught for the new objects, which is the whole claim.
 from __future__ import annotations
 
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 import numpy as np
@@ -411,6 +411,30 @@ def run(
 
         # --- what it can see -----------------------------------------------
         cloud = object_point_cloud(env, result.object_name, obs=obs)
+        # **The object's cloud is the full scan; the scene's stays observed.**
+        #
+        # Two different questions, and only one of them is about perception. The
+        # *object* cloud decides what grasps exist and where the keypoints sit,
+        # and a camera cloud of it is one-sided and top-dominated -- which is
+        # what left the narrow hands choosing grasps on rims. Replacing it with
+        # the mesh removes perception from that question so the map, the grasp
+        # generator and the executor can be measured without it.
+        #
+        # The *scene* cloud is what the collision filters test the arm against,
+        # and there the whole point is that the robot knows its own links
+        # exactly and knows the shelf only as a point cloud. Giving it the true
+        # scene would make the filter depend on something hardware will not
+        # have, so ``scene_point_cloud`` below is untouched.
+        #
+        # ``camera_positions`` is kept from the real capture, so the visibility
+        # filter still asks which directions the object was actually seen from.
+        if getattr(env, "world", None) == "ycb":
+            from tpgpt.sim.ycb import world_surface_cloud
+
+            cloud = replace(cloud, points=world_surface_cloud(env, result.object_name))
+            result.metrics["object_cloud_source"] = "ycb scan"
+        else:
+            result.metrics["object_cloud_source"] = "cameras"
         result.metrics["cloud_points"] = len(cloud)
         if len(cloud) < MIN_CLOUD_POINTS:
             return _fail(

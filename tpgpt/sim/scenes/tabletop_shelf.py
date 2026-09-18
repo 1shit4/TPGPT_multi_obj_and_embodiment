@@ -45,7 +45,7 @@ from robosuite.utils.observables import Observable, sensor
 from robosuite.utils.placement_samplers import UniformRandomSampler
 from robosuite.utils.transform_utils import convert_quat
 
-from tpgpt.sim.objects import BENCHMARK, REAL, WORLDS, make_object, rest_quat
+from tpgpt.sim.objects import BENCHMARK, REAL, WORLDS, YCB, make_object, rest_quat
 
 #: Selectable objects, keyed by the short name the language layer resolves to.
 #:
@@ -187,13 +187,28 @@ SHELF_VARIANTS = ("open", "cubby", "enclosed")
 #: Real shelf board thickness: 18 mm, the standard furniture-board thickness.
 REAL_SHELF_THICKNESS = 0.018
 
-#: Real board depth, front to back: 300 mm on both levels, a standard pantry or
-#: bookcase shelf. The benchmark scene's 100 mm bottom and 280 mm top were a
+#: Real board depth, front to back. The bottom is a standard 300 mm pantry
+#: shelf; the top is **380 mm**, and the extra 80 mm is not a style choice.
+#:
+#: **The destination must admit the longest object at every orientation it can
+#: be commanded into.** At 300 mm the top board leaves 282 mm of clear depth
+#: between its front edge and the back panel, and the YCB hammer's footprint
+#: along that axis reaches **336.6 mm** at 81 degrees of yaw. Measured on the
+#: campaign before this, 21 of 42 hammer cells were commanded into a pose that
+#: intersects the panels -- through the back by up to 36.7 mm -- which is the
+#: scene refusing the task rather than the method failing it. 380 mm leaves
+#: 362 mm clear, which clears the worst yaw by 25 mm.
+#:
+#: Deepening the **top** board only, because it is the only level used as a
+#: destination and it sits 160 mm above the table, so growing it forwards costs
+#: nothing on the tabletop. Deepening the bottom board would bring its front
+#: edge to within 119 mm of the pick region, against the ~120 mm at which a
+#: Panda's hand catches the underside of a board (2.9). The benchmark scene's 100 mm bottom and 280 mm top were a
 #: clearance fix for the hand (see ``SHELF_BOARD_DEPTH``); 300 mm is what a
 #: shelf is. Depth costs nothing in reach, because it extends *backwards* from
 #: the slot: the slot centre is the placement target and the board grows away
 #: from the robot behind it.
-REAL_SHELF_BOARD_DEPTH = {"bottom": 0.30, "top": 0.30}
+REAL_SHELF_BOARD_DEPTH = {"bottom": 0.30, "top": 0.38}
 
 #: Real board width: 640 mm, a standard bookcase bay.
 REAL_SHELF_BOARD_WIDTH = 0.64
@@ -304,6 +319,55 @@ REAL_PICK_CONFIGS = {
 #: lower one is 142 mm clear and does not admit a real carton.
 REAL_DESTINATIONS = ("top_middle", "top_left")
 
+#: Where a YCB object is put on the table, as ``(x, y, yaw degrees)`` relative
+#: to the table centre.
+#:
+#: **Chosen by search, not by hand, and the constraint that decides them is the
+#: robot's own base.** Objects at the previous ``REAL_PICK_CONFIGS`` poses were
+#: knocked backwards into ``fixed_mount0_pedestal_col`` -- traced on
+#: ``robotiq3f/cereal/P2``, the box slides 4.6 mm per control step for 17 steps
+#: and stops at 99.3 mm when it reaches the pedestal, which is 400 mm behind the
+#: table centre. An object with the pedestal behind it cannot be nudged clear;
+#: it jams.
+#:
+#: Two things had to be got right to search for better ones:
+#:
+#: * **Only geometry that reaches above the table can obstruct an object on
+#:   it.** ``fixed_mount0_pedestal_feet_col`` reaches forward to x = -0.298 and
+#:   sits at z = 0.009 to 0.319 -- on the floor. Taking it as the bound left a
+#:   150 mm strip in which the 332.7 mm hammer does not fit at any yaw, and only
+#:   72 poses with at most 10 mm of clearance. The geom that actually matters is
+#:   ``fixed_mount0_pedestal_col`` at x = -0.400, which gives a 270 mm strip and
+#:   1125 feasible poses.
+#: * **The hand at its home pose is not an obstacle.** Including it put the
+#:   bound at x = +0.005, which is the parked gripper, and excluded everything.
+#:
+#: Each pose is required to clear the pedestal by 40 mm, the shelf's front edge
+#: by 120 mm (2.9: a Panda's hand catches the underside of a board within about
+#: that), and the table edge -- for **every object in the set**, not on average.
+#: **The footprint is measured in the scene, not in an isolated model.** A first
+#: search rotated each object's collision vertices about its own origin in a
+#: standalone model and produced poses that looked clear by 39 mm; built in the
+#: scene, the hammer's rear edge sat at x = -0.483, which is 83 mm *behind* the
+#: pedestal. The object origins are not the centres of their footprints -- the
+#: hammer spans -121.8 to +150.2 mm about its own -- so the two frames disagree.
+#: Measuring ``_geom_vertices`` relative to ``body_xpos`` in a built scene is
+#: what makes the numbers mean anything.
+#:
+#: The three below are the best of their yaw band at 39.8, 45.8 and 37.1 mm of
+#: worst-object clearance, chosen to differ in y as well as in yaw. Feasible
+#: yaws run 45 to 130 degrees: outside that the hammer's long axis points across
+#: the strip and no position clears both ends.
+YCB_PICK_CONFIGS = {
+    "P0": (-0.230, -0.140, 50.0),
+    "P1": (-0.200, 0.020, 90.0),
+    "P2": (-0.220, 0.160, 125.0),
+}
+
+#: Clearance every pick pose is required to leave, in metres.
+PICK_BASE_CLEARANCE = 0.040
+PICK_SHELF_CLEARANCE = 0.120
+
 #: An extra camera that can actually see the workspace.
 #:
 #: robosuite's stock ``agentview`` and ``frontview`` sit on the far side of the
@@ -387,10 +451,17 @@ class TabletopShelf(ManipulationEnv):
         camera_segmentations=None,
         **kwargs,
     ):
-        unknown = [name for name in objects if name not in OBJECT_CLASSES]
+        if world == YCB:
+            from tpgpt.sim.ycb import YCB_ARTICLES
+
+            known = set(YCB_ARTICLES)
+        else:
+            known = set(OBJECT_CLASSES)
+        unknown = [name for name in objects if name not in known]
         if unknown:
             raise ValueError(
-                f"unknown objects {unknown}; available: {sorted(OBJECT_CLASSES)}"
+                f"unknown objects {unknown} for world {world!r}; "
+                f"available: {sorted(known)}"
             )
         # Each name becomes a MuJoCo body name, so a repeat is a duplicate body
         # and the failure surfaces as "repeated name 'can_main' in body" from
@@ -411,15 +482,15 @@ class TabletopShelf(ManipulationEnv):
                 f"unknown world {world!r}; expected one of {WORLDS}"
             )
         if pick_config is not None:
-            if world != REAL:
+            if world not in (REAL, YCB):
                 raise ValueError(
                     "pick_config is only defined for the real-sized world; the "
                     "benchmark scene samples its placements"
                 )
-            if pick_config not in REAL_PICK_CONFIGS:
+            if pick_config not in self.pick_configs_for(world):
                 raise ValueError(
                     f"unknown pick configuration {pick_config!r}; expected one "
-                    f"of {sorted(REAL_PICK_CONFIGS)}"
+                    f"of {sorted(self.pick_configs_for(world))}"
                 )
             if len(objects) != 1:
                 raise ValueError(
@@ -433,7 +504,7 @@ class TabletopShelf(ManipulationEnv):
         self.pick_config = pick_config
         # Every piece of geometry below is read from these, not from the module
         # constants, so the two worlds share one implementation.
-        real = world == REAL
+        real = world in (REAL, YCB)
         self.shelf_levels = REAL_SHELF_LEVELS if real else SHELF_LEVELS
         self.shelf_slots = REAL_SHELF_SLOTS if real else SHELF_SLOTS
         self.shelf_board_depth = REAL_SHELF_BOARD_DEPTH if real else SHELF_BOARD_DEPTH
@@ -596,8 +667,8 @@ class TabletopShelf(ManipulationEnv):
         # catches the hand on the underside of the board. At real size the
         # shelf's front edge moves in to x = 0.03 and the objects are up to
         # 330 mm long, so the region moves back with it.
-        x_range = [-0.32, -0.12] if self.world == REAL else [-0.22, -0.04]
-        y_range = [-0.20, 0.20] if self.world == REAL else [-0.18, 0.18]
+        x_range = [-0.32, -0.12] if self.world in (REAL, YCB) else [-0.22, -0.04]
+        y_range = [-0.20, 0.20] if self.world in (REAL, YCB) else [-0.18, 0.18]
         self.placement_initializer = UniformRandomSampler(
             name="ObjectSampler",
             mujoco_objects=self.objects,
@@ -733,7 +804,7 @@ class TabletopShelf(ManipulationEnv):
         from tpgpt.grasp.grasps import contact_offset
         from tpgpt.sim.kinematics import solve_ik
 
-        home = self.REAL_HOME_TCP if self.world == REAL else self.HOME_TCP
+        home = self.REAL_HOME_TCP if self.world in (REAL, YCB) else self.HOME_TCP
         pair = self._gripper_short_name()
         if pair is None:
             return
@@ -791,7 +862,22 @@ class TabletopShelf(ManipulationEnv):
     PLACEMENT_ATTEMPTS = 20
 
     def _geom_vertices(self, body_id):
-        """World-frame corners of every geom's bounding box on a body.
+        """World-frame points bounding every geom on a body.
+
+        **A mesh geom is measured by its vertices, not by its bounding box**,
+        and the difference decides whether an object is seated or dropped. A
+        mesh's ``geom_aabb`` is a local axis-aligned box, so for a convex
+        decomposition the union of the parts' boxes is far larger than the
+        object: the YCB hammer's 5 parts read 251.6 x 235.7 x **132.3** mm
+        against a true 332.7 x 182.2 x **32.9**. Seating from that put the
+        hammer about 50 mm above the table, and it then fell, bounced and
+        rolled -- measured tilting 89.7 degrees at one pick pose and coming to
+        rest 91 mm behind the robot base's front face. Dropped on a bare plane
+        the same object settles within 0.26 degrees of its scan orientation, so
+        the instability was the seating, not the object.
+
+        Primitive geoms keep the box, which for a box, a cylinder or a sphere
+        is exact.
 
         From ``model.geom_aabb``, MuJoCo's own local-frame bounding box, rather
         than from the mesh vertex array. A first version read ``mesh_vert``
@@ -804,17 +890,27 @@ class TabletopShelf(ManipulationEnv):
         The box is conservative for a tilted object, but these are placed with a
         yaw-only rotation, for which its z extent is exact.
         """
+        import mujoco
+
         model, data = self.sim.model, self.sim.data
         out = []
         for g in range(model.ngeom):
             if model.geom_bodyid[g] != body_id:
                 continue
-            centre, half = np.array(model.geom_aabb[g][:3]), np.array(model.geom_aabb[g][3:])
-            corners = np.array([[x, y, z] for x in (-half[0], half[0])
-                                for y in (-half[1], half[1])
-                                for z in (-half[2], half[2])]) + centre
             rot = np.array(data.geom_xmat[g]).reshape(3, 3)
-            out.append(corners @ rot.T + np.array(data.geom_xpos[g]))
+            origin = np.array(data.geom_xpos[g])
+            mesh = int(model.geom_dataid[g])
+            if int(model.geom_type[g]) == int(mujoco.mjtGeom.mjGEOM_MESH) and mesh >= 0:
+                start = int(model.mesh_vertadr[mesh])
+                count = int(model.mesh_vertnum[mesh])
+                local = np.array(model.mesh_vert[start:start + count])
+            else:
+                centre = np.array(model.geom_aabb[g][:3])
+                half = np.array(model.geom_aabb[g][3:])
+                local = np.array([[x, y, z] for x in (-half[0], half[0])
+                                  for y in (-half[1], half[1])
+                                  for z in (-half[2], half[2])]) + centre
+            out.append(local @ rot.T + origin)
         return np.vstack(out) if out else np.zeros((0, 3))
 
     def _seat_objects(self):
@@ -875,7 +971,14 @@ class TabletopShelf(ManipulationEnv):
                 continue
             other = contact.geom2 if b1 in object_bodies else contact.geom1
             name = model.geom_id2name(other) or ""
-            if name.startswith(("robot", "gripper")):
+            # **Everything the robot is made of, not a name prefix.** This used
+            # to test ``name.startswith(("robot", "gripper"))``, which silently
+            # excluded the robot's own base: its geoms are named
+            # ``fixed_mount0_...``. The pedestal is what a disturbed object
+            # actually jams against -- measured on ``robotiq3f/cereal``, the box
+            # slides 99.3 mm and stops on ``fixed_mount0_pedestal_col`` -- so a
+            # check that cannot see it is checking the wrong thing.
+            if name.startswith(("robot", "gripper", "fixed_mount")):
                 worst = max(worst, -float(contact.dist))
         return worst
 
@@ -887,6 +990,11 @@ class TabletopShelf(ManipulationEnv):
     #: whichever hand happened to build the scene first, and the block would
     #: silently become that hand's scene.
     SETTLED_STATES = "configs/settled_states.json"
+
+    @staticmethod
+    def pick_configs_for(world: str) -> dict:
+        """The written-down pick poses for ``world``."""
+        return YCB_PICK_CONFIGS if world == YCB else REAL_PICK_CONFIGS
 
     def _object_by_name(self, name):
         for obj in self.objects:
@@ -941,7 +1049,7 @@ class TabletopShelf(ManipulationEnv):
                     for pos, quat, obj in self.placement_initializer.sample().values()}
         from robosuite.utils.transform_utils import quat_multiply
 
-        x, y, yaw = REAL_PICK_CONFIGS[self.pick_config]
+        x, y, yaw = self.pick_configs_for(self.world)[self.pick_config]
         obj = self.objects[0]
         # Generous: the exact height is set by ``_seat_objects`` from the
         # object's own geometry in whatever orientation it ends up in, which
@@ -957,7 +1065,7 @@ class TabletopShelf(ManipulationEnv):
             return np.array([q[3], q[0], q[1], q[2]])
 
         yaw_q = np.array([0.0, 0.0, np.sin(half), np.cos(half)])
-        quat = to_wxyz(quat_multiply(yaw_q, to_xyzw(rest_quat(obj.name))))
+        quat = to_wxyz(quat_multiply(yaw_q, to_xyzw(rest_quat(obj.name, self.world))))
         return {obj.name: (
             (float(self.table_offset[0]) + x, float(self.table_offset[1]) + y, z),
             quat,
@@ -986,7 +1094,7 @@ class TabletopShelf(ManipulationEnv):
             # and made things worse -- see 7.32 -- so the scene still drops them
             # ~25 mm and this says how bad the starting state is. It reads 0.00
             # for every registered hand now that the arm starts clear.
-            if self.world == REAL:
+            if self.world in (REAL, YCB):
                 # **Seat the object, do not drop it.** The sampler places an
                 # object at ``table_z + z_offset + |bottom_offset|`` and every
                 # one of these assets declares a ``bottom_offset`` about 25 mm
