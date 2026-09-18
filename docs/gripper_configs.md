@@ -703,3 +703,58 @@ capability means bringing in hands that already carry a curated description --
 GraspGen-X ships URDFs for `sharpa_wave` (34 links), `barrett_hand`,
 `surge_hand`, `wuji_hand` and `unitree_g1`, and MuJoCo compiles all of them --
 which is a robosuite modelling task, not an authoring one.
+
+## 19. Correction: eleven of sixteen registered hands had never been tested
+
+Section 18 concluded that no hand is worth porting. That conclusion was reached
+from **five** hands -- the ones with both an authored and a curated description,
+because the question being asked was "is my authoring as good as theirs". Eleven
+registered hands were never put through this harness at all, four of them
+three-finger hands running descriptions GraspGen-X's own authors wrote. Two of
+those, `g1three` and `bd`, were paired in a previous session and had **never
+been validated by grasping anything**.
+
+Run on the same bench -- same `Lift` table, same 40 mm cube, same cached
+candidate sets, same seed:
+
+| hand | fingers | held / reachable | rate | config |
+|---|---|---|---|---|
+| `xarm` | 2 | 10/15 | **67%** | curated |
+| `panda` | 2 | 3/5 | 60% | curated |
+| `robotiq85` | 2 | 9/21 | 43% | curated |
+| **`robotiq3f_dex`** | **3** | **6/15** | **40%** | curated |
+| `robotiq140` | 2 | 6/16 | 38% | curated |
+| `yumi` | 2 | 4/12 | 33% | curated |
+| **`robotiq3f`** | **3** | **6/20** | **30%** | curated |
+| `rethink` | 2 | 1/10 | 10% | curated |
+| `umi` | 2 | 2/25 | 8% | curated |
+| `bd` | 2 | 1/20 | 5% | curated |
+| `g1three` | 3 | 0/8 | 0% | curated |
+| `jaco3f` | 3 | 0/7 | 0% | authored |
+| `inspire` | 5 | 0/5 | 0% | curated |
+
+**Seven of thirteen hands clear 30%, and two of those are three-finger hands.**
+`robotiq3f_dex` at 40% sits above three of the four parallel jaws. The claim
+that finger diversity does not work in this system is wrong: it works for three
+fingers, on two separate hands, both on curated descriptions.
+
+What remains true is narrower and should be stated as such: **no five-finger
+hand grasps**, and **no hand this project authored a description for grasps**
+(`jaco3f`, 0/47 across four draws). Those are different failures -- section 13
+for the first, section 18 for the second -- and neither licenses the broader
+claim.
+
+**The methodological fault is worth more than the numbers.** The
+authored-versus-curated question needed hands with both halves, so the hand set
+was chosen by what made the *comparison* clean rather than by what would answer
+the *project's* question, which is which hands work. A census costs one run and
+should have come first: it would have found `robotiq3f_dex` in an hour rather
+than at the end, and it would have stopped `g1three` and `bd` sitting in the
+registry for a session as untested pairings. **Enumerate the population before
+designing the contrast.**
+
+Two entries here also contradict older records and are flagged rather than
+silently overwritten: `umi` is recorded elsewhere as lifting nothing (0 of 13)
+and reaches 2 of 25 here, and `g1three` and `bd` have no prior grasp measurement
+of any kind. All three are single runs on one object at n <= 25, so they rank
+hands, they do not settle them.
