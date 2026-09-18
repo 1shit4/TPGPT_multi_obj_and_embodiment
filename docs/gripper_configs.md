@@ -481,3 +481,102 @@ generation.
 **Importing GraspGenX triggers a 1.57 GiB checkpoint download** into
 `<repo>/ext/graspgenx_checkpoints` on first use, plus the gripper-description
 pack. Budget for it before running anything that imports the package fresh.
+
+## 15. The other half: getting a grasp from the planner onto real hardware
+
+Sections 6-14 are about making GraspGen-X *emit* a good grasp. This section is
+about *executing* one, which is a separate problem with separate measurements,
+and it is the half a `config.json` says nothing about. It is written for the
+case that matters here: a gripper you printed, bolted to your own arm.
+
+### What the planner hands you, exactly
+
+GraspGen-X returns a 4x4 pose, and that pose is **the gripper base in the
+canonical frame**: `+Z` is the approach direction, `+X` is the closing
+direction. That convention is uniform across all of its grippers -- it is what
+`base_rotation` exists to guarantee, and if you authored your config with a
+`base_rotation` that was wrong, every pose it returns is wrong by that rotation
+and nothing downstream can tell.
+
+Your robot controller does not aim the gripper base. It aims a **tool frame** --
+a flange, or a TCP you configured. So between what the planner says and what you
+command there is a fixed rigid transform with two parts, and both have to be
+measured per gripper:
+
+| | what it is | how wrong it can be |
+|---|---|---|
+| **rotation** | how your tool frame is turned relative to `+Z` approach / `+X` closing | measured across this registry's nine hands: **0.2 degrees** for the Robotiqs, **90** for the XArm, **180** for the Panda, Yumi and Rethink |
+| **translation** | how far along the approach axis the grasp point sits from the base | the `fingertip` depth, **103 to 195 mm** across the same nine hands |
+
+In this project those are `alignment_rotation` and `contact_offset` /
+`calibrated_depth`, and the conversion is `R_tool = R_grasp @ alignment`.
+
+### Why this is the part that bites
+
+**Every failure mode here is silent.** A wrong rotation does not throw, does not
+look like a crash, and does not produce an obviously bad pose. The arm flies
+somewhere plausible, closes on nothing, and the natural conclusion is that the
+grasp was bad. Three measured examples from this project:
+
+* expressed in the model's root-body frame instead of the grasp frame,
+  **GraspGen-X's own Panda description scored 0 of 31** -- a description written
+  by its own authors, failing completely on a frame error;
+* `contact_offset` looked a hand up by identity and returned a **zero** offset
+  for an unmeasured hand. Zero is a plausible number, so a 41 mm frame error
+  read as the arm missing its target;
+* a **19.7 mm** tool-offset error turned a 28 mm placement into a 232 mm one.
+
+And a discrepancy that is nobody's bug, worth knowing exists: GraspGen-X's Panda
+URDF and robosuite's Panda XML place the gripper base **17.50 mm** apart,
+constant across every grasp. Two third-party models of the same hand disagree
+about where its origin is. **A gripper you authored from your own CAD does not
+have this problem**, because the description and the robot are written in the
+same frame -- which is one of the genuine advantages of printing your own.
+
+### The procedure for a new printed gripper
+
+1. **Fix the canonical frame in CAD, once.** Decide which axis of your CAD model
+   is the approach and which is the closing direction, and record the rotation
+   from your export frame to `+Z`/`+X` as `base_rotation` in the config. Do this
+   before anything else; every later number is expressed in it.
+
+2. **Get the rotation from CAD, then verify it physically.** The transform from
+   the gripper base to your tool frame is fixed by the mounting plate, so it is
+   known from the assembly -- you do not need to estimate it. What you do need
+   is a check that catches a sign or an axis swap, because those are the errors
+   that survive inspection. The cheap one: command the hand to a grasp you
+   constructed by hand rather than one the planner produced -- straight down
+   onto a cylinder on the table, closing axis across it -- and confirm the hand
+   arrives the way you drew it. A 90 or 180 degree error is unmissable there and
+   invisible in a planned grasp.
+
+3. **Measure the depth, do not derive it.** Section 7 shows `fingertip` is
+   derivable from the sweep box to about **+-10 mm**, and that the curators of
+   GraspGen-X's own hands then adjusted it by a hand-chosen 5 to 30 mm. Ten
+   millimetres is the difference between gripping an object and brushing it. The
+   measurement is a handful of grasps at a spread of depths on one reference
+   object, keeping everything else fixed, and taking the depth where it holds --
+   `describe --calibrate` in simulation, the identical experiment by hand on
+   hardware. Section 4 shows the response is a **plateau** roughly 30 mm wide,
+   not a peak, so about six depths at 10 mm spacing locates it.
+
+4. **Choose the reference object to suit the hand.** `calibrate_depth` in this
+   project defaults to a 65 mm can, which is a fine reference for a jaw opening
+   to 80 or 125 mm and meaningless for a narrower hand, where the sweep measures
+   "a can does not fit" rather than a depth. Use something comfortably inside
+   the aperture your config declares.
+
+5. **Re-run the calibration whenever the hand changes.** Every
+   `calibrated_depth` in this registry moved when the scene was corrected, by up
+   to 30 mm, and the Panda's wrist-to-fingertip offset went from 41.1 mm to
+   11.1. For a printed gripper, a reprint at a different tolerance or a new pad
+   material is that same kind of change.
+
+### What no config can give you
+
+A `config.json` describes the *hand*. The transform above describes the *hand on
+your robot*, and nothing in GraspGen-X's schema, wizard or asset pack carries
+it -- the wizard never asks what arm you are using. So for every gripper you
+print, budget one mounting measurement in addition to the description, and treat
+it as the more likely source of a confusing failure, because it fails silently
+and the description does not.
