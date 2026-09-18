@@ -1,0 +1,100 @@
+{
+    "open": {
+        "gripper0_right_finger_joint1": 0.039669810064622446,
+        "gripper0_right_finger_joint2": -0.03968932979047027
+    },
+    "close": {
+        "gripper0_right_finger_joint1": 0.0004901359989710713,
+        "gripper0_right_finger_joint2": -0.0005096612328855239
+    },
+    "fingertip": [
+        0.0,
+        0.0,
+        0.10554968282866624
+    ],
+    "sweep_volume": {
+        "extents": [
+            0.07886,
+            0.01811,
+            0.02151
+        ],
+        "offset": [
+            0.0,
+            0.0,
+            0.09555
+        ],
+        "extents2": [
+            0.03957,
+            0.01811,
+            0.02151
+        ],
+        "offset2": [
+            0.0,
+            0.0,
+            0.09555
+        ]
+    },
+    "links": [
+        "gripper0_right_right_gripper",
+        "gripper0_right_eef",
+        "gripper0_right_leftfinger",
+        "gripper0_right_finger_joint1_tip",
+        "gripper0_right_rightfinger",
+        "gripper0_right_finger_joint2_tip"
+    ],
+    "standoff": [
+        0.0,
+        0.0
+    ],
+    "base_rotation": [
+        [
+            1.0,
+            0.0,
+            0.0,
+            0.0
+        ],
+        [
+            0.0,
+            1.0,
+            0.0,
+            0.0
+        ],
+        [
+            0.0,
+            0.0,
+            1.0,
+            0.0
+        ],
+        [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+        ]
+    ],
+    "bbox": [
+        [
+            -0.106318830383078,
+            -0.031650377846273205,
+            -0.027869576190499585
+        ],
+        [
+            0.1031920452153032,
+            0.031687407436034716,
+            0.11004762053920118
+        ]
+    ],
+    "symmetric": true,
+    "type": "parallel_2f",
+    "tpgpt_measured": {
+        "robosuite": "PandaGripper",
+        "robot": "Panda",
+        "n_fingers": 2,
+        "seed": 0,
+        "sweep_samples": 9,
+        "moving_geoms": 6,
+        "closing_axis": 0,
+        "pocket_slices": 16,
+        "n_finger_links": 4
+    }
+}

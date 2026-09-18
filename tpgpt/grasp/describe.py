@@ -136,6 +136,12 @@ SWEEP_HOLD = 12
 #: "half-open" box.
 MID_CLOSURE = 0.5
 
+#: How far beyond the open pocket's centre the grasp point sits, in metres.
+#: The median of what GraspGen-X's own curators applied to their 26 hands,
+#: and independently the optimum of a physics sweep over three authored
+#: descriptions. See the derivation of ``fingertip`` in ``describe_gripper``.
+FINGERTIP_PUSH = 0.010
+
 #: Number of surface points written to ``points.json`` per closure state.
 #: ``grippers.gripper_points`` subsamples to 1024 by default.
 POINTS_PER_STATE = 10500
@@ -673,30 +679,43 @@ def describe_gripper(
         close_points = _surface_points(sim, geom_ids, root_p, root_R,
                                        root_to_grasp, rng)
 
-        # The grasp point. GraspGen-X's wizard derives it, and this is the
-        # derivation, verbatim from ``gripper_config_wizard.py``:
+        # The grasp point. GraspGen-X's wizard derives it from the sweep box
+        # in one line (``gripper_config_wizard.py:1270``):
         #
         #     # Derive fingertip from sweep volume offset
         #     self.fingertip = list(self.sv_offset)
         #
-        # So it is the centre of the open pocket and nothing else has to be
-        # measured -- which matters for a hand that exists only as CAD, where
-        # there is no physics sweep to calibrate against.
+        # -- the centre of the open pocket. That is the whole derivation, which
+        # is what makes a hand describable from CAD alone with no physics.
         #
-        # It is not the whole story, and the curated descriptions say so: five
-        # of the 26 use exactly the box centre and the rest push the point
-        # **forward** along the approach axis by a round 5, 10, 15, 20, 25 or
-        # 30 mm, median 10, maximum 37 (the UMI). Those are a person's
-        # judgement about where along the fingers the object should sit, not a
-        # derivation. GraspGen-X's own fallback for a config-less gripper,
-        # ``make_sweep_volume_gripper_info``, uses a *third* rule -- the top
-        # plane of the box, ``offset[2] + extents[2] / 2`` -- which for the
-        # Panda gives 112.4 mm against the 113.4 mm this module's physics
-        # calibration found independently.
+        # It is not where the curators left it. Across GraspGen-X's own 26
+        # descriptions, ``fingertip - offset[2]`` is a round **5, 10, 15, 20,
+        # 25 or 30 mm** forward along the approach axis -- median 10, maximum
+        # 37 (the UMI) -- with only five hands left at the bare centre. A
+        # person is deciding how far into the fingers the object should sit,
+        # and the box centre is systematically too shallow.
         #
-        # The box centre is what the authoring tool writes, so it is the
-        # default; ``--calibrate`` refines it against physics.
-        fingertip_z = float(offset[2])
+        # ``FINGERTIP_PUSH`` applies that median, and it is not taken on the
+        # curators' authority alone. Swept in physics over three authored
+        # descriptions, holding the config, the cached candidates, the cube and
+        # the seed fixed so that only this number moves:
+        #
+        #     push (mm)      0     5    10    15    20    30
+        #     panda        1/4   1/4   3/4   2/4   3/4   1/4
+        #     robotiq85    1/9   4/9   5/9   1/9   2/8   2/9
+        #     robotiq140  7/12  7/12  7/12  6/12  5/13  5/13
+        #
+        # 10 mm is the optimum on two hands and costs nothing on the third, and
+        # it lands each one near the value GraspGen-X's own authors chose --
+        # the Panda at 105.5 against their 103.4, the Robotiq 2F-85 at 133.2
+        # against their 136.0. Two independent routes to the same number.
+        #
+        # It is a **median, not a law**: the curated pushes span 0 to 37 mm and
+        # the Jaco's own measured optimum is 20. ``--calibrate`` sweeps it per
+        # hand and overwrites this; section 4 shows the response is a plateau
+        # about 30 mm wide, so this default starts inside it rather than at its
+        # edge, which is the point.
+        fingertip_z = float(offset[2]) + FINGERTIP_PUSH
 
         config = {
             "open": open_qpos,

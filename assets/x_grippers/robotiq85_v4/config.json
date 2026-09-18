@@ -1,0 +1,110 @@
+{
+    "open": {
+        "gripper0_right_finger_joint": -0.027457491802521845,
+        "gripper0_right_left_inner_finger_joint": -0.2629231008521675,
+        "gripper0_right_left_inner_knuckle_joint": -0.204468582556571,
+        "gripper0_right_right_outer_knuckle_joint": -0.027454313362166586,
+        "gripper0_right_right_inner_finger_joint": -0.2628392592480844,
+        "gripper0_right_right_inner_knuckle_joint": -0.20447992239047752
+    },
+    "close": {
+        "gripper0_right_finger_joint": 0.5110946147136376,
+        "gripper0_right_left_inner_finger_joint": -0.15066406435939725,
+        "gripper0_right_left_inner_knuckle_joint": 0.25941397779382575,
+        "gripper0_right_right_outer_knuckle_joint": 0.5186721257422934,
+        "gripper0_right_right_inner_finger_joint": -0.11068109061877358,
+        "gripper0_right_right_inner_knuckle_joint": 0.25507123168916446
+    },
+    "fingertip": [
+        0.0,
+        0.0,
+        0.1331517288539023
+    ],
+    "sweep_volume": {
+        "extents": [
+            0.09617,
+            0.027,
+            0.06022
+        ],
+        "offset": [
+            0.0,
+            0.0,
+            0.12315
+        ],
+        "extents2": [
+            0.05081,
+            0.039,
+            0.0889
+        ],
+        "offset2": [
+            0.0,
+            0.0,
+            0.11062
+        ]
+    },
+    "links": [
+        "gripper0_right_robotiq_85_adapter_link",
+        "gripper0_right_eef",
+        "gripper0_right_left_outer_knuckle",
+        "gripper0_right_left_inner_finger",
+        "gripper0_right_left_inner_knuckle",
+        "gripper0_right_right_outer_knuckle",
+        "gripper0_right_right_inner_finger",
+        "gripper0_right_right_inner_knuckle"
+    ],
+    "standoff": [
+        0.0,
+        0.0
+    ],
+    "base_rotation": [
+        [
+            1.0,
+            0.0,
+            0.0,
+            0.0
+        ],
+        [
+            0.0,
+            1.0,
+            0.0,
+            0.0
+        ],
+        [
+            0.0,
+            0.0,
+            1.0,
+            0.0
+        ],
+        [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+        ]
+    ],
+    "bbox": [
+        [
+            -0.07654570476785089,
+            -0.03750204968052668,
+            -0.004620338473527046
+        ],
+        [
+            0.07595358626927684,
+            0.037500786958835026,
+            0.15325797154497395
+        ]
+    ],
+    "symmetric": true,
+    "type": "revolute_2f",
+    "tpgpt_measured": {
+        "robosuite": "Robotiq85Gripper",
+        "robot": "Panda",
+        "n_fingers": 2,
+        "seed": 0,
+        "sweep_samples": 9,
+        "moving_geoms": 22,
+        "closing_axis": 0,
+        "pocket_slices": 22,
+        "n_finger_links": 6
+    }
+}
