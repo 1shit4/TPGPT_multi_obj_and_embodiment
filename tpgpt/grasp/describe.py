@@ -172,45 +172,102 @@ def _local_frame(opened_local, closed_local):
     return basis, moving
 
 
-def _swept_volume(env, gripper, geom_ids, root_id, root_to_grasp, moving,
+def _pad_geoms(geom_ids, local_open, moving, fraction=None):
+    """Which moving geoms are the contact pads.
+
+    The distal band of the fingers, measured back from their tips along the
+    approach axis. Everything proximal to that is knuckle and linkage: it moves
+    when the hand closes, so it is "moving", and it sweeps a far wider arc than
+    the pads do. Including it put the Panda's aperture at **104.6 mm** against a
+    declared 80.
+    """
+    from tpgpt.grasp.measure_frames import DISTAL_FRACTION
+
+    band = DISTAL_FRACTION if fraction is None else fraction
+    along = local_open[moving][:, 2]
+    cut = along.max() - band * (float(np.ptp(along)) or 0.01)
+    # ``moving`` masks the *rows* of the geom array, so its indices address
+    # ``geom_ids`` and not MuJoCo's global geom table. Using them directly as
+    # geom ids reads the AABBs of whatever else is in the scene, and the Panda's
+    # aperture came out as 3472 mm -- the width of the room.
+    rows = np.flatnonzero(moving)[along >= cut]
+    return [int(geom_ids[r]) for r in rows]
+
+
+def _solid_corners(sim, geom_ids, root_p, root_R, root_to_grasp):
+    """Corners of each geom's exact box, in the grasp frame.
+
+    Solid rather than centres. The swept volume's extent **across** the closing
+    axis is the pads' own cross-section -- the Panda's 18 x 18 mm -- and its two
+    fingers sit at the same height and the same depth, so a box fitted to their
+    *centres* is 0 mm wide in that direction. A degenerate box is not a smaller
+    error than a wrong one: it is what the model conditions on.
+    """
+    aabb = np.array(sim.model.geom_aabb).reshape(-1, 6)
+    signs = np.array(np.meshgrid(*[[-1, 1]] * 3)).T.reshape(-1, 3)
+    out = []
+    for gid in geom_ids:
+        centre, half = aabb[gid][:3], aabb[gid][3:]
+        pos = np.array(sim.data.geom_xpos[gid])
+        rot = np.array(sim.data.geom_xmat[gid]).reshape(3, 3)
+        world = pos + (centre + signs * half) @ rot.T
+        out.append(((world - root_p) @ root_R) @ root_to_grasp)
+    return np.vstack(out)
+
+
+def _largest_gap(coordinate):
+    """The widest empty interval along one axis of a set of points.
+
+    This is the aperture: the space between the two groups of fingers, which is
+    what an object has to fit into.
+
+    Splitting the pads by the *sign* of their coordinate is the obvious way and
+    it is wrong for anything but a symmetric jaw. It assumes the two groups
+    straddle the origin, and a hand whose fingers curl does not oblige -- at the
+    distal band its pads can sit wholly on one side, so the split puts every pad
+    in one group, leaves the other empty, and reports an aperture of nothing.
+    Measured that way, the Inspire hand read **6.8 mm** against a declared 80,
+    the SchunkSvh **0.8** and the Ability hand **0.1**.
+
+    The largest gap needs no such assumption: sort the coordinates and take the
+    biggest step between neighbours. For a parallel jaw that is exactly the
+    space between the two fingers; for a thumb opposing four fingers it is the
+    space between the thumb and the rest, wherever they sit.
+    """
+    values = np.sort(np.asarray(coordinate, dtype=float))
+    if len(values) < 2:
+        return 0.0
+    return float(np.max(np.diff(values)))
+
+
+def _swept_volume(env, gripper, geom_ids, pad_ids, root_id, root_to_grasp,
                   start_fraction, freeze):
-    """The region the fingers **traverse** while closing, as an axis-aligned box.
+    """The region the finger **pads** traverse while closing, as a box.
 
-    This is GraspGen-X's own definition (arXiv:2606.00998): *"the region
-    traversed by the robot fingers during its grasping motion"*, recorded for
-    two states -- from fully open, and from halfway closed -- and fed to the
-    model as 3 extents plus 3 offsets per state.
+    GraspGen-X's own definition (arXiv:2606.00998): *"the region traversed by
+    the robot fingers during its grasping motion"*, recorded from fully open
+    and from half closed, and fed to the model as three extents plus three
+    offsets per state.
 
-    **Not the free space between the fingers**, which is what an earlier
-    version of this module measured. The two nearly coincide for a parallel
-    jaw, which is why that version reproduced the shipped apertures for the
-    Panda, Yumi and Robotiq 2F-140 and why the agreement looked like
-    validation. For a hand whose fingers curl inward they are unrelated
-    quantities, and the error read as a five-finger hand that could not open
-    more than 28 mm.
+    Three things make this match what the shipped descriptions contain, and
+    each was got wrong first:
 
-    The Panda's shipped config is the check: its finger joint travels 0.04 m
-    per side, and ``extents[0]`` is **0.08** -- the total travel of the two
-    fingers, not the gap between them -- with ``extents2[0]`` = 0.04, the
-    travel from half-closed.
+    * the **pads**, not every moving geom -- see :func:`_pad_geoms`;
+    * the pads' **solid** volume, not their centres -- see
+      :func:`_solid_corners`;
+    * the offset's x and y forced to **zero**. Every one of GraspGen-X's own
+      26 descriptions has ``offset = [0, 0, z]``: the box is centred on the
+      approach axis by convention, and a hand whose pads are a millimetre
+      off-centre in the model should not be described as gripping off-axis.
 
-    Args:
-        start_fraction: Closure to sweep from. 0 gives the open-state box,
-            0.5 the half-closed one.
-        freeze: Callable holding the arm still between steps.
-
-    Returns:
-        ``(extents, offset)`` in the grasp frame.
+    The Panda is the check, because its declared numbers are unambiguous: its
+    finger joint travels 0.04 m per side and ``extents[0]`` is 0.08, the two
+    fingers' total travel, with ``extents[1]`` and ``extents[2]`` at 0.018, the
+    pad's own cross-section.
     """
     from tpgpt.sim.replay import closing_direction, set_closure
 
     sim = env.sim
-    # How a partial closure is commanded depends on the hand -- see
-    # ``grippers.commands_position``. On a passthrough hand ``set_closure``
-    # writes a field ``format_action`` never reads, so driving the sweep with
-    # it would hold the hand at one pose and report the open box for both
-    # states. The Schunk hand read an identical 151.9 mm at open **and** at
-    # half closure before this, which is that bug's signature.
     passthrough = commands_position(gripper)
     direction = None if passthrough else closing_direction(gripper)
 
@@ -218,6 +275,9 @@ def _swept_volume(env, gripper, geom_ids, root_id, root_to_grasp, moving,
     for _ in range(SETTLE_STEPS):
         env.step(action)
         freeze()
+
+    root_p = np.array(sim.data.body_xpos[root_id])
+    root_R = np.array(sim.data.body_xmat[root_id]).reshape(3, 3)
 
     traversed = []
     for fraction in np.linspace(float(start_fraction), 1.0, SWEEP_SAMPLES):
@@ -229,11 +289,29 @@ def _swept_volume(env, gripper, geom_ids, root_id, root_to_grasp, moving,
         for _ in range(SWEEP_HOLD):
             env.step(command)
             freeze()
-        traversed.append(_root_local(sim, geom_ids, root_id)[moving] @ root_to_grasp)
+        traversed.append(
+            _solid_corners(sim, pad_ids, root_p, root_R, root_to_grasp)
+        )
 
+    # Across the closing axis and along the approach, the box is the region the
+    # pads **sweep**: a revolute finger swings through a much taller volume than
+    # it occupies at any one moment, which is why the Robotiq 2F-140 declares
+    # 62 mm of depth for a pad a fraction of that.
     points = np.vstack(traversed)
     lo, hi = points.min(axis=0), points.max(axis=0)
-    return hi - lo, (hi + lo) / 2.0
+
+    # Along the closing axis it is the **gap between the jaws**, not the solid
+    # union. A swept union there would span the fingers *and* the space between
+    # them plus their own thickness; the Panda came out at 94.9 mm against a
+    # declared 80, which is exactly its 2 x 0.04 m of travel. Closing only
+    # narrows the gap, so the union of the gap over the sweep is the gap at the
+    # state the sweep starts from.
+    first = traversed[0]
+    aperture = _largest_gap(first[:, 0])
+
+    extents = np.array([aperture, float(hi[1] - lo[1]), float(hi[2] - lo[2])])
+    offset = np.array([0.0, 0.0, float((hi[2] + lo[2]) / 2.0)])
+    return extents, offset
 
 
 def _bbox(sim, geom_ids, root_p, root_R, root_to_grasp):
@@ -419,22 +497,31 @@ def describe_gripper(
         open_points = _surface_points(sim, geom_ids, root_p, root_R,
                                       root_to_grasp, rng)
 
-        # The two boxes the model conditions on: the region the fingers cover
+        # The two boxes the model conditions on: the region the pads cover
         # sweeping from fully open to shut, and from half-closed to shut.
+        pad_ids = _pad_geoms(geom_ids, local_open, moving)
         extents, offset = _swept_volume(
-            env, gripper, geom_ids, root_id, root_to_grasp, moving, 0.0, freeze_arm)
+            env, gripper, geom_ids, pad_ids, root_id, root_to_grasp,
+            0.0, freeze_arm)
         extents2, offset2 = _swept_volume(
-            env, gripper, geom_ids, root_id, root_to_grasp, moving,
+            env, gripper, geom_ids, pad_ids, root_id, root_to_grasp,
             MID_CLOSURE, freeze_arm)
 
         settle(1.0)
         close_points = _surface_points(sim, geom_ids, root_p, root_R,
                                        root_to_grasp, rng)
 
-        # The grasp point: the far face of the swept box along the approach
-        # axis, which is where the fingertips are when the hand is open and so
-        # where an object first meets them.
-        fingertip_z = float(offset[2] + extents[2] / 2.0)
+        # The grasp point: the **centre** of the swept box along the approach
+        # axis. That is where an object's own centre ends up when the pads
+        # close on it, which is what a tool-centre depth means.
+        #
+        # Checked against the descriptions GraspGen-X wrote: for the Panda,
+        # ``fingertip`` and ``offset[2]`` are the same number, 103.4 mm. For
+        # the other ten hands ``fingertip`` sits 0 to 37 mm beyond the box
+        # centre, with no constant relationship -- those are annotations a
+        # person entered, not a derivation, so the box centre is the defensible
+        # choice and section 4 measures what a wrong one costs.
+        fingertip_z = float(offset[2])
 
         config = {
             "open": open_qpos,
@@ -472,6 +559,103 @@ def describe_gripper(
             "close": close_points.round(5).tolist(),
         }
         return config, points
+    finally:
+        env.close()
+
+
+def calibrate_fingertip(name, gripper_short, candidates=None, n_grasps=20,
+                        cone_deg=75.0, seed=0):
+    """Choose ``fingertip`` by grasping with it, rather than by deriving it.
+
+    Every other field in a description is geometry and can be measured off the
+    model. ``fingertip`` cannot, and the reason is worth stating because it
+    looks like it should be derivable.
+
+    It is the tool-centre depth: how far along the approach axis the grasp point
+    sits from the gripper's base. The hand's own geometry gives a candidate --
+    the centre of the region its pads sweep -- and for the Panda that is
+    **93.4 mm** while the description GraspGen-X ships says **103.4**. Neither
+    is wrong about the hand. They disagree because "the grasp point" is a
+    convention: the model is trained to place the base so that
+    ``base + depth * approach`` lands on the object, and which point of the
+    object that is -- its surface, its centre, the middle of the pads -- is not
+    fixed by the hand.
+
+    What physics settles is the **total** depth. Executed on a 40 mm cube, the
+    same grasps held 3 of 12 at 93.4 mm and **8 of 12** at 103.4, and a sweep
+    peaks around 110 -- which is the shipped 103.4 plus the Panda's own stored
+    ``calibrated_depth`` of 7.5. So the two numbers trade off exactly, and only
+    their sum is observable.
+
+    Inside this project that means a wrong ``fingertip`` is absorbed by
+    ``verify.calibrate_depth`` and costs nothing once that has been run -- which
+    is the onboarding step that was skipped for the four hands that then held
+    **0 of 41** grasps. On hardware there is no such second chance: the
+    description has to be right on its own. So it is calibrated here.
+
+    Args:
+        name: GraspGen-X description to calibrate, already installed.
+        gripper_short: The registry hand it describes.
+        candidates: Depths in metres to try. Defaults to a spread around the
+            description's current value.
+        n_grasps: Grasps executed per candidate. They are the **same** grasps at
+            every depth -- the planner never sees ``fingertip``, so this is an
+            exact one-variable sweep rather than a comparison of draws.
+
+    Returns:
+        ``{"fingertip", "tried", "held", "rate"}``, or ``None`` if no candidate
+        held anything.
+    """
+    import json as _json
+
+    from tpgpt.grasp import validate_config as V
+    from tpgpt.grasp.client import GraspGenClient
+
+    current = _json.loads(gripper_config_path(name).read_text())["fingertip"][2]
+    if candidates is None:
+        # Spread either side of the geometric value, not just beyond it. The
+        # Yumi's optimum came out at the **lowest** depth a one-sided range
+        # offered, which is a sweep reporting its own edge rather than a
+        # maximum; a peak at an endpoint means the range was wrong.
+        candidates = [current + d / 1000.0
+                      for d in (-30, -20, -10, 0, 10, 20, 30)]
+
+    env = V._lift_scene(gripper_short, seed=seed)
+    try:
+        centre, half = V._cube_state(env)
+        cloud = V.surface_cloud(half, centre, seed=seed)
+        client = GraspGenClient()
+        try:
+            poses, scores = V.propose(cloud, name, client=client,
+                                      num_grasps=400, topk=100)
+        finally:
+            client.close()
+        down = np.array([0.0, 0.0, -1.0])
+        above = [i for i in range(len(poses))
+                 if float(poses[i][:3, 2] @ down) >= np.cos(np.radians(cone_deg))]
+        order = sorted(above, key=lambda i: -scores[i])[:n_grasps]
+        if not order:
+            return None
+
+        best, tried = None, []
+        for depth in candidates:
+            rows = [V.teleport_grasp(env, poses[i], gripper_short, depth, seed=seed)
+                    for i in order]
+            got = [r for r in rows if r["reachable"]]
+            held = sum(1 for r in got if r["held"])
+            rate = held / len(got) if got else 0.0
+            tried.append({"fingertip": float(depth), "reachable": len(got),
+                          "held": held, "rate": rate})
+            if best is None or rate > best["rate"]:
+                best = tried[-1]
+        # A maximum at either end is the range's edge, not the hand's optimum.
+        if best is not None and tried and best["rate"] > 0 and \
+                best["fingertip"] in (tried[0]["fingertip"], tried[-1]["fingertip"]):
+            best = dict(best, at_edge=True)
+        if best is None or best["held"] == 0:
+            return {"fingertip": None, "tried": tried, "held": 0, "rate": 0.0}
+        return {"fingertip": best["fingertip"], "tried": tried,
+                "held": best["held"], "rate": best["rate"]}
     finally:
         env.close()
 
@@ -565,6 +749,12 @@ def main(argv=None):
     parser.add_argument("--out", default=str(ASSETS_ROOT))
     parser.add_argument("--install", action="store_true",
                         help="also copy into the GraspGen-X asset root")
+    parser.add_argument(
+        "--calibrate", action="store_true",
+        help="after writing and installing, choose `fingertip` by grasping "
+             "with it -- see calibrate_fingertip() for why it cannot be "
+             "derived. Requires --install.",
+    )
     parser.add_argument("--validate", action="store_true",
                         help="describe the hands GraspGen-X already describes "
                              "and compare, instead of writing anything")
@@ -607,6 +797,39 @@ def main(argv=None):
     print(f"  wrote         {out}")
     if args.install:
         print(f"  installed     {install(args.name, Path(args.out))}")
+    if args.calibrate:
+        if not args.install:
+            parser.error("--calibrate needs --install: it grasps with the "
+                         "installed description")
+        short = next((k for k, v in GRIPPER_PAIRS.items()
+                      if v.robosuite == args.gripper), None)
+        if short is None:
+            parser.error(f"{args.gripper} is not in GRIPPER_PAIRS, so there is "
+                         "no registry hand to grasp with")
+        result = calibrate_fingertip(args.name, short)
+        if result is None:
+            print("  calibration   no top-down grasps to try")
+        elif result["fingertip"] is None:
+            print("  calibration   nothing held at any depth; fingertip left "
+                  f"at {config['fingertip'][2] * 1000:.1f} mm")
+            for row in result["tried"]:
+                print(f"      {row['fingertip'] * 1000:7.1f} mm  "
+                      f"{row['held']}/{row['reachable']}")
+        else:
+            for row in result["tried"]:
+                mark = "  <<<" if row["fingertip"] == result["fingertip"] else ""
+                print(f"      {row['fingertip'] * 1000:7.1f} mm  "
+                      f"held {row['held']:2}/{row['reachable']:<3}"
+                      f"  {100 * row['rate']:3.0f}%{mark}")
+            config["fingertip"] = [0.0, 0.0, float(result["fingertip"])]
+            config.setdefault("tpgpt_measured", {})["fingertip_calibrated"] = {
+                "rate": result["rate"], "held": result["held"],
+                "tried": result["tried"],
+            }
+            write_description(config, points, args.name, Path(args.out))
+            install(args.name, Path(args.out))
+            print(f"  calibration   fingertip {result['fingertip'] * 1000:.1f} mm "
+                  f"({100 * result['rate']:.0f}% of grasps held)")
     return out
 
 
