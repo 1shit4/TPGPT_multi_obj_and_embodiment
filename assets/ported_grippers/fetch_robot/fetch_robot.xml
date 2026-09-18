@@ -1,0 +1,40 @@
+<mujoco model="fetch_robot">
+  <compiler angle="radian" strippath="false" />
+  <asset>
+    <mesh name="gripper_link_cvx0" content_type="model/obj" file="./meshes/gripper_link_cvx0.obj" />
+    <mesh name="r_gripper_finger_link_cvx0" content_type="model/obj" file="./meshes/r_gripper_finger_link_cvx0.obj" />
+    <mesh name="l_gripper_finger_link_cvx0" content_type="model/obj" file="./meshes/l_gripper_finger_link_cvx0.obj" />
+  </asset>
+  <worldbody>
+    <body name="right_gripper" pos="0 0 0">
+      <site name="ft_frame" pos="0 0 0" size="0.01 0.01 0.01" rgba="1 0 0 1" type="sphere" group="1" />
+      <inertial pos="0 0 0.05" mass="0.3" diaginertia="0.09 0.07 0.05" />
+      <body name="eef" pos="0 0 0.17" quat="1 0 0 0">
+        <site name="grip_site" pos="0 0 0" size="0.01 0.01 0.01" rgba="1 0 0 0.5" type="sphere" group="1" />
+        <site name="ee_x" pos="0.1 0 0" size="0.005 .1" quat="0.707105 0 0.707108 0" rgba="1 0 0 0" type="cylinder" group="1" />
+        <site name="ee_y" pos="0 0.1 0" size="0.005 .1" quat="0.707105 0.707108 0 0" rgba="0 1 0 0" type="cylinder" group="1" />
+        <site name="ee_z" pos="0 0 0.1" size="0.005 .1" quat="1 0 0 0" rgba="0 0 1 0" type="cylinder" group="1" />
+        <site name="grip_site_cylinder" pos="0 0 0" size="0.005 10" rgba="0 1 0 0.3" type="cylinder" group="1" />
+      </body>
+      <geom pos="0 0 0.154" quat="0.499998 0.5 -0.5 0.500002" type="mesh" mesh="gripper_link_cvx0" name="palm_collision_0" group="0" condim="4" friction="1 0.005 0.0001" />
+      <body name="r_gripper_finger_link" pos="-0.015425 -5.66592e-08 0.154" quat="0.499998 0.5 -0.5 0.500002">
+        <joint name="r_gripper_finger_joint" pos="0 0 0" axis="0 1 0" type="slide" range="0 0.05" actuatorfrcrange="-200 200" damping="1.0" armature="0.1" frictionloss="0.1" />
+        <geom pos="0 0.101425 0" quat="1 0 0 0" type="mesh" rgba="0.356 0.361 0.376 1" mesh="r_gripper_finger_link_cvx0" name="r_gripper_finger_link_collision_0" group="0" condim="4" friction="2 0.05 0.0001" solref="0.01 0.5" />
+      </body>
+      <body name="l_gripper_finger_link" pos="0.015425 5.66592e-08 0.154" quat="0.499998 0.5 -0.5 0.500002">
+        <joint name="l_gripper_finger_joint" pos="0 0 0" axis="0 -1 0" type="slide" range="0 0.05" actuatorfrcrange="-200 200" damping="1.0" armature="0.1" frictionloss="0.1" />
+        <geom pos="0 -0.101425 0" quat="1 0 0 0" type="mesh" rgba="0.356 0.361 0.376 1" mesh="l_gripper_finger_link_cvx0" name="l_gripper_finger_link_collision_0" group="0" condim="4" friction="2 0.05 0.0001" solref="0.01 0.5" />
+      </body>
+    </body>
+  </worldbody>
+  <actuator>
+    <position name="gripper_r_gripper_finger_joint" joint="r_gripper_finger_joint" ctrllimited="true" ctrlrange="0.0 0.05" kp="1000.0" forcelimited="true" forcerange="-20.0 20.0" />
+  </actuator>
+  <equality>
+    <joint joint1="l_gripper_finger_joint" polycoef="0 0 0 0 0" />
+  </equality>
+  <sensor>
+    <force name="force_ee" site="ft_frame" />
+    <torque name="torque_ee" site="ft_frame" />
+  </sensor>
+</mujoco>

@@ -1,0 +1,178 @@
+<mujoco model="wuji_hand">
+  <compiler angle="radian" strippath="false" />
+  <asset>
+    <mesh name="right_palm_link" content_type="model/stl" file="meshes/right_palm_link.STL" />
+    <mesh name="right_finger1_link1" content_type="model/stl" file="meshes/right_finger1_link1.STL" />
+    <mesh name="right_finger1_link2" content_type="model/stl" file="meshes/right_finger1_link2.STL" />
+    <mesh name="right_finger1_link3" content_type="model/stl" file="meshes/right_finger1_link3.STL" />
+    <mesh name="right_finger1_link4" content_type="model/stl" file="meshes/right_finger1_link4.STL" />
+    <mesh name="right_finger1_tip_link" content_type="model/stl" file="meshes/right_finger1_tip_link.STL" />
+    <mesh name="right_finger2_link1" content_type="model/stl" file="meshes/right_finger2_link1.STL" />
+    <mesh name="right_finger2_link2" content_type="model/stl" file="meshes/right_finger2_link2.STL" />
+    <mesh name="right_finger2_link3" content_type="model/stl" file="meshes/right_finger2_link3.STL" />
+    <mesh name="right_finger2_link4" content_type="model/stl" file="meshes/right_finger2_link4.STL" />
+    <mesh name="right_finger2_tip_link" content_type="model/stl" file="meshes/right_finger2_tip_link.STL" />
+    <mesh name="right_finger3_link1" content_type="model/stl" file="meshes/right_finger3_link1.STL" />
+    <mesh name="right_finger3_link2" content_type="model/stl" file="meshes/right_finger3_link2.STL" />
+    <mesh name="right_finger3_link3" content_type="model/stl" file="meshes/right_finger3_link3.STL" />
+    <mesh name="right_finger3_link4" content_type="model/stl" file="meshes/right_finger3_link4.STL" />
+    <mesh name="right_finger3_tip_link" content_type="model/stl" file="meshes/right_finger3_tip_link.STL" />
+    <mesh name="right_finger4_link1" content_type="model/stl" file="meshes/right_finger4_link1.STL" />
+    <mesh name="right_finger4_link2" content_type="model/stl" file="meshes/right_finger4_link2.STL" />
+    <mesh name="right_finger4_link3" content_type="model/stl" file="meshes/right_finger4_link3.STL" />
+    <mesh name="right_finger4_link4" content_type="model/stl" file="meshes/right_finger4_link4.STL" />
+    <mesh name="right_finger4_tip_link" content_type="model/stl" file="meshes/right_finger4_tip_link.STL" />
+    <mesh name="right_finger5_link1" content_type="model/stl" file="meshes/right_finger5_link1.STL" />
+    <mesh name="right_finger5_link2" content_type="model/stl" file="meshes/right_finger5_link2.STL" />
+    <mesh name="right_finger5_link3" content_type="model/stl" file="meshes/right_finger5_link3.STL" />
+    <mesh name="right_finger5_link4" content_type="model/stl" file="meshes/right_finger5_link4.STL" />
+    <mesh name="right_finger5_tip_link" content_type="model/stl" file="meshes/right_finger5_tip_link.STL" />
+  </asset>
+  <worldbody>
+    <body name="right_gripper" pos="0 0 0">
+      <site name="ft_frame" pos="0 0 0" size="0.01 0.01 0.01" rgba="1 0 0 1" type="sphere" group="1" />
+      <inertial pos="0 0 0.05" mass="0.3" diaginertia="0.09 0.07 0.05" />
+      <body name="eef" pos="0 0 0.105" quat="1 0 0 0">
+        <site name="grip_site" pos="0 0 0" size="0.01 0.01 0.01" rgba="1 0 0 0.5" type="sphere" group="1" />
+        <site name="ee_x" pos="0.1 0 0" size="0.005 .1" quat="0.707105 0 0.707108 0" rgba="1 0 0 0" type="cylinder" group="1" />
+        <site name="ee_y" pos="0 0.1 0" size="0.005 .1" quat="0.707105 0.707108 0 0" rgba="0 1 0 0" type="cylinder" group="1" />
+        <site name="ee_z" pos="0 0 0.1" size="0.005 .1" quat="1 0 0 0" rgba="0 0 1 0" type="cylinder" group="1" />
+        <site name="grip_site_cylinder" pos="0 0 0" size="0.005 10" rgba="0 1 0 0.3" type="cylinder" group="1" />
+      </body>
+      <geom pos="0.06 0 0.01" quat="0.877583 0 -0.479426 0" type="mesh" rgba="0.89804 0.91765 0.92941 1" mesh="right_palm_link" name="palm_collision_0" group="0" condim="4" friction="1 0.005 0.0001" />
+      <body name="right_finger1_link1" pos="0.0404454 0.020575 0.0326862" quat="0.6373 -0.358503 -0.256424 -0.632116">
+        <inertial pos="-0.0024628 -0.0014428 0.0077802" quat="0.904243 0.21652 0.0443878 -0.365368" mass="0.0075" diaginertia="3.37599e-07 3.01198e-07 2.11203e-07" />
+        <joint name="right_finger1_joint1" pos="0 0 0" axis="0 1 0" range="0.0475 1.6033" actuatorfrcrange="-0.4452 0.4452" damping="1.0" armature="0.1" frictionloss="0.1" />
+        <geom type="mesh" rgba="0.89804 0.91765 0.92941 1" mesh="right_finger1_link1" name="right_finger1_link1_collision_0" group="0" condim="4" friction="2 0.05 0.0001" solref="0.01 0.5" />
+        <body name="right_finger1_link2" pos="-0.0047549 -0.0060191 0.014132" quat="0.616955 -0.0855901 -0.290851 0.726255">
+          <inertial pos="0.0011196 -1.2405e-05 0.015663" quat="0.815906 0.0024483 -0.00462559 0.57816" mass="0.0248" diaginertia="2.81725e-06 2.75299e-06 6.79766e-07" />
+          <joint name="right_finger1_joint2" pos="0 0 0" axis="0 -1 0" range="-0.1387 0.9324" actuatorfrcrange="-0.4259 0.4259" damping="1.0" armature="0.1" frictionloss="0.1" />
+          <geom type="mesh" rgba="0.89804 0.91765 0.92941 1" mesh="right_finger1_link2" name="right_finger1_link2_collision_0" group="0" condim="4" friction="2 0.05 0.0001" solref="0.01 0.5" />
+          <body name="right_finger1_link3" pos="0.00018873 -0.0009916 0.034664" quat="0.577852 0.0212383 -0.0150031 -0.815727">
+            <inertial pos="-0.0011235 -1.579e-05 0.013056" quat="0.999951 0 0.00989566 0" mass="0.0165" diaginertia="1.4604e-06 1.42e-06 4.49604e-07" />
+            <joint name="right_finger1_joint3" pos="0 0 0" axis="0 1 0" range="-0.4642 1.5623" actuatorfrcrange="-0.1888 0.1888" damping="1.0" armature="0.1" frictionloss="0.1" />
+            <geom type="mesh" rgba="0.89804 0.91765 0.92941 1" mesh="right_finger1_link3" name="right_finger1_link3_collision_0" group="0" condim="4" friction="2 0.05 0.0001" solref="0.01 0.5" />
+            <body name="right_finger1_link4" pos="0 -0.00025 0.0295">
+              <inertial pos="-0.00160983 0.000234366 0.0113487" quat="0.705453 -0.0487835 -0.0489426 0.705379" mass="0.0206" diaginertia="2.60023e-06 2.58038e-06 7.59852e-07" />
+              <joint name="right_finger1_joint4" pos="0 0 0" axis="0 1 0" range="-0.4699 1.5568" actuatorfrcrange="-0.1468 0.1468" damping="1.0" armature="0.1" frictionloss="0.1" />
+              <geom type="mesh" rgba="0.89804 0.91765 0.92941 1" mesh="right_finger1_link4" name="right_finger1_link4_collision_0" group="0" condim="4" friction="2 0.05 0.0001" solref="0.01 0.5" />
+              <geom pos="-0.0011048 0.00023218 0.0283" type="mesh" rgba="0.89804 0.91765 0.92941 1" mesh="right_finger1_tip_link" name="right_finger1_link4_collision_1" group="0" condim="4" friction="2 0.05 0.0001" solref="0.01 0.5" />
+            </body>
+          </body>
+        </body>
+      </body>
+      <body name="right_finger2_link1" pos="-0.0205171 0.029434 0.0547234" quat="0.856253 0.0014034 -0.501133 -0.125277">
+        <inertial pos="-0.0013291 -3.2911e-08 0.00031987" quat="0.92388 0 0.382683 0" mass="0.0032" diaginertia="1.1e-07 7e-08 5e-08" />
+        <joint name="right_finger2_joint1" pos="0 0 0" axis="0 1 0" range="-0.1585 1.5604" actuatorfrcrange="-0.6188 0.6188" damping="1.0" armature="0.1" frictionloss="0.1" />
+        <geom type="mesh" rgba="0.89804 0.91765 0.92941 1" mesh="right_finger2_link1" name="right_finger2_link1_collision_0" group="0" condim="4" friction="2 0.05 0.0001" solref="0.01 0.5" />
+        <body name="right_finger2_link2" pos="0.0022 0 0.004">
+          <inertial pos="-0.0061577 -4.1189e-07 0.020911" quat="0.70703 0.0104245 0.0104245 0.70703" mass="0.033" diaginertia="6.34e-06 6.31472e-06 8.85281e-07" />
+          <joint name="right_finger2_joint2" pos="0 0 0" axis="-1 0 0" range="-0.4069 0.2988" actuatorfrcrange="-0.1822 0.1822" damping="1.0" armature="0.1" frictionloss="0.1" />
+          <geom type="mesh" rgba="0.89804 0.91765 0.92941 1" mesh="right_finger2_link2" name="right_finger2_link2_collision_0" group="0" condim="4" friction="2 0.05 0.0001" solref="0.01 0.5" />
+          <body name="right_finger2_link3" pos="-0.0047503 0 0.043618" quat="1 0 0 -0.000134305">
+            <inertial pos="-0.0011668 4.1873e-06 0.026893" quat="0.999892 0 -0.0146884 0" mass="0.0165" diaginertia="1.47088e-06 1.44e-06 4.49118e-07" />
+            <joint name="right_finger2_joint3" pos="0 0 0" axis="0 1 0" range="-0.4777 1.5485" actuatorfrcrange="-0.2251 0.2251" damping="1.0" armature="0.1" frictionloss="0.1" />
+            <geom type="mesh" rgba="0.89804 0.91765 0.92941 1" mesh="right_finger2_link3" name="right_finger2_link3_collision_0" group="0" condim="4" friction="2 0.05 0.0001" solref="0.01 0.5" />
+            <body name="right_finger2_link4" pos="0 0 0.0295">
+              <inertial pos="-0.000766056 -0.000179751 0.00770944" quat="0.998354 0.0103509 -0.0508894 0.0243386" mass="0.01718" diaginertia="1.58547e-06 1.49202e-06 4.21685e-07" />
+              <joint name="right_finger2_joint4" pos="0 0 0" axis="0 1 0" range="-0.4683 1.5753" actuatorfrcrange="-0.217 0.217" damping="1.0" armature="0.1" frictionloss="0.1" />
+              <geom type="mesh" rgba="0.89804 0.91765 0.92941 1" mesh="right_finger2_link4" name="right_finger2_link4_collision_0" group="0" condim="4" friction="2 0.05 0.0001" solref="0.01 0.5" />
+              <geom pos="-0.00105 0 0.0274" type="mesh" rgba="0.89804 0.91765 0.92941 1" mesh="right_finger2_tip_link" name="right_finger2_link4_collision_1" group="0" condim="4" friction="2 0.05 0.0001" solref="0.01 0.5" />
+            </body>
+          </body>
+        </body>
+      </body>
+      <body name="right_finger3_link1" pos="-0.0210002 0.0074615 0.049579" quat="0.855835 -0.000150428 -0.517249 0.000248898">
+        <inertial pos="-0.0013291 3.4987e-09 0.00031994" quat="0.92388 0 0.382683 0" mass="0.0032" diaginertia="1.1e-07 7e-08 5e-08" />
+        <joint name="right_finger3_joint1" pos="0 0 0" axis="0 1 0" range="-0.1644 1.5516" actuatorfrcrange="-0.6494 0.6494" damping="1.0" armature="0.1" frictionloss="0.1" />
+        <geom type="mesh" rgba="0.89804 0.91765 0.92941 1" mesh="right_finger3_link1" name="right_finger3_link1_collision_0" group="0" condim="4" friction="2 0.05 0.0001" solref="0.01 0.5" />
+        <body name="right_finger3_link2" pos="0.0022 0 0.004">
+          <inertial pos="-0.0061576 -4.1651e-07 0.020911" quat="0.70703 0.0104245 0.0104245 0.70703" mass="0.033" diaginertia="6.34e-06 6.31472e-06 8.85281e-07" />
+          <joint name="right_finger3_joint2" pos="0 0 0" axis="-1 0 0" range="-0.3995 0.3055" actuatorfrcrange="-0.1827 0.1827" damping="1.0" armature="0.1" frictionloss="0.1" />
+          <geom type="mesh" rgba="0.89804 0.91765 0.92941 1" mesh="right_finger3_link2" name="right_finger3_link2_collision_0" group="0" condim="4" friction="2 0.05 0.0001" solref="0.01 0.5" />
+          <body name="right_finger3_link3" pos="-0.00475 0 0.043618" quat="1 0 0 -0.000134305">
+            <inertial pos="-0.0011214 4.331e-06 0.015763" quat="0.999892 0 -0.0146884 0" mass="0.0165" diaginertia="1.47088e-06 1.44e-06 4.49118e-07" />
+            <joint name="right_finger3_joint3" pos="0 0 0" axis="0 1 0" range="-0.4739 1.5512" actuatorfrcrange="-0.2078 0.2078" damping="1.0" armature="0.1" frictionloss="0.1" />
+            <geom type="mesh" rgba="0.89804 0.91765 0.92941 1" mesh="right_finger3_link3" name="right_finger3_link3_collision_0" group="0" condim="4" friction="2 0.05 0.0001" solref="0.01 0.5" />
+            <body name="right_finger3_link4" pos="0 0 0.0295">
+              <inertial pos="-0.000766442 -0.000180017 0.00770944" quat="0.998352 0.0103722 -0.0509199 0.0243491" mass="0.01718" diaginertia="1.5855e-06 1.49202e-06 4.21669e-07" />
+              <joint name="right_finger3_joint4" pos="0 0 0" axis="0 1 0" range="-0.4684 1.5745" actuatorfrcrange="-0.2018 0.2018" damping="1.0" armature="0.1" frictionloss="0.1" />
+              <geom type="mesh" rgba="0.89804 0.91765 0.92941 1" mesh="right_finger3_link4" name="right_finger3_link4_collision_0" group="0" condim="4" friction="2 0.05 0.0001" solref="0.01 0.5" />
+              <geom pos="-0.0010491 0 0.0267" type="mesh" rgba="0.89804 0.91765 0.92941 1" mesh="right_finger3_tip_link" name="right_finger3_link4_collision_1" group="0" condim="4" friction="2 0.05 0.0001" solref="0.01 0.5" />
+            </body>
+          </body>
+        </body>
+      </body>
+      <body name="right_finger4_link1" pos="-0.0151859 -0.013712 0.0491674" quat="0.856183 0.0282807 -0.513985 0.0443932">
+        <inertial pos="-0.0013291 1.0048e-08 0.00031995" quat="0.92388 0 0.382683 0" mass="0.0032" diaginertia="1.1e-07 7e-08 5e-08" />
+        <joint name="right_finger4_joint1" pos="0 0 0" axis="0 1 0" range="-0.1554 1.5585" actuatorfrcrange="-0.6389 0.6389" damping="1.0" armature="0.1" frictionloss="0.1" />
+        <geom type="mesh" rgba="0.89804 0.91765 0.92941 1" mesh="right_finger4_link1" name="right_finger4_link1_collision_0" group="0" condim="4" friction="2 0.05 0.0001" solref="0.01 0.5" />
+        <body name="right_finger4_link2" pos="0.0022 0 0.004">
+          <inertial pos="-0.0061576 -4.1601e-07 0.020911" quat="0.70703 0.0104245 0.0104245 0.70703" mass="0.033" diaginertia="6.34e-06 6.31472e-06 8.85281e-07" />
+          <joint name="right_finger4_joint2" pos="0 0 0" axis="-1 0 0" range="-0.4118 0.3087" actuatorfrcrange="-0.1832 0.1832" damping="1.0" armature="0.1" frictionloss="0.1" />
+          <geom type="mesh" rgba="0.89804 0.91765 0.92941 1" mesh="right_finger4_link2" name="right_finger4_link2_collision_0" group="0" condim="4" friction="2 0.05 0.0001" solref="0.01 0.5" />
+          <body name="right_finger4_link3" pos="-0.00475 0 0.043618" quat="1 0 0 -0.000134305">
+            <inertial pos="-0.0011214 4.3494e-06 0.015763" quat="0.999892 0 -0.0146884 0" mass="0.0165" diaginertia="1.47088e-06 1.44e-06 4.49118e-07" />
+            <joint name="right_finger4_joint3" pos="0 0 0" axis="0 1 0" range="-0.4765 1.5487" actuatorfrcrange="-0.2249 0.2249" damping="1.0" armature="0.1" frictionloss="0.1" />
+            <geom type="mesh" rgba="0.89804 0.91765 0.92941 1" mesh="right_finger4_link3" name="right_finger4_link3_collision_0" group="0" condim="4" friction="2 0.05 0.0001" solref="0.01 0.5" />
+            <body name="right_finger4_link4" pos="0 0 0.0295">
+              <inertial pos="-0.000766431 -0.000180689 0.00770952" quat="0.998349 0.0104237 -0.0509196 0.0244494" mass="0.01718" diaginertia="1.58554e-06 1.49205e-06 4.21684e-07" />
+              <joint name="right_finger4_joint4" pos="0 0 0" axis="0 1 0" range="-0.4777 1.5634" actuatorfrcrange="-0.2044 0.2044" damping="1.0" armature="0.1" frictionloss="0.1" />
+              <geom type="mesh" rgba="0.89804 0.91765 0.92941 1" mesh="right_finger4_link4" name="right_finger4_link4_collision_0" group="0" condim="4" friction="2 0.05 0.0001" solref="0.01 0.5" />
+              <geom pos="-0.0010528 0 0.0267" type="mesh" rgba="0.89804 0.91765 0.92941 1" mesh="right_finger4_tip_link" name="right_finger4_link4_collision_1" group="0" condim="4" friction="2 0.05 0.0001" solref="0.01 0.5" />
+            </body>
+          </body>
+        </body>
+      </body>
+      <body name="right_finger5_link1" pos="-0.00373109 -0.034001 0.0482252" quat="0.851196 0.0474924 -0.508682 0.120221">
+        <inertial pos="-0.0013291 1.7235e-08 0.00031997" quat="0.92388 0 0.382683 0" mass="0.0032" diaginertia="1.1e-07 7e-08 5e-08" />
+        <joint name="right_finger5_joint1" pos="0 0 0" axis="0 1 0" range="-0.1626 1.5585" actuatorfrcrange="-0.6441 0.6441" damping="1.0" armature="0.1" frictionloss="0.1" />
+        <geom type="mesh" rgba="0.89804 0.91765 0.92941 1" mesh="right_finger5_link1" name="right_finger5_link1_collision_0" group="0" condim="4" friction="2 0.05 0.0001" solref="0.01 0.5" />
+        <body name="right_finger5_link2" pos="0.0022 0 0.004">
+          <inertial pos="-0.0061576 -4.1475e-07 0.020911" quat="0.70703 0.0104245 0.0104245 0.70703" mass="0.033" diaginertia="6.34e-06 6.31472e-06 8.85281e-07" />
+          <joint name="right_finger5_joint2" pos="0 0 0" axis="-1 0 0" range="-0.4153 0.294" actuatorfrcrange="-0.1798 0.1798" damping="1.0" armature="0.1" frictionloss="0.1" />
+          <geom type="mesh" rgba="0.89804 0.91765 0.92941 1" mesh="right_finger5_link2" name="right_finger5_link2_collision_0" group="0" condim="4" friction="2 0.05 0.0001" solref="0.01 0.5" />
+          <body name="right_finger5_link3" pos="-0.00475 0 0.043618" quat="1 0 0 -0.000134305">
+            <inertial pos="-0.0011214 4.3703e-06 0.015763" quat="0.999892 0 -0.0146884 0" mass="0.0165" diaginertia="1.47088e-06 1.44e-06 4.49118e-07" />
+            <joint name="right_finger5_joint3" pos="0 0 0" axis="0 1 0" range="-0.4768 1.549" actuatorfrcrange="-0.2384 0.2384" damping="1.0" armature="0.1" frictionloss="0.1" />
+            <geom type="mesh" rgba="0.89804 0.91765 0.92941 1" mesh="right_finger5_link3" name="right_finger5_link3_collision_0" group="0" condim="4" friction="2 0.05 0.0001" solref="0.01 0.5" />
+            <body name="right_finger5_link4" pos="0 0 0.0295">
+              <inertial pos="-0.00076855 -0.000179174 0.00770942" quat="0.998351 0.0103138 -0.0510722 0.024077" mass="0.01718" diaginertia="1.58554e-06 1.49197e-06 4.21535e-07" />
+              <joint name="right_finger5_joint4" pos="0 0 0" axis="0 1 0" range="-0.4683 1.5735" actuatorfrcrange="-0.1866 0.1866" damping="1.0" armature="0.1" frictionloss="0.1" />
+              <geom type="mesh" rgba="0.89804 0.91765 0.92941 1" mesh="right_finger5_link4" name="right_finger5_link4_collision_0" group="0" condim="4" friction="2 0.05 0.0001" solref="0.01 0.5" />
+              <geom pos="-0.0010446 1.1308e-05 0.0267" type="mesh" rgba="0.89804 0.91765 0.92941 1" mesh="right_finger5_tip_link" name="right_finger5_link4_collision_1" group="0" condim="4" friction="2 0.05 0.0001" solref="0.01 0.5" />
+            </body>
+          </body>
+        </body>
+      </body>
+    </body>
+  </worldbody>
+  <actuator>
+    <position name="gripper_right_finger1_joint1" joint="right_finger1_joint1" ctrllimited="true" ctrlrange="0.4 1.2" kp="1000.0" forcelimited="true" forcerange="-20.0 20.0" />
+    <position name="gripper_right_finger1_joint2" joint="right_finger1_joint2" ctrllimited="true" ctrlrange="-0.1 0.1" kp="1000.0" forcelimited="true" forcerange="-20.0 20.0" />
+    <position name="gripper_right_finger1_joint3" joint="right_finger1_joint3" ctrllimited="true" ctrlrange="0.0 1.2" kp="1000.0" forcelimited="true" forcerange="-20.0 20.0" />
+    <position name="gripper_right_finger1_joint4" joint="right_finger1_joint4" ctrllimited="true" ctrlrange="0.0 1.0" kp="1000.0" forcelimited="true" forcerange="-20.0 20.0" />
+    <position name="gripper_right_finger2_joint1" joint="right_finger2_joint1" ctrllimited="true" ctrlrange="0.0 1.2" kp="1000.0" forcelimited="true" forcerange="-20.0 20.0" />
+    <position name="gripper_right_finger2_joint3" joint="right_finger2_joint3" ctrllimited="true" ctrlrange="0.0 1.2" kp="1000.0" forcelimited="true" forcerange="-20.0 20.0" />
+    <position name="gripper_right_finger2_joint4" joint="right_finger2_joint4" ctrllimited="true" ctrlrange="0.0 1.2" kp="1000.0" forcelimited="true" forcerange="-20.0 20.0" />
+    <position name="gripper_right_finger3_joint1" joint="right_finger3_joint1" ctrllimited="true" ctrlrange="0.0 1.2" kp="1000.0" forcelimited="true" forcerange="-20.0 20.0" />
+    <position name="gripper_right_finger3_joint3" joint="right_finger3_joint3" ctrllimited="true" ctrlrange="0.0 1.2" kp="1000.0" forcelimited="true" forcerange="-20.0 20.0" />
+    <position name="gripper_right_finger3_joint4" joint="right_finger3_joint4" ctrllimited="true" ctrlrange="0.0 1.2" kp="1000.0" forcelimited="true" forcerange="-20.0 20.0" />
+    <position name="gripper_right_finger4_joint1" joint="right_finger4_joint1" ctrllimited="true" ctrlrange="0.0 1.2" kp="1000.0" forcelimited="true" forcerange="-20.0 20.0" />
+    <position name="gripper_right_finger4_joint3" joint="right_finger4_joint3" ctrllimited="true" ctrlrange="0.0 1.2" kp="1000.0" forcelimited="true" forcerange="-20.0 20.0" />
+    <position name="gripper_right_finger4_joint4" joint="right_finger4_joint4" ctrllimited="true" ctrlrange="0.0 1.2" kp="1000.0" forcelimited="true" forcerange="-20.0 20.0" />
+    <position name="gripper_right_finger5_joint1" joint="right_finger5_joint1" ctrllimited="true" ctrlrange="0.0 1.2" kp="1000.0" forcelimited="true" forcerange="-20.0 20.0" />
+    <position name="gripper_right_finger5_joint3" joint="right_finger5_joint3" ctrllimited="true" ctrlrange="0.0 1.2" kp="1000.0" forcelimited="true" forcerange="-20.0 20.0" />
+    <position name="gripper_right_finger5_joint4" joint="right_finger5_joint4" ctrllimited="true" ctrlrange="0.0 1.2" kp="1000.0" forcelimited="true" forcerange="-20.0 20.0" />
+  </actuator>
+  <equality>
+    <joint joint1="right_finger2_joint2" polycoef="0.2 0 0 0 0" />
+    <joint joint1="right_finger3_joint2" polycoef="0.0 0 0 0 0" />
+    <joint joint1="right_finger4_joint2" polycoef="0.0 0 0 0 0" />
+    <joint joint1="right_finger5_joint2" polycoef="0.0 0 0 0 0" />
+  </equality>
+  <sensor>
+    <force name="force_ee" site="ft_frame" />
+    <torque name="torque_ee" site="ft_frame" />
+  </sensor>
+</mujoco>

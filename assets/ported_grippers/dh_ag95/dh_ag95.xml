@@ -1,0 +1,81 @@
+<mujoco model="dh_ag95">
+  <compiler angle="radian" strippath="false" />
+  <asset>
+    <mesh name="base_link_cvx0" content_type="model/obj" file="./meshes/collision/base_link_cvx0.obj" scale="0.001 0.001 0.001" />
+    <mesh name="crank_Link_cvx0" content_type="model/obj" file="./meshes/collision/crank_Link_cvx0.obj" scale="0.001 0.001 0.001" />
+    <mesh name="rod_Link_cvx0" content_type="model/obj" file="./meshes/collision/rod_Link_cvx0.obj" scale="0.001 0.001 0.001" />
+    <mesh name="proximal_phalanx_Link_cvx0" content_type="model/obj" file="./meshes/collision/proximal_phalanx_Link_cvx0.obj" scale="0.001 0.001 0.001" />
+    <mesh name="proximal_phalanx_Link_cvx1" content_type="model/obj" file="./meshes/collision/proximal_phalanx_Link_cvx1.obj" scale="0.001 0.001 0.001" />
+    <mesh name="proximal_phalanx_Link_cvx2" content_type="model/obj" file="./meshes/collision/proximal_phalanx_Link_cvx2.obj" scale="0.001 0.001 0.001" />
+    <mesh name="proximal_phalanx_Link_cvx3" content_type="model/obj" file="./meshes/collision/proximal_phalanx_Link_cvx3.obj" scale="0.001 0.001 0.001" />
+    <mesh name="distal_phalanx_Link_cvx0" content_type="model/obj" file="./meshes/collision/distal_phalanx_Link_cvx0.obj" scale="0.001 0.001 0.001" />
+  </asset>
+  <worldbody>
+    <body name="right_gripper" pos="0 0 0">
+      <site name="ft_frame" pos="0 0 0" size="0.01 0.01 0.01" rgba="1 0 0 1" type="sphere" group="1" />
+      <inertial pos="0 0 0.05" mass="0.3" diaginertia="0.09 0.07 0.05" />
+      <body name="eef" pos="0 0 0.172" quat="1 0 0 0">
+        <site name="grip_site" pos="0 0 0" size="0.01 0.01 0.01" rgba="1 0 0 0.5" type="sphere" group="1" />
+        <site name="ee_x" pos="0.1 0 0" size="0.005 .1" quat="0.707105 0 0.707108 0" rgba="1 0 0 0" type="cylinder" group="1" />
+        <site name="ee_y" pos="0 0.1 0" size="0.005 .1" quat="0.707105 0.707108 0 0" rgba="0 1 0 0" type="cylinder" group="1" />
+        <site name="ee_z" pos="0 0 0.1" size="0.005 .1" quat="1 0 0 0" rgba="0 0 1 0" type="cylinder" group="1" />
+        <site name="grip_site_cylinder" pos="0 0 0" size="0.005 10" rgba="0 1 0 0.3" type="cylinder" group="1" />
+      </body>
+      <geom type="mesh" mesh="base_link_cvx0" name="palm_collision_0" group="0" condim="4" friction="1 0.005 0.0001" />
+      <body name="gripper_finger1_knuckle_link" pos="-0.016 0 0.10586" quat="0.000796327 0 0 1">
+        <joint name="gripper_finger1_joint" pos="0 0 0" axis="0 -1 0" range="0 0.6524" actuatorfrcrange="-100 100" damping="1.0" armature="0.1" frictionloss="0.1" />
+        <geom type="mesh" mesh="crank_Link_cvx0" name="gripper_finger1_knuckle_link_collision_0" group="0" condim="4" friction="2 0.05 0.0001" solref="0.01 0.5" />
+        <body name="gripper_finger1_finger_link" pos="0.029208 0 -0.0227133">
+          <joint name="gripper_finger1_finger_joint" pos="0 0 0" axis="0 -1 0" range="-3.14 3.14" actuatorfrcrange="-100 100" damping="1.0" armature="0.1" frictionloss="0.1" />
+          <geom type="mesh" mesh="rod_Link_cvx0" name="gripper_finger1_finger_link_collision_0" group="0" condim="4" friction="2 0.05 0.0001" solref="0.01 0.5" />
+        </body>
+      </body>
+      <body name="gripper_finger2_knuckle_link" pos="0.016 0 0.10586">
+        <joint name="gripper_finger2_joint" pos="0 0 0" axis="0 -1 0" range="-3.14 3.14" actuatorfrcrange="-100 100" damping="1.0" armature="0.1" frictionloss="0.1" />
+        <geom type="mesh" mesh="crank_Link_cvx0" name="gripper_finger2_knuckle_link_collision_0" group="0" condim="4" friction="2 0.05 0.0001" solref="0.01 0.5" />
+        <body name="gripper_finger2_finger_link" pos="0.029208 0 -0.0227133">
+          <joint name="gripper_finger2_finger_joint" pos="0 0 0" axis="0 -1 0" range="-3.14 3.14" actuatorfrcrange="-100 100" damping="1.0" armature="0.1" frictionloss="0.1" />
+          <geom type="mesh" mesh="rod_Link_cvx0" name="gripper_finger2_finger_link_collision_0" group="0" condim="4" friction="2 0.05 0.0001" solref="0.01 0.5" />
+        </body>
+      </body>
+      <body name="gripper_finger1_inner_knuckle_link" pos="-0.016 0 0.10586" quat="0.000796327 0 0 1">
+        <joint name="gripper_finger1_inner_knuckle_joint" pos="0 0 0" axis="0 -1 0" range="-3.14 3.14" actuatorfrcrange="-100 100" damping="1.0" armature="0.1" frictionloss="0.1" />
+        <geom type="mesh" mesh="proximal_phalanx_Link_cvx0" name="gripper_finger1_inner_knuckle_link_collision_0" group="0" condim="4" friction="2 0.05 0.0001" solref="0.01 0.5" />
+        <geom type="mesh" mesh="proximal_phalanx_Link_cvx1" name="gripper_finger1_inner_knuckle_link_collision_1" group="0" condim="4" friction="2 0.05 0.0001" solref="0.01 0.5" />
+        <geom type="mesh" mesh="proximal_phalanx_Link_cvx2" name="gripper_finger1_inner_knuckle_link_collision_2" group="0" condim="4" friction="2 0.05 0.0001" solref="0.01 0.5" />
+        <geom type="mesh" mesh="proximal_phalanx_Link_cvx3" name="gripper_finger1_inner_knuckle_link_collision_3" group="0" condim="4" friction="2 0.05 0.0001" solref="0.01 0.5" />
+        <body name="gripper_finger1_finger_tip_link" pos="0.0394969 0 0.0382752">
+          <joint name="gripper_finger1_finger_tip_joint" pos="0 0 0" axis="0 1 0" range="-3.14 3.14" actuatorfrcrange="-100 100" damping="1.0" armature="0.1" frictionloss="0.1" />
+          <geom type="mesh" mesh="distal_phalanx_Link_cvx0" name="gripper_finger1_finger_tip_link_collision_0" group="0" condim="4" friction="2 0.05 0.0001" solref="0.01 0.5" />
+        </body>
+      </body>
+      <body name="gripper_finger2_inner_knuckle_link" pos="0.016 0 0.10586">
+        <joint name="gripper_finger2_inner_knuckle_joint" pos="0 0 0" axis="0 -1 0" range="-3.14 3.14" actuatorfrcrange="-100 100" damping="1.0" armature="0.1" frictionloss="0.1" />
+        <geom type="mesh" mesh="proximal_phalanx_Link_cvx0" name="gripper_finger2_inner_knuckle_link_collision_0" group="0" condim="4" friction="2 0.05 0.0001" solref="0.01 0.5" />
+        <geom type="mesh" mesh="proximal_phalanx_Link_cvx1" name="gripper_finger2_inner_knuckle_link_collision_1" group="0" condim="4" friction="2 0.05 0.0001" solref="0.01 0.5" />
+        <geom type="mesh" mesh="proximal_phalanx_Link_cvx2" name="gripper_finger2_inner_knuckle_link_collision_2" group="0" condim="4" friction="2 0.05 0.0001" solref="0.01 0.5" />
+        <geom type="mesh" mesh="proximal_phalanx_Link_cvx3" name="gripper_finger2_inner_knuckle_link_collision_3" group="0" condim="4" friction="2 0.05 0.0001" solref="0.01 0.5" />
+        <body name="gripper_finger2_finger_tip_link" pos="0.0394969 0 0.0382752">
+          <joint name="gripper_finger2_finger_tip_joint" pos="0 0 0" axis="0 1 0" range="-3.14 3.14" actuatorfrcrange="-100 100" damping="1.0" armature="0.1" frictionloss="0.1" />
+          <geom type="mesh" mesh="distal_phalanx_Link_cvx0" name="gripper_finger2_finger_tip_link_collision_0" group="0" condim="4" friction="2 0.05 0.0001" solref="0.01 0.5" />
+        </body>
+      </body>
+    </body>
+  </worldbody>
+  <actuator>
+    <position name="gripper_gripper_finger1_joint" joint="gripper_finger1_joint" ctrllimited="true" ctrlrange="0.0 0.6524" kp="1000.0" forcelimited="true" forcerange="-20.0 20.0" />
+  </actuator>
+  <equality>
+    <joint joint1="gripper_finger1_finger_joint" joint2="gripper_finger1_joint" polycoef="0 9.625996 0 0 0" />
+    <joint joint1="gripper_finger2_joint" polycoef="0 0 0 0 0" />
+    <joint joint1="gripper_finger2_finger_joint" polycoef="0 0 0 0 0" />
+    <joint joint1="gripper_finger1_inner_knuckle_joint" polycoef="0 0 0 0 0" />
+    <joint joint1="gripper_finger1_finger_tip_joint" polycoef="0 0 0 0 0" />
+    <joint joint1="gripper_finger2_inner_knuckle_joint" polycoef="0 0 0 0 0" />
+    <joint joint1="gripper_finger2_finger_tip_joint" polycoef="0 0 0 0 0" />
+  </equality>
+  <sensor>
+    <force name="force_ee" site="ft_frame" />
+    <torque name="torque_ee" site="ft_frame" />
+  </sensor>
+</mujoco>

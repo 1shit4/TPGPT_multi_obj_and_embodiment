@@ -1,0 +1,58 @@
+<mujoco model="schunk_wsg50">
+  <compiler angle="radian" strippath="false" />
+  <asset>
+    <mesh name="WSG50_110_cvx0" content_type="model/obj" file="./meshes/WSG50_110_cvx0.obj" />
+    <mesh name="WSG50_110_cvx1" content_type="model/obj" file="./meshes/WSG50_110_cvx1.obj" />
+    <mesh name="WSG50_110_cvx2" content_type="model/obj" file="./meshes/WSG50_110_cvx2.obj" />
+    <mesh name="GUIDE_WSG50_110_cvx0" content_type="model/obj" file="./meshes/GUIDE_WSG50_110_cvx0.obj" scale="0.001 0.001 0.001" />
+    <mesh name="GUIDE_WSG50_110_cvx1" content_type="model/obj" file="./meshes/GUIDE_WSG50_110_cvx1.obj" scale="0.001 0.001 0.001" />
+    <mesh name="GUIDE_WSG50_110_cvx2" content_type="model/obj" file="./meshes/GUIDE_WSG50_110_cvx2.obj" scale="0.001 0.001 0.001" />
+    <mesh name="WSG-FMF_cvx4" content_type="model/obj" file="./meshes/WSG-FMF_cvx4.obj" scale="0.001 0.001 0.001" />
+    <mesh name="WSG-FMF_cvx2" content_type="model/obj" file="./meshes/WSG-FMF_cvx2.obj" scale="0.001 0.001 0.001" />
+    <mesh name="WSG-FMF_cvx3" content_type="model/obj" file="./meshes/WSG-FMF_cvx3.obj" scale="0.001 0.001 0.001" />
+  </asset>
+  <worldbody>
+    <body name="right_gripper" pos="0 0 0">
+      <site name="ft_frame" pos="0 0 0" size="0.01 0.01 0.01" rgba="1 0 0 1" type="sphere" group="1" />
+      <inertial pos="0 0 0.05" mass="0.3" diaginertia="0.09 0.07 0.05" />
+      <body name="eef" pos="0 0 0.143" quat="1 0 0 0">
+        <site name="grip_site" pos="0 0 0" size="0.01 0.01 0.01" rgba="1 0 0 0.5" type="sphere" group="1" />
+        <site name="ee_x" pos="0.1 0 0" size="0.005 .1" quat="0.707105 0 0.707108 0" rgba="1 0 0 0" type="cylinder" group="1" />
+        <site name="ee_y" pos="0 0.1 0" size="0.005 .1" quat="0.707105 0.707108 0 0" rgba="0 1 0 0" type="cylinder" group="1" />
+        <site name="ee_z" pos="0 0 0.1" size="0.005 .1" quat="1 0 0 0" rgba="0 0 1 0" type="cylinder" group="1" />
+        <site name="grip_site_cylinder" pos="0 0 0" size="0.005 10" rgba="0 1 0 0.3" type="cylinder" group="1" />
+      </body>
+      <geom type="mesh" mesh="WSG50_110_cvx0" name="palm_collision_0" group="0" condim="4" friction="1 0.005 0.0001" />
+      <geom type="mesh" mesh="WSG50_110_cvx1" name="palm_collision_1" group="0" condim="4" friction="1 0.005 0.0001" />
+      <geom type="mesh" mesh="WSG50_110_cvx2" name="palm_collision_2" group="0" condim="4" friction="1 0.005 0.0001" />
+      <body name="gripper_left">
+        <joint name="base_joint_gripper_left" pos="0 0 0" axis="-1 0 0" type="slide" range="0.0027 0.055" actuatorfrcrange="-80 80" damping="1.0" frictionloss="0.1" armature="0.1" />
+        <geom type="mesh" rgba="0 0 0 1" mesh="GUIDE_WSG50_110_cvx0" name="gripper_left_collision_0" group="0" condim="4" friction="2 0.05 0.0001" solref="0.01 0.5" />
+        <geom type="mesh" rgba="0 0 0 1" mesh="GUIDE_WSG50_110_cvx1" name="gripper_left_collision_1" group="0" condim="4" friction="2 0.05 0.0001" solref="0.01 0.5" />
+        <geom type="mesh" rgba="0 0 0 1" mesh="GUIDE_WSG50_110_cvx2" name="gripper_left_collision_2" group="0" condim="4" friction="2 0.05 0.0001" solref="0.01 0.5" />
+        <geom pos="0 0 0.023" type="mesh" rgba="0 0 0 1" mesh="WSG-FMF_cvx4" name="gripper_left_collision_3" group="0" condim="4" friction="2 0.05 0.0001" solref="0.01 0.5" />
+        <geom pos="0 0 0.023" type="mesh" rgba="0 0 0 1" mesh="WSG-FMF_cvx2" name="gripper_left_collision_4" group="0" condim="4" friction="2 0.05 0.0001" solref="0.01 0.5" />
+        <geom pos="0 0 0.023" type="mesh" rgba="0 0 0 1" mesh="WSG-FMF_cvx3" name="gripper_left_collision_5" group="0" condim="4" friction="2 0.05 0.0001" solref="0.01 0.5" />
+      </body>
+      <body name="gripper_right" quat="1.32679e-06 0 0 1">
+        <joint name="base_joint_gripper_right" pos="0 0 0" axis="-1 0 0" type="slide" range="0.0027 0.055" actuatorfrcrange="-80 80" damping="1.0" frictionloss="0.1" armature="0.1" />
+        <geom type="mesh" rgba="0 0 0 1" mesh="GUIDE_WSG50_110_cvx0" name="gripper_right_collision_0" group="0" condim="4" friction="2 0.05 0.0001" solref="0.01 0.5" />
+        <geom type="mesh" rgba="0 0 0 1" mesh="GUIDE_WSG50_110_cvx1" name="gripper_right_collision_1" group="0" condim="4" friction="2 0.05 0.0001" solref="0.01 0.5" />
+        <geom type="mesh" rgba="0 0 0 1" mesh="GUIDE_WSG50_110_cvx2" name="gripper_right_collision_2" group="0" condim="4" friction="2 0.05 0.0001" solref="0.01 0.5" />
+        <geom pos="0 0 0.023" type="mesh" rgba="0 0 0 1" mesh="WSG-FMF_cvx4" name="gripper_right_collision_3" group="0" condim="4" friction="2 0.05 0.0001" solref="0.01 0.5" />
+        <geom pos="0 0 0.023" type="mesh" rgba="0 0 0 1" mesh="WSG-FMF_cvx2" name="gripper_right_collision_4" group="0" condim="4" friction="2 0.05 0.0001" solref="0.01 0.5" />
+        <geom pos="0 0 0.023" type="mesh" rgba="0 0 0 1" mesh="WSG-FMF_cvx3" name="gripper_right_collision_5" group="0" condim="4" friction="2 0.05 0.0001" solref="0.01 0.5" />
+      </body>
+    </body>
+  </worldbody>
+  <actuator>
+    <position name="gripper_base_joint_gripper_left" joint="base_joint_gripper_left" ctrllimited="true" ctrlrange="0.0027 0.055" kp="1000.0" forcelimited="true" forcerange="-20.0 20.0" />
+  </actuator>
+  <equality>
+    <joint joint1="base_joint_gripper_right" polycoef="0 0 0 0 0" />
+  </equality>
+  <sensor>
+    <force name="force_ee" site="ft_frame" />
+    <torque name="torque_ee" site="ft_frame" />
+  </sensor>
+</mujoco>

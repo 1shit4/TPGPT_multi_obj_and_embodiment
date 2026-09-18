@@ -1,0 +1,68 @@
+<mujoco model="robotiq_hande">
+  <compiler angle="radian" strippath="false" />
+  <asset>
+    <mesh name="hand-e-collision_cvx0" content_type="model/obj" file="./meshes/collision/hand-e-collision_cvx0.obj" />
+    <mesh name="hand-e-collision_cvx1" content_type="model/obj" file="./meshes/collision/hand-e-collision_cvx1.obj" />
+    <mesh name="hand-e-collision_cvx2" content_type="model/obj" file="./meshes/collision/hand-e-collision_cvx2.obj" />
+    <mesh name="hand-e-collision_cvx3" content_type="model/obj" file="./meshes/collision/hand-e-collision_cvx3.obj" />
+    <mesh name="hand-e-collision_cvx4" content_type="model/obj" file="./meshes/collision/hand-e-collision_cvx4.obj" />
+    <mesh name="finger_1-collision_cvx0" content_type="model/obj" file="./meshes/collision/finger_1-collision_cvx0.obj" />
+    <mesh name="finger_1-collision_cvx1" content_type="model/obj" file="./meshes/collision/finger_1-collision_cvx1.obj" />
+    <mesh name="finger_1-collision_cvx2" content_type="model/obj" file="./meshes/collision/finger_1-collision_cvx2.obj" />
+    <mesh name="finger_1-collision_cvx3" content_type="model/obj" file="./meshes/collision/finger_1-collision_cvx3.obj" />
+    <mesh name="finger_1-collision_cvx4" content_type="model/obj" file="./meshes/collision/finger_1-collision_cvx4.obj" />
+    <mesh name="finger_1-collision_cvx5" content_type="model/obj" file="./meshes/collision/finger_1-collision_cvx5.obj" />
+    <mesh name="finger_2-collision_cvx0" content_type="model/obj" file="./meshes/collision/finger_2-collision_cvx0.obj" />
+    <mesh name="finger_2-collision_cvx1" content_type="model/obj" file="./meshes/collision/finger_2-collision_cvx1.obj" />
+    <mesh name="finger_2-collision_cvx2" content_type="model/obj" file="./meshes/collision/finger_2-collision_cvx2.obj" />
+    <mesh name="finger_2-collision_cvx3" content_type="model/obj" file="./meshes/collision/finger_2-collision_cvx3.obj" />
+    <mesh name="finger_2-collision_cvx4" content_type="model/obj" file="./meshes/collision/finger_2-collision_cvx4.obj" />
+    <mesh name="finger_2-collision_cvx5" content_type="model/obj" file="./meshes/collision/finger_2-collision_cvx5.obj" />
+  </asset>
+  <worldbody>
+    <body name="right_gripper" pos="0 0 0">
+      <site name="ft_frame" pos="0 0 0" size="0.01 0.01 0.01" rgba="1 0 0 1" type="sphere" group="1" />
+      <inertial pos="0 0 0.05" mass="0.3" diaginertia="0.09 0.07 0.05" />
+      <body name="eef" pos="0 0 0.133" quat="1 0 0 0">
+        <site name="grip_site" pos="0 0 0" size="0.01 0.01 0.01" rgba="1 0 0 0.5" type="sphere" group="1" />
+        <site name="ee_x" pos="0.1 0 0" size="0.005 .1" quat="0.707105 0 0.707108 0" rgba="1 0 0 0" type="cylinder" group="1" />
+        <site name="ee_y" pos="0 0.1 0" size="0.005 .1" quat="0.707105 0.707108 0 0" rgba="0 1 0 0" type="cylinder" group="1" />
+        <site name="ee_z" pos="0 0 0.1" size="0.005 .1" quat="1 0 0 0" rgba="0 0 1 0" type="cylinder" group="1" />
+        <site name="grip_site_cylinder" pos="0 0 0" size="0.005 10" rgba="0 1 0 0.3" type="cylinder" group="1" />
+      </body>
+      <geom quat="-1.8366e-06 5.8214e-12 -1.8366e-06 1" type="mesh" rgba="0.1 0.1 0.1 1" mesh="hand-e-collision_cvx0" name="palm_collision_0" group="0" condim="4" friction="1 0.005 0.0001" />
+      <geom quat="-1.8366e-06 5.82129e-12 -1.8366e-06 1" type="mesh" rgba="0.1 0.1 0.1 1" mesh="hand-e-collision_cvx1" name="palm_collision_1" group="0" condim="4" friction="1 0.005 0.0001" />
+      <geom pos="0 0 0" quat="-1.8366e-06 5.82134e-12 -1.83661e-06 1" type="mesh" rgba="0.1 0.1 0.1 1" mesh="hand-e-collision_cvx2" name="palm_collision_2" group="0" condim="4" friction="1 0.005 0.0001" />
+      <geom pos="0 0 0" quat="-1.8366e-06 5.82129e-12 -1.8366e-06 1" type="mesh" rgba="0.1 0.1 0.1 1" mesh="hand-e-collision_cvx3" name="palm_collision_3" group="0" condim="4" friction="1 0.005 0.0001" />
+      <geom pos="0 0 0" quat="-1.8366e-06 5.82134e-12 -1.83661e-06 1" type="mesh" rgba="0.1 0.1 0.1 1" mesh="hand-e-collision_cvx4" name="palm_collision_4" group="0" condim="4" friction="1 0.005 0.0001" />
+      <body name="hande_robotiq_hande_left_finger" pos="0.025 -2.71817e-07 0.099" quat="0.499998 0.500002 -0.5 0.5">
+        <joint name="hande_robotiq_hande_base_to_left_finger" pos="0 0 0" axis="0 1 0" type="slide" range="0 0.025" actuatorfrcrange="-130 130" damping="1.0" armature="0.1" frictionloss="0.1" />
+        <geom quat="0.5 0.5 0.5 0.5" type="mesh" rgba="0.1 0.1 0.1 1" mesh="finger_1-collision_cvx0" name="hande_robotiq_hande_left_finger_collision_0" group="0" condim="4" friction="2 0.05 0.0001" solref="0.01 0.5" />
+        <geom quat="0.5 0.5 0.5 0.5" type="mesh" rgba="0.1 0.1 0.1 1" mesh="finger_1-collision_cvx1" name="hande_robotiq_hande_left_finger_collision_1" group="0" condim="4" friction="2 0.05 0.0001" solref="0.01 0.5" />
+        <geom quat="0.5 0.5 0.5 0.5" type="mesh" rgba="0.1 0.1 0.1 1" mesh="finger_1-collision_cvx2" name="hande_robotiq_hande_left_finger_collision_2" group="0" condim="4" friction="2 0.05 0.0001" solref="0.01 0.5" />
+        <geom quat="0.5 0.5 0.5 0.5" type="mesh" rgba="0.1 0.1 0.1 1" mesh="finger_1-collision_cvx3" name="hande_robotiq_hande_left_finger_collision_3" group="0" condim="4" friction="2 0.05 0.0001" solref="0.01 0.5" />
+        <geom quat="0.5 0.5 0.5 0.5" type="mesh" rgba="0.1 0.1 0.1 1" mesh="finger_1-collision_cvx4" name="hande_robotiq_hande_left_finger_collision_4" group="0" condim="4" friction="2 0.05 0.0001" solref="0.01 0.5" />
+        <geom quat="0.5 0.5 0.5 0.5" type="mesh" rgba="0.1 0.1 0.1 1" mesh="finger_1-collision_cvx5" name="hande_robotiq_hande_left_finger_collision_5" group="0" condim="4" friction="2 0.05 0.0001" solref="0.01 0.5" />
+      </body>
+      <body name="hande_robotiq_hande_right_finger" pos="-0.025 -4.55477e-07 0.099" quat="0.499998 0.500002 -0.5 0.5">
+        <joint name="hande_robotiq_hande_base_to_right_finger" pos="0 0 0" axis="0 -1 0" type="slide" range="0 0.025" actuatorfrcrange="-130 130" damping="1.0" armature="0.1" frictionloss="0.1" />
+        <geom quat="0.5 0.5 0.5 0.5" type="mesh" rgba="0.1 0.1 0.1 1" mesh="finger_2-collision_cvx0" name="hande_robotiq_hande_right_finger_collision_0" group="0" condim="4" friction="2 0.05 0.0001" solref="0.01 0.5" />
+        <geom quat="0.5 0.5 0.5 0.5" type="mesh" rgba="0.1 0.1 0.1 1" mesh="finger_2-collision_cvx1" name="hande_robotiq_hande_right_finger_collision_1" group="0" condim="4" friction="2 0.05 0.0001" solref="0.01 0.5" />
+        <geom quat="0.5 0.5 0.5 0.5" type="mesh" rgba="0.1 0.1 0.1 1" mesh="finger_2-collision_cvx2" name="hande_robotiq_hande_right_finger_collision_2" group="0" condim="4" friction="2 0.05 0.0001" solref="0.01 0.5" />
+        <geom quat="0.5 0.5 0.5 0.5" type="mesh" rgba="0.1 0.1 0.1 1" mesh="finger_2-collision_cvx3" name="hande_robotiq_hande_right_finger_collision_3" group="0" condim="4" friction="2 0.05 0.0001" solref="0.01 0.5" />
+        <geom quat="0.5 0.5 0.5 0.5" type="mesh" rgba="0.1 0.1 0.1 1" mesh="finger_2-collision_cvx4" name="hande_robotiq_hande_right_finger_collision_4" group="0" condim="4" friction="2 0.05 0.0001" solref="0.01 0.5" />
+        <geom quat="0.5 0.5 0.5 0.5" type="mesh" rgba="0.1 0.1 0.1 1" mesh="finger_2-collision_cvx5" name="hande_robotiq_hande_right_finger_collision_5" group="0" condim="4" friction="2 0.05 0.0001" solref="0.01 0.5" />
+      </body>
+    </body>
+  </worldbody>
+  <actuator>
+    <position name="gripper_hande_robotiq_hande_base_to_left_finger" joint="hande_robotiq_hande_base_to_left_finger" ctrllimited="true" ctrlrange="0.0 0.025" kp="1000.0" forcelimited="true" forcerange="-20.0 20.0" />
+  </actuator>
+  <equality>
+    <joint joint1="hande_robotiq_hande_base_to_right_finger" polycoef="0 0 0 0 0" />
+  </equality>
+  <sensor>
+    <force name="force_ee" site="ft_frame" />
+    <torque name="torque_ee" site="ft_frame" />
+  </sensor>
+</mujoco>

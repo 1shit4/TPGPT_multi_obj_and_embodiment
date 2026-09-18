@@ -1,0 +1,98 @@
+<mujoco model="surge_hand">
+  <compiler angle="radian" strippath="false" />
+  <asset>
+    <mesh name="palm_left_collide_vhacd" content_type="model/obj" file="meshes/collision/palm_left_collide_vhacd.obj" />
+    <mesh name="index_proximal_left_collide_vhacd" content_type="model/obj" file="meshes/collision/index_proximal_left_collide_vhacd.obj" />
+    <mesh name="index_distal_collide_vhacd" content_type="model/obj" file="meshes/collision/index_distal_collide_vhacd.obj" />
+    <mesh name="middle_proximal_collide_vhacd" content_type="model/obj" file="meshes/collision/middle_proximal_collide_vhacd.obj" />
+    <mesh name="middle_distal_collide_vhacd" content_type="model/obj" file="meshes/collision/middle_distal_collide_vhacd.obj" />
+    <mesh name="ring_proximal_collide_vhacd" content_type="model/obj" file="meshes/collision/ring_proximal_collide_vhacd.obj" />
+    <mesh name="ring_distal_collide_vhacd" content_type="model/obj" file="meshes/collision/ring_distal_collide_vhacd.obj" />
+    <mesh name="pinky_proximal_collide_vhacd" content_type="model/obj" file="meshes/collision/pinky_proximal_collide_vhacd.obj" />
+    <mesh name="pinky_distal_collide_vhacd" content_type="model/obj" file="meshes/collision/pinky_distal_collide_vhacd.obj" />
+    <mesh name="Metacarpal_left" content_type="model/stl" file="meshes/visual/Metacarpal_left.STL" />
+    <mesh name="thumb_left_collide_vhacd" content_type="model/obj" file="meshes/collision/thumb_left_collide_vhacd.obj" />
+  </asset>
+  <worldbody>
+    <body name="right_gripper" pos="0 0 0">
+      <site name="ft_frame" pos="0 0 0" size="0.01 0.01 0.01" rgba="1 0 0 1" type="sphere" group="1" />
+      <inertial pos="0 0 0.05" mass="0.3" diaginertia="0.09 0.07 0.05" />
+      <body name="eef" pos="0 0 0.12" quat="1 0 0 0">
+        <site name="grip_site" pos="0 0 0" size="0.01 0.01 0.01" rgba="1 0 0 0.5" type="sphere" group="1" />
+        <site name="ee_x" pos="0.1 0 0" size="0.005 .1" quat="0.707105 0 0.707108 0" rgba="1 0 0 0" type="cylinder" group="1" />
+        <site name="ee_y" pos="0 0.1 0" size="0.005 .1" quat="0.707105 0.707108 0 0" rgba="0 1 0 0" type="cylinder" group="1" />
+        <site name="ee_z" pos="0 0 0.1" size="0.005 .1" quat="1 0 0 0" rgba="0 0 1 0" type="cylinder" group="1" />
+        <site name="grip_site_cylinder" pos="0 0 0" size="0.005 10" rgba="0 1 0 0.3" type="cylinder" group="1" />
+      </body>
+      <geom pos="0.05 0 0.0202" quat="0.900447 0 -0.434966 0" type="mesh" rgba="1 1 1 1" mesh="palm_left_collide_vhacd" name="palm_collision_0" group="0" condim="4" friction="1 0.005 0.0001" />
+      <body name="Index_Proximal" pos="-0.037513 -0.0322863 0.0777783" quat="0.853235 -0.0330131 -0.519986 0.0227031">
+        <inertial pos="0.012312 -0.00144 0.015605" quat="0.705762 0.0436737 -0.0223497 0.706748" mass="0.2557" diaginertia="4.62452e-06 4.28575e-06 1.59774e-06" />
+        <joint name="Index_MCP_Joint" pos="0 0 0" axis="0 0.995641 0.0932686" range="0 1.774" actuatorfrcrange="-10 10" damping="1.0" armature="0.1" frictionloss="0.1" />
+        <geom type="mesh" rgba="1 1 1 1" mesh="index_proximal_left_collide_vhacd" name="Index_Proximal_collision_0" group="0" condim="4" friction="2 0.05 0.0001" solref="0.01 0.5" />
+        <body name="Index_Distal" pos="0.000620549 -0.00320953 0.0341395" quat="0.993335 0.0464246 0.105385 0.00492531">
+          <inertial pos="0.00245853 4.18782e-07 0.0189937" quat="0.703097 0.0753349 0.0753286 0.703068" mass="0.16235" diaginertia="1.98213e-06 1.92127e-06 2.58119e-07" />
+          <joint name="Index_PIP_Joint" pos="0 0 0" axis="0 1 0" range="0 1.571" actuatorfrcrange="-10 10" damping="1.0" armature="0.1" frictionloss="0.1" />
+          <geom type="mesh" rgba="1 1 1 1" mesh="index_distal_collide_vhacd" name="Index_Distal_collision_0" group="0" condim="4" friction="2 0.05 0.0001" solref="0.01 0.5" />
+        </body>
+      </body>
+      <body name="Middle_Proximal" pos="-0.0407151 -0.00944934 0.0768132" quat="0.857409 -0.00780949 -0.514104 0.0220337">
+        <inertial pos="0.0123125 2.17566e-05 0.0156706" quat="0.707018 0.0106736 0.0106655 0.707034" mass="0.12557" diaginertia="4.6244e-06 4.28567e-06 1.59773e-06" />
+        <joint name="Middle_MCP_Joint" pos="0 0 0" axis="0 1 0" range="0 1.774" actuatorfrcrange="-10 10" damping="1.0" armature="0.1" frictionloss="0.1" />
+        <geom type="mesh" rgba="0.792157 0.819608 0.933333 1" mesh="middle_proximal_collide_vhacd" name="Middle_Proximal_collision_0" group="0" condim="4" friction="2 0.05 0.0001" solref="0.01 0.5" />
+        <body name="Middle_Distal" pos="0.000620549 -1.14e-05 0.03429" quat="0.995509 0 0.0946668 0">
+          <inertial pos="0.00245853 4.19306e-07 0.0189937" quat="0.703097 0.075335 0.0753286 0.703068" mass="0.108624" diaginertia="1.98212e-06 1.92127e-06 2.58119e-07" />
+          <joint name="Middle_PIP_Joint" pos="0 0 0" axis="0 1 0" range="0 1.571" actuatorfrcrange="-10 10" damping="1.0" armature="0.1" frictionloss="0.1" />
+          <geom type="mesh" rgba="1 1 1 1" mesh="middle_distal_collide_vhacd" name="Middle_Distal_collision_0" group="0" condim="4" friction="2 0.05 0.0001" solref="0.01 0.5" />
+        </body>
+      </body>
+      <body name="Ring_Proximal" pos="-0.0377512 0.0133563 0.0749182" quat="0.857063 -0.0163396 -0.514536 -0.0207348">
+        <inertial pos="0.0123125 2.17824e-05 0.0156707" quat="0.707014 0.0106738 0.0106624 0.707038" mass="0.12557" diaginertia="4.62442e-06 4.28568e-06 1.59773e-06" />
+        <joint name="Ring_MCP_Joint" pos="0 0 0" axis="0 1 0" range="0 1.774" actuatorfrcrange="-10 10" damping="1.0" armature="0.1" frictionloss="0.1" />
+        <geom type="mesh" rgba="1 1 1 1" mesh="ring_proximal_collide_vhacd" name="Ring_Proximal_collision_0" group="0" condim="4" friction="2 0.05 0.0001" solref="0.01 0.5" />
+        <body name="Ring_Distal" pos="0.000620549 1.14e-05 0.03429" quat="0.995131 0 0.0985642 0">
+          <inertial pos="0.00245853 4.18276e-07 0.0189937" quat="0.703098 0.0753349 0.0753288 0.703068" mass="0.108624" diaginertia="1.98212e-06 1.92127e-06 2.58119e-07" />
+          <joint name="Ring_PIP_Joint" pos="0 0 0" axis="0 1 0" range="0 1.571" actuatorfrcrange="-10 10" damping="1.0" armature="0.1" frictionloss="0.1" />
+          <geom type="mesh" rgba="1 1 1 1" mesh="ring_distal_collide_vhacd" name="Ring_Distal_collision_0" group="0" condim="4" friction="2 0.05 0.0001" solref="0.01 0.5" />
+        </body>
+      </body>
+      <body name="Pinky_Proximal" pos="-0.0296061 0.0359407 0.0731642" quat="0.860039 -0.0195731 -0.505667 -0.0652017">
+        <inertial pos="0.0123125 2.17988e-05 0.0156707" quat="0.707013 0.0106742 0.0106642 0.70704" mass="0.12557" diaginertia="4.62445e-06 4.28572e-06 1.59774e-06" />
+        <joint name="Pinky_MCP_Joint" pos="0 0 0" axis="0 1 0" range="0 1.774" actuatorfrcrange="-10 10" damping="1.0" armature="0.1" frictionloss="0.1" />
+        <geom type="mesh" rgba="0.792157 0.819608 0.933333 1" mesh="pinky_proximal_collide_vhacd" name="Pinky_Proximal_collision_0" group="0" condim="4" friction="2 0.05 0.0001" solref="0.01 0.5" />
+        <body name="Pinky_Distal" pos="0.00062055 -1.14e-05 0.03429" quat="0.995125 0 0.0986244 0">
+          <inertial pos="0.00245853 4.16761e-07 0.0189937" quat="0.703098 0.0753348 0.0753288 0.703067" mass="0.116235" diaginertia="1.98213e-06 1.92127e-06 2.58119e-07" />
+          <joint name="Pinky_PIP_Joint" pos="0 0 0" axis="0 1 0" range="0 1.571" actuatorfrcrange="-10 10" damping="1.0" armature="0.1" frictionloss="0.1" />
+          <geom type="mesh" rgba="1 1 1 1" mesh="pinky_distal_collide_vhacd" name="Pinky_Distal_collision_0" group="0" condim="4" friction="2 0.05 0.0001" solref="0.01 0.5" />
+        </body>
+      </body>
+      <body name="Metacarpal" pos="0.029562 -0.025391 0.0466223" quat="0.883888 -0.0800053 -0.452728 0.0858964">
+        <inertial pos="8.59616e-05 -0.00749227 0.000693795" quat="0.76077 0.649003 -0.00494604 0.000799548" mass="0.104559" diaginertia="4.15946e-07 3.78977e-07 1.36067e-07" />
+        <joint name="Metacarpal_Joint" pos="0 0 0" axis="0 0 1" range="0 1.774" actuatorfrcrange="-10 10" damping="1.0" armature="0.1" frictionloss="0.1" />
+        <geom type="mesh" rgba="0.792157 0.819608 0.933333 1" mesh="Metacarpal_left" name="Metacarpal_collision_0" group="0" condim="4" friction="2 0.05 0.0001" solref="0.01 0.5" />
+        <body name="Thumb" pos="0 -0.01905 0.0022926" quat="0.707105 0 0 -0.707108">
+          <inertial pos="0.0150109 6.94222e-05 -0.00633804" quat="0.515933 0.477866 0.556658 0.442254" mass="0.159955" diaginertia="1.62175e-05 1.61913e-05 4.2627e-06" />
+          <joint name="Thumb_Joint" pos="0 0 0" axis="0 -1 0" range="0 1.774" actuatorfrcrange="-10 10" damping="1.0" armature="0.1" frictionloss="0.1" />
+          <geom type="mesh" rgba="1 1 1 1" mesh="thumb_left_collide_vhacd" name="Thumb_collision_0" group="0" condim="4" friction="2 0.05 0.0001" solref="0.01 0.5" />
+        </body>
+      </body>
+    </body>
+  </worldbody>
+  <actuator>
+    <position name="gripper_Index_MCP_Joint" joint="Index_MCP_Joint" ctrllimited="true" ctrlrange="0.0 1.774" kp="1000.0" forcelimited="true" forcerange="-20.0 20.0" />
+    <position name="gripper_Index_PIP_Joint" joint="Index_PIP_Joint" ctrllimited="true" ctrlrange="0.0 1.571" kp="1000.0" forcelimited="true" forcerange="-20.0 20.0" />
+    <position name="gripper_Middle_MCP_Joint" joint="Middle_MCP_Joint" ctrllimited="true" ctrlrange="0.0 1.774" kp="1000.0" forcelimited="true" forcerange="-20.0 20.0" />
+    <position name="gripper_Middle_PIP_Joint" joint="Middle_PIP_Joint" ctrllimited="true" ctrlrange="0.0 1.571" kp="1000.0" forcelimited="true" forcerange="-20.0 20.0" />
+    <position name="gripper_Ring_MCP_Joint" joint="Ring_MCP_Joint" ctrllimited="true" ctrlrange="0.0 1.774" kp="1000.0" forcelimited="true" forcerange="-20.0 20.0" />
+    <position name="gripper_Ring_PIP_Joint" joint="Ring_PIP_Joint" ctrllimited="true" ctrlrange="0.0 1.571" kp="1000.0" forcelimited="true" forcerange="-20.0 20.0" />
+    <position name="gripper_Pinky_MCP_Joint" joint="Pinky_MCP_Joint" ctrllimited="true" ctrlrange="0.0 1.774" kp="1000.0" forcelimited="true" forcerange="-20.0 20.0" />
+    <position name="gripper_Pinky_PIP_Joint" joint="Pinky_PIP_Joint" ctrllimited="true" ctrlrange="0.0 1.571" kp="1000.0" forcelimited="true" forcerange="-20.0 20.0" />
+    <position name="gripper_Thumb_Joint" joint="Thumb_Joint" ctrllimited="true" ctrlrange="0.0 1.774" kp="1000.0" forcelimited="true" forcerange="-20.0 20.0" />
+  </actuator>
+  <equality>
+    <joint joint1="Metacarpal_Joint" polycoef="1.774 0 0 0 0" />
+  </equality>
+  <sensor>
+    <force name="force_ee" site="ft_frame" />
+    <torque name="torque_ee" site="ft_frame" />
+  </sensor>
+</mujoco>

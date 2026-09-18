@@ -1,0 +1,41 @@
+<mujoco model="piper_hand">
+  <compiler angle="radian" strippath="false" />
+  <asset>
+    <mesh name="gripper_base_shift" content_type="model/stl" file="./piper_description/meshes/gripper_base_shift.STL" />
+    <mesh name="link7" content_type="model/stl" file="./piper_description/meshes/link7.STL" />
+    <mesh name="link8" content_type="model/stl" file="./piper_description/meshes/link8.STL" />
+  </asset>
+  <worldbody>
+    <body name="right_gripper" pos="0 0 0">
+      <site name="ft_frame" pos="0 0 0" size="0.01 0.01 0.01" rgba="1 0 0 1" type="sphere" group="1" />
+      <inertial pos="0 0 0.05" mass="0.3" diaginertia="0.09 0.07 0.05" />
+      <body name="eef" pos="0 0 0.13" quat="1 0 0 0">
+        <site name="grip_site" pos="0 0 0" size="0.01 0.01 0.01" rgba="1 0 0 0.5" type="sphere" group="1" />
+        <site name="ee_x" pos="0.1 0 0" size="0.005 .1" quat="0.707105 0 0.707108 0" rgba="1 0 0 0" type="cylinder" group="1" />
+        <site name="ee_y" pos="0 0.1 0" size="0.005 .1" quat="0.707105 0.707108 0 0" rgba="0 1 0 0" type="cylinder" group="1" />
+        <site name="ee_z" pos="0 0 0.1" size="0.005 .1" quat="1 0 0 0" rgba="0 0 1 0" type="cylinder" group="1" />
+        <site name="grip_site_cylinder" pos="0 0 0" size="0.005 10" rgba="0 1 0 0.3" type="cylinder" group="1" />
+      </body>
+      <geom pos="0 0 0.065" quat="0.707105 0 0 0.707108" type="mesh" rgba="0.792157 0.819608 0.933333 1" mesh="gripper_base_shift" name="palm_collision_0" group="0" condim="4" friction="1 0.005 0.0001" />
+      <body name="link7" pos="0 0 0.1358" quat="0.499998 0.5 0.500002 0.5">
+        <inertial pos="0.000651232 -0.049193 0.00972259" quat="0.477798 0.572974 -0.518028 0.418398" mass="0.025" diaginertia="7.74531e-05 7.36783e-05 5.0886e-06" />
+        <joint name="joint7" pos="0 0 0" axis="0 0 1" type="slide" range="0 0.035" actuatorfrcrange="-10 10" damping="1.0" armature="0.1" frictionloss="0.1" />
+        <geom type="mesh" rgba="0.792157 0.819608 0.933333 1" mesh="link7" name="link7_collision_0" group="0" condim="4" friction="2 0.05 0.0001" solref="0.01 0.5" />
+      </body>
+      <body name="link8" pos="0 0 0.1358" quat="0.499998 0.5 -0.500002 -0.5">
+        <inertial pos="0.000651232 -0.049193 0.00972259" quat="0.477798 0.572974 -0.518028 0.418398" mass="0.025" diaginertia="7.74531e-05 7.36783e-05 5.0886e-06" />
+        <joint name="joint8" pos="0 0 0" axis="0 0 1" type="slide" range="0 0.035" actuatorfrcrange="-10 10" damping="1.0" armature="0.1" frictionloss="0.1" />
+        <geom type="mesh" rgba="0.792157 0.819608 0.933333 1" mesh="link8" name="link8_collision_0" group="0" condim="4" friction="2 0.05 0.0001" solref="0.01 0.5" />
+      </body>
+    </body>
+  </worldbody>
+  <actuator>
+    <position name="gripper_joint7" joint="joint7" ctrllimited="true" ctrlrange="0.0 0.035" kp="1000.0" forcelimited="true" forcerange="-20.0 20.0" />
+    <position name="gripper_joint8" joint="joint8" ctrllimited="true" ctrlrange="0.0 0.035" kp="1000.0" forcelimited="true" forcerange="-20.0 20.0" />
+  </actuator>
+  <equality />
+  <sensor>
+    <force name="force_ee" site="ft_frame" />
+    <torque name="torque_ee" site="ft_frame" />
+  </sensor>
+</mujoco>

@@ -32,3 +32,7 @@ paper/
 
 # MuJoCo writes this next to the working directory on a solver warning.
 MUJOCO_LOG.TXT
+
+# Ported gripper meshes are copied verbatim from the GraspGen-X asset pack and
+# regenerate from `tpgpt.grasp.port_gripper.convert`; up to 29 MB per hand.
+assets/ported_grippers/*/meshes/
