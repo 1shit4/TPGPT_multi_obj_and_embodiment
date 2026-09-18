@@ -580,3 +580,126 @@ it -- the wizard never asks what arm you are using. So for every gripper you
 print, budget one mounting measurement in addition to the description, and treat
 it as the more likely source of a confusing failure, because it fails silently
 and the description does not.
+
+## 16. Authored against curated, properly paired
+
+**Why.** Section 12 compared an authored description with a curated one by
+calling the planner fresh each time. GraspGen-X's planner is an unseeded
+diffusion model, so that compares draws. This routes every candidate set
+through `tpgpt.grasp.cache`, so a cell's grasps are fixed on first run and
+identical on every rerun, and raises n from 12 to 30.
+
+**Conditions held fixed.** The same `Lift` table, the same 40 mm cube, the same
+cloud sampled from its known geometry, the same seed, the same physics. Only
+the config changes. The two arms of a pair necessarily see *different*
+candidates -- changing the description is what changes what the model proposes,
+and that is the thing under test.
+
+**Result, over four draws.**
+
+| arm | held / reachable | rate |
+|---|---|---|
+| curated (4 draws) | 63/163 | **39%** |
+| authored (3 draws) | 36/94 | **38%** |
+| authored + 10 mm push (1 draw) | 10/32 | 31% |
+| all authored pooled | 46/126 | **37%** |
+
+Authored against curated: Fisher **p = 0.716**. Per hand, nothing separates
+either -- panda 34% vs 14%, robotiq140 39% vs 35%, robotiq85 40% vs 55%.
+
+**What it says.** *An automatically authored description performs as well as one
+GraspGen-X's own curators drew by hand.* That is the result this document set out
+to reach, and it is what licenses pointing the tool at a gripper nobody has
+described before.
+
+**The correction it forced.** Section 12 reported `robotiq85` authored beating
+curated 18/22 against 9/22 at **p = 0.0122**. That is **withdrawn**. With two
+further draws it is 21/38 against 19/48, **p = 0.193**, and its per-draw rates
+are **91%, 73%, 19%**. Twenty-two grasps drawn from a single candidate set are
+not twenty-two independent samples -- the unit of variance here is the
+**candidate set**, and treating grasps as the unit is pseudo-replication.
+Caching fixed *reproducibility* without fixing *representativeness*: a cached
+draw reruns identically and is still one sample. Three draws is the minimum that
+exposes this, and two actively misled.
+
+## 17. `fingertip` has two jobs, and improving one does not improve the whole
+
+**Why.** Section 7 established that the curators push the grasp point forward
+from the sweep box's centre by a median 10 mm. Does applying that help?
+
+**Held fixed, then not.** Two experiments, deliberately different:
+
+*With the candidate set pinned* -- same config, same cached grasps, same cube,
+same seed, only `tcp_depth` moving:
+
+| push (mm) | 0 | 5 | **10** | 15 | 20 | 30 |
+|---|---|---|---|---|---|---|
+| panda | 1/4 | 1/4 | **3/4** | 2/4 | 3/4 | 1/4 |
+| robotiq85 | 1/9 | 4/9 | **5/9** | 1/9 | 2/8 | 2/9 |
+| robotiq140 | 7/12 | 7/12 | **7/12** | 6/12 | 5/13 | 5/13 |
+
+10 mm is the optimum on two hands and free on the third, and it lands each near
+the curated value -- Panda 105.5 against 103.4, Robotiq 2F-85 133.2 against
+136.0. Two independent routes to the same number.
+
+*With the description re-authored* so the push is baked in: **10/32, 31%**,
+against 36/94 (38%) without it. Push versus no push, Fisher **p = 0.529**. No
+net gain.
+
+**What it says, and it is the most useful thing in this document for anyone
+authoring a config.** `fingertip[-1]` is read **twice**, in two unrelated
+places:
+
+* it reaches the model as `depth` and sets the gripper's control points, so it
+  decides **which poses come back**;
+* it is the tool-centre depth, so it decides **where the hand is driven** for a
+  given pose.
+
+The pinned sweep measures only the second. Moving the point forward genuinely
+places the hand better on a fixed set of grasps. Re-authoring moves the first as
+well, and the model then proposes a *different* set -- and the two effects
+cancel. **A change that clearly improves one role of this number can be net
+neutral on the task**, and an experiment that pins the candidates cannot see it.
+
+**The default keeps the push anyway, and the reason is not the physics.** On
+hardware there is no thirty-grasp A/B to run, so what you want is the value most
+likely to be right before any test: the one expert curators converged on across
+26 hands, which is the box centre plus about 10 mm. The measured net effect is
+null (p = 0.529), not negative, and `--calibrate` overrides it per hand.
+
+## 18. What is worth porting, and the answer is nothing yet
+
+The point of authoring descriptions was to add hands. Over four draws:
+
+| hand | fingers | best available | verdict |
+|---|---|---|---|
+| panda, robotiq85, robotiq140 | 2 | curated and authored tie | already registered; **no reason to switch** |
+| `jaco3f` | 3 | authored | **0 of 47** grasps held |
+| `inspire` | 5 | curated | 0 of 28; 0 at all six depths |
+| `ability`, `schunk`, `fourier` | 5 | -- | cannot be described (section 13) |
+
+**No registry entry should change.** Switching a hand from its curated config to
+an authored one would move every existing campaign number for that hand in
+exchange for a difference of 39% against 37% at p = 0.716. The honest reading is
+that the authoring method is **validated** and that validation does not license
+a change.
+
+**`jaco3f` is the closest miss and is still a miss.** Its arm arrives at 3.3 to
+4.6 mm and its fingers **sweep the cube aside**: 0.0 mm of lift with 9.5 to
+40.9 mm of lateral slide, on every one of six traced grasps. A depth sweep finds
+a real optimum at **172.9 mm**, 20 mm past the box centre, where it holds 1 of
+7 against 0 of 7 everywhere else -- and that reproduces session one's
+independent calibration of 173.6 mm, on a different config, to within 0.7 mm. A
+reproducible 14% is a real peak and not a working hand.
+
+**`inspire` is settled.** It holds nothing on the description **GraspGen-X's own
+authors wrote**, nothing at any of six depths, and at one of them it knocks the
+cube off the table. Section 13 gives the mechanism.
+
+So the state is: the authoring tool is ready for a printed two- or three-finger
+gripper, and it unlocks no new hand *in this simulator*, because the hands that
+needed it fail for reasons a description cannot address. Adding five-finger
+capability means bringing in hands that already carry a curated description --
+GraspGen-X ships URDFs for `sharpa_wave` (34 links), `barrett_hand`,
+`surge_hand`, `wuji_hand` and `unitree_g1`, and MuJoCo compiles all of them --
+which is a robosuite modelling task, not an authoring one.
