@@ -1,55 +1,55 @@
 {
     "open": {
-        "gripper0_right_R_thumb_proximal_yaw_joint": 1.3816443128818445,
-        "gripper0_right_R_thumb_proximal_pitch_joint": -0.07951738881518838,
-        "gripper0_right_R_thumb_distal_joint": -0.012556094901609962,
-        "gripper0_right_R_index_proximal_joint": 0.0314856518255289,
-        "gripper0_right_R_index_intermediate_joint": 0.42033605526075785,
-        "gripper0_right_R_middle_proximal_joint": -0.08865528638083842,
-        "gripper0_right_R_middle_intermediate_joint": 0.02054637088137696,
-        "gripper0_right_R_ring_proximal_joint": -0.11182692725070865,
-        "gripper0_right_R_ring_intermediate_joint": 0.5985019547576743,
-        "gripper0_right_R_pinky_proximal_joint": -0.10492620264252389,
-        "gripper0_right_R_pinky_intermediate_joint": 0.0014669822767831738
+        "gripper0_right_R_thumb_proximal_yaw_joint": 1.3818094873596802,
+        "gripper0_right_R_thumb_proximal_pitch_joint": -0.08538026187225851,
+        "gripper0_right_R_thumb_distal_joint": -0.013301677730659088,
+        "gripper0_right_R_index_proximal_joint": 0.03446079617422509,
+        "gripper0_right_R_index_intermediate_joint": 0.41761514714615827,
+        "gripper0_right_R_middle_proximal_joint": -0.08562889658097582,
+        "gripper0_right_R_middle_intermediate_joint": 0.13104427727785045,
+        "gripper0_right_R_ring_proximal_joint": -0.0957872533583243,
+        "gripper0_right_R_ring_intermediate_joint": 0.526671319819325,
+        "gripper0_right_R_pinky_proximal_joint": -0.09206807534369961,
+        "gripper0_right_R_pinky_intermediate_joint": 0.0006097946901456847
     },
     "close": {
-        "gripper0_right_R_thumb_proximal_yaw_joint": 1.4135345143368958,
-        "gripper0_right_R_thumb_proximal_pitch_joint": -0.05748922423937007,
-        "gripper0_right_R_thumb_distal_joint": 1.18016944383663,
-        "gripper0_right_R_index_proximal_joint": 0.07544547051087859,
-        "gripper0_right_R_index_intermediate_joint": 0.8591303149790074,
-        "gripper0_right_R_middle_proximal_joint": -0.04866377845499474,
-        "gripper0_right_R_middle_intermediate_joint": 0.41995422159998524,
-        "gripper0_right_R_ring_proximal_joint": -0.16311242563853617,
-        "gripper0_right_R_ring_intermediate_joint": 1.0134225549366225,
-        "gripper0_right_R_pinky_proximal_joint": -0.19964777782956175,
-        "gripper0_right_R_pinky_intermediate_joint": 0.5314804704714828
+        "gripper0_right_R_thumb_proximal_yaw_joint": 1.4134343811586902,
+        "gripper0_right_R_thumb_proximal_pitch_joint": -0.05748500593990076,
+        "gripper0_right_R_thumb_distal_joint": 1.1802660343599571,
+        "gripper0_right_R_index_proximal_joint": 0.09063855368146037,
+        "gripper0_right_R_index_intermediate_joint": 0.8525181509045674,
+        "gripper0_right_R_middle_proximal_joint": -0.05817829544453322,
+        "gripper0_right_R_middle_intermediate_joint": 0.46625010328949495,
+        "gripper0_right_R_ring_proximal_joint": -0.13939912150112724,
+        "gripper0_right_R_ring_intermediate_joint": 0.9563812211084938,
+        "gripper0_right_R_pinky_proximal_joint": -0.1825868318950036,
+        "gripper0_right_R_pinky_intermediate_joint": 0.5119571539068982
     },
     "fingertip": [
         0.0,
         0.0,
-        0.13042071737279773
+        0.10033958781695959
     ],
     "sweep_volume": {
         "extents": [
-            0.01051,
-            0.08344,
-            0.10333
+            0.01255,
+            0.07619,
+            0.15559
         ],
         "offset": [
             0.0,
             0.0,
-            0.13042
+            0.10034
         ],
         "extents2": [
-            0.01065,
-            0.0856,
-            0.1045
+            0.10351,
+            0.07718,
+            0.10204
         ],
         "offset2": [
             0.0,
             0.0,
-            0.12969
+            0.12851
         ]
     },
     "links": [
@@ -77,16 +77,42 @@
         0.0,
         0.0
     ],
-    "bbox": [
+    "base_rotation": [
         [
-            -0.1286671358617024,
-            -0.04610450216611175,
-            -0.009884605852373975
+            1.0,
+            0.0,
+            0.0,
+            0.0
         ],
         [
-            0.05838379892171656,
-            0.052022554629567654,
-            0.18000046999284647
+            0.0,
+            1.0,
+            0.0,
+            0.0
+        ],
+        [
+            0.0,
+            0.0,
+            1.0,
+            0.0
+        ],
+        [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+        ]
+    ],
+    "bbox": [
+        [
+            -0.12885891743910666,
+            -0.04664482227133194,
+            -0.009927766824168878
+        ],
+        [
+            0.058936085601835324,
+            0.052184261264054045,
+            0.18056052804755213
         ]
     ],
     "symmetric": false,
@@ -97,6 +123,9 @@
         "n_fingers": 5,
         "seed": 0,
         "sweep_samples": 9,
-        "moving_geoms": 22
+        "moving_geoms": 22,
+        "closing_axis": 0,
+        "pocket_slices": 1,
+        "n_finger_links": 11
     }
 }

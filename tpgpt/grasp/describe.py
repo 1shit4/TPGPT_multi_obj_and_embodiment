@@ -140,6 +140,9 @@ MID_CLOSURE = 0.5
 #: ``grippers.gripper_points`` subsamples to 1024 by default.
 POINTS_PER_STATE = 10500
 
+#: MuJoCo's geom type code for a mesh.
+MESH_GEOM = 7
+
 
 def _root_local(sim, geom_ids, root_id):
     """Gripper geom positions **in the root body's own frame**.
@@ -312,6 +315,162 @@ def _swept_volume(env, gripper, geom_ids, pad_ids, root_id, root_to_grasp,
     extents = np.array([aperture, float(hi[1] - lo[1]), float(hi[2] - lo[2])])
     offset = np.array([0.0, 0.0, float((hi[2] + lo[2]) / 2.0)])
     return extents, offset
+
+
+def _finger_boxes(sim, geom_ids, root_p, root_R, root_to_grasp):
+    """One axis-aligned box per finger geom, in the grasp frame.
+
+    GraspGen-X's estimator works **per geom** -- it needs to know which finger
+    each box belongs to so it can pick the outermost two. Pooling every corner
+    into one cloud, which is what :func:`_largest_gap` did, throws that away.
+    """
+    corners = _solid_corners(sim, geom_ids, root_p, root_R, root_to_grasp)
+    boxes = corners.reshape(len(geom_ids), 8, 3)
+    return boxes.min(axis=1), boxes.max(axis=1)
+
+
+def _inner_sweep_volume(lo, hi):
+    """The pocket between the fingers, by GraspGen-X's own rule.
+
+    A port of ``estimate_inner_sweep_volume`` in GraspGenX's
+    ``scripts/gripper_config_wizard.py`` -- the function that seeds the box the
+    wizard then asks a person to drag, and therefore the closest thing to an
+    authoritative definition that exists. Its docstring: *"closing extent = gap
+    between innermost finger surfaces"*.
+
+    The rule, in three steps:
+
+    1. the **closing axis** is whichever axis the finger centroids are most
+       spread along (here it should come out 0, because the frame is already
+       the grasp frame, and if it does not the frame measurement is wrong);
+    2. sort the fingers by centroid along that axis and take only the **two
+       extreme** ones -- the gap is from the far face of the most-negative
+       finger to the near face of the most-positive one. If they overlap, so
+       that there is no gap to enclose, fall back to the centroid separation;
+    3. across the other two axes the box is the **union** of every finger box.
+
+    Taking the two extremes is what my ``_largest_gap`` got wrong, and it is
+    the whole of the five-finger failure. Sorting *all* the pad coordinates and
+    taking the biggest step finds the space between two **adjacent** fingers on
+    an anthropomorphic hand -- about 8 mm -- where the pocket the object goes
+    into is thumb-to-little-finger, about 110 mm. Measured that way the Ability
+    hand declared 8.8 mm against a real 112, the SchunkSvh 7.1 against 190 and
+    the Fourier hand 10.5 against 30, and none of the three held an object at
+    any depth. The two hands where the rules agree are parallel jaws, where
+    "the widest gap" and "between the outermost two fingers" are the same
+    sentence -- which is why the Panda and the Yumi validated a broken rule.
+    """
+    centroids = (lo + hi) / 2.0
+    spread = centroids.max(axis=0) - centroids.min(axis=0)
+    axis = int(np.argmax(spread))
+
+    order = np.argsort(centroids[:, axis])
+    inner_lo = float(hi[order[0], axis])
+    inner_hi = float(lo[order[-1], axis])
+    if inner_hi <= inner_lo:
+        inner_lo = float(centroids[order[0], axis])
+        inner_hi = float(centroids[order[-1], axis])
+
+    sv_lo, sv_hi = lo.min(axis=0), hi.max(axis=0)
+    sv_lo[axis], sv_hi[axis] = inner_lo, inner_hi
+    return (sv_hi - sv_lo), (sv_lo + sv_hi) / 2.0, axis
+
+
+def _pocket(env, gripper, moving_ids, root_id, root_to_grasp, fraction, freeze,
+            rng):
+    """The inner box at one closure fraction.
+
+    Drives the hand to ``fraction`` (0 = fully open, 1 = shut), lets it settle,
+    and fits :func:`tpgpt.grasp.authoring.estimate_sweep_box` to the finger
+    links. Two calls -- at 0 and at 0.5 -- give the ``extents``/``offset`` and
+    ``extents2``/``offset2`` the model conditions on.
+
+    The estimator is scored against GraspGen-X's own 26 curated descriptions by
+    :mod:`tpgpt.grasp.bench_authoring`; see that module for what the numbers
+    mean. The closing axis is **forced** to 0 rather than derived, because the
+    frame here is already the grasp frame that ``measure_frames`` produced --
+    deriving it again would let a noisy hand overrule a measurement. The
+    derived value is returned anyway, as a free check that the two agree.
+    """
+    from tpgpt.grasp.authoring import estimate_sweep_box
+    from tpgpt.sim.replay import closing_direction, set_closure
+
+    sim = env.sim
+    if commands_position(gripper):
+        command = gripper_action(env, gripper, 2.0 * float(fraction) - 1.0)
+    else:
+        set_closure(gripper, closing_direction(gripper), float(fraction))
+        command = np.zeros(env.action_dim)
+    for _ in range(SETTLE_STEPS):
+        env.step(command)
+        freeze()
+
+    root_p = np.array(sim.data.body_xpos[root_id])
+    root_R = np.array(sim.data.body_xmat[root_id]).reshape(3, 3)
+    fingers = _finger_points(sim, moving_ids, root_p, root_R, root_to_grasp, rng)
+    box = estimate_sweep_box(fingers, closing_axis=0)
+    return box.extents, box.offset, box.diagnostics
+
+
+def _geom_surface(sim, gid, rng, n):
+    """Points on one geom's actual surface, in the world frame.
+
+    A mesh geom gives up its **vertices**; everything else is sampled on its
+    bounding box. The distinction is not cosmetic. The pocket's width is a gap
+    between two surfaces, and a bounding box bulges inward wherever the shape
+    inside it tapers: the Panda's finger pads face each other at +-39.4 mm,
+    close to the 80 mm aperture its curated description declares, while the
+    AABBs of the finger hulls behind them register material at +-30 mm -- a
+    solid 10 mm inside the pads, through which no object could pass. Sampling
+    boxes put the Panda's aperture at 70.8 mm; its own mesh gives 79.8 mm from
+    the same rule.
+    """
+    gtype = int(sim.model.geom_type[gid])
+    mesh_id = int(sim.model.geom_dataid[gid])
+    geom_p = np.array(sim.data.geom_xpos[gid])
+    geom_R = np.array(sim.data.geom_xmat[gid]).reshape(3, 3)
+
+    if gtype == MESH_GEOM and mesh_id >= 0:
+        start = int(sim.model.mesh_vertadr[mesh_id])
+        count = int(sim.model.mesh_vertnum[mesh_id])
+        verts = np.array(sim.model.mesh_vert[start:start + count]).reshape(-1, 3)
+        if len(verts) > n:
+            verts = verts[rng.choice(len(verts), n, replace=False)]
+        return geom_p + verts @ geom_R.T
+
+    aabb = np.array(sim.model.geom_aabb).reshape(-1, 6)
+    centre, half = aabb[gid][:3], aabb[gid][3:]
+    if np.all(half <= 0):
+        return np.zeros((0, 3))
+    local = rng.uniform(-1.0, 1.0, size=(n, 3))
+    axis = rng.integers(0, 3, size=n)
+    local[np.arange(n), axis] = np.sign(local[np.arange(n), axis])
+    return geom_p + (centre + local * half) @ geom_R.T
+
+
+def _finger_points(sim, moving_ids, root_p, root_R, root_to_grasp, rng,
+                   per_geom=800):
+    """Surface points of each finger **link**, in the grasp frame.
+
+    Grouped by MuJoCo body, not by geom. GraspGen-X's estimator works on URDF
+    link meshes -- one geometry per finger segment -- and robosuite's models
+    split a single finger across several geoms (a Panda finger carries both a
+    collision hull and a separate pad). Feeding those in as if they were
+    separate fingers makes a two-finger hand look like a four-finger one and
+    changes which pair counts as the outermost.
+    """
+    by_body = {}
+    for gid in moving_ids:
+        by_body.setdefault(int(sim.model.geom_bodyid[gid]), []).append(int(gid))
+
+    fingers = []
+    for _, gids in sorted(by_body.items()):
+        pts = [_geom_surface(sim, gid, rng, per_geom) for gid in gids]
+        pts = [q for q in pts if len(q)]
+        if pts:
+            world = np.vstack(pts)
+            fingers.append(((world - root_p) @ root_R) @ root_to_grasp)
+    return fingers
 
 
 def _bbox(sim, geom_ids, root_p, root_R, root_to_grasp):
@@ -497,30 +656,46 @@ def describe_gripper(
         open_points = _surface_points(sim, geom_ids, root_p, root_R,
                                       root_to_grasp, rng)
 
-        # The two boxes the model conditions on: the region the pads cover
-        # sweeping from fully open to shut, and from half-closed to shut.
-        pad_ids = _pad_geoms(geom_ids, local_open, moving)
-        extents, offset = _swept_volume(
-            env, gripper, geom_ids, pad_ids, root_id, root_to_grasp,
-            0.0, freeze_arm)
-        extents2, offset2 = _swept_volume(
-            env, gripper, geom_ids, pad_ids, root_id, root_to_grasp,
-            MID_CLOSURE, freeze_arm)
+        # The two boxes the model conditions on: the pocket between the fingers
+        # with the hand open, and the same pocket half closed. Not a swept
+        # union over the closing motion -- GraspGen-X's wizard annotates "the
+        # inner volume between the fingertips" at two static poses, and its own
+        # estimator calls the closing extent "the gap between innermost finger
+        # surfaces". See :func:`_inner_sweep_volume`.
+        moving_ids = [int(geom_ids[r]) for r in np.flatnonzero(moving)]
+        extents, offset, pocket_info = _pocket(
+            env, gripper, moving_ids, root_id, root_to_grasp, 0.0, freeze_arm, rng)
+        extents2, offset2, _ = _pocket(
+            env, gripper, moving_ids, root_id, root_to_grasp,
+            MID_CLOSURE, freeze_arm, rng)
 
         settle(1.0)
         close_points = _surface_points(sim, geom_ids, root_p, root_R,
                                        root_to_grasp, rng)
 
-        # The grasp point: the **centre** of the swept box along the approach
-        # axis. That is where an object's own centre ends up when the pads
-        # close on it, which is what a tool-centre depth means.
+        # The grasp point. GraspGen-X's wizard derives it, and this is the
+        # derivation, verbatim from ``gripper_config_wizard.py``:
         #
-        # Checked against the descriptions GraspGen-X wrote: for the Panda,
-        # ``fingertip`` and ``offset[2]`` are the same number, 103.4 mm. For
-        # the other ten hands ``fingertip`` sits 0 to 37 mm beyond the box
-        # centre, with no constant relationship -- those are annotations a
-        # person entered, not a derivation, so the box centre is the defensible
-        # choice and section 4 measures what a wrong one costs.
+        #     # Derive fingertip from sweep volume offset
+        #     self.fingertip = list(self.sv_offset)
+        #
+        # So it is the centre of the open pocket and nothing else has to be
+        # measured -- which matters for a hand that exists only as CAD, where
+        # there is no physics sweep to calibrate against.
+        #
+        # It is not the whole story, and the curated descriptions say so: five
+        # of the 26 use exactly the box centre and the rest push the point
+        # **forward** along the approach axis by a round 5, 10, 15, 20, 25 or
+        # 30 mm, median 10, maximum 37 (the UMI). Those are a person's
+        # judgement about where along the fingers the object should sit, not a
+        # derivation. GraspGen-X's own fallback for a config-less gripper,
+        # ``make_sweep_volume_gripper_info``, uses a *third* rule -- the top
+        # plane of the box, ``offset[2] + extents[2] / 2`` -- which for the
+        # Panda gives 112.4 mm against the 113.4 mm this module's physics
+        # calibration found independently.
+        #
+        # The box centre is what the authoring tool writes, so it is the
+        # default; ``--calibrate`` refines it against physics.
         fingertip_z = float(offset[2])
 
         config = {
@@ -539,6 +714,26 @@ def describe_gripper(
                 if (sim.model.body_id2name(i) or "").startswith("gripper0")
             ],
             "standoff": [0.0, 0.0],
+            # The rotation that takes the gripper's **native** frame -- whatever
+            # frame its URDF or CAD was exported in -- to the canonical one,
+            # +Z along the approach and +X along the closing direction. It is
+            # step 1 of GraspGen-X's wizard and "applied to every downstream
+            # computation", and omitting it silently asserts the model is
+            # already aligned.
+            #
+            # Identity here, and that is a statement rather than a default:
+            # every number above is measured in the grasp frame that
+            # ``measure_frames`` derives, so the description is *already*
+            # canonical and no further rotation is needed. A hand arriving as
+            # CAD has no such measurement, and for it this field is the
+            # difference between a working description and one rotated 90 or
+            # 180 degrees -- the same spread ``alignment_rotation`` measures
+            # across this registry's own hands.
+            #
+            # None of GraspGen-X's own 26 curated descriptions carries the key,
+            # because their URDFs were exported aligned; the loader therefore
+            # treats a missing one as identity.
+            "base_rotation": np.eye(4).tolist(),
             "bbox": [bbox_lo.tolist(), bbox_hi.tolist()],
             "symmetric": n_fingers == 2,
             "type": _family(sim, gripper, n_fingers),
@@ -552,6 +747,12 @@ def describe_gripper(
                 "seed": int(seed),
                 "sweep_samples": SWEEP_SAMPLES,
                 "moving_geoms": int(moving.sum()),
+                # 0 means the pocket's own widest spread is along the frame's
+                # closing axis, which is what the frame measurement claims.
+                # Anything else means the two disagree about the hand.
+                "closing_axis": int(pocket_info["derived_closing_axis"]),
+                "pocket_slices": int(pocket_info["pocket_slices"]),
+                "n_finger_links": int(pocket_info["n_fingers"]),
             },
         }
         points = {
