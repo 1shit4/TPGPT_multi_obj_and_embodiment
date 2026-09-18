@@ -1,0 +1,113 @@
+{
+    "open": {
+        "gripper0_right_finger_joint1": 0.039677308807313134,
+        "gripper0_right_finger_joint2": -0.03968183104780893
+    },
+    "close": {
+        "gripper0_right_finger_joint1": 0.0004976334216338425,
+        "gripper0_right_finger_joint2": -0.0005021569382123305
+    },
+    "fingertip": [
+        0.0,
+        0.0,
+        0.11340000002687385
+    ],
+    "sweep_volume": {
+        "extents": [
+            0.07892,
+            0.016,
+            0.016
+        ],
+        "offset": [
+            0.0,
+            0.0,
+            0.0934
+        ],
+        "extents2": [
+            0.04095,
+            0.016,
+            0.016
+        ],
+        "offset2": [
+            0.0,
+            0.0,
+            0.0934
+        ]
+    },
+    "links": [
+        "gripper0_right_right_gripper",
+        "gripper0_right_eef",
+        "gripper0_right_leftfinger",
+        "gripper0_right_finger_joint1_tip",
+        "gripper0_right_rightfinger",
+        "gripper0_right_finger_joint2_tip"
+    ],
+    "standoff": [
+        0.0,
+        0.0
+    ],
+    "bbox": [
+        [
+            -0.10632481270076216,
+            -0.031650377846273205,
+            -0.027878996494151518
+        ],
+        [
+            0.10319396106470669,
+            0.031687407436034744,
+            0.1100425718363067
+        ]
+    ],
+    "symmetric": true,
+    "type": "parallel_2f",
+    "tpgpt_measured": {
+        "robosuite": "PandaGripper",
+        "robot": "Panda",
+        "n_fingers": 2,
+        "seed": 0,
+        "sweep_samples": 9,
+        "moving_geoms": 6,
+        "fingertip_calibrated": {
+            "rate": 0.5,
+            "held": 4,
+            "tried": [
+                {
+                    "fingertip": 0.08340000002687385,
+                    "reachable": 7,
+                    "held": 0,
+                    "rate": 0.0
+                },
+                {
+                    "fingertip": 0.09340000002687385,
+                    "reachable": 7,
+                    "held": 0,
+                    "rate": 0.0
+                },
+                {
+                    "fingertip": 0.10340000002687384,
+                    "reachable": 7,
+                    "held": 0,
+                    "rate": 0.0
+                },
+                {
+                    "fingertip": 0.11340000002687385,
+                    "reachable": 8,
+                    "held": 4,
+                    "rate": 0.5
+                },
+                {
+                    "fingertip": 0.12340000002687385,
+                    "reachable": 8,
+                    "held": 4,
+                    "rate": 0.5
+                },
+                {
+                    "fingertip": 0.13340000002687386,
+                    "reachable": 9,
+                    "held": 4,
+                    "rate": 0.4444444444444444
+                }
+            ]
+        }
+    }
+}

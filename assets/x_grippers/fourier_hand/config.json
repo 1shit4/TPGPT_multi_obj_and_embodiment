@@ -1,55 +1,55 @@
 {
     "open": {
-        "gripper0_right_R_thumb_proximal_yaw_joint": 1.3809676487252698,
-        "gripper0_right_R_thumb_proximal_pitch_joint": -0.08218919092617766,
-        "gripper0_right_R_thumb_distal_joint": -0.013476795162020164,
-        "gripper0_right_R_index_proximal_joint": 0.03253497414865021,
-        "gripper0_right_R_index_intermediate_joint": 0.42104789886649757,
-        "gripper0_right_R_middle_proximal_joint": -0.08660509392684913,
-        "gripper0_right_R_middle_intermediate_joint": 0.04686345868395011,
-        "gripper0_right_R_ring_proximal_joint": -0.10722884972108473,
-        "gripper0_right_R_ring_intermediate_joint": 0.5751658437371067,
-        "gripper0_right_R_pinky_proximal_joint": -0.10138794658958676,
-        "gripper0_right_R_pinky_intermediate_joint": -0.00035013216751536916
+        "gripper0_right_R_thumb_proximal_yaw_joint": 1.3816443128818445,
+        "gripper0_right_R_thumb_proximal_pitch_joint": -0.07951738881518838,
+        "gripper0_right_R_thumb_distal_joint": -0.012556094901609962,
+        "gripper0_right_R_index_proximal_joint": 0.0314856518255289,
+        "gripper0_right_R_index_intermediate_joint": 0.42033605526075785,
+        "gripper0_right_R_middle_proximal_joint": -0.08865528638083842,
+        "gripper0_right_R_middle_intermediate_joint": 0.02054637088137696,
+        "gripper0_right_R_ring_proximal_joint": -0.11182692725070865,
+        "gripper0_right_R_ring_intermediate_joint": 0.5985019547576743,
+        "gripper0_right_R_pinky_proximal_joint": -0.10492620264252389,
+        "gripper0_right_R_pinky_intermediate_joint": 0.0014669822767831738
     },
     "close": {
-        "gripper0_right_R_thumb_proximal_yaw_joint": 1.4136405806848185,
-        "gripper0_right_R_thumb_proximal_pitch_joint": -0.057483157588100915,
-        "gripper0_right_R_thumb_distal_joint": 1.181400517834743,
-        "gripper0_right_R_index_proximal_joint": 0.08252247165061467,
-        "gripper0_right_R_index_intermediate_joint": 0.855161140132006,
-        "gripper0_right_R_middle_proximal_joint": -0.04841167140961432,
-        "gripper0_right_R_middle_intermediate_joint": 0.43129680109215657,
-        "gripper0_right_R_ring_proximal_joint": -0.15637646109239328,
-        "gripper0_right_R_ring_intermediate_joint": 1.0095653195461252,
-        "gripper0_right_R_pinky_proximal_joint": -0.19489632710225196,
-        "gripper0_right_R_pinky_intermediate_joint": 0.5247713230286098
+        "gripper0_right_R_thumb_proximal_yaw_joint": 1.4135345143368958,
+        "gripper0_right_R_thumb_proximal_pitch_joint": -0.05748922423937007,
+        "gripper0_right_R_thumb_distal_joint": 1.18016944383663,
+        "gripper0_right_R_index_proximal_joint": 0.07544547051087859,
+        "gripper0_right_R_index_intermediate_joint": 0.8591303149790074,
+        "gripper0_right_R_middle_proximal_joint": -0.04866377845499474,
+        "gripper0_right_R_middle_intermediate_joint": 0.41995422159998524,
+        "gripper0_right_R_ring_proximal_joint": -0.16311242563853617,
+        "gripper0_right_R_ring_intermediate_joint": 1.0134225549366225,
+        "gripper0_right_R_pinky_proximal_joint": -0.19964777782956175,
+        "gripper0_right_R_pinky_intermediate_joint": 0.5314804704714828
     },
     "fingertip": [
         0.0,
         0.0,
-        0.14956849647575754
+        0.13042071737279773
     ],
     "sweep_volume": {
         "extents": [
-            0.14484,
-            0.06026,
-            0.11706
+            0.01051,
+            0.08344,
+            0.10333
         ],
         "offset": [
-            -0.03245,
-            0.00716,
-            0.09104
+            0.0,
+            0.0,
+            0.13042
         ],
         "extents2": [
-            0.14214,
-            0.05997,
-            0.11725
+            0.01065,
+            0.0856,
+            0.1045
         ],
         "offset2": [
-            -0.0316,
-            0.00712,
-            0.09113
+            0.0,
+            0.0,
+            0.12969
         ]
     },
     "links": [
@@ -79,14 +79,14 @@
     ],
     "bbox": [
         [
-            -0.12872107394416105,
-            -0.04629628719643613,
-            -0.00990543174946718
+            -0.1286671358617024,
+            -0.04610450216611175,
+            -0.009884605852373975
         ],
         [
-            0.058599427450183726,
-            0.05207876902415548,
-            0.18012762646748834
+            0.05838379892171656,
+            0.052022554629567654,
+            0.18000046999284647
         ]
     ],
     "symmetric": false,

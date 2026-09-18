@@ -1,45 +1,45 @@
 {
     "open": {
-        "gripper0_right_joint_thumb": 1.056145350642629,
-        "gripper0_right_joint_thumb_distal": 0.4462273775797671,
-        "gripper0_right_joint_index": 1.0561316829335943,
-        "gripper0_right_joint_index_distal": 0.4462136681630319,
-        "gripper0_right_joint_pinky": 1.0561398224790215,
-        "gripper0_right_joint_pinky_distal": 0.4462219061491821
+        "gripper0_right_joint_thumb": 1.0561451067006624,
+        "gripper0_right_joint_thumb_distal": 0.4462270645875112,
+        "gripper0_right_joint_index": 1.0561335356404702,
+        "gripper0_right_joint_index_distal": 0.4462155152401149,
+        "gripper0_right_joint_pinky": 1.0561441823547892,
+        "gripper0_right_joint_pinky_distal": 0.44622630135095975
     },
     "close": {
-        "gripper0_right_joint_thumb": 0.7557055075529641,
-        "gripper0_right_joint_thumb_distal": 0.19834744849162586,
-        "gripper0_right_joint_index": 0.7556914733821974,
-        "gripper0_right_joint_index_distal": 0.19833334516511428,
-        "gripper0_right_joint_pinky": 0.7557006929523237,
-        "gripper0_right_joint_pinky_distal": 0.19834247360421103
+        "gripper0_right_joint_thumb": 0.7557045389057088,
+        "gripper0_right_joint_thumb_distal": 0.19834654455992526,
+        "gripper0_right_joint_index": 0.7556931953924715,
+        "gripper0_right_joint_index_distal": 0.19833508471031763,
+        "gripper0_right_joint_pinky": 0.7557052617487642,
+        "gripper0_right_joint_pinky_distal": 0.19834703854924304
     },
     "fingertip": [
         0.0,
         0.0,
-        0.17986379839609154
+        0.17363288232155244
     ],
     "sweep_volume": {
         "extents": [
-            0.12965,
-            0.05724,
-            0.06271
+            0.07599,
+            0.08638,
+            0.08333
         ],
         "offset": [
-            0.01049,
-            -0.00605,
-            0.14851
+            0.0,
+            0.0,
+            0.16363
         ],
         "extents2": [
-            0.12961,
-            0.05723,
-            0.0622
+            0.02603,
+            0.08638,
+            0.08288
         ],
         "offset2": [
-            0.01049,
-            -0.00604,
-            0.14826
+            0.0,
+            0.0,
+            0.1634
         ]
     },
     "links": [
@@ -59,14 +59,14 @@
     ],
     "bbox": [
         [
-            -0.06283719487711927,
-            -0.05153461090426809,
-            -0.012197423772822735
+            -0.0628371918697577,
+            -0.05153463201463466,
+            -0.012197440423866604
         ],
         [
-            0.0834245943940383,
-            0.05130950120100943,
-            0.20047539704696937
+            0.0834246517648372,
+            0.05130953910043524,
+            0.20047537348262198
         ]
     ],
     "symmetric": false,
@@ -77,6 +77,54 @@
         "n_fingers": 3,
         "seed": 0,
         "sweep_samples": 9,
-        "moving_geoms": 18
+        "moving_geoms": 18,
+        "fingertip_calibrated": {
+            "rate": 0.11764705882352941,
+            "held": 2,
+            "tried": [
+                {
+                    "fingertip": 0.13363288232155243,
+                    "reachable": 17,
+                    "held": 0,
+                    "rate": 0.0
+                },
+                {
+                    "fingertip": 0.14363288232155244,
+                    "reachable": 17,
+                    "held": 0,
+                    "rate": 0.0
+                },
+                {
+                    "fingertip": 0.15363288232155242,
+                    "reachable": 17,
+                    "held": 1,
+                    "rate": 0.058823529411764705
+                },
+                {
+                    "fingertip": 0.16363288232155243,
+                    "reachable": 17,
+                    "held": 0,
+                    "rate": 0.0
+                },
+                {
+                    "fingertip": 0.17363288232155244,
+                    "reachable": 17,
+                    "held": 2,
+                    "rate": 0.11764705882352941
+                },
+                {
+                    "fingertip": 0.18363288232155242,
+                    "reachable": 17,
+                    "held": 1,
+                    "rate": 0.058823529411764705
+                },
+                {
+                    "fingertip": 0.19363288232155243,
+                    "reachable": 17,
+                    "held": 1,
+                    "rate": 0.058823529411764705
+                }
+            ]
+        }
     }
 }
