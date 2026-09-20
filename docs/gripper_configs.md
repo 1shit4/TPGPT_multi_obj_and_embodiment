@@ -29,7 +29,7 @@ So a description has to be checked by **grasping with it**. That is what
 
 | key | what it is | derivable from the model? |
 |---|---|---|
-| `sweep_volume` | the box the fingers traverse while closing, at two closure states | **yes** — section 3 |
+| `sweep_volume` | the box **between** the fingers — the gap they close onto — at two closure states. Not the region they traverse; that reading was wrong and section 8 is the correction | **yes** — sections 3, 8, 10 |
 | `type` | `parallel_2f`, `revolute_2f`, `revolute_3f` | yes, from the joint type and finger count |
 | `symmetric` | whether a half turn about the approach is the same grasp | yes — true for a two-finger jaw |
 | `bbox` | the hand's own extent | yes, from MuJoCo's exact per-geom bounds |
@@ -702,7 +702,8 @@ needed it fail for reasons a description cannot address. Adding five-finger
 capability means bringing in hands that already carry a curated description --
 GraspGen-X ships URDFs for `sharpa_wave` (34 links), `barrett_hand`,
 `surge_hand`, `wuji_hand` and `unitree_g1`, and MuJoCo compiles all of them --
-which is a robosuite modelling task, not an authoring one.
+which is a robosuite modelling task, not an authoring one. **Section 20 does
+that task, and section 21 measures what it bought.**
 
 ## 19. Correction: eleven of sixteen registered hands had never been tested
 
@@ -744,6 +745,15 @@ hand grasps**, and **no hand this project authored a description for grasps**
 for the first, section 18 for the second -- and neither licenses the broader
 claim.
 
+**The five-finger half of that needs one qualification, added later.** Section
+21 benches `sharpa_wave`, a physically five-finger hand ported from GraspGen-X's
+own curated description, at **12/81 = 15%** over seven independent candidate
+sets. So "no five-finger hand grasps" is too strong as an absolute: one holds
+sometimes. It is still true in the sense that matters here, which is that no
+five-finger hand grasps *well enough to register* -- 15% sits below every hand
+in the table above that was judged worth having, and significantly below
+`robotiq3f_dex` at 40% (Fisher p = 0.033).
+
 **The methodological fault is worth more than the numbers.** The
 authored-versus-curated question needed hands with both halves, so the hand set
 was chosen by what made the *comparison* clean rather than by what would answer
@@ -758,3 +768,233 @@ silently overwritten: `umi` is recorded elsewhere as lifting nothing (0 of 13)
 and reaches 2 of 25 here, and `g1three` and `bd` have no prior grasp measurement
 of any kind. All three are single runs on one object at n <= 25, so they rank
 hands, they do not settle them.
+
+## 20. Going the other way: porting GraspGen-X's own hands into robosuite
+
+Every route in this document up to here runs **robosuite → GraspGen-X**: take a
+hand the simulator already has, and author it a description. Section 19 shows
+that route exhausted for the thing it was meant to buy, which is finger
+diversity. The robosuite hands still unpaired are anthropomorphic, GraspGen-X
+trained only on two- and three-finger families (section 13), and a five-finger
+hand has no single closing axis for a description to name.
+
+This section runs the route **backwards**. GraspGen-X ships 26 hands, each with
+a URDF *and* a `config.json` its own authors curated. Section 16 measures
+curated descriptions at 39% against this project's authored ones at 37% — so a
+hand taken this way arrives with the half that works and skips the step that was
+failing. What it lacks is the robosuite model, and building one is a *modelling*
+job rather than an authoring one.
+
+`tpgpt/grasp/port_gripper.py` does the conversion; `tpgpt/grasp/ported_models.py`
+wraps the result as a robosuite `GripperModel`; and
+`tpgpt.experiments.run_ported_bench` measures it, in two modes that are
+deliberately separate — `--mount-only` (does it load, mount and move) and the
+default (does it hold anything). Conflating those two is how "thirteen hands now
+work" gets written down when what works is the XML.
+
+### What the porter reads rather than assumes
+
+The config's `open` and `close` give each joint's two end states, which become
+the position actuator's `ctrlrange` and the rest pose; `fingertip` gives where
+`grip_site` goes. Three joint **roles** fall out of comparing those two poses
+against the URDF's joint list, rather than being hardcoded per hand:
+
+| role | how it is recognised | what it gets |
+|---|---|---|
+| **driven** | named in `close`, with a value **different** from `open` | a position actuator, `ctrlrange` open→close |
+| **locked** | named in `close`, with a value **equal** to `open` | an equality constraint pinning it |
+| **coupled** | in the URDF, **absent** from the config | an equality constraint tying it to its driver |
+
+The locked case is not a technicality. The Barrett's finger **spread** joint is
+one: it is named in the config and does not move between the two poses, so
+actuating it would splay the hand open at exactly the moment it should be
+closing. The coupled case is the distal links of a real linkage, tied to their
+driver at the ratio of their joint-limit spans — which for the Barrett comes out
+**0.3443**, its true 1/3 linkage, *derived* rather than typed in.
+
+### The frame needs no measurement, and that is the part worth keeping
+
+Every other hand in this project needed a `measure_frames` pass to find
+`alignment_rotation` and `contact_offset`, and §7.34 records **0.6 to 91
+degrees** of commanded error from getting it wrong. A ported hand skips that
+pass entirely: the porter puts the XML's `eef` body at the description's own
+`fingertip` depth along **+Z**, which is the frame GraspGen-X emits poses in, so
+converting a planned pose into a `grip_site` target is the identity rotation
+plus that depth.
+
+That is *asserted*, not derived, so it is checked rather than believed — §7.13's
+lesson being that an unverified frame returns a plausible number rather than an
+obviously wrong one. The check is the bench's `reach_mm` column, the distance
+between where the arm was told to go and where its end effector actually landed.
+On `sharpa_wave` it reads **3.4, 3.5 and 3.6 mm** across three independent
+draws, which is the inverse-kinematics tolerance itself. A frame error cannot
+hide in that column; it puts the arm somewhere else.
+
+### The trap that costs an afternoon
+
+robosuite's `MujocoXML.resolve_asset_dependency` (`models/base.py:54`) rewrites
+every mesh path absolute **against the XML's own folder**, and **ignores the
+compiler's `meshdir`**. So a port that loads perfectly in bare MuJoCo fails the
+moment robosuite merges it into a robot, with an error about a file that plainly
+exists. The porter copies the meshes beside the XML and drops `meshdir`; those
+copies are gitignored, being verbatim and regenerable at up to 29 MB a hand.
+
+### What mounted
+
+`run_ported_bench --mount-only`, one Panda each, all gripper degrees of freedom
+driven to `-1` then `+1` for 60 control steps each.
+
+**Column glossary.** *travel* is the largest distance any gripper geom moves
+between the two poses — the blunt "did anything happen" measure. *diameter* is
+the gripper geom set's maximum pairwise distance at each pose; it is **not** a
+fingertip gap, because a base geom or a splaying knuckle widens it while the
+fingers converge, which is why it is reported and not interpreted. *+1 closes*
+compares each driven joint's final position against the two poses the config
+itself declares and asks which one it ended nearer; locked joints cast no vote.
+
+| hand | joints | act | travel mm | diameter −1 → +1 mm | +1 closes? |
+|---|---|---|---|---|---|
+| `barrett_hand` | 8 | 3 | **169.3** | 288.1 → 102.6 | **yes** (3/3) |
+| `sharpa_wave` | 22 | 14 | **149.6** | 169.3 → 124.5 | **yes** (14/14) |
+| `surge_hand` | 10 | 9 | **95.6** | 144.2 → 86.7 | **yes** (9/9) |
+| `ezgripper` | 4 | 1 | **75.3** | 212.5 → 176.0 | **yes** (1/1) |
+| `wuji_hand` | 20 | 16 | 94.5 | 201.0 → 151.6 | **no** (16 joints) |
+| `schunk_wsg50` | 2 | 1 | 50.5 | 115.8 → 143.0 | **no** |
+| `fetch_robot` | 2 | 1 | 49.5 | 95.0 → 110.5 | **no** |
+| `arx_x5` | 2 | 1 | 43.2 | 91.2 → 112.2 | **no** |
+| `robotiq_hande` | 2 | 1 | 24.7 | 120.1 → 123.6 | **no** |
+| `galaxea_g1` | 2 | 1 | 7.1 | 119.8 → 119.8 | no |
+| `onrobot_RG6` | 6 | 1 | 1.5 | 175.7 → 175.7 | no |
+| `dh_ag95` | 8 | 1 | 0.8 | 129.0 → 129.4 | no |
+| `onrobot_RG2` | 6 | 1 | 0.5 | 132.9 → 132.9 | no |
+| `piper_hand` | — | — | — | **does not load** | — |
+
+Read it as three groups, not one number:
+
+- **Thirteen of the fourteen hands this project lacked now mount on a Panda**,
+  where previously none did. That is the modelling result, and it holds.
+- **Nine of those move meaningfully** (over 20 mm of travel). The other four —
+  `onrobot_RG2`, `onrobot_RG6`, `dh_ag95`, `galaxea_g1` — travel 0.5 to 7.1 mm.
+  All four are **four-bar linkages**: their extra joints are absent from the
+  config, so the porter's coupling rule ties them to the driver at a
+  joint-limit ratio, and for a closed loop that over-constrains the mechanism
+  and locks it. The rule is right for a serial finger and wrong for a loop.
+- **Only four reach the pose the config asked for.** This is new, and section
+  21 is about what it costs.
+
+`piper_hand` is the single load failure, and it is the porter's fault rather
+than the hand's: the URDF refers to its meshes through a nested
+`piper_description/meshes/` path which the mesh copier flattens, so `link7.STL`
+is not where the rewritten absolute path looks for it.
+
+## 21. Correction: two opposite claims about the same hand, both wrong
+
+Commit `bf489da`'s message says:
+
+> **sharpa_wave grasps: 4 of 12, mean lift 110.8 mm** — comparable to robotiq3f
+> at 30%, yumi at 33%, robotiq140 at 38%. The first five-finger hand in this
+> project that holds anything.
+
+**That is withdrawn.** So is the correction that first replaced it, which was
+reported as "the honest answer is: none" and was not more honest for being less
+flattering. Both were single-tail readings of one distribution.
+
+### Every draw
+
+The bench is section 19's: a Panda in a `Lift` env, one 40 mm cube, candidates
+from the planner filtered to top-down approaches, each reached by inverse
+kinematics, closed on, and lifted. A **draw** is one candidate set. GraspGen-X's
+planner is an unseeded diffusion model, so asking it twice asks two different
+questions (§7.15) — which makes the candidate set, not the individual grasp, the
+unit of variance.
+
+| draw | source | held / reachable | rate | mean lift |
+|---|---|---|---|---|
+| 1 | scratchpad, quoted in `bf489da` | 4/12 | **33%** | +110.8 mm |
+| 2 | scratchpad, `--fresh` | 0/5 | 0% | — |
+| 3 | scratchpad, `--fresh` | 1/11 | 9% | — |
+| 4 | scratchpad, `--fresh` | 0/10 | 0% | −160.0 mm |
+| 5 | `run_ported_bench`, cached | 4/19 | 21% | +172.6 mm |
+| 6 | `run_ported_bench`, cached | 0/9 | 0% | −88.9 mm |
+| 7 | `run_ported_bench`, cached | 3/15 | 20% | −79.8 mm |
+| **pooled** | | **12/81** | **15%** | |
+
+95% interval on the pooled rate: **7.9% to 24.4%**.
+
+- **33%** is the draw quoted in the commit. It sits **above** the interval's
+  upper bound — the top of the distribution, not the hand's rate.
+- **4%** is draws 2–4 pooled, the figure behind "none". It sits **below** the
+  lower bound — the bottom of the same distribution.
+- **15%** is all seven draws, and it is the number that should be quoted.
+
+So the fault in the second claim was identical to the fault in the first: a
+per-draw rate spanning 0% to 33% was being reported as a property of the hand.
+Withdrawing a flattering number on one draw and replacing it with an unflattering
+number on three is not the fix. **The fix is that a single draw is not a result,
+in either direction**, which is why `run_ported_bench` takes `--draws k` — *k*
+independent candidate sets, each keyed into `tpgpt.grasp.cache` by its draw
+index so every one of them replays exactly — and why its `--fresh` flag is
+documented as making a run non-reproducible rather than as a convenience.
+
+### Where that actually puts the hand
+
+Against section 19's registry census, run on the same bench:
+
+| comparison | their rate | Fisher p |
+|---|---|---|
+| `sharpa_wave` 15% vs `robotiq3f_dex` | 6/15 = 40% | **0.033** |
+| vs `robotiq3f` | 6/20 = 30% | 0.187 |
+| vs `yumi` | 4/12 = 33% | 0.211 |
+| vs `rethink` | 1/10 = 10% | 1.000 |
+| vs `umi` | 2/25 = 8% | 0.511 |
+| vs `bd` | 1/20 = 5% | 0.455 |
+
+It is **significantly worse than the best three-finger hand** and
+**indistinguishable from the bottom three of the registry**. Not a working hand,
+and not a zero: a bottom-quartile hand.
+
+### The lift column says something the held column hides
+
+Mean lift across the three cached draws is **+172.6, −88.9 and −79.8 mm**. A
+negative mean lift is the cube ending up *below* where it started, which on a
+table means it was swept off it. So the typical outcome of a `sharpa_wave`
+attempt is not "fails to hold" but "destroys the scene". The mount audit says
+why: its geom diameter fully shut is **124.5 mm** against a 40 mm cube, so the
+hand arrives *around* the object rather than onto it, and the fingers meet the
+table before they meet each other.
+
+### And most of the ported hands were never asked the right question
+
+Section 20's last column is the finding that outranks all of the above. **Nine
+of the thirteen mounted hands do not reach the pose their own config declares
+as `close` when commanded `+1`** — including `wuji_hand`, which travels 94.5 mm
+and still ends nearer `open` on all sixteen of its driven joints. For the four
+two-finger jaws the geom diameter *grows* on the close command (`schunk_wsg50`
+115.8 → 143.0 mm, `arx_x5` 91.2 → 112.2), which is what a hand **opening** looks
+like.
+
+This matters because it reframes an earlier diagnosis. `barrett_hand`,
+`wuji_hand` and `surge_hand` were recorded as mounting and actuating but holding
+nothing, and the cause was put down to `grip_site` sitting past the geometry.
+That explanation may still be right for the two that *do* close — but for
+`wuji_hand` it is answering the wrong question, because the hand was never
+commanded shut. **A bench result on a hand that fails this check measures the
+sign convention, not the hand.**
+
+It is left as a measurement rather than fixed in the same sitting, deliberately:
+`CLAUDE.md`'s rule is never to change the system and the measurement together,
+and §7.26 records three findings retracted for exactly that. The concrete next
+step is to make the porter's actuator range agree with the config on all
+thirteen, re-run `--mount-only` until the last column reads `yes` everywhere it
+can, and only then bench.
+
+### The state, in one line each
+
+- **Porting works as modelling.** Thirteen hands that mount and actuate in
+  robosuite where previously there were none, frames correct by construction
+  and confirmed at 3.4–3.6 mm of reach.
+- **Porting has so far produced no hand worth registering.** `sharpa_wave`, the
+  only one benched across draws, holds at 15% — below every hand section 19
+  found worth having.
+- **No registry entry has been changed.** `GRIPPER_PAIRS` and
+  `gripper_frames.json` are untouched, so no existing campaign number moves.

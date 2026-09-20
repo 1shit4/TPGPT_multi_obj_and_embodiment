@@ -1,0 +1,53 @@
+{
+  "title": "Ported GraspGen-X hands: grasp-close-lift",
+  "settings": {
+    "varied": {
+      "hands": [
+        "arx_x5",
+        "barrett_hand",
+        "dh_ag95",
+        "ezgripper",
+        "fetch_robot",
+        "galaxea_g1",
+        "onrobot_RG2",
+        "onrobot_RG6",
+        "piper_hand",
+        "robotiq_hande",
+        "schunk_wsg50",
+        "sharpa_wave",
+        "surge_hand",
+        "wuji_hand"
+      ],
+      "draws": 3
+    },
+    "fixed": {
+      "cube_half_m": 0.02,
+      "env": "Lift",
+      "robot": "Panda",
+      "n_poses": 20,
+      "num_grasps": 200,
+      "topk": 100,
+      "topdown_z": -0.5,
+      "lift_threshold_m": 0.05
+    }
+  },
+  "provenance": {
+    "commit": "0cc3f55881f5a2cd74b327bc6a71735383ca0aba",
+    "commit_short": "0cc3f55",
+    "branch": "main",
+    "committed": "2026-09-20T08:25:10+05:30",
+    "dirty": [],
+    "diff_stat": null,
+    "untracked_code": [],
+    "reproducible": true,
+    "python": "3.10.12",
+    "platform": "Linux-6.8.0-138-generic-x86_64-with-glibc2.35",
+    "packages": {
+      "numpy": "2.2.6",
+      "scipy": "1.15.3",
+      "mujoco": "3.7.0",
+      "robosuite": "1.5.2",
+      "similaritymeasures": "1.4.0"
+    }
+  }
+}
