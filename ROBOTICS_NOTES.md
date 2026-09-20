@@ -4266,28 +4266,35 @@ rather than the difference of two separately-minimised distances.
 
 **Also open:**
 
-- **The whole scene is scaled down and the hand is not, and the proper
-  experiment has not been run.** robosuite's benchmark meshes are 1.4 to 2.5
-  times smaller than the articles they stand for -- the cereal box is
-  30 x 100 x 150 mm against a real 80 x 200 x 300, the loaf 40 x 48 x 49 against
-  a real 200 x 110 x 110 -- while the gripper is full size. The shelf was the
-  same: a 100 mm board with 88 mm of usable depth against hands that are 83 to
-  217 mm across their jaw axis.
+- ~~**The whole scene is scaled down and the hand is not, and the proper
+  experiment has not been run.**~~ **Done, twice over, and this item was never
+  struck -- which is how "the objects are scaled down" came to be believed on
+  2026-09-20 about a scene in which nothing is scaled.** `df87edc` (2026-09-15)
+  built the `real` world: robosuite's meshes scaled *up* per axis to the real
+  articles (cereal 30 x 100 x 150 -> 190 x 80 x 300 mm) with the density solved
+  to the real mass. `a40b3ca` (2026-09-19) replaced that with the **YCB** world,
+  which is the one every campaign now runs on: the YCB scans loaded at their
+  scanned size with no `scale` attribute anywhere (`grep scale
+  assets/ycb_mjcf/*.xml` is empty), CoACD-decomposed, and `_set_mass`
+  (`tpgpt/sim/objects.py`) solving one density per object so the compiled body
+  mass equals the published value exactly:
 
-  The shelf has been deepened to 280 mm as a **clearance fix** (see
-  ``SHELF_BOARD_DEPTH``), which is not the same thing. What is still untested is
-  the case that matters for hardware: **real-sized objects admit far fewer
-  grasps**, because a 200 mm-wide cereal box can only be taken across its 80 mm
-  face by an 80 mm jaw. Every filter in the funnel is currently being exercised
-  on objects that can be grasped almost anywhere, so "the filter kept enough
-  candidates" means very little.
+  | object | scan extent (mm) | YCB mass (kg) | compiled mass (kg) |
+  |---|---|---|---|
+  | sugar | 176.0 x 94.2 x 49.5 | 0.514 | 0.514 |
+  | meat | 102.1 x 83.5 x 60.1 | 0.370 | 0.370 |
+  | mug | 117.0 x 93.1 x 81.3 | 0.118 | 0.118 |
+  | hammer | 332.7 x 182.2 x 32.9 | 0.665 | 0.665 |
+  | banana | 178.4 x 108.9 x 36.7 | 0.066 | 0.066 |
 
-  It is feasible: ``MujocoXMLObject`` takes a ``scale`` argument, which
-  robosuite's convenience classes simply do not expose. Uniform factors of
-  about 2.0 (cereal), 1.5 (milk), 1.4 (can) and 2.5 (bread) reach realistic
-  sizes. It is deliberately **a separate experiment**, because scaling changes
-  which grasps exist at all and would confound anything else measured with it,
-  and because it needs the robot placement re-verified the way `7.32` did.
+  Measured by compiling each `assets/ycb_mjcf/<name>.xml` under MuJoCo 3.7.0 and
+  reading `body_mass`; re-fetching the scans on a second machine rebuilt the
+  MJCF byte-identical to the tracked one. The commit `d3275d7 "scene resizing"`
+  changed no code or asset -- only manifests -- despite its title. The one
+  simplification that remains is that the density is **uniform over the convex
+  parts**, so the hammer's centre of mass sits mid-tool rather than in its head;
+  that is a mass-distribution question, not a scaling one, and it is open under
+  the hammer's 3/42 in `docs/ycb_grid.md`.
 - **A front-approach demonstration** for a shelf with a roof. A top-down teach
   cannot solve one by construction: the approach direction is wrong, and no
   amount of warping fixes a direction the demonstration never contained. This is
