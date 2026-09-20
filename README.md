@@ -22,7 +22,7 @@ two objects share no correspondence.
 
 | | result |
 |---|---|
-| the paper's own setting — same object and hand, 20 randomised scenes | **17/20**, 7.6 mm mean placement error, against 4/20 without the nonlinear stage (p = 3.3e-5) |
+| the paper's own setting — same object and hand, 20 randomised scenes | **20/20**, 7.1 mm median placement error, against 5/20 without the nonlinear stage (p = 5.5e-6) |
 | **seven different hands × four different objects**, position-control replay | **19/28** |
 | the same 28 cells, executed by the learned policy under impedance control | **17/28** |
 
@@ -52,7 +52,7 @@ Given a set of *source keypoints* (where things were in the demonstration) and
 nonlinear map `phi` that carries one onto the other, push every policy label
 through it — position, velocity, end-effector orientation, Cartesian stiffness
 and damping — and refit a policy on the result. This is the paper's method, and
-it reproduces: 17/20 at 7.6 mm in the paper's own setting, against 4/20 with the
+it reproduces: 20/20 at 7.1 mm in the paper's own setting, against 5/20 with the
 nonlinear stage ablated (p = 3.3e-5), so the map is doing the work rather than a
 rigid alignment hiding inside it.
 

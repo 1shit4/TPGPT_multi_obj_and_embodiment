@@ -4282,6 +4282,48 @@ grid, gates and clamp on, paired against the same grid with them off, is what
 settles it; until then the gates are adopted on the grounds that they cost no
 success on 35 cells and remove a measured 8 mm of drop.
 
+### 7.44 The three seeds that always failed the reshelving gate were the approach, and two more executor defects the YCB ledger named
+
+The 210-cell YCB ledger of `docs/ycb_s0_results.md` had 20 cells failing at
+`approach`: the arm started 80-225 mm from the transported start with 230 to
+570 mm to travel. `_approach` ramped its setpoint over 45 fixed steps and
+handed over wherever the arm was; those cells never ran the policy. It now
+holds its final setpoint until the wrist is within 10 mm (cap 300 extra
+steps, warned). Commit `b7f7c61`.
+
+**Re-running the regression gate with only that change: 17/20 -> 20/20,
+median placement 7.1 mm (was 9.3); affine-only 4/20 -> 5/20; Mann-Whitney
+p = 5.5e-6.** Seeds 8, 11 and 16 had failed on every measurement since
+2026-09-07, through several rounds of change to the map, the policy and the
+rollout, and were read as the method's own limit. They were the executor's
+first 45 steps. The lesson is 7.26's again in a different place: a failure
+that survives every change to the thing under test is not in the thing under
+test.
+
+The second defect from the same ledger: the release gate of 7.43 opened on
+*any* support contact, and on 19 cells the object touched the shelf's front
+edge 120-320 mm short of the slot while the arm was still short of its
+attractor, so the hand let go there. Support now counts only within 40 mm of
+the attractor (the lag gate's own tolerance, rounded).
+
+What the ledger leaves, by mechanism, on the 127 failures of the seed-0 grid:
+approach 20 (fixed above); hand blocked at the grasp 17 (hammer 9, sugar 5;
+long fingers on a thin object after the support clamp, 7.43); object pushed
+away on the descent 13 (**10 are the sugar box**, 176 mm tall and 50 mm thin,
+so the arm cutting the corner of the descent grazes it -- a selection or
+approach-shape question); no purchase 26 (Rethink 11 -- its inner jaw is
+66 mm against objects 60-93 mm across, a hand limitation to report, not to
+tune away -- and the three-finger hands on the hammer 8); released short 19
+(the gate rule above); released at the right place then dropped 80-147 mm 15
+(the plan's release height is ~10 cm above the board because the object has
+rotated or slipped in the hand during the carry, sugar 7 of 15 -- the release
+height should be re-derived from the object's measured pose in the hand after
+the lift); slipped in the carry 15.
+
+The executor-free replay of the same grid on the same cached grasps
+(`ycb_replay`) and the policy grid with both fixes are running as this is
+written; they say how much of the remainder is the executor.
+
 ## 8. Open items
 
 > **Read 7.26 first.** Every end-to-end campaign has been deleted, so the items
