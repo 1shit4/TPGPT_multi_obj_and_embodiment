@@ -15,6 +15,7 @@ import yaml
 
 from tpgpt.experiments.reshelving_pipeline import record_source, transport_to_scene
 from tpgpt.transport.svgp import SparseGaussianProcessRegressor
+from tpgpt.reporting.html import _jsonable
 
 
 def _residual(name: str):
@@ -79,7 +80,12 @@ def run(config_path: str | Path) -> dict:
         "affine_residual_max": max(r["affine_residual_max"] for r in records),
     }
     report = {"config": config, "summary": summary, "episodes": records}
-    (out_dir / "report.json").write_text(json.dumps(report, indent=2, default=float))
+    # ``default=float`` broke once the rollout's metadata grew a vector-valued
+    # field (the attractor law's, section 7.40); _jsonable is what every
+    # campaign manifest is written with and turns arrays into lists.
+    (out_dir / "report.json").write_text(
+        json.dumps(report, indent=2, default=_jsonable)
+    )
 
     print(
         f"\nsuccess {summary['success_rate'] * 100:.0f}% "
