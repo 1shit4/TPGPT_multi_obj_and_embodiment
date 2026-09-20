@@ -46,7 +46,8 @@ class TestObjectSupported:
         for _ in range(20):
             scene.sim.step()
         gate = release_gate(scene, "can", arrive=0.01)
-        assert gate(scene, lag=0.05) == "supported"   # opens regardless of lag
+        assert gate(scene, lag=0.03) == "supported"   # supported and near: opens
+        assert not gate(scene, lag=0.15)               # supported but 150 mm short: holds
         _set_object_z(scene, "can", +0.30)
         assert not gate(scene, lag=0.05)               # in the air, 50 mm short: holds
         assert gate(scene, lag=0.005) == "arrived"     # in the air but arrived: opens

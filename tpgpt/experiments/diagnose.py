@@ -830,20 +830,25 @@ def object_supported(env, object_name: str, min_up: float = 0.5) -> bool:
         return False
 
 
-def release_gate(env, object_name: str, arrive: float = 0.01):
+def release_gate(env, object_name: str, arrive: float = 0.01, near: float = 0.04):
     """The release-gate callable for :func:`~tpgpt.sim.rollout.rollout_policy`.
 
-    Opens the hand when the object is supported from below, or when the hand
-    has converged to within ``arrive`` of its attractor -- the second clause is
-    what stops a placement onto a surface the object cannot reach (a ledge the
-    hand cannot enter) from waiting out the whole cap. The rollout supplies the
-    hand-to-attractor distance.
+    Opens the hand when the object is supported from below **and the hand is
+    within ``near`` of its attractor**, or when the hand has converged to
+    within ``arrive`` of it. Support alone is not enough: on 19 of 210 YCB
+    cells the object touched the shelf's front edge 120-320 mm short of the
+    slot while the arm was still fighting to get there, the gate read
+    "supported" and let go. ``near`` is the lag gate's own tolerance (35 mm)
+    rounded up, so "near" means the same thing here as it does to the clock.
+    The ``arrive`` clause is what stops a placement onto a surface the object
+    cannot reach (a ledge the hand cannot enter) from waiting out the whole
+    cap. The rollout supplies the hand-to-attractor distance.
     """
     def gate(env_, lag: float):
-        if object_supported(env_, object_name):
-            return "supported"
         if lag <= arrive:
             return "arrived"
+        if lag <= near and object_supported(env_, object_name):
+            return "supported"
         return False
 
     return gate

@@ -106,6 +106,15 @@ from tpgpt.sim.controllers.cartesian_impedance import CartesianImpedanceControll
 #: :mod:`tpgpt.sim.replay` is built the same way.
 RELEASE_GATE_MAX_STEPS = 100
 
+#: The approach hands over to the policy once the wrist is within this of the
+#: transported start, metres. 10 mm: the same arrival test the close gate uses.
+APPROACH_TOLERANCE = 0.010
+
+#: Control steps the approach may hold its final setpoint waiting to arrive,
+#: on top of the ramp. 300 is 15 s at 20 Hz -- generous, so a cap firing means
+#: the start pose is unreachable rather than merely far.
+APPROACH_MAX_EXTRA_STEPS = 300
+
 
 @dataclass
 class SimRollout:
@@ -351,8 +360,9 @@ def rollout_policy(
         policy.labels.orientations[0] if policy.labels.orientations is not None else None
     )
     approach_gap = float(np.linalg.norm(tool_state()[0] - start_position))
+    approach_extra = 0
     if approach_steps > 0:
-        obs = _approach(
+        obs, approach_extra = _approach(
             env,
             controller,
             start_position - (
@@ -613,6 +623,7 @@ def rollout_policy(
             "dt": dt,
             "approach_gap": approach_gap,
             "approach_steps": int(approach_steps),
+            "approach_extra_steps": int(approach_extra),
             "speed_limit": speed_limit,
             "attractor_integrated": attractor_law == "integrate",
             "tool_offset": offset.tolist(),
@@ -729,27 +740,56 @@ def _approach(
     rotational_damping,
     writer,
     camera,
+    tolerance: float = APPROACH_TOLERANCE,
+    max_extra_steps: int = APPROACH_MAX_EXTRA_STEPS,
 ):
-    """Drive the arm to the transported start pose with the gripper open."""
+    """Drive the arm to the transported start pose with the gripper open.
+
+    The setpoint is ramped over ``n_steps`` and then **held until the wrist
+    arrives** (within ``tolerance``), up to ``max_extra_steps`` more. It used to
+    hand over the moment the ramp ended, wherever the arm was: on the YCB grid
+    that was 80-225 mm short on 20 of 210 cells with 230-570 mm to travel, and
+    those cells never ran the policy at all -- the diagnosis calls it an
+    ``approach`` failure and the policy is not to blame for it.
+
+    Returns ``(obs, extra_steps)``; a cap that fires is a ``RuntimeWarning``.
+    """
     K = np.eye(3) * stiffness
     D = np.eye(3) * (2.0 * np.sqrt(stiffness) * 0.9)
     start, _, _, _ = controller.eef_state()
     obs = env._get_observations()
-    for step in range(n_steps):
-        alpha = (step + 1) / n_steps
+
+    def step_to(target):
         action = controller.action(
-            start + alpha * (position - start),
-            K,
-            D,
-            gripper=-1.0,
-            rotation_desired=rotation,
+            target, K, D, gripper=-1.0, rotation_desired=rotation,
             rotational_stiffness=rotational_stiffness,
             rotational_damping=rotational_damping,
         )
-        obs, _, _, _ = env.step(action)
+        obs_, _, _, _ = env.step(action)
         if writer is not None:
-            writer.append(observation_frame(obs, camera))
-    return obs
+            writer.append(observation_frame(obs_, camera))
+        return obs_
+
+    for step in range(n_steps):
+        alpha = (step + 1) / n_steps
+        obs = step_to(start + alpha * (position - start))
+    extra = 0
+    while extra < max_extra_steps:
+        wrist, _, _, _ = controller.eef_state()
+        if np.linalg.norm(wrist - position) <= tolerance:
+            break
+        obs = step_to(position)
+        extra += 1
+    else:
+        wrist, _, _, _ = controller.eef_state()
+        warnings.warn(
+            f"the approach never arrived: {np.linalg.norm(wrist - position) * 1000:.0f} mm "
+            f"from the transported start after {n_steps + extra} steps; handing "
+            "over anyway",
+            RuntimeWarning,
+            stacklevel=3,
+        )
+    return obs, extra
 
 
 def _contact_force(env) -> float:
