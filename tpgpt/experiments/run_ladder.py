@@ -159,10 +159,16 @@ def table(rows: list[dict], reference: str = REFERENCE) -> dict:
     summary = {}
     for name, cells in by_variant.items():
         fitted = [r for r in cells.values() if not r.get("refused")]
+        # A construction that produced a map with det J changing sign is a
+        # *fold*, and pipeline.run refuses to go on with one; keep the two
+        # counts apart, as the paper's table does.
+        folds = [r for r in cells.values() if r.get("refused") and any(
+            m in (r.get("reason") or "")
+            for m in ("diffeomorphism", "valid transportation map"))]
         entry = {
             "cells": len(cells),
-            "refused": sum(1 for r in cells.values() if r.get("refused")),
-            "folded": sum(1 for r in fitted if r.get("folded")),
+            "refused": sum(1 for r in cells.values() if r.get("refused")) - len(folds),
+            "folded": len(folds) + sum(1 for r in fitted if r.get("folded")),
         }
         for col, _ in COMPARED:
             vals = np.array([r[col] for r in fitted if r.get(col) is not None], float)
@@ -205,7 +211,7 @@ def _print_table(summary: dict) -> None:
               f"{fmt('keypoint_residual', 1000)} {fmt('min_det')}"
               + (f"  worst {e['min_det']['worst']:.3f}" if e.get('min_det') else ""))
         if e.get("p_vs_reference_holm"):
-            print("    " + "  ".join(f"{k.split('_')[0]}:{p:.3g}" for k, p in e["p_vs_reference_holm"].items()))
+            print("    Holm p vs (D): " + "  ".join(f"{k}={p:.2g}" for k, p in e["p_vs_reference_holm"].items()))
 
 
 def main(cells_path: str, out_dir: str, variant_names=None, limit=None) -> dict:
@@ -257,6 +263,14 @@ if __name__ == "__main__":
     parser.add_argument("--out", default="outputs/ladder")
     parser.add_argument("--variants", default=None, help="comma-separated subset")
     parser.add_argument("--limit", type=int, default=None, help="first N cells only")
+    parser.add_argument("--retable", action="store_true",
+                        help="recompute the table from <out>/rows.json without re-measuring")
     args = parser.parse_args()
-    main(args.cells, args.out,
-         args.variants.split(",") if args.variants else None, args.limit)
+    if args.retable:
+        rows = json.loads((Path(args.out) / "rows.json").read_text())
+        summary = table(rows)
+        _print_table(summary)
+        (Path(args.out) / "table.json").write_text(json.dumps(summary, indent=1))
+    else:
+        main(args.cells, args.out,
+             args.variants.split(",") if args.variants else None, args.limit)
