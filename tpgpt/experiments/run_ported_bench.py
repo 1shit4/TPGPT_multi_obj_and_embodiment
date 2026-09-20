@@ -132,6 +132,7 @@ def bench(name: str, half: float, draws: int, fresh: bool) -> list[dict]:
     cfg = json.loads((CURATED / name / "config.json").read_text())
     tcp = float(cfg["fingertip"][-1])
     _register(name)
+    _patch_cube(half)          # must precede suite.make; see _patch_cube
 
     env = suite.make(
         "Lift", robots="Panda", gripper_types=name, has_renderer=False,
