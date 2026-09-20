@@ -125,6 +125,62 @@ def _draw(env, name: str, cloud, draw: int, fresh: bool):
     return keep, key
 
 
+def mount_check(name: str) -> dict:
+    """Does a ported hand load, mount on a Panda, and move its fingertips?
+
+    The audit every ported hand passes before anything else is claimed about
+    it, and it is deliberately separate from :func:`bench`: mounting is a
+    modelling result and grasping is a physics result, and conflating the two
+    is how "thirteen hands now work" gets written down when what works is the
+    XML. ``travel_mm`` is the largest distance any gripper geom moves between
+    the fully-open and fully-shut poses -- a four-bar linkage whose extra
+    joints the porter's coupling rule locks reads a few tenths of a millimetre
+    here, which is the intended way to catch it.
+    """
+    import robosuite as suite
+
+    cfg = json.loads((CURATED / name / "config.json").read_text())
+    _register(name)
+    env = suite.make(
+        "Lift", robots="Panda", gripper_types=name, has_renderer=False,
+        has_offscreen_renderer=False, use_camera_obs=False,
+        control_freq=20, horizon=200, ignore_done=True,
+    )
+    try:
+        env.reset()
+        sim = env.sim
+        grip = env.robots[0].gripper["right"]
+        gids = [i for i in range(sim.model.ngeom)
+                if (sim.model.geom_id2name(i) or "").startswith("gripper0")]
+
+        def spread():
+            pts = np.array([sim.data.geom_xpos[g] for g in gids])
+            return pts, float(np.max(np.linalg.norm(
+                pts[:, None] - pts[None], axis=-1)))
+
+        act = np.zeros(env.action_dim)
+        act[-grip.dof:] = -1.0
+        for _ in range(60):
+            env.step(act)
+        p_open, s_open = spread()
+        act[-grip.dof:] = 1.0
+        for _ in range(60):
+            env.step(act)
+        p_close, s_close = spread()
+        travel = float(np.max(
+            np.linalg.norm(p_close - p_open, axis=-1)) * 1000)
+        return {
+            "hand": name, "mounts": True, "family": cfg["type"],
+            "joints": len(grip.joints), "actuators": len(grip.actuators),
+            "dof": grip.dof, "travel_mm": travel,
+            "spread_open_mm": s_open * 1000,
+            "spread_closed_mm": s_close * 1000,
+            "tcp_mm": float(cfg["fingertip"][-1]) * 1000,
+        }
+    finally:
+        env.close()
+
+
 def bench(name: str, half: float, draws: int, fresh: bool) -> list[dict]:
     """Grasp-close-lift a ported hand over ``draws`` candidate sets."""
     import robosuite as suite
@@ -218,6 +274,10 @@ def main(argv=None) -> int:
     ap.add_argument("--fresh", action="store_true",
                     help="bypass the cache -- makes the run NON-reproducible, "
                          "use --draws instead")
+    ap.add_argument("--mount-only", action="store_true",
+                    help="load, mount and drive each hand; no planner, no "
+                         "grasping -- mounting is a modelling result and "
+                         "grasping is a physics one")
     ap.add_argument("--out", default=None)
     ap.add_argument("--require-clean", action="store_true")
     args = ap.parse_args(argv)
@@ -229,11 +289,20 @@ def main(argv=None) -> int:
     rows = []
     for name in args.hands:
         try:
-            rows += bench(name, args.cube_half, args.draws, args.fresh)
+            if args.mount_only:
+                row = mount_check(name)
+                rows.append(row)
+                print(f"{name:16s} mounts  joints {row['joints']:2d}  "
+                      f"act {row['actuators']:2d}  travel {row['travel_mm']:7.1f} mm  "
+                      f"tips {row['spread_open_mm']:.1f} -> "
+                      f"{row['spread_closed_mm']:.1f} mm", flush=True)
+            else:
+                rows += bench(name, args.cube_half, args.draws, args.fresh)
         except Exception as exc:                            # noqa: BLE001
             print(f"{name:16s} ERROR {type(exc).__name__}: {exc}"[:200],
                   flush=True)
-            rows.append({"hand": name, "error": f"{type(exc).__name__}: {exc}"})
+            rows.append({"hand": name, "mounts": False,
+                         "error": f"{type(exc).__name__}: {exc}"})
 
     for name in args.hands:
         mine = [r for r in rows if r.get("hand") == name and "held" in r]
