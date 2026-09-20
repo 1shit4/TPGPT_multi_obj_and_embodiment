@@ -1,0 +1,404 @@
+{
+  "title": "Keypoint ladder: the five constructions on pinned grasps",
+  "description": "    python -m tpgpt.experiments.run_ladder --cells outputs/campaigns/ycb/ycb/rows.json \\\n        --out outputs/ladder",
+  "settings": {
+    "varied": {
+      "variant": [
+        "A_object_box",
+        "B_finger_contacts",
+        "C_support_cube",
+        "D_grasp_cube",
+        "E_grasp_cube_contacts"
+      ]
+    },
+    "fixed": {
+      "cells_from": "outputs/campaigns/ycb_s0_gated/ycb/rows.json",
+      "grasp": "pinned per cell to grasp_chosen_index of the source campaign",
+      "physics": "none",
+      "reference": "D_grasp_cube",
+      "correction": "Holm-Bonferroni over the comparisons against the reference, per column"
+    },
+    "cells": 210
+  },
+  "results": {
+    "A_object_box": {
+      "cells": 210,
+      "refused": 1,
+      "folded": 0,
+      "aim_grasp_mm": {
+        "median": 35.89307878525339,
+        "iqr": [
+          26.39847986658897,
+          48.880096786075754
+        ],
+        "worst": 155.7308928487996,
+        "n": 209
+      },
+      "aim_release_mm": {
+        "median": 35.98112967970422,
+        "iqr": [
+          26.32085675470693,
+          46.43621314712166
+        ],
+        "worst": 157.1530544857254,
+        "n": 209
+      },
+      "orientation_error_grasp_deg": {
+        "median": 16.899149193632777,
+        "iqr": [
+          9.319334176756978,
+          27.193504791730547
+        ],
+        "worst": 85.20751897759642,
+        "n": 209
+      },
+      "orientation_error_release_deg": {
+        "median": 17.24117563059866,
+        "iqr": [
+          9.11712090418258,
+          27.477054904467288
+        ],
+        "worst": 87.82139593581842,
+        "n": 209
+      },
+      "keypoint_residual": {
+        "median": 5.7805059469645963e-08,
+        "iqr": [
+          4.3670079459316416e-08,
+          7.472883833458524e-08
+        ],
+        "worst": 4.7321324335806714e-07,
+        "n": 209
+      },
+      "min_det": {
+        "median": 1.0464562742082242,
+        "iqr": [
+          0.8002055675738281,
+          1.5114538552052854
+        ],
+        "worst": 0.37565602402103365,
+        "n": 209
+      },
+      "p_vs_reference": {
+        "aim_grasp_mm": 4.808369038280386e-36,
+        "aim_release_mm": 4.808369038280386e-36,
+        "orientation_error_grasp_deg": 5.3956610719214824e-36,
+        "orientation_error_release_deg": 5.093610513599318e-36,
+        "keypoint_residual": 4.808369038280386e-36,
+        "min_det": 1.6152694985254164e-23
+      },
+      "p_vs_reference_holm": {
+        "aim_grasp_mm": 2.8850214229682314e-35,
+        "aim_release_mm": 2.8850214229682314e-35,
+        "keypoint_residual": 2.8850214229682314e-35,
+        "orientation_error_release_deg": 2.8850214229682314e-35,
+        "orientation_error_grasp_deg": 2.8850214229682314e-35,
+        "min_det": 1.6152694985254164e-23
+      }
+    },
+    "B_finger_contacts": {
+      "cells": 210,
+      "refused": 5,
+      "folded": 0,
+      "aim_grasp_mm": {
+        "median": 7.066522104900457,
+        "iqr": [
+          4.445234092935393,
+          12.224302697637945
+        ],
+        "worst": 133.18946435944758,
+        "n": 205
+      },
+      "aim_release_mm": {
+        "median": 6.818138104049254,
+        "iqr": [
+          3.9775758013610005,
+          11.74368446895948
+        ],
+        "worst": 137.98392346677824,
+        "n": 205
+      },
+      "orientation_error_grasp_deg": {
+        "median": 11.468215637652767,
+        "iqr": [
+          7.375870261478603,
+          16.1281035398427
+        ],
+        "worst": 81.14708044015778,
+        "n": 205
+      },
+      "orientation_error_release_deg": {
+        "median": 6.757203456354714,
+        "iqr": [
+          4.084430118642588,
+          13.332759884253845
+        ],
+        "worst": 69.99694970921833,
+        "n": 205
+      },
+      "keypoint_residual": {
+        "median": 1.581351446154567e-08,
+        "iqr": [
+          1.181441745235335e-08,
+          2.08788830805355e-08
+        ],
+        "worst": 1.071340729293363e-07,
+        "n": 205
+      },
+      "min_det": {
+        "median": 0.9275654964762624,
+        "iqr": [
+          0.7084542216621341,
+          0.9987712637818962
+        ],
+        "worst": 0.02411452976540639,
+        "n": 205
+      },
+      "p_vs_reference": {
+        "aim_grasp_mm": 2.1755845769840117e-35,
+        "aim_release_mm": 2.1755845769840117e-35,
+        "orientation_error_grasp_deg": 2.1755845769840117e-35,
+        "orientation_error_release_deg": 2.1755845769840117e-35,
+        "keypoint_residual": 2.1755845769840117e-35,
+        "min_det": 0.02161068027959283
+      },
+      "p_vs_reference_holm": {
+        "aim_grasp_mm": 1.305350746190407e-34,
+        "aim_release_mm": 1.305350746190407e-34,
+        "orientation_error_grasp_deg": 1.305350746190407e-34,
+        "orientation_error_release_deg": 1.305350746190407e-34,
+        "keypoint_residual": 1.305350746190407e-34,
+        "min_det": 0.02161068027959283
+      }
+    },
+    "C_support_cube": {
+      "cells": 210,
+      "refused": 0,
+      "folded": 0,
+      "aim_grasp_mm": {
+        "median": 47.97039214949005,
+        "iqr": [
+          32.87010750785835,
+          66.72743417911758
+        ],
+        "worst": 177.9655547264345,
+        "n": 210
+      },
+      "aim_release_mm": {
+        "median": 46.64459020202402,
+        "iqr": [
+          30.08900929126831,
+          67.27142016154427
+        ],
+        "worst": 178.76278002633214,
+        "n": 210
+      },
+      "orientation_error_grasp_deg": {
+        "median": 20.693618182364276,
+        "iqr": [
+          14.20894279449881,
+          33.53935264231247
+        ],
+        "worst": 95.0392277584724,
+        "n": 210
+      },
+      "orientation_error_release_deg": {
+        "median": 17.358222082256887,
+        "iqr": [
+          9.236215010145125,
+          30.20753462533468
+        ],
+        "worst": 94.6627900053414,
+        "n": 210
+      },
+      "keypoint_residual": {
+        "median": 3.530726950784186e-07,
+        "iqr": [
+          2.4711133052439095e-07,
+          5.851650478730071e-07
+        ],
+        "worst": 9.424532698364569e-07,
+        "n": 210
+      },
+      "min_det": {
+        "median": 0.9035867005760002,
+        "iqr": [
+          0.7627783842777774,
+          0.9434257705839734
+        ],
+        "worst": 0.40332412680686097,
+        "n": 210
+      },
+      "p_vs_reference": {
+        "aim_grasp_mm": 3.296973389731099e-36,
+        "aim_release_mm": 3.296973389731099e-36,
+        "orientation_error_grasp_deg": 3.296973389731099e-36,
+        "orientation_error_release_deg": 3.296973389731099e-36,
+        "keypoint_residual": 0.0043121764163969335,
+        "min_det": 6.207168662178894e-17
+      },
+      "p_vs_reference_holm": {
+        "aim_grasp_mm": 1.9781840338386593e-35,
+        "aim_release_mm": 1.9781840338386593e-35,
+        "orientation_error_grasp_deg": 1.9781840338386593e-35,
+        "orientation_error_release_deg": 1.9781840338386593e-35,
+        "min_det": 1.241433732435779e-16,
+        "keypoint_residual": 0.0043121764163969335
+      }
+    },
+    "D_grasp_cube": {
+      "cells": 210,
+      "refused": 0,
+      "folded": 0,
+      "aim_grasp_mm": {
+        "median": 0.00025846669002691945,
+        "iqr": [
+          0.00016990212959819875,
+          0.0004278735923551879
+        ],
+        "worst": 0.002351702488179952,
+        "n": 210
+      },
+      "aim_release_mm": {
+        "median": 0.00029192145762851006,
+        "iqr": [
+          0.00021218592053284262,
+          0.0004564359062808552
+        ],
+        "worst": 0.002335984091246391,
+        "n": 210
+      },
+      "orientation_error_grasp_deg": {
+        "median": 1.4534712404029273,
+        "iqr": [
+          0.9071007642927396,
+          1.586062118828202
+        ],
+        "worst": 1.9646532735355358,
+        "n": 210
+      },
+      "orientation_error_release_deg": {
+        "median": 0.8599026975475341,
+        "iqr": [
+          0.6088099900215654,
+          1.1282836037320165
+        ],
+        "worst": 1.9274153591715946,
+        "n": 210
+      },
+      "keypoint_residual": {
+        "median": 3.0254084415451914e-07,
+        "iqr": [
+          2.2415920948290207e-07,
+          4.727126692069919e-07
+        ],
+        "worst": 2.351702488179952e-06,
+        "n": 210
+      },
+      "min_det": {
+        "median": 0.8048236541137914,
+        "iqr": [
+          0.6739264918729462,
+          0.9300717791944835
+        ],
+        "worst": 0.10711800758734104,
+        "n": 210
+      }
+    },
+    "E_grasp_cube_contacts": {
+      "cells": 210,
+      "refused": 43,
+      "folded": 0,
+      "aim_grasp_mm": {
+        "median": 1.644424820623822e-05,
+        "iqr": [
+          9.946413064172352e-06,
+          2.3936309701804172e-05
+        ],
+        "worst": 0.00010310284220551753,
+        "n": 167
+      },
+      "aim_release_mm": {
+        "median": 1.6595101214242482e-05,
+        "iqr": [
+          9.51990595886144e-06,
+          2.3660192596281e-05
+        ],
+        "worst": 7.881740016031977e-05,
+        "n": 167
+      },
+      "orientation_error_grasp_deg": {
+        "median": 10.593002209993745,
+        "iqr": [
+          8.520383514148747,
+          13.210306560620808
+        ],
+        "worst": 44.82327256717984,
+        "n": 167
+      },
+      "orientation_error_release_deg": {
+        "median": 9.177719237759277,
+        "iqr": [
+          7.584852424607847,
+          10.883828011208628
+        ],
+        "worst": 42.83286494557773,
+        "n": 167
+      },
+      "keypoint_residual": {
+        "median": 4.0483564306738047e-08,
+        "iqr": [
+          2.9373537937966212e-08,
+          5.0003814644746096e-08
+        ],
+        "worst": 1.0855884607018618e-07,
+        "n": 167
+      },
+      "min_det": {
+        "median": 0.3008407106410296,
+        "iqr": [
+          0.17268600335021816,
+          0.4928330281737134
+        ],
+        "worst": 0.011455162980989763,
+        "n": 167
+      },
+      "p_vs_reference": {
+        "aim_grasp_mm": 3.716123610518026e-29,
+        "aim_release_mm": 3.716123610518026e-29,
+        "orientation_error_grasp_deg": 3.716123610518026e-29,
+        "orientation_error_release_deg": 3.716123610518026e-29,
+        "keypoint_residual": 3.716123610518026e-29,
+        "min_det": 1.0354941230176102e-28
+      },
+      "p_vs_reference_holm": {
+        "aim_grasp_mm": 2.2296741663108156e-28,
+        "aim_release_mm": 2.2296741663108156e-28,
+        "orientation_error_grasp_deg": 2.2296741663108156e-28,
+        "orientation_error_release_deg": 2.2296741663108156e-28,
+        "keypoint_residual": 2.2296741663108156e-28,
+        "min_det": 2.2296741663108156e-28
+      }
+    }
+  },
+  "created": "2026-09-20T15:21:35",
+  "provenance": {
+    "commit": "1af6b487081ec1ab1eb3d8fe91060d3c84a8eeb4",
+    "commit_short": "1af6b48",
+    "branch": "main",
+    "committed": "2026-09-20T15:13:53+05:30",
+    "dirty": [],
+    "diff_stat": null,
+    "untracked_code": [],
+    "reproducible": true,
+    "python": "3.10.12",
+    "platform": "Linux-6.8.0-138-generic-x86_64-with-glibc2.35",
+    "packages": {
+      "numpy": "2.2.6",
+      "scipy": "1.15.3",
+      "mujoco": "3.7.0",
+      "robosuite": "1.5.2",
+      "similaritymeasures": "1.4.0"
+    }
+  }
+}
