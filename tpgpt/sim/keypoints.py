@@ -754,8 +754,16 @@ def object_keypoints(
             f"{name}: {len(points)} points is too few to fit an oriented box; "
             "a cloud this sparse cannot describe an object's extent"
         )
-    if box not in ("cloud", "grasp_cube"):
-        raise ValueError(f"unknown box mode {box!r}; expected 'cloud' or 'grasp_cube'")
+    if box not in ("cloud", "grasp_cube", "support_cube"):
+        raise ValueError(
+            f"unknown box mode {box!r}; expected 'cloud', 'grasp_cube' or "
+            "'support_cube'"
+        )
+    if box == "support_cube" and orientation != "task":
+        raise ValueError(
+            "the support cube is aligned with the support frame by definition; "
+            "orientation='grasp' does not apply to it"
+        )
     if orientation not in ("task", "grasp"):
         raise ValueError(
             f"unknown orientation {orientation!r}; expected 'task' or 'grasp'"
@@ -782,8 +790,17 @@ def object_keypoints(
 
     if box == "cloud":
         centre, half = cloud_centre, cloud_half
-    else:
+    elif box == "grasp_cube":
         centre = np.asarray(grasp.tcp, dtype=float).reshape(3)
+        half = np.full(3, float(cube_half_extent))
+    else:
+        # The paper's comparison construction (C): the same fixed cube, but
+        # centred where the object meets its support and laid out in the
+        # support frame. It carries the object's *position* and nothing of its
+        # size, and nothing of the grasp -- which is the point: it separates
+        # "a fixed-size anchor" from "an anchor on the grasp". Its centre is
+        # the support contact, so half its corners lie below the plane.
+        centre = support_contact(points, frame, support_height, cloud_centre)
         half = np.full(3, float(cube_half_extent))
 
     corner_frame = (
@@ -830,7 +847,7 @@ def object_keypoints(
             "block_kind": box,
             "corner_orientation": orientation,
             "cube_half_extent": (
-                float(cube_half_extent) if box == "grasp_cube" else None
+                float(cube_half_extent) if box != "cloud" else None
             ),
             "corner_frame": corner_frame.tolist(),
             "grasp_tcp": np.asarray(grasp.tcp, dtype=float).reshape(3).tolist(),

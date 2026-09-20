@@ -331,6 +331,7 @@ def run(
     env=None,
     rollout_kwargs: dict | None = None,
     executor: str = "policy",
+    forced_grasp_index: int | None = None,
 ) -> RunResult:
     """One end-to-end attempt.
 
@@ -368,9 +369,9 @@ def run(
             ``"replay"``. robosuite instantiates its part controllers during
             ``__init__``, so this cannot be chosen after the fact.
     """
-    if executor not in ("policy", "replay"):
+    if executor not in ("policy", "replay", "none"):
         raise ValueError(
-            f"unknown executor {executor!r}; expected 'policy' or 'replay'")
+            f"unknown executor {executor!r}; expected 'policy', 'replay' or 'none'")
     started = time.time()
     result = RunResult(prompt=prompt, gripper=gripper, shelf_variant=shelf_variant, seed=seed)
     owned = env is None
@@ -534,6 +535,12 @@ def run(
         )
 
         candidates = [grasp_set.grasps[i] for i in funnel.survivors[:max_candidates]]
+        if forced_grasp_index is not None:
+            if not 0 <= forced_grasp_index < len(grasp_set.grasps):
+                return _fail(result, "forced_grasp_missing",
+                             f"candidate {forced_grasp_index} is not in this "
+                             f"cell's cached set of {len(grasp_set.grasps)}")
+            candidates = [grasp_set.grasps[forced_grasp_index]]
         chosen = _choose_grasp(
             env, placement, target_of, tool_labels, keypoint_parts, candidates,
             box=keypoint_box, orientation=keypoint_orientation,
@@ -584,6 +591,7 @@ def run(
         survivors = list(funnel.survivors[:max_candidates])
         rank = check.get("chosen")
         result.metrics["grasp_chosen_index"] = (
+            int(forced_grasp_index) if forced_grasp_index is not None else
             int(survivors[rank])
             if rank is not None and 0 <= rank < len(survivors) else None
         )
@@ -728,8 +736,24 @@ def run(
         )
         result.metrics["orientation_error_grasp_deg"] = float(errors[0])
         result.metrics["orientation_error_release_deg"] = float(errors[1])
+        # **Aim**: how close the transported fingertip path passes to the
+        # target grasp point, and to the release point, in millimetres. Pure
+        # geometry -- no physics has run yet. For a construction that makes
+        # the grasp point a keypoint this is ~0 *by construction* and is not
+        # evidence; for one that does not, it is the miss the executor then
+        # inherits. Both ends, because a roll or a support anchor can be right
+        # at one and wrong at the other.
+        path = np.asarray(transported.positions, dtype=float)
+        result.metrics["aim_grasp_mm"] = float(
+            np.linalg.norm(path - executed_p[None], axis=1).min() * 1000)
+        result.metrics["aim_release_mm"] = float(
+            np.linalg.norm(path - placed_p[None], axis=1).min() * 1000)
 
         # --- execute --------------------------------------------------------
+        if executor == "none":
+            result.timings = timings.stages
+            result.outcome = "not_executed"
+            return result
         if executor == "replay":
             rollout = _replay_execution(env, result, transported, target_offset,
                                         gripper, rollout_kwargs or {})
@@ -971,6 +995,14 @@ def executable_fraction(
             answer as 200 -- but *where* the samples fall changes what the number
             means, and the two moments that decide the task are narrow.
 
+        forced_grasp_index: Execute *this* candidate of the cached set -- the
+            index ``grasp_chosen_index`` a campaign row records -- instead of
+            letting the funnel choose. The funnel still runs, for its record,
+            but the choice is bypassed. What pins a comparison of constructions
+            to one grasp per cell (7.41).
+        executor: ``"policy"``, ``"replay"``, or ``"none"`` to stop once the
+            map is fitted and measured -- the geometry tier, milliseconds a
+            cell, no physics.
     Returns:
         The fraction of sampled poses the arm can hold, which is what a grasp
         should be chosen by.

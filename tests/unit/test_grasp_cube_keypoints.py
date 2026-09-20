@@ -446,3 +446,53 @@ class TestTheMidPathTiltIsAffineNotOrientation:
         assert orientation_transport_error(pose, *args)[0] < orientation_transport_error(
             task, *args
         )[0]
+
+
+class TestSupportCube:
+    """The paper's construction (C): the same fixed cube, anchored on the support.
+
+    It is the control that separates "a fixed-size anchor" from "an anchor on
+    the grasp": same nine points, same extent, same task-frame layout as the
+    task-frame cube, and the one thing that differs is where its centre is.
+    """
+
+    def _scene(self):
+        points = box_cloud(np.array([0.0, 0.0, TABLE + HALF[2]]), faces="visible")
+        from tpgpt.sim.keypoints import top_down_grasp
+
+        return points, top_down_grasp(points)
+
+    def test_nine_points_in_the_same_layout(self):
+        points, grasp = self._scene()
+        ks = object_keypoints(points, grasp, support_height=TABLE, box="support_cube")
+        assert len(ks) == 9
+        assert ks.labels[0] == "obj_center"
+        assert ks.metadata["block_kind"] == "support_cube"
+        assert ks.metadata["cube_half_extent"] == GRASP_CUBE_HALF_EXTENT
+
+    def test_its_centre_is_on_the_support_plane_under_the_object(self):
+        points, grasp = self._scene()
+        ks = object_keypoints(points, grasp, support_height=TABLE, box="support_cube")
+        centre = ks.points[0]
+        assert centre[2] == pytest.approx(TABLE, abs=1e-6)
+        assert np.allclose(centre[:2], 0.0, atol=2e-3), "the footprint centre"
+        # and it is neither the grasp point nor the cloud centre
+        assert not np.allclose(centre, grasp.tcp)
+        cloud = object_keypoints(points, grasp, support_height=TABLE, box="cloud")
+        assert not np.allclose(centre, cloud.points[0])
+
+    def test_it_carries_the_object_position_but_not_its_size(self):
+        """Doubling the object's height moves nothing but the grasp; the
+        support cube's nine points are unchanged."""
+        points, grasp = self._scene()
+        tall = box_cloud(np.array([0.0, 0.0, TABLE + 2 * HALF[2]]),
+                         half=HALF * np.array([1.0, 1.0, 2.0]), faces="visible")
+        a = object_keypoints(points, grasp, support_height=TABLE, box="support_cube")
+        b = object_keypoints(tall, grasp, support_height=TABLE, box="support_cube")
+        assert np.allclose(a.points, b.points, atol=3e-3)
+
+    def test_it_is_aligned_with_the_support_not_the_grasp(self):
+        points, grasp = self._scene()
+        with pytest.raises(ValueError, match="support frame"):
+            object_keypoints(points, grasp, support_height=TABLE,
+                             box="support_cube", orientation="grasp")
