@@ -158,17 +158,49 @@ def mount_check(name: str) -> dict:
             return pts, float(np.max(np.linalg.norm(
                 pts[:, None] - pts[None], axis=-1)))
 
+        def driven_qpos():
+            """Each driven joint's position, keyed by the config's own name."""
+            out = {}
+            for jname in grip.joints:
+                bare = jname.split("_", 1)[-1] if jname.startswith("gripper0") \
+                    else jname
+                for key in cfg.get("close", {}):
+                    if bare.endswith(key) or key.endswith(bare):
+                        jid = sim.model.joint_name2id(jname)
+                        out[key] = float(
+                            sim.data.qpos[sim.model.jnt_qposadr[jid]])
+            return out
+
         act = np.zeros(env.action_dim)
         act[-grip.dof:] = -1.0
         for _ in range(60):
             env.step(act)
         p_open, s_open = spread()
+        q_minus = driven_qpos()
         act[-grip.dof:] = 1.0
         for _ in range(60):
             env.step(act)
         p_close, s_close = spread()
+        q_plus = driven_qpos()
         travel = float(np.max(
             np.linalg.norm(p_close - p_open, axis=-1)) * 1000)
+
+        # Does +1 actually command the config's ``close`` pose? The spread
+        # columns cannot answer this: they are the whole gripper geom set's
+        # diameter, which a base geom or a splaying knuckle can widen while
+        # the fingers converge. Comparing each driven joint against the two
+        # poses the config declares can, and it is the check that decides
+        # whether a bench on this hand is measuring the hand or a sign error.
+        votes = []
+        for key, target_close in cfg.get("close", {}).items():
+            if key not in q_plus or key not in q_minus:
+                continue
+            target_open = cfg.get("open", {}).get(key, 0.0)
+            if abs(float(target_close) - float(target_open)) <= 1e-6:
+                continue                       # locked joint: no vote to cast
+            votes.append(abs(q_plus[key] - float(target_close))
+                         < abs(q_minus[key] - float(target_close)))
+
         return {
             "hand": name, "mounts": True, "family": cfg["type"],
             "joints": len(grip.joints), "actuators": len(grip.actuators),
@@ -176,6 +208,9 @@ def mount_check(name: str) -> dict:
             "spread_open_mm": s_open * 1000,
             "spread_closed_mm": s_close * 1000,
             "tcp_mm": float(cfg["fingertip"][-1]) * 1000,
+            "driven_joints_checked": len(votes),
+            "plus_one_closes": (bool(np.all(votes)) if votes else None),
+            "qpos_at_minus_one": q_minus, "qpos_at_plus_one": q_plus,
         }
     finally:
         env.close()
@@ -294,8 +329,10 @@ def main(argv=None) -> int:
                 rows.append(row)
                 print(f"{name:16s} mounts  joints {row['joints']:2d}  "
                       f"act {row['actuators']:2d}  travel {row['travel_mm']:7.1f} mm  "
-                      f"tips {row['spread_open_mm']:.1f} -> "
-                      f"{row['spread_closed_mm']:.1f} mm", flush=True)
+                      f"diam {row['spread_open_mm']:6.1f} -> "
+                      f"{row['spread_closed_mm']:6.1f} mm  "
+                      f"+1 closes: {row['plus_one_closes']} "
+                      f"({row['driven_joints_checked']} joints)", flush=True)
             else:
                 rows += bench(name, args.cube_half, args.draws, args.fresh)
         except Exception as exc:                            # noqa: BLE001
