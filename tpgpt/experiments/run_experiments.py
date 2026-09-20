@@ -267,6 +267,8 @@ def _row(result, label: str, setting: dict | None = None) -> dict:
         # fingertips clear the support (grasps.clamp_to_support); the executed
         # one is the entry at the chosen rank, 0.0 when it already cleared.
         "support_clamp_mm": result.metrics.get("support_clamp_mm"),
+        "approach_extra_steps": result.metrics.get("approach_extra_steps"),
+        "attractor_law": result.metrics.get("attractor_law"),
         "close_gate_steps": (result.metrics.get("close_gate_steps")
                              if result.metrics.get("close_gated") else None),
         "close_gate_reason": result.metrics.get("close_gate_reason"),
@@ -840,6 +842,15 @@ if __name__ == "__main__":
              "cells only; recorded in the manifest.",
     )
     parser.add_argument(
+        "--attractor-law", default=None, choices=("integrate", "anchor", "reference"),
+        help="how the attractor moves (policy.rollout.advance_attractor). "
+             "'integrate' is the shipped dead-reckoning of the velocity field; "
+             "'reference' follows the policy's regressed path point outright, "
+             "so it cannot drift off the plan. Recorded in the manifest.",
+    )
+    parser.add_argument("--anchor-gain", type=float, default=None,
+                        help="constant gain for --attractor-law anchor")
+    parser.add_argument(
         "--require-clean", action="store_true",
         help="refuse to run unless the results would be reproducible: "
              "committed, with no modified or untracked code files",
@@ -862,4 +873,8 @@ if __name__ == "__main__":
         ROLLOUT_KWARGS["release_gate"] = True
     if args.close_gate:
         ROLLOUT_KWARGS["close_gate"] = True
+    if args.attractor_law:
+        ROLLOUT_KWARGS["attractor_law"] = args.attractor_law
+    if args.anchor_gain is not None:
+        ROLLOUT_KWARGS["anchor_gain"] = args.anchor_gain
     main(tuple(args.campaigns.split(",")), args.out, strict=args.require_clean)
