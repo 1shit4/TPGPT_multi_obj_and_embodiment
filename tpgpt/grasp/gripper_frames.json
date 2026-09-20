@@ -545,7 +545,9 @@
     "plus_one_closes": true,
     "robosuite": "PandaGripper",
     "spread_closed": 0.02563162504072583,
-    "spread_open": 0.10398984597847163
+    "spread_open": 0.10398984597847163,
+    "finger_reach": 0.008,
+    "finger_reach_note": "How far the finger geoms extend past contact_offset along the approach at the open pose, metres: max over finger_geoms of (geom centre - contact) . approach + the geom's half-extent along it. Measured 2026-09-20 on the default scene; used by grasps.clamp_to_support so a commanded fingertip never goes below the support plane."
   },
   "rethink": {
     "alignment": [
@@ -660,7 +662,9 @@
     "plus_one_closes": true,
     "robosuite": "RethinkGripper",
     "spread_closed": 0.030826721850361595,
-    "spread_open": 0.07695223167768138
+    "spread_open": 0.07695223167768138,
+    "finger_reach": 0.019,
+    "finger_reach_note": "How far the finger geoms extend past contact_offset along the approach at the open pose, metres: max over finger_geoms of (geom centre - contact) . approach + the geom's half-extent along it. Measured 2026-09-20 on the default scene; used by grasps.clamp_to_support so a commanded fingertip never goes below the support plane."
   },
   "robotiq140": {
     "alignment": [
@@ -785,7 +789,9 @@
     "plus_one_closes": true,
     "robosuite": "Robotiq140Gripper",
     "spread_closed": 0.11062023448766921,
-    "spread_open": 0.16545096917006505
+    "spread_open": 0.16545096917006505,
+    "finger_reach": 0.0364,
+    "finger_reach_note": "How far the finger geoms extend past contact_offset along the approach at the open pose, metres: max over finger_geoms of (geom centre - contact) . approach + the geom's half-extent along it. Measured 2026-09-20 on the default scene; used by grasps.clamp_to_support so a commanded fingertip never goes below the support plane."
   },
   "robotiq3f": {
     "alignment": [
@@ -921,7 +927,9 @@
     "restoration_note": "Frame restored to its ec76c0d value on 2026-09-15. It had been re-measured while adding the closing-axis sign resolution, and moved 11.5 mm in contact_offset and 1.63 degrees in alignment. The sign did **not** flip for this hand, so that movement is the measurement's own irreproducibility -- three fresh processes span 11.7 mm on it -- and keeping the new draw would have substituted one sample for another under every campaign this hand appears in, which is ROBOTICS_NOTES 7.41. Measure only the hand you are adding.",
     "robosuite": "RobotiqThreeFingerGripper",
     "spread_closed": 0.0796500876498736,
-    "spread_open": 0.16438688829042575
+    "spread_open": 0.16438688829042575,
+    "finger_reach": 0.0485,
+    "finger_reach_note": "How far the finger geoms extend past contact_offset along the approach at the open pose, metres: max over finger_geoms of (geom centre - contact) . approach + the geom's half-extent along it. Measured 2026-09-20 on the default scene; used by grasps.clamp_to_support so a commanded fingertip never goes below the support plane."
   },
   "robotiq3f_dex": {
     "alignment": [
@@ -995,7 +1003,9 @@
     "plus_one_closes": true,
     "robosuite": "RobotiqThreeFingerDexterousGripper",
     "spread_closed": 0.08230344420661959,
-    "spread_open": 0.16495557131671085
+    "spread_open": 0.16495557131671085,
+    "finger_reach": 0.0386,
+    "finger_reach_note": "How far the finger geoms extend past contact_offset along the approach at the open pose, metres: max over finger_geoms of (geom centre - contact) . approach + the geom's half-extent along it. Measured 2026-09-20 on the default scene; used by grasps.clamp_to_support so a commanded fingertip never goes below the support plane."
   },
   "robotiq85": {
     "alignment": [
@@ -1120,7 +1130,9 @@
     "plus_one_closes": true,
     "robosuite": "Robotiq85Gripper",
     "spread_closed": 0.10244870084727123,
-    "spread_open": 0.1313592090951913
+    "spread_open": 0.1313592090951913,
+    "finger_reach": 0.0261,
+    "finger_reach_note": "How far the finger geoms extend past contact_offset along the approach at the open pose, metres: max over finger_geoms of (geom centre - contact) . approach + the geom's half-extent along it. Measured 2026-09-20 on the default scene; used by grasps.clamp_to_support so a commanded fingertip never goes below the support plane."
   },
   "schunk": {
     "alignment": [
@@ -1422,7 +1434,9 @@
     "plus_one_closes": true,
     "robosuite": "XArm7Gripper",
     "spread_closed": 0.07165965577419753,
-    "spread_open": 0.10699230200428571
+    "spread_open": 0.10699230200428571,
+    "finger_reach": 0.0103,
+    "finger_reach_note": "How far the finger geoms extend past contact_offset along the approach at the open pose, metres: max over finger_geoms of (geom centre - contact) . approach + the geom's half-extent along it. Measured 2026-09-20 on the default scene; used by grasps.clamp_to_support so a commanded fingertip never goes below the support plane."
   },
   "yumi": {
     "alignment": [
@@ -1529,6 +1543,8 @@
     "plus_one_closes": true,
     "robosuite": "YumiRightGripper",
     "spread_closed": 0.008404226394827068,
-    "spread_open": 0.05839426721491528
+    "spread_open": 0.05839426721491528,
+    "finger_reach": 0.011,
+    "finger_reach_note": "How far the finger geoms extend past contact_offset along the approach at the open pose, metres: max over finger_geoms of (geom centre - contact) . approach + the geom's half-extent along it. Measured 2026-09-20 on the default scene; used by grasps.clamp_to_support so a commanded fingertip never goes below the support plane."
   }
 }

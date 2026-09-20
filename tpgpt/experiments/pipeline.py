@@ -31,6 +31,7 @@ from tpgpt.experiments.run_keypoint_transport import object_centre_of_mass
 from tpgpt.grasp.filters import FilterFunnel, filter_grasps
 from tpgpt.grasp.grasps import (
     Grasp6D,
+    clamp_to_support,
     contact_offset,
     grasp_to_eef_pose,
     to_grasp_convention,
@@ -535,12 +536,24 @@ def run(
         )
 
         candidates = [grasp_set.grasps[i] for i in funnel.survivors[:max_candidates]]
+        # **The fingertips must clear the table.** What is executed is deeper
+        # than the planner's contact point by the hand's calibrated depth and
+        # its finger reach, and on the flat YCB objects that put the fingertips
+        # below the plane on every hand. Clamped here, before the keypoints are
+        # built, so the cube is centred on the grasp that actually runs.
+        support = float(env.table_offset[2])
+        clamped = [clamp_to_support(g, support, gripper) for g in candidates]
+        candidates = [g for g, _ in clamped]
+        result.metrics["support_clamp_mm"] = [round(s * 1000, 1) for _, s in clamped]
         if forced_grasp_index is not None:
             if not 0 <= forced_grasp_index < len(grasp_set.grasps):
                 return _fail(result, "forced_grasp_missing",
                              f"candidate {forced_grasp_index} is not in this "
                              f"cell's cached set of {len(grasp_set.grasps)}")
-            candidates = [grasp_set.grasps[forced_grasp_index]]
+            forced, shift = clamp_to_support(
+                grasp_set.grasps[forced_grasp_index], support, gripper)
+            candidates = [forced]
+            result.metrics["support_clamp_mm"] = [round(shift * 1000, 1)]
         chosen = _choose_grasp(
             env, placement, target_of, tool_labels, keypoint_parts, candidates,
             box=keypoint_box, orientation=keypoint_orientation,

@@ -4171,6 +4171,117 @@ scene from the four-object one every campaign before this used -- different
 positions, different occlusions, different clouds. Nothing measured under the
 old set is cell-by-cell comparable with anything measured under the new one.
 
+### 7.43 Gating the executor on arrival, and the fingertips that were commanded through the table
+
+**Measured on a second machine** (RTX 4090 box, stock robosuite 1.5.2, MuJoCo
+3.7.0, 2026-09-20) after the reshelving gate reproduced there at 17/20 vs
+4/20 with keypoint residuals identical to the record. Everything below is on
+the **YCB world**, one condition (pick `P0`, destination `top_middle`), seven
+hands x five objects = 35 cells, the planner's candidates pinned by the grasp
+cache so every arm of a comparison executed the same candidate (35 of 35 cells,
+same `min det` to the bit). Commits `56dea29`..`d14fbda` plus the clamp below.
+
+**Why anything was changed.** `docs/ycb_grid.md` recorded 84/210 with 58 of
+126 failures "carried, then set down in the wrong place" and 51 "never
+lifted", and an attribution that blamed `reach` on 83 of 126 because the
+closing budget `(aperture - width) / 2` is sub-millimetre once the objects are
+real-sized. The executor opened the hand on the clock, 13-130 mm short of its
+release pose (7.35), and -- less noticed -- closed it on the clock too: the lag
+gate holds the clock only on *excess* lag (35 mm), so a hand up to that far
+short is told to shut.
+
+**What was changed, in order, never together with the instrument.**
+
+1. *Attribution* (`diagnose`, commit `56dea29`): the reach verdict is now
+   `push_before_close <= 20 mm` and `reach_error <= 40 mm` (the trace-based
+   tests `attribute_failures.py` had already used on the real-world grid); the
+   per-axis budget is kept as a measurement. The grasp stage additionally fails
+   a contact whose peak grip force stayed under 50 N and never lifted.
+2. *Close and release gates* (`rollout_policy`, commit `615e005`): when the
+   policy first commands the hand shut, hold it open with the attractor and the
+   clock frozen until the hand is within 10 mm of its attractor; when it first
+   commands the hand open, hold it shut until the object is supported from
+   below (`diagnose.object_supported`) or the hand has arrived. Cap 100 steps,
+   reason recorded per cell. Off by default; `--close-gate --release-gate`.
+3. *Support clamp* (`grasps.clamp_to_support`): see below.
+
+**The gates are a wash on success and a gain on precision.** Baseline 11/35,
+gated 11/35; two cells gained (`robotiq3f/mug`, `robotiq140/mug`), two lost
+(`robotiq85/sugar`, `panda/mug`), McNemar p = 1.0. On the nine cells both
+arms placed, the median placement error fell from **21.6 to 13.2 mm**
+(Wilcoxon p = 0.074, n = 9). The release gate was asked on 32 cells and
+answered "supported" immediately on 26: on a cell that gets as far as the
+release, the object is usually already on the board when the policy lets go,
+so the drop 7.35 measured is mostly on cells that fail earlier for other
+reasons. Median release-gate wait 0 steps, maximum 28.
+
+**The close gate is the finding.** It timed out on **18 of 35 cells**: the hand
+never came within 10 mm of its own attractor at the grasp. On those cells the
+attractor was on the plan (commanded error under 10 mm on 14 of 18) and the
+hand sat 12-65 mm from it -- the arm was *blocked*, not misaimed. A contact log
+on three of them says by what: `panda/hammer` was on the **table** for the
+whole 100 steps, `robotiq140/banana` on the table, `xarm/meat` pressing down on
+the **object**. Ten of the 18 were the two flat objects (hammer 33 mm, banana
+37 mm).
+
+The arithmetic behind the table contacts: the planner's contact point on the
+hammer sits 5-22 mm above the plane (`robotiq140/hammer` at -7 mm), and what
+is executed is deeper than that by the hand's `calibrated_depth` (0-22.5 mm)
+*and* by how far its finger geoms reach past the contact centroid, which had
+never been measured:
+
+| hand | finger reach past contact (mm) | calibrated depth (mm) |
+|---|---|---|
+| panda | 8.0 | 7.5 |
+| yumi | 11.0 | 7.5 |
+| xarm | 10.3 | 22.5 |
+| rethink | 19.0 | 0.0 |
+| robotiq85 | 26.1 | 15.0 |
+| robotiq140 | 36.4 | 7.5 |
+| robotiq3f_dex | 38.6 | 0.0 |
+| robotiq3f | 48.5 | 15.0 |
+
+Measured as the maximum over the registry's `finger_geoms` of the geom's
+centre-minus-contact projected on the approach plus its half-extent along it,
+at the open pose, on the default scene; stored as `finger_reach` in
+`gripper_frames.json`. So on every hammer cell the commanded fingertip was at
+or below the table -- `robotiq3f/hammer` 58 mm below it -- and the arm parked
+on the plane.
+
+`clamp_to_support` slides a candidate back along its own approach until
+`contact + approach * (depth + reach)` clears the plane by 5 mm, before the
+keypoints are built. On the 14 flat-object cells, both gates on: **3/14 to
+5/14**, close-gate timeouts 10 to 5. Not a clean pairing: the shift changed
+which candidate the path check ranked first on three banana cells, and both
+gains are there (`robotiq3f/banana`, `robotiq3f_dex/banana`, from "approach"
+failures to placed). On the 11 cells that kept their grasp the count is 3 to 3,
+and two hammer cells got *worse* (`robotiq85/hammer` lift 125 to 3 mm): with
+41 mm of reach-plus-depth, a Robotiq 85 clamped to clear the table pinches only
+the top 13 mm of a 33 mm handle. That is geometry, and it says thin objects are
+marginal for long-fingered hands whatever the executor does.
+
+**Two mechanisms remain open from this.** `panda/hammer` needs no clamp by the
+arithmetic (executed tip 6.8 mm up) and still parks on the table: its
+*attractor* drifted 36 mm below the plan (`commanded_error`), so that one is
+the integrator, not the geometry. And `xarm/meat`, `rethink/meat`,
+`rethink/sugar` press on the object for 100+ steps with the attractor on
+target -- the pinch is commanded at a depth the object's top rim refuses, which
+is a jaw-thickness-at-depth question the declared aperture cannot see.
+
+**Also measured, and worth knowing before A3 is built:** the fleet's gripper
+actuators are not commensurate. Panda, Rethink and Yumi close under
+`kp = 1000` with a 20 N per-finger force cap; the three Robotiqs under
+`kp = 20` with **no** force limit; the xArm under a 50 N cap. "Fully shut"
+means a bounded squeeze on one hand and an unbounded one on another. A
+force-limited close would have to be specified per hand on the measured grip
+force, not on the actuator.
+
+**What would make this wrong.** The 35 cells are one condition and one draw;
+the 5/14 rests on two cells that changed grasp. A three-draw run of the full
+grid, gates and clamp on, paired against the same grid with them off, is what
+settles it; until then the gates are adopted on the grounds that they cost no
+success on 35 cells and remove a measured 8 mm of drop.
+
 ## 8. Open items
 
 > **Read 7.26 first.** Every end-to-end campaign has been deleted, so the items

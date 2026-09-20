@@ -248,6 +248,82 @@ def contact_offset(pair: GripperPair | str) -> np.ndarray:
     return offset
 
 
+#: Clearance kept between the lowest point of the fingers and the support
+#: plane when a grasp is clamped, metres. Below the 8-23 mm of solver jitter
+#: an object at rest shows (7.32) it would be meaningless; above it, it starts
+#: costing pinch depth on thin objects. 5 mm.
+FLOOR_MARGIN = 0.005
+
+
+def finger_reach(pair) -> float:
+    """How far this hand's fingers extend past its contact point, metres.
+
+    Measured on the model at the open pose and stored in the registry as
+    ``finger_reach`` (see the note there). The contact offset is the centroid
+    of the distal third of the fingers, not their tip, so the tips reach
+    further: 8 mm on a Panda, 48.5 mm on a Robotiq 3F. Zero when unmeasured --
+    which means "no clamp", so an unmeasured hand still runs and the omission
+    shows up as a table contact rather than as a silent shift.
+    """
+    frame = gripper_frame(_short_name(_as_pair(pair)))
+    if frame is None:
+        return 0.0
+    return float(frame.get("finger_reach") or 0.0)
+
+
+def clamp_to_support(
+    grasp: Grasp6D,
+    support_height: float,
+    gripper: str | GripperPair | None = None,
+    normal=(0.0, 0.0, 1.0),
+    margin: float = FLOOR_MARGIN,
+) -> tuple[Grasp6D, float]:
+    """Slide a grasp back along its approach until the fingertips clear the support.
+
+    What is executed is not the planner's contact point: ``grasp_to_eef_pose``
+    pushes the hand a further ``calibrated_depth`` along the approach, and the
+    finger geoms reach ``finger_reach`` beyond the contact. On a 33 mm-thin
+    hammer lying on the table the planner's contact sits 5-22 mm above the
+    plane, and the executed fingertips were 5-58 mm **below** it on every hand
+    -- the arm parked on the table and the close never happened (35-cell YCB
+    run, 2026-09-20: 10 of the 18 cells whose close gate timed out were the
+    hammer and the banana).
+
+    The lowest fingertip point is ``contact + approach * (depth + reach)``.
+    If it is less than ``margin`` above the plane, the whole grasp is moved
+    back along ``-approach`` by the amount that fixes it, which keeps the pinch
+    on the same line of approach; for an approach within 30 degrees of
+    parallel to the plane, where moving along it changes nothing, the shift is
+    along the normal instead.
+
+    Returns:
+        ``(grasp, shift_m)`` -- the grasp, possibly replaced, and how far it
+        was moved (0.0 when it already cleared).
+    """
+    from dataclasses import replace
+
+    pair = gripper if isinstance(gripper, GripperPair) else resolve_pair(gripper or grasp.gripper)
+    n = np.asarray(normal, dtype=float)
+    n = n / np.linalg.norm(n)
+    frame = gripper_frame(_short_name(pair)) or {}
+    depth = float(frame.get("calibrated_depth") or 0.0)
+    reach = finger_reach(pair)
+    contact = grasp.position + grasp.approach * gripper_geometry(pair.graspgen).tcp_depth
+    lowest = contact + grasp.approach * (depth + reach)
+    height = float((lowest @ n) - support_height)
+    short = margin - height
+    if short <= 0.0:
+        return grasp, 0.0
+    descent = float(-(grasp.approach @ n))  # >0 when the approach points down
+    if descent > 0.5:
+        direction, shift = -grasp.approach, short / descent
+    else:
+        direction, shift = n, short
+    pose = np.array(grasp.pose, dtype=float)
+    pose[:3, 3] += direction * shift
+    return replace(grasp, pose=pose), float(shift)
+
+
 def to_grasp_convention(rotations: np.ndarray, gripper) -> np.ndarray:
     """Re-express wrist (``grip_site``) orientations in the grasp convention.
 

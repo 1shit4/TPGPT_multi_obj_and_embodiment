@@ -263,6 +263,10 @@ def _row(result, label: str, setting: dict | None = None) -> dict:
         "release_gate_steps": (result.metrics.get("release_gate_steps")
                                if result.metrics.get("release_gated") else None),
         "release_gate_reason": result.metrics.get("release_gate_reason"),
+        # How far each candidate was slid back along its approach so the
+        # fingertips clear the support (grasps.clamp_to_support); the executed
+        # one is the entry at the chosen rank, 0.0 when it already cleared.
+        "support_clamp_mm": result.metrics.get("support_clamp_mm"),
         "close_gate_steps": (result.metrics.get("close_gate_steps")
                              if result.metrics.get("close_gated") else None),
         "close_gate_reason": result.metrics.get("close_gate_reason"),
@@ -815,6 +819,13 @@ if __name__ == "__main__":
         help="comma-separated destinations (top_middle,...) for the real/ycb grids",
     )
     parser.add_argument(
+        "--seed", type=int, default=None,
+        help="scene seed for the real/ycb grids. With a fixed pick pose the "
+             "physics is deterministic, so a seed varies nothing unless the "
+             "planner draw does: point TPGPT_GRASP_CACHE at a per-seed "
+             "directory to get a fresh candidate set per seed.",
+    )
+    parser.add_argument(
         "--release-gate", action="store_true",
         help="hold the hand shut at the release until the object is supported "
              "from below or the hand has converged onto its release pose, "
@@ -840,6 +851,8 @@ if __name__ == "__main__":
     if args.objects:
         EXECUTION_OBJECTS = tuple(o.strip() for o in args.objects.split(","))
         GRID_OVERRIDES["objects"] = EXECUTION_OBJECTS
+    if args.seed is not None:
+        GRID_OVERRIDES["seed"] = args.seed
     if args.picks:
         GRID_OVERRIDES["picks"] = tuple(p.strip() for p in args.picks.split(","))
     if args.destinations:
