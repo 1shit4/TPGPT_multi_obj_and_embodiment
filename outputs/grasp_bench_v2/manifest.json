@@ -1,0 +1,82 @@
+{
+  "title": "Grasp bench: can this hand hold this object?",
+  "description": "One object on the table, one hand, several planner grasps each. Approach, close, lift, carry sideways and back. No transportation map, no policy, no shelf.",
+  "settings": {
+    "varied": {
+      "gripper": [
+        "panda",
+        "robotiq85",
+        "robotiq140",
+        "rethink",
+        "xarm",
+        "robotiq3f",
+        "yumi",
+        "inspire",
+        "g1three",
+        "bd",
+        "umi"
+      ],
+      "object": [
+        "can",
+        "milk",
+        "cereal",
+        "bread",
+        "hammer",
+        "wrench",
+        "pot",
+        "mug",
+        "nut_square",
+        "nut_round"
+      ],
+      "grasp_rank": [
+        0,
+        1,
+        2
+      ]
+    },
+    "fixed": {
+      "scene": "TabletopShelf, ONE object, rebuilt fresh per grasp",
+      "seed": 0,
+      "camera": "256x256, three views",
+      "grasps": "GraspGen-X via tpgpt.grasp.cache, put through filters.filter_grasps' pick-side stages, then ranked by the planner's own score. Cached because the planner is an unseeded diffusion model (ROBOTICS_NOTES 7.15)",
+      "filters": "visibility, target containment, jaw width, support approach, collision, centre offset. No place-side stage and no reachability stage",
+      "gripper_command": "plain +1 shut; no force target, no feedback",
+      "control": "Cartesian impedance, stiffness 600, same as verify.execute_grasp",
+      "carry": "0.2 m sideways and back, at 0.15 m above the pick",
+      "preconditions": "gripper_mounted, scene_unstepped, object_placement, closure_calibrated -- checked per grasp, aborts before physics",
+      "cells": "all"
+    }
+  },
+  "results": {
+    "grasps_attempted": 294,
+    "held": 74,
+    "lifted_then_lost": 12,
+    "never_lifted": 208
+  },
+  "thresholds": {
+    "lift_height_m": 0.02,
+    "min_cloud_points": 40
+  },
+  "created": "2026-09-14T06:36:06",
+  "provenance": {
+    "commit": "4e0c7506ce0c4670994d7cdf66cde73f839746f9",
+    "commit_short": "4e0c750",
+    "branch": "main",
+    "committed": "2026-09-14T05:51:56+05:30",
+    "dirty": [
+      "tpgpt/grasp/describe.py"
+    ],
+    "diff_stat": "tpgpt/grasp/describe.py | 233 +++++++++++++++++++-----------------------------\n 1 file changed, 92 insertions(+), 141 deletions(-)",
+    "untracked_code": [],
+    "reproducible": false,
+    "python": "3.10.12",
+    "platform": "Linux-6.8.0-138-generic-x86_64-with-glibc2.35",
+    "packages": {
+      "numpy": "2.2.6",
+      "scipy": "1.15.3",
+      "mujoco": "3.7.0",
+      "robosuite": "1.5.2",
+      "similaritymeasures": "1.4.0"
+    }
+  }
+}

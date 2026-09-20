@@ -1,0 +1,71 @@
+{
+  "title": "Gripper audit: does it mount, does it actuate, is it fully commanded?",
+  "description": "Each gripper mounted on an arm and driven fully open to fully closed, twice: once commanding only the last entry of the action vector and once commanding the whole gripper block. The gap between the two is what the scalar command was mis-measuring.",
+  "settings": {
+    "varied": {
+      "gripper": [
+        "AbilityLeftHand",
+        "AbilityRightHand",
+        "AlohaGripper",
+        "BDGripper",
+        "FourierLeftHand",
+        "FourierRightHand",
+        "G1ThreeFingerLeftGripper",
+        "G1ThreeFingerRightGripper",
+        "InspireLeftHand",
+        "InspireRightHand",
+        "JacoThreeFingerDexterousGripper",
+        "JacoThreeFingerGripper",
+        "PR2Gripper",
+        "PandaGripper",
+        "RethinkGripper",
+        "Robotiq140Gripper",
+        "Robotiq85Gripper",
+        "RobotiqThreeFingerDexterousGripper",
+        "RobotiqThreeFingerGripper",
+        "SchunkSvhLeftHand",
+        "SchunkSvhRightHand",
+        "UMIGripper",
+        "XArm7Gripper",
+        "YumiLeftGripper",
+        "YumiRightGripper",
+        "Z1Gripper"
+      ]
+    },
+    "fixed": {
+      "robot": "Panda",
+      "scope": "every gripper robosuite can build",
+      "task": "robosuite Lift, no cameras, control_freq 20",
+      "seed": "np.random.seed(0) before make and reset, per run",
+      "settle_steps": 40,
+      "min_travel_m": 0.0002,
+      "clear_travel_m": 0.001
+    }
+  },
+  "results": {
+    "audited": 26,
+    "mounted": 26,
+    "actuating": 26,
+    "under_driven_by_scalar_command": 12
+  },
+  "created": "2026-09-14T02:45:59",
+  "provenance": {
+    "commit": "062f52e35350ec534456e2e8111bcb5386056086",
+    "commit_short": "062f52e",
+    "branch": "main",
+    "committed": "2026-09-14T02:43:21+05:30",
+    "dirty": [],
+    "diff_stat": null,
+    "untracked_code": [],
+    "reproducible": true,
+    "python": "3.10.12",
+    "platform": "Linux-6.8.0-138-generic-x86_64-with-glibc2.35",
+    "packages": {
+      "numpy": "2.2.6",
+      "scipy": "1.15.3",
+      "mujoco": "3.7.0",
+      "robosuite": "1.5.2",
+      "similaritymeasures": "1.4.0"
+    }
+  }
+}
