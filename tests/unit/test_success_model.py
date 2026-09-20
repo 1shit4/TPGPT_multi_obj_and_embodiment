@@ -46,7 +46,12 @@ class TestFactorEffects:
                      {"a": 0.5, "b": 0.5, "c": 0.5})
         fe = factor_effects(rows)
         assert fe["factors"]["gripper"]["p"] > 0.05
-        assert "cluster-robust" in fe["covariance"]
+        assert "HC1" in fe["covariance"], "18 clusters is below MIN_CLUSTERS"
+
+    def test_enough_clusters_switches_to_cluster_robust(self):
+        rng = np.random.default_rng(5)
+        rows = _rows(rng, ("a", "b"), ("x", "y"), tuple(range(12)), {"a": 0.5, "b": 0.5})
+        assert "cluster-robust" in factor_effects(rows)["covariance"]  # 24 clusters
 
     def test_a_factor_with_one_level_is_dropped(self):
         rng = np.random.default_rng(2)

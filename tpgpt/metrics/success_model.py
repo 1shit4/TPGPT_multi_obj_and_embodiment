@@ -29,6 +29,15 @@ from __future__ import annotations
 import numpy as np
 
 
+#: Clusters below which the cluster-robust covariance is not used. The sandwich
+#: estimator is consistent in the number of clusters, not of observations, and
+#: with a handful it is badly anticonservative: on the 210-cell YCB grid with
+#: its 6 conditions as clusters it gave the gripper factor chi2 = 98 on 6 df
+#: (p = 0.000) where a chi-square on the contingency table gives 6.5 (p = 0.37)
+#: and HC1 gives 8.6 (p = 0.20). Twenty is the usual rule of thumb.
+MIN_CLUSTERS = 20
+
+
 def wilson(k: int, n: int, z: float = 1.959964) -> tuple[float, float]:
     """Wilson score interval for ``k`` successes in ``n`` trials."""
     if n == 0:
@@ -74,12 +83,13 @@ def factor_effects(
     formula = "success ~ " + " + ".join(f"C({f})" for f in kept)
     n_clusters = df["cluster"].nunique()
     model = smf.glm(formula, df, family=__import__("statsmodels.api", fromlist=["families"]).families.Binomial())
-    if n_clusters > 1:
+    if n_clusters >= MIN_CLUSTERS:
         fit = model.fit(cov_type="cluster", cov_kwds={"groups": df["cluster"].astype("category").cat.codes})
         covariance = f"cluster-robust on {cluster} ({n_clusters} clusters)"
     else:
         fit = model.fit(cov_type="HC1")
-        covariance = "heteroskedasticity-robust (HC1); one cluster only"
+        covariance = (f"heteroskedasticity-robust (HC1); {n_clusters} clusters is "
+                      f"below the {MIN_CLUSTERS} a cluster-robust covariance needs")
     out = {"n": int(len(df)), "covariance": covariance, "formula": formula, "factors": {}}
     for f in kept:
         names = [p for p in fit.params.index if p.startswith(f"C({f})")]
