@@ -4324,6 +4324,53 @@ The executor-free replay of the same grid on the same cached grasps
 (`ycb_replay`) and the policy grid with both fixes are running as this is
 written; they say how much of the remainder is the executor.
 
+### 7.45 The executor is at its ceiling on the YCB grid; 85 cells fail under every executor
+
+Three runs of the same 210 cells, same cached grasps on every cell (verified
+210/210), commits `b7f7c61`-`9adf5c2`:
+
+| executor | placed |
+|---|---|
+| policy, integrate law (shipped), gates + clamp + approach hold | **91** |
+| policy, `reference` law (attractor = regressed path point) | 90 |
+| position-control replay, IK per waypoint (executor-free ceiling) | **93** |
+
+The reference law is out: 7.40's "the laws do not differ" holds here too,
+where the integrator was suspected of drifting 140-370 mm on six cells.
+
+**The replay places 93, the policy 91, and they are not the same 91.** Both
+place 59; the replay places 34 the policy fails and the policy 32 the replay
+fails; **85 fail under both**; 132 are placed by at least one of the three.
+So there are two populations. Sixty-odd cells are *marginal* -- they flip with
+any change of executor, which is why every executor change since 7.43 has come
+out +-10 with p > 0.1 -- and eighty-five are structural. The rate sits on the
+structural ones, and the replay's own ledger on them says what they are:
+
+| first failure, replay, on the 85 both-fail cells | cells |
+|---|---|
+| approach: the transported **start pose is unreachable** (IK cannot get there) | 25 |
+| reach: blocked at the grasp (thin objects, long fingers; hammer 32/42 fails even here) | 23 |
+| carry: the grip slips | 13 |
+| place / settle | 13 |
+| lift / grasp | 11 |
+
+None of these is the controller. The largest is selection: the map carries
+the demonstration's starting pose to wherever the deformation puts it, and on
+25 cells that is outside the arm's reach; the funnel checks the *path* for
+collision and never asks IK whether its first waypoint can be reached. That is
+the next fix, and it is on the selection side -- reject a candidate whose
+transported start is unreachable, or begin the plan at its first reachable
+waypoint.
+
+Per hand under the replay: xarm 21, robotiq140 19, panda 17, robotiq85 16,
+rethink 8, **robotiq3f 6, robotiq3f_dex 6** of 30 -- the three-finger hands
+are *worse* under position control than under the policy (11, 12), the
+opposite of the parallel jaws. Per object: sugar 22, meat 31, mug 17, hammer
+10, **banana 13** (28 under the policy).
+
+**What would make this wrong.** One draw; the 85 is a count on that draw and
+the marginal population will reshuffle on another. The ledger's causes are
+the trace-based attribution of 7.43 applied to the replay's own trace.
 ## 8. Open items
 
 > **Read 7.26 first.** Every end-to-end campaign has been deleted, so the items
