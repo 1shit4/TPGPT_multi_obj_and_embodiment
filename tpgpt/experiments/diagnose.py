@@ -66,6 +66,33 @@ CARRY_FRACTION = 0.6
 #: Released within this of the slot centre, measured laterally.
 PLACE_TOLERANCE = 0.06
 
+#: Horizontal motion of the *object* between the start of the run and the
+#: moment the jaws are commanded shut. Below this is settling and contact
+#: compliance; above it the object is somewhere other than where the grasp was
+#: planned, because the hand pushed it there on the way in. A grasp cannot be
+#: judged on a target that has left. Measured on the real-world grid
+#: (``attribute_failures``): pushes that lost the object were 22-140 mm and
+#: settling never exceeded 6 mm.
+PUSH_TOLERANCE = 0.020
+
+#: Straight-line distance between the hand's contact point and the planned
+#: grasp point at the moment of closing, above which the arm simply never got
+#: there. Deliberately loose: the approach axis tolerates 120-135 mm on a
+#: parallel jaw (section 7.2), so this catches "the arm was elsewhere", not
+#: "a few millimetres off". Fine-grained reach is still recorded, per axis, in
+#: the measurements (``reach_closing`` against ``closing_budget``); it no longer
+#: decides the verdict. It used to, and at real object sizes the budget
+#: ``(aperture - width) / 2`` is sub-millimetre for most hand-object pairs --
+#: the object nearly fills the jaws -- so the test fired on 83 of 126 failures
+#: of the YCB grid and hid every later stage (``docs/ycb_grid.md`` section 5).
+ARRIVE_TOLERANCE = 0.040
+
+#: Peak grip force after closing below which contact was a brush, not a hold.
+#: Measured on the same traces: a hand that takes hold registers hundreds of
+#: newtons and one that touches the object registers 20-40. Only applied when
+#: the trace carries ``grip_force``.
+GRIP_FORCE = 50.0
+
 STAGES = ("approach", "reach", "grasp", "lift", "carry", "place", "settle")
 
 #: One plain sentence per stage, for the report.
@@ -902,23 +929,65 @@ def diagnose(result, env, grasp_point: np.ndarray | None = None) -> Diagnosis:
             closing_budget=budget,
         )
 
-    if axes is not None and budget is not None:
-        reach_ok = axes["closing"] <= budget
-        detail = (
-            f"the jaws closed {axes['closing'] * 1000:.0f} mm off the closing "
-            f"axis against a {budget * 1000:.0f} mm budget "
-            f"({axes['signed_approach'] * 1000:+.0f} mm along the approach, "
-            f"{axes['jaw'] * 1000:.0f} mm along the fingers), at step "
-            f"{close_step}"
+    # **The verdict comes from the trace, not from the budget.** Two questions,
+    # in order: was the object still where the grasp was planned when the jaws
+    # shut (the hand can push it away on the descent), and was the hand there.
+    # The per-axis figures above are kept as measurements because they are
+    # the finer instrument; they stopped being the judge when real-sized
+    # objects made the closing budget sub-millimetre (see ARRIVE_TOLERANCE).
+    push = float(np.linalg.norm(xy[close_step] - xy[0]))
+    diagnosis.measurements["push_before_close"] = push
+    if grasp_point is not None:
+        # Did the hand get there at all, at any step? A close approach *after*
+        # the close is a schedule problem -- the jaws shut on the way in.
+        along_hand = np.linalg.norm(
+            np.array([
+                _hand_contact(
+                    result, e, measured[i] if measured is not None else None
+                )
+                for i, e in enumerate(eef)
+            ]) - np.asarray(grasp_point), axis=1,
         )
-        value = axes["closing"]
+        closest = int(along_hand.argmin())
+        diagnosis.measurements["closest_hand"] = float(along_hand[closest])
+        diagnosis.measurements["closest_hand_step"] = closest
+        diagnosis.measurements["closed_early"] = bool(
+            closest > close_step
+            and along_hand[closest] <= ARRIVE_TOLERANCE
+            and reach_error > ARRIVE_TOLERANCE
+        )
+    if axes is not None and budget is not None:
+        diagnosis.measurements["reach_within_budget"] = bool(
+            axes["closing"] <= budget
+        )
+
+    if push > PUSH_TOLERANCE:
+        reach_ok = False
+        detail = (
+            f"the hand moved the object {push * 1000:.0f} mm before the jaws "
+            f"closed at step {close_step}, so the grasp was planned on a "
+            f"target that had left"
+        )
+        value = push
     else:
-        reach_ok = reach_error <= REACH_TOLERANCE
+        reach_ok = reach_error <= ARRIVE_TOLERANCE
         detail = (
             f"the jaws closed {reach_error * 1000:.0f} mm from the planned "
-            f"grasp point, at step {close_step} (straight-line distance; the "
-            f"grasp frame was not available to split it by axis)"
+            f"grasp point, at step {close_step}"
         )
+        if axes is not None:
+            detail += (
+                f" ({axes['closing'] * 1000:.0f} mm across the closing axis"
+                + (f" against a {budget * 1000:.0f} mm budget"
+                   if budget is not None else "")
+                + f", {axes['signed_approach'] * 1000:+.0f} mm along the "
+                f"approach, {axes['jaw'] * 1000:.0f} mm along the fingers)"
+            )
+        if diagnosis.measurements.get("closed_early"):
+            detail += (
+                f"; the hand did reach it later, at step "
+                f"{diagnosis.measurements['closest_hand_step']}"
+            )
         value = reach_error
     diagnosis.stages.append(Stage(
         "reach", reach_ok, detail + (f" ({cause})" if cause else ""), value,
@@ -932,18 +1001,32 @@ def diagnose(result, env, grasp_point: np.ndarray | None = None) -> Diagnosis:
     contact_steps = int(held.sum())
     diagnosis.measurements["contact_steps"] = contact_steps
     first_contact = int(np.flatnonzero(held)[0]) if contact_steps else None
+    rise = float(z.max() - z[0])
+    diagnosis.measurements["lift_height"] = rise
+    # Touching is not holding. Where the trace carries the grip force, a
+    # contact that never reached GRIP_FORCE *and* never lifted the object is a
+    # brush -- the fingers found the object and took no purchase -- and that
+    # is the grasp's failure, not the lift's.
+    force = trace.get("grip_force")
+    peak = float(np.max(np.asarray(force)[close_step:])) if force is not None \
+        and len(force) > close_step else None
+    diagnosis.measurements["peak_grip_force"] = peak
+    if contact_steps == 0:
+        grasp_ok, why = False, " -- it closed on nothing"
+    elif peak is not None and peak < GRIP_FORCE and rise < LIFT_HEIGHT:
+        grasp_ok = False
+        why = (f", from step {first_contact}, but the peak grip force was "
+               f"{peak:.0f} N against {GRIP_FORCE:.0f} N -- touched, no purchase")
+    else:
+        grasp_ok, why = True, f", from step {first_contact}"
     diagnosis.stages.append(Stage(
-        "grasp", contact_steps > 0,
+        "grasp", grasp_ok,
         f"the hand was in contact with the object on {contact_steps} of "
-        f"{len(held)} steps"
-        + (f", from step {first_contact}" if first_contact is not None else
-           " -- it closed on nothing"),
+        f"{len(held)} steps" + why,
         float(contact_steps),
     ))
 
     # --- lift: did the object leave the table? -------------------------------
-    rise = float(z.max() - z[0])
-    diagnosis.measurements["lift_height"] = rise
     diagnosis.stages.append(Stage(
         "lift", rise >= LIFT_HEIGHT,
         f"the object rose {rise * 1000:.0f} mm above where it started",
