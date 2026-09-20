@@ -786,6 +786,84 @@ def _gripper_touches(env, object_name: str) -> bool:
         return False
 
 
+def object_supported(env, object_name: str, min_up: float = 0.5) -> bool:
+    """Whether the object is resting on something that is not the hand.
+
+    The set-down's own signature: a contact between one of the object's geoms
+    and a geom belonging to neither the object nor the robot, whose normal
+    points up into the object (``min_up`` is the cosine against world +z, so
+    0.5 admits a 60 degree lean and refuses a wall). Used as the release gate,
+    so that a hand carrying the object 40 mm above the board -- which is where
+    the arm stops when it is short of its release pose, section 7.35 -- waits
+    for the board rather than letting go in the air.
+
+    MuJoCo's contact normal runs from ``geom1`` to ``geom2``; it is flipped here
+    when the object is ``geom1`` so that "up into the object" means one thing.
+    """
+    try:
+        model, data = env.sim.model, env.sim.data
+        body = env.object_body_ids[object_name]
+        object_geoms = {
+            i for i in range(model.ngeom) if model.geom_bodyid[i] == body
+        }
+        robot_bodies = set()
+        for robot in env.robots:
+            robot_bodies |= {
+                model.body_name2id(name) for name in model.body_names
+                if name.startswith(("robot", "gripper"))
+            }
+        for i in range(data.ncon):
+            contact = data.contact[i]
+            g1, g2 = contact.geom1, contact.geom2
+            if g1 in object_geoms and g2 not in object_geoms:
+                other, up = g2, -contact.frame[2]
+            elif g2 in object_geoms and g1 not in object_geoms:
+                other, up = g1, contact.frame[2]
+            else:
+                continue
+            if model.geom_bodyid[other] in robot_bodies:
+                continue
+            if up >= min_up:
+                return True
+        return False
+    except Exception:  # pragma: no cover
+        return False
+
+
+def release_gate(env, object_name: str, arrive: float = 0.01):
+    """The release-gate callable for :func:`~tpgpt.sim.rollout.rollout_policy`.
+
+    Opens the hand when the object is supported from below, or when the hand
+    has converged to within ``arrive`` of its attractor -- the second clause is
+    what stops a placement onto a surface the object cannot reach (a ledge the
+    hand cannot enter) from waiting out the whole cap. The rollout supplies the
+    hand-to-attractor distance.
+    """
+    def gate(env_, lag: float):
+        if object_supported(env_, object_name):
+            return "supported"
+        if lag <= arrive:
+            return "arrived"
+        return False
+
+    return gate
+
+
+def close_gate(arrive: float = 0.01):
+    """The close-gate callable: shut only once the hand has arrived.
+
+    ``arrive`` is the hand-to-attractor distance in metres. 10 mm is below the
+    closing budget of every registered hand on every fleet object except where
+    the object fills the jaws, and above the 2-5 mm an impedance-controlled
+    arm settles to with a parked setpoint (section 2.7), so a hand that can
+    arrive does and one that is blocked times out with a named reason.
+    """
+    def gate(env_, lag: float):
+        return "arrived" if lag <= arrive else False
+
+    return gate
+
+
 def diagnose(result, env, grasp_point: np.ndarray | None = None) -> Diagnosis:
     """Attribute one run to the stage that failed.
 

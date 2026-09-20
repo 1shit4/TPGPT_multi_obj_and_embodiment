@@ -74,6 +74,13 @@ ALL_SLOTS = ("top left", "top middle", "top right",
 #: an arm that is merely slow rather than stuck.
 MAX_STEPS = 800
 
+#: Extra arguments handed to :func:`tpgpt.sim.rollout.rollout_policy` on every
+#: policy-executed cell. Set from the command line (``--release-gate``) and
+#: recorded in the manifest, so a campaign says which executor ran it. Empty
+#: by default: the recorded grids (84/210, 17/28) ran without a release gate
+#: and stay reproducible.
+ROLLOUT_KWARGS: dict = {}
+
 PROMPTS = {
     "sugar": "put the sugar box on the {slot}",
     "meat": "put the meat can on the {slot}",
@@ -144,6 +151,7 @@ def _settings_record(name, settings, objects) -> dict:
         "scene_objects": list(objects),
         "default_keypoints": list(DEFAULT_KEYPOINTS),
         "max_steps": MAX_STEPS,
+        "rollout_kwargs": dict(ROLLOUT_KWARGS),
     }
 
 
@@ -250,6 +258,14 @@ def _row(result, label: str, setting: dict | None = None) -> dict:
         "release_error_components_mm":
             result.metrics.get("release_error_components_mm"),
         "release_drop_mm": result.metrics.get("release_drop_mm"),
+        # How long the release gate held the hand shut, 0 when the object was
+        # already supported when the policy asked to open, None when no gate ran.
+        "release_gate_steps": (result.metrics.get("release_gate_steps")
+                               if result.metrics.get("release_gated") else None),
+        "release_gate_reason": result.metrics.get("release_gate_reason"),
+        "close_gate_steps": (result.metrics.get("close_gate_steps")
+                             if result.metrics.get("close_gated") else None),
+        "close_gate_reason": result.metrics.get("close_gate_reason"),
         # How high the object's origin sits above whatever it rests on,
         # measured at the pick. It is the reference the vertical error
         # component above is taken against, so a reader can check that
@@ -374,6 +390,7 @@ def campaign(
                 max_steps=MAX_STEPS,
                 env=env,
                 executor=executor,
+                rollout_kwargs=dict(ROLLOUT_KWARGS),
             )
             rows.append(_row(result, label, setting))
             # **The map and the plan, to disk, for every cell.**
@@ -738,6 +755,23 @@ CAMPAIGNS = {
 }
 
 
+#: Grid overrides from the command line, handed to any settings function that
+#: accepts them (``ycb_settings``, ``real_settings`` and their replays take
+#: ``**kwargs``); the older campaigns read the module globals instead.
+GRID_OVERRIDES: dict = {}
+
+
+def _settings_for(name: str) -> list[dict]:
+    import inspect
+
+    factory = CAMPAIGNS[name]
+    params = inspect.signature(factory).parameters
+    takes_kwargs = any(p.kind is p.VAR_KEYWORD for p in params.values())
+    if takes_kwargs and GRID_OVERRIDES:
+        return factory(**GRID_OVERRIDES)
+    return factory()
+
+
 def main(names=("keypoints",), out_root="outputs/campaigns", strict: bool = False):
     # Before anything expensive runs, say whether its results will be
     # attributable to a state of the code. Checked here rather than at the
@@ -749,7 +783,7 @@ def main(names=("keypoints",), out_root="outputs/campaigns", strict: bool = Fals
     out_root = Path(out_root)
     for name in names:
         print(f"\n=== {name} ===")
-        campaign(name, CAMPAIGNS[name](), out_root / name)
+        campaign(name, _settings_for(name), out_root / name)
     index = write_index("outputs")
     print(f"\nindex: {index}")
     return index
@@ -773,6 +807,28 @@ if __name__ == "__main__":
              "is not cell-by-cell comparable with one without it.",
     )
     parser.add_argument(
+        "--picks", default=None,
+        help="comma-separated pick-config ids (P0,P1,P2) for the real/ycb grids",
+    )
+    parser.add_argument(
+        "--destinations", default=None,
+        help="comma-separated destinations (top_middle,...) for the real/ycb grids",
+    )
+    parser.add_argument(
+        "--release-gate", action="store_true",
+        help="hold the hand shut at the release until the object is supported "
+             "from below or the hand has converged onto its release pose, "
+             "instead of opening on the clock (section 7.35: every placement "
+             "was a drop from a median 40 mm). Policy-executed cells only; "
+             "recorded in the manifest.",
+    )
+    parser.add_argument(
+        "--close-gate", action="store_true",
+        help="hold the hand open at the grasp until it has converged onto the "
+             "grasp pose instead of closing on the clock. Policy-executed "
+             "cells only; recorded in the manifest.",
+    )
+    parser.add_argument(
         "--require-clean", action="store_true",
         help="refuse to run unless the results would be reproducible: "
              "committed, with no modified or untracked code files",
@@ -780,6 +836,17 @@ if __name__ == "__main__":
     args = parser.parse_args()
     if args.grippers:
         EXECUTION_GRIPPERS = tuple(g.strip() for g in args.grippers.split(","))
+        GRID_OVERRIDES["grippers"] = EXECUTION_GRIPPERS
     if args.objects:
         EXECUTION_OBJECTS = tuple(o.strip() for o in args.objects.split(","))
+        GRID_OVERRIDES["objects"] = EXECUTION_OBJECTS
+    if args.picks:
+        GRID_OVERRIDES["picks"] = tuple(p.strip() for p in args.picks.split(","))
+    if args.destinations:
+        GRID_OVERRIDES["destinations"] = tuple(
+            d.strip() for d in args.destinations.split(","))
+    if args.release_gate:
+        ROLLOUT_KWARGS["release_gate"] = True
+    if args.close_gate:
+        ROLLOUT_KWARGS["close_gate"] = True
     main(tuple(args.campaigns.split(",")), args.out, strict=args.require_clean)

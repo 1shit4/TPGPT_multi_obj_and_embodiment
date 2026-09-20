@@ -758,6 +758,17 @@ def run(
             "tool_offset": target_offset,
         }
         settings.update(rollout_kwargs or {})
+        # ``release_gate=True`` is a request, not a callable: the gate needs
+        # the object's name, which only this function knows. Built here from
+        # the same helper the diagnosis uses to detect a set-down.
+        if settings.get("release_gate") is True:
+            from tpgpt.experiments.diagnose import release_gate
+
+            settings["release_gate"] = release_gate(env, result.object_name)
+        if settings.get("close_gate") is True:
+            from tpgpt.experiments.diagnose import close_gate
+
+            settings["close_gate"] = close_gate()
         rollout = rollout_policy(env, policy, **settings)
         result.rollout = rollout
         result.diagnosis = diagnose(result, env)
