@@ -195,7 +195,10 @@ class TestScreening:
         assert out[0] is None
         assert out[1] == "duplicate"
         assert out[2].startswith("from_below")
-        assert out[3].startswith("too_wide")
+        # Closing across the middle of the empty cup: the simulation's on-target
+        # stage (held point > 4 cm from the cloud) runs before the jaw width, as
+        # in filter_grasps, so it names the rejection; the jaws would refuse it too.
+        assert out[3].startswith(("on_target", "too_wide"))
         assert out[4].startswith(("hits_support", "too_wide", "collides"))
 
 
@@ -235,7 +238,8 @@ class TestSelection:
                            half=np.array([0.025, 0.04, 0.05]), seed=3, faces="visible")
         scene = TargetScene(points=points, destination=np.array([0.55, 0.25, 0.15]),
                             destination_height=0.15, support_height=TABLE)
-        sel = select_and_plan(bundle, scene, None, None, unavailable_reason="server down")
+        sel = select_and_plan(bundle, scene, None, None, SelectionSettings(fallback_top_down=True),
+                              unavailable_reason="server down")
         assert sel.source == "top_down"
         assert any("server down" in n for n in sel.notes)
 
@@ -245,3 +249,137 @@ class TestSelection:
         with pytest.raises(PlanningError, match="no_executable_grasp"):
             select_and_plan(bundle, self._scene(), poses, np.array([0.9]),
                             SelectionSettings(fallback_top_down=False))
+
+
+# --------------------------------------------------------------- the whole path
+def _slot_over_destination(roof: float):
+    """A shelf slot around the test destination (0.55, 0.25), board at 0.15.
+
+    The front edge runs along +x at y = 0.12, so the slot opens toward the pick
+    (the cup at y = 0.02) and extends 0.3 m in +y; walls at x = 0.40 and 0.70.
+    """
+    from tpgpt.hardware.shelf import ShelfModel
+
+    return ShelfModel.from_config({"shelf": {
+        "measured": True, "front_left": [0.40, 0.12], "front_right": [0.70, 0.12],
+        "depth": 0.30, "bottom": TABLE, "top": roof, "wall_thickness": 0.018,
+        "back_thickness": 0.0,
+        "boards": [{"name": "board", "top": 0.15, "thickness": 0.018},
+                   {"name": "roof", "top": roof, "thickness": 0.018, "support": False}],
+    }})
+
+
+class TestWholePath:
+    @pytest.fixture(scope="class")
+    def bundle(self):
+        return synthetic_bundle()
+
+    def _scene(self, destination=(0.55, 0.25, 0.15)):
+        return TargetScene(points=cup_cloud(), destination=np.array(destination),
+                           destination_height=float(destination[2]), support_height=TABLE)
+
+    def _poses(self):
+        return np.stack([graspgen_pose(RIM_TCP, top_down([1, 0, 0], None))]), np.array([0.9])
+
+    def test_the_chosen_plan_carries_its_path_check(self, bundle):
+        poses, scores = self._poses()
+        sel = select_and_plan(bundle, self._scene(), poses, scores)
+        c = sel.chosen.path_check
+        assert c["violations"] == 0 and c["reachable_fraction"] >= 0.6
+        assert sel.rank_examined == 1 and not sel.fell_back
+        assert any("kinematics only" in n for n in sel.notes)
+        assert sel.plan.metrics["path_check"] is c
+
+    def test_a_shelf_the_hand_cannot_enter_rejects_every_candidate_by_name(self, bundle):
+        from tpgpt.hardware.grasp_selection import PathContext
+        from tpgpt.hardware.shelf import ShelfWorld
+
+        world = ShelfWorld.build(_slot_over_destination(roof=0.30))   # the hand ends in the roof
+        poses, scores = self._poses()
+        with pytest.raises(PlanningError, match="no_executable_grasp") as err:
+            select_and_plan(bundle, self._scene(), poses, scores,
+                            SelectionSettings(check_place_zone=False),
+                            path=PathContext(world=world))
+        rejected = [c.rejected for c in err.value.candidates if c.rejected]
+        assert any(r.startswith("collision") and "shelf" in r for r in rejected)
+
+    def test_a_shelf_the_path_stays_clear_of_admits_the_candidate(self, bundle):
+        from tpgpt.hardware.grasp_selection import PathContext
+        from tpgpt.hardware.shelf import ShelfModel, ShelfWorld
+
+        # The synthetic demonstration carries the cup diagonally up from the
+        # table, so any shelf built round its destination is struck at the
+        # board's front edge (the check above). This one stands beside the path.
+        beside = ShelfModel.from_config({"shelf": {
+            "measured": True, "front_left": [0.40, 0.55], "front_right": [0.70, 0.55],
+            "depth": 0.30, "bottom": TABLE, "top": 0.40, "wall_thickness": 0.018,
+            "boards": [{"name": "board", "top": 0.15, "thickness": 0.018}],
+        }})
+        world = ShelfWorld.build(beside)
+        poses, scores = self._poses()
+        sel = select_and_plan(bundle, self._scene(), poses, scores, path=PathContext(world=world))
+        assert sel.chosen.path_check["violations"] == 0
+        assert sel.world["model"]["measured"] is True
+
+    def test_out_of_reach_falls_back_only_when_allowed(self, bundle):
+        far = (1.10, 0.25, 0.15)
+        poses, scores = self._poses()
+        sel = select_and_plan(bundle, self._scene(far), poses, scores,
+                              SelectionSettings(max_aim_grasp=1.0, min_path_clearance=-1.0))
+        assert sel.fell_back and sel.chosen.path_check["verdict"].startswith("kinematics")
+        with pytest.raises(PlanningError):
+            select_and_plan(bundle, self._scene(far), poses, scores,
+                            SelectionSettings(max_aim_grasp=1.0, min_path_clearance=-1.0,
+                                              allow_kinematic_fallback=False))
+
+
+class TestFunnelStages:
+    def _screen(self, context, **settings):
+        from tpgpt.hardware.grasp_selection import screen_candidates
+
+        poses = np.stack([graspgen_pose(RIM_TCP, top_down([1, 0, 0], None))])
+        out = screen_candidates(cup_cloud(), poses, np.array([0.9]), TABLE,
+                                SelectionSettings(**settings), context=context)
+        return out, {row[0]: row for row in out.stages}
+
+    def test_a_camera_above_sees_a_top_down_approach(self):
+        from tpgpt.hardware.grasp_selection import ScreenContext
+
+        out, stages = self._screen(ScreenContext(camera_position=np.array([0.4, 0.0, 1.0])))
+        assert stages["visibility"][1:] == [1, 1, False]
+        assert out[0].rejected is None
+
+    def test_a_stage_that_would_empty_the_set_passes_it_through_and_says_so(self):
+        from tpgpt.hardware.grasp_selection import ScreenContext
+
+        # A camera under the table: a top-down approach points straight away from it.
+        out, stages = self._screen(ScreenContext(camera_position=np.array([0.42, 0.02, -2.0])))
+        assert stages["visibility"] == ["visibility", 1, 1, True]
+        assert out[0].rejected is None
+
+    def test_the_place_zone_is_judged_against_the_shelf_model(self):
+        from tpgpt.hardware.grasp_selection import ScreenContext
+        from tpgpt.hardware.shelf import ShelfWorld
+
+        # Released with its fingertips at 0.238 m, the hand's body spans the roof.
+        ctx = ScreenContext(world=ShelfWorld.build(_slot_over_destination(roof=0.30)),
+                            destination=np.array([0.55, 0.25]), destination_height=0.15)
+        out, stages = self._screen(ctx)
+        # The only candidate would arrive through the roof: flagged, passed through.
+        assert stages["place_zone"] == ["place_zone", 1, 1, True]
+        ctx.world = ShelfWorld.build(_slot_over_destination(roof=0.60))
+        out, stages = self._screen(ctx)
+        assert stages["place_zone"] == ["place_zone", 1, 1, False]
+
+    def test_release_positions_keep_the_grasp_offset_from_the_object_base(self):
+        from tpgpt.hardware.grasp_selection import (Candidate, ScreenContext, _release_positions,
+                                                    horizontal_centre)
+
+        cloud = cup_cloud()
+        g = pose_to_grasp_frame(graspgen_pose(RIM_TCP, top_down([1, 0, 0], None)))
+        c = Candidate(index=0, score=0.9, grasp=g, tilt_deg=0.0)
+        ctx = ScreenContext(destination=np.array([0.55, 0.25]), destination_height=0.15)
+        release = _release_positions([c], cloud, TABLE, ctx)[0]
+        base = horizontal_centre(cloud)
+        assert np.allclose(release[:2] - [0.55, 0.25], g.tcp[:2] - base[:2], atol=1e-9)
+        assert release[2] == pytest.approx(0.15 + g.tcp[2] - TABLE)
