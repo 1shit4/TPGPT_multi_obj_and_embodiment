@@ -14,11 +14,15 @@ robot's measured ``fr3_hand_tcp`` pose, and ``controller.action(...)`` by a
 What is intentionally different on hardware, stated so nothing is silently
 absorbed (``docs/sim/SIM_CLAUDE.md`` rule 3):
 
-* **No infeasible-pose fallback.** ``rollout_policy``'s two tiers ask MuJoCo's
-  ``solve_ik`` whether a pose exists for the arm. There is no simulator here,
-  so the fallback is off (``infeasible_fallback=False`` is a supported setting
-  of the simulated rollout too). A pose the arm cannot hold then shows up as a
-  shut gate and, eventually, a stalled watchdog -- the run stops and holds.
+* **The infeasible-pose fallback asks the FR3 model, not MuJoCo.**
+  ``rollout_policy``'s two tiers -- relax the orientation if only the hand
+  angle is out of reach, else steer to the next label the arm can hold and
+  jump the phase on arrival -- run here exactly as there (same stride,
+  tolerance, iteration cap and look-ahead), with ``solve_ik`` replaced by
+  :meth:`tpgpt.hardware.fr3.FR3.solve_ik` seeded from the **measured** joint
+  angles, as the simulation seeds from the arm's current configuration. It
+  needs those angles: :meth:`HardwareExecutor.step` takes them, and without
+  them the fallback does not run (recorded in the trace).
 * **Optional speed scaling.** ``speed_scale < 1`` slows the whole task
   uniformly: velocities, the speed clamp and the phase clock are all scaled,
   so the lag gate's ``expected = ||K^-1 D|| v`` stays consistent with the speed
@@ -71,6 +75,10 @@ class ExecutorSettings:
     anchor_gated: bool = True
     query_at: str = "attractor"
     skip_arrival: float = 0.02
+    #: ``rollout_policy``'s infeasible-pose fallback (see the module docstring).
+    infeasible_fallback: bool = True
+    feasibility_stride: int = 5
+    feasibility_tolerance: float = 0.015
     #: Uniform slow-down, in ``(0, 1]``. See the module docstring.
     speed_scale: float = 1.0
     #: Where the grasp point sits in ``fr3_hand_tcp`` coordinates. The plan's
@@ -105,6 +113,9 @@ class Command:
     velocity: np.ndarray
     done: bool = False
     stalled: bool = False
+    #: The orientation is not commanded this step (fallback tier 1):
+    #: ``tcp_rotation`` is then the measured one, so the wrist is free.
+    relaxed: bool = False
     trace: dict = field(default_factory=dict)
 
 
@@ -118,7 +129,8 @@ class HardwareExecutor:
             call :meth:`step` at this period.
     """
 
-    def __init__(self, policy, dt: float, settings: ExecutorSettings | None = None):
+    def __init__(self, policy, dt: float, settings: ExecutorSettings | None = None,
+                 kinematics=None):
         if policy.labels is None:
             raise ValueError("HardwareExecutor needs a fitted policy")
         self.policy = policy
@@ -156,6 +168,12 @@ class HardwareExecutor:
         self.steps = 0
         self.finished = False
         self.stalled = False
+        # Infeasible-pose fallback state, as rollout_policy keeps it.
+        self._kinematics = kinematics
+        self.relax_orientation = False
+        self.skip_index: int | None = None
+        self.relaxed_steps = self.skipped_steps = self.skips = 0
+        self.feasibility_unavailable = 0
 
     # ------------------------------------------------------------- frames
     def tool_position(self, tcp_position, tcp_rotation) -> np.ndarray:
@@ -182,11 +200,54 @@ class HardwareExecutor:
             prediction = dataclasses.replace(prediction, velocity=prediction.velocity * s)
         return prediction
 
-    def step(self, tcp_position, tcp_rotation) -> Command:
+    @property
+    def kinematics(self):
+        if self._kinematics is None:
+            from tpgpt.hardware.fr3 import default_model
+
+            self._kinematics = default_model()
+        return self._kinematics
+
+    def _reachable(self, tool_position, rotation, seed) -> bool:
+        """``solve_ik(..., max_iterations=40)`` of ``_feasibility_action``, on the FR3."""
+        R = np.eye(3) if rotation is None else np.asarray(rotation, dtype=float)
+        target = self.tcp_from_tool(tool_position, R)
+        return self.kinematics.solve_ik(
+            target, rotation, seed=seed, max_iterations=40,
+            position_tolerance=self.settings.feasibility_tolerance).reachable
+
+    def _feasibility_action(self, rotation, seed) -> tuple[bool, int | None]:
+        """``rollout._feasibility_action``: relax the hand angle, skip ahead, or neither."""
+        if self.skip_index is not None:
+            return False, self.skip_index
+        if self._reachable(self.attractor, rotation, seed):
+            return False, None
+        if self._reachable(self.attractor, None, seed):
+            return True, None
+        return False, self._next_feasible(seed)
+
+    def _next_feasible(self, seed, lookahead: int = 40, stride: int = 5) -> int | None:
+        """``rollout._next_feasible``: the next label ahead the arm can hold."""
+        labels = self.policy.labels
+        if labels.time_belief is None or len(labels.positions) == 0:
+            return None
+        start = int(np.searchsorted(np.asarray(labels.time_belief), self.phase))
+        rotations = labels.orientations
+        for i in range(start + stride, min(start + lookahead, len(labels.positions)), stride):
+            rotation = rotations[i] if rotations is not None else None
+            if self._reachable(labels.positions[i], rotation, seed):
+                return i
+        return None
+
+    def step(self, tcp_position, tcp_rotation, joint_positions=None) -> Command:
         """Advance one control step from a measured ``fr3_hand_tcp`` pose.
 
         The body is ``rollout_policy``'s loop body, line for line, minus the
         simulator calls; the comments name the lines it mirrors.
+
+        Args:
+            joint_positions: The measured arm joints, for the infeasible-pose
+                fallback's IK seed. ``None`` leaves the fallback off this step.
         """
         if self.finished:
             raise RuntimeError("the executor already finished; build a new one")
@@ -204,11 +265,32 @@ class HardwareExecutor:
             position, self.attractor, prediction, self.law,
             static_sag=self.watchdog.static_sag,
         )
+        # --- infeasible-pose fallback: only while the gate is shut --------------
+        if cfg.infeasible_fallback and self.law.lag_tolerance and decision.gate < 1.0:
+            if joint_positions is None:
+                self.feasibility_unavailable += 1
+            elif self.steps % max(int(cfg.feasibility_stride), 1) == 0:
+                self.relax_orientation, self.skip_index = self._feasibility_action(
+                    rotation, np.asarray(joint_positions, dtype=float).reshape(7))
+            if self.relax_orientation:
+                self.relaxed_steps += 1
+        steer_to = (np.asarray(self.policy.labels.positions[self.skip_index], dtype=float)
+                    if self.skip_index is not None else None)
         step_out = advance_step(
             position, self.attractor, decision, self.law, prediction,
-            static_sag=self.watchdog.static_sag, steer_to=None,
+            static_sag=self.watchdog.static_sag, steer_to=steer_to,
         )
         self.attractor = step_out.attractor
+        if self.skip_index is not None:
+            if step_out.skip_arrived:
+                # Arrived: hand the clock over so the gripper schedule matches
+                # where the arm now is, and resume the policy.
+                if self.policy.labels.time_belief is not None:
+                    self.phase = float(self.policy.labels.time_belief[self.skip_index])
+                self.skip_index = None
+                self.skips += 1
+            else:
+                self.skipped_steps += 1
 
         # Firm about orientation at the grasp and the placement, compliant in
         # transit -- the same expression as rollout_policy.
@@ -218,7 +300,10 @@ class HardwareExecutor:
             cfg.rotational_stiffness * cfg.transit_rotational_scale
             if carrying else cfg.rotational_stiffness
         )
-        commanded_rotation = rotation if rotation is not None else tcp_rotation
+        # A relaxed segment commands no orientation: the measured one is sent,
+        # so the wrist finds whatever angle reaches the point.
+        relaxed = bool(self.relax_orientation) or rotation is None
+        commanded_rotation = tcp_rotation if relaxed else rotation
         tcp_target = self.tcp_from_tool(self.attractor, commanded_rotation)
 
         query_phase = self.phase
@@ -256,7 +341,13 @@ class HardwareExecutor:
             velocity=np.asarray(step_out.velocity, dtype=float),
             done=self.finished and not self.stalled,
             stalled=self.stalled,
+            relaxed=bool(self.relax_orientation),
             trace={
+                "skip_index": self.skip_index,
+                "relaxed_steps": int(self.relaxed_steps),
+                "skipped_steps": int(self.skipped_steps),
+                "skips": int(self.skips),
+                "feasibility_unavailable": int(self.feasibility_unavailable),
                 "max_lag": float(step_out.max_lag),
                 "static_sag": float(self.watchdog.static_sag),
                 "sag_rebaselines": int(self.watchdog.rebaselines),

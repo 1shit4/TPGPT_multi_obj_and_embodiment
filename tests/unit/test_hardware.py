@@ -410,3 +410,77 @@ class TestApproachAndStiffness:
         R45 = yaw_matrix(np.pi / 4)
         K = R45 @ np.diag([100.0, 900.0, 500.0]) @ R45.T
         assert stiffness_projection_loss(K, np.eye(3)) > 0.3
+
+
+# ------------------------------------------------ the infeasible-pose fallback
+class _StubArm:
+    """Reachability on demand: ``orientation`` decides whether a pose with a
+    commanded rotation is reachable, ``beyond_x`` makes positions past it reachable
+    (with or without orientation)."""
+
+    def __init__(self, orientation=False, beyond_x=np.inf):
+        self.orientation, self.beyond_x = orientation, beyond_x
+
+    def solve_ik(self, target, rotation, seed=None, max_iterations=120, position_tolerance=0.005):
+        from types import SimpleNamespace
+
+        ok = target[0] > self.beyond_x or rotation is None or self.orientation
+        return SimpleNamespace(reachable=bool(ok))
+
+
+def _stuck_run(policy, arm, joints=np.zeros(7), n=60):
+    """An arm that never moves, so the gate shuts and the fallback is consulted."""
+    ex = HardwareExecutor(policy, DT, kinematics=arm)
+    x = policy.labels.positions[0].copy()
+    cmds = [ex.step(x, np.eye(3), joints) for _ in range(n)]
+    return ex, cmds
+
+
+class TestInfeasibleFallback:
+    def test_only_the_hand_angle_out_of_reach_relaxes_the_orientation(self):
+        # A policy with an orientation channel: without one there is no hand
+        # angle to give up, in rollout_policy as here.
+        labels = line_labels()
+        labels = labels.replace(orientations=np.tile(np.eye(3), (len(labels.positions), 1, 1)))
+        policy = GPPolicy().fit(labels)
+        ex, cmds = _stuck_run(policy, _StubArm(orientation=False))
+        relaxed = [c for c in cmds if c.relaxed]
+        assert relaxed and ex.relaxed_steps > 0
+        assert all(np.array_equal(c.tcp_rotation, np.eye(3)) for c in relaxed)
+
+    def test_a_point_out_of_reach_steers_to_the_next_reachable_label(self, line_policy):
+        # Nothing is reachable at the start; labels past x = 0.05 are.
+        arm = _StubArm(orientation=False, beyond_x=0.05)
+        arm.solve_ik = lambda target, rotation, **k: __import__("types").SimpleNamespace(
+            reachable=bool(target[0] > 0.05))
+        ex, cmds = _stuck_run(line_policy, arm)
+        chosen = [c.trace["skip_index"] for c in cmds if c.trace["skip_index"] is not None]
+        assert chosen
+        assert all(line_policy.labels.positions[i][0] > 0.05 for i in chosen)
+        # The attractor is being steered toward that label, never past it.
+        assert cmds[-1].attractor[0] <= line_policy.labels.positions[chosen[-1]][0] + 1e-9
+
+    def test_a_reachable_pose_changes_nothing(self, line_policy):
+        ex, cmds = _stuck_run(line_policy, _StubArm(orientation=True))
+        assert not any(c.relaxed for c in cmds) and ex.skips == 0 and ex.skipped_steps == 0
+
+    def test_without_joint_angles_the_fallback_is_off_and_says_so(self, line_policy):
+        ex, cmds = _stuck_run(line_policy, _StubArm(orientation=False), joints=None)
+        assert not any(c.relaxed for c in cmds)
+        assert ex.feasibility_unavailable > 0
+
+    def test_the_real_fr3_is_the_default_model(self, line_policy):
+        from tpgpt.hardware.fr3 import FR3
+
+        assert isinstance(HardwareExecutor(line_policy, DT).kinematics, FR3)
+
+    def test_the_settings_are_rollout_policys(self):
+        import inspect
+
+        from tpgpt.sim.rollout import rollout_policy
+
+        defaults = inspect.signature(rollout_policy).parameters
+        s = ExecutorSettings()
+        assert s.infeasible_fallback == defaults["infeasible_fallback"].default
+        assert s.feasibility_stride == defaults["feasibility_stride"].default
+        assert s.feasibility_tolerance == defaults["feasibility_tolerance"].default
