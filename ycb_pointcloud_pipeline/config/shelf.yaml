@@ -10,7 +10,7 @@
 #
 # STATUS 2026-09-21: only the board heights and the shelf's yaw are measured (the four slot points of
 # CALIBRATION.md). Everything marked ESTIMATE is a guess placed symmetrically about those slots:
-# inner width 0.50, depth 0.30, slots at mid-depth. Until they are measured the check can report a
+# inner width 0.50, depth 0.30, slots at mid-depth, no roof. Until they are measured the check can report a
 # collision that is not there, or miss one at a wall. `measured: false` is written into every plan.
 shelf:
   measured: false
@@ -19,14 +19,17 @@ shelf:
   front_right: [0.2888, -0.2542]     # ESTIMATE: front edge of a board, at the RIGHT wall's inner face
   depth: 0.30                        # ESTIMATE: front edge to the back panel's inner face
   bottom: -0.0136                    # the table (touched); the shelf stands on it
-  top: 0.60                          # ESTIMATE: top of the side walls
+  top: 0.3213                        # ESTIMATE: top of the side walls. Taken as the top board's surface
+                                     # (an open-top two-tier shelf: CALIBRATION.md has the bottom board
+                                     # 'recessed under the top shelf'). Raise it if the walls stand higher.
   wall_thickness: 0.018              # ESTIMATE: side walls
   back_thickness: 0.005              # ESTIMATE: back panel; 0 = open back
 
   boards:                            # `top` = height of the board's upper surface
     - {name: bottom_board, top: 0.0768, thickness: 0.018, support: true}   # top measured; thickness ESTIMATE
     - {name: top_board,    top: 0.3213, thickness: 0.018, support: true}   # top measured; thickness ESTIMATE
-    - {name: roof,         top: 0.60,   thickness: 0.018, support: false}  # ESTIMATE; delete if there is none
+    # A roof, if the shelf has one above the top board:
+    # - {name: roof, top: <height>, thickness: 0.018, support: false}
 
   # Anything else solid on or around the shelf, as boxes: lo/hi corners in the shelf frame
   # (frame: shelf) or the base frame (frame: base).
@@ -35,4 +38,5 @@ shelf:
 # How the observed cloud is used around the model (tpgpt.hardware.shelf.ShelfWorld).
 scene:
   roi_margin: 0.03                   # cloud points this far outside the model still count
+  roi_above_support: 0.30            # ...and this far above the highest board objects stand on
   use_cloud: true                    # false: the model alone

@@ -52,6 +52,12 @@ import numpy as np
 #: slot's front edge, a panel a centimetre off).
 ROI_MARGIN = 0.03
 
+#: How far the region reaches above each board objects stand on, metres. An
+#: open-top shelf's model ends at its top board, but whatever stands *on* that
+#: board -- an object placed earlier -- is exactly what the model cannot know and
+#: the cloud must keep. 0.30 m covers the tallest objects used (a cereal box).
+ROI_ABOVE_SUPPORT = 0.30
+
 #: How far above the shelf's own bottom the region starts, metres, so the table
 #: surface around the shelf's foot is not mistaken for a shelf obstacle. The
 #: table is the planner's support plane.
@@ -186,26 +192,33 @@ class ShelfModel:
                 names[i] = box.name
         return depth, names
 
-    def roi_bounds(self, margin: float = ROI_MARGIN) -> tuple[np.ndarray, np.ndarray]:
-        """The shelf's bounding box in the shelf frame, grown by ``margin``.
+    def roi_bounds(self, margin: float = ROI_MARGIN,
+                   above_support: float = ROI_ABOVE_SUPPORT) -> tuple[np.ndarray, np.ndarray]:
+        """The shelf's region of interest in the shelf frame.
 
-        Its floor is lifted :data:`ROI_FLOOR_CLEARANCE` above the shelf's bottom,
-        so the table around the shelf's foot stays out.
+        Its bounding box grown by ``margin``, reaching at least ``above_support``
+        above the highest board objects stand on, with the floor lifted
+        :data:`ROI_FLOOR_CLEARANCE` above the shelf's bottom so the table around
+        the shelf's foot stays out.
         """
         corners = np.vstack([self._corners(b) for b in self.boxes])
         local = (corners - self.origin) @ self.R_base_shelf
         lo, hi = local.min(axis=0) - margin, local.max(axis=0) + margin
         lo[2] = local[:, 2].min() + ROI_FLOOR_CLEARANCE
+        tops = [float(b.position[2] + b.size[2]) for b in self.boxes if b.name in self.supports]
+        if tops:
+            hi[2] = max(hi[2], max(tops) + above_support)
         return lo, hi
 
-    def in_roi(self, points: np.ndarray, margin: float = ROI_MARGIN) -> np.ndarray:
-        lo, hi = self.roi_bounds(margin)
+    def in_roi(self, points: np.ndarray, margin: float = ROI_MARGIN,
+               above_support: float = ROI_ABOVE_SUPPORT) -> np.ndarray:
+        lo, hi = self.roi_bounds(margin, above_support)
         local = (np.atleast_2d(points) - self.origin) @ self.R_base_shelf
         return np.all((local >= lo) & (local <= hi), axis=1)
 
     def near(self, points: np.ndarray, reach: float) -> bool:
         """Whether any of ``points`` is within ``reach`` of the shelf's region."""
-        lo, hi = self.roi_bounds(reach)
+        lo, hi = self.roi_bounds(reach, above_support=0.0)
         local = (np.atleast_2d(points) - self.origin) @ self.R_base_shelf
         return bool(np.any(np.all((local >= lo) & (local <= hi), axis=1)))
 
@@ -307,6 +320,7 @@ class ShelfWorld:
     def build(cls, model: ShelfModel | None, scene_points: np.ndarray | None = None,
               target_points: np.ndarray | None = None, robot_q=None, fr3=None,
               end_effector=None, margin: float = ROI_MARGIN,
+              above_support: float = ROI_ABOVE_SUPPORT,
               target_exclusion: float = TARGET_EXCLUSION) -> "ShelfWorld":
         """Crop an observed scene cloud to the shelf and clean it.
 
@@ -325,7 +339,7 @@ class ShelfWorld:
             pts = np.atleast_2d(np.asarray(scene_points, dtype=float))
             report["scene_points"] = int(len(pts))
             if model is not None:
-                pts = pts[model.in_roi(pts, margin)]
+                pts = pts[model.in_roi(pts, margin, above_support)]
                 report["in_shelf_region"] = int(len(pts))
             if target_points is not None and len(target_points) and len(pts):
                 d, _ = cKDTree(np.asarray(target_points, dtype=float)).query(pts)
@@ -366,11 +380,15 @@ class ShelfWorld:
         """Cheap prune: could anything in ``points`` (plus ``reach``) touch this world?"""
         if self.model is not None and self.model.near(points, reach):
             return True
-        return bool(len(self.cloud)) and self.model is None
+        tree = self.tree("cloud")
+        if tree is None:
+            return False
+        d, _ = tree.query(np.atleast_2d(points))
+        return bool(np.min(d) <= reach)
 
     def to_dict(self) -> dict:
         return {"model": self.model.to_dict() if self.model is not None else None,
                 "cloud_report": self.cloud_report}
 
 
-__all__ = ["ROI_MARGIN", "ShelfModel", "ShelfWorld", "box_surface", "robot_mask"]
+__all__ = ["ROI_ABOVE_SUPPORT", "ROI_MARGIN", "ShelfModel", "ShelfWorld", "box_surface", "robot_mask"]
