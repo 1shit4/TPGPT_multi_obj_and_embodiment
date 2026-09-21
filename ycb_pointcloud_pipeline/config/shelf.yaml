@@ -1,0 +1,38 @@
+# The shelf, as the planner's collision model (tpgpt.hardware.shelf.ShelfModel).
+#
+# Base frame, metres. Measure by touching with the closed Franka Hand and ~/calib_tools/touch_point.py,
+# which already adds the 9.5 mm fingertip-face offset (docs/hardware/CALIBRATION.md). Procedure and
+# what each number is: docs/hardware/SHELF_AND_PATH_CHECK.md.
+#
+# Shelf frame: +x along the front edge from front_left to front_right, +y INTO the shelf, +z up.
+# "left" is the end on the robot's left as it faces the shelf's open front -- the same side as the
+# "left slot" in CALIBRATION.md. The builder refuses a swapped pair.
+#
+# STATUS 2026-09-21: only the board heights and the shelf's yaw are measured (the four slot points of
+# CALIBRATION.md). Everything marked ESTIMATE is a guess placed symmetrically about those slots:
+# inner width 0.50, depth 0.30, slots at mid-depth. Until they are measured the check can report a
+# collision that is not there, or miss one at a wall. `measured: false` is written into every plan.
+shelf:
+  measured: false
+
+  front_left:  [0.7619, -0.0923]     # ESTIMATE: front edge of a board, at the LEFT wall's inner face
+  front_right: [0.2888, -0.2542]     # ESTIMATE: front edge of a board, at the RIGHT wall's inner face
+  depth: 0.30                        # ESTIMATE: front edge to the back panel's inner face
+  bottom: -0.0136                    # the table (touched); the shelf stands on it
+  top: 0.60                          # ESTIMATE: top of the side walls
+  wall_thickness: 0.018              # ESTIMATE: side walls
+  back_thickness: 0.005              # ESTIMATE: back panel; 0 = open back
+
+  boards:                            # `top` = height of the board's upper surface
+    - {name: bottom_board, top: 0.0768, thickness: 0.018, support: true}   # top measured; thickness ESTIMATE
+    - {name: top_board,    top: 0.3213, thickness: 0.018, support: true}   # top measured; thickness ESTIMATE
+    - {name: roof,         top: 0.60,   thickness: 0.018, support: false}  # ESTIMATE; delete if there is none
+
+  # Anything else solid on or around the shelf, as boxes: lo/hi corners in the shelf frame
+  # (frame: shelf) or the base frame (frame: base).
+  extra_boxes: []
+
+# How the observed cloud is used around the model (tpgpt.hardware.shelf.ShelfWorld).
+scene:
+  roi_margin: 0.03                   # cloud points this far outside the model still count
+  use_cloud: true                    # false: the model alone
