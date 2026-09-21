@@ -102,12 +102,26 @@ def pick_place_waypoints(
 
     above_object = grasp_position - grasp_approach * hover_height
     above_goal = place_position - place_approach * hover_height
+    # **Lift clear of the destination before translating.** The transfer used
+    # to run straight from above the pick to above the goal -- a diagonal that
+    # climbs the shelf's height while moving forward, so it crosses the top
+    # board's front edge still rising. The demonstration's own small box
+    # cleared it; a real-size object hanging from the hand did not: on the
+    # YCB grid the funnel rejected 513 candidates for the carried object
+    # hitting the scene sideways at waypoints 80-120, 100 of 140 fallback
+    # cells, and physics showed the object dragging along `shelf_top` on the
+    # way in (7.46). A teacher who lifts to the destination's hover height
+    # first, then translates, is the ordinary careful demonstration; it costs
+    # one waypoint and changes nothing when the goal is no higher than the pick.
+    climb = float((above_goal - above_object) @ (-place_approach))
+    clear = above_object - place_approach * max(0.0, climb)
 
     return [
         Waypoint(above_object, -1.0, free_stiffness, 25, "approach", grasp_rotation),
         Waypoint(grasp_position, -1.0, free_stiffness, 25, "descend", grasp_rotation),
         Waypoint(grasp_position, 1.0, insertion_stiffness, 15, "grasp", grasp_rotation),
         Waypoint(above_object, 1.0, free_stiffness, 25, "lift", grasp_rotation),
+        Waypoint(clear, 1.0, free_stiffness, 20, "clear", grasp_rotation),
         Waypoint(above_goal, 1.0, free_stiffness, 40, "transfer", place_rotation),
         Waypoint(place_position, 1.0, insertion_stiffness, 30, "insert", place_rotation),
         Waypoint(place_position, -1.0, insertion_stiffness, 15, "release", place_rotation),
