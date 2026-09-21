@@ -587,6 +587,11 @@ def run(
         check = path_flags.get("path_check", {})
         result.metrics["path_fell_back"] = bool(check.get("fell_back"))
         result.metrics["path_rank_examined"] = check.get("rank_examined")
+        # Where the executors join the transported path (filters.JOIN_MARGIN).
+        chosen_record = next((e for e in check.get("examined", [])
+                              if e.get("index") == check.get("chosen")), {})
+        start_index = chosen_record.get("joined_at") or 0
+        result.metrics["start_index"] = int(start_index)
         # **The index into the *raw* candidate list, not into the survivors.**
         # ``_choose_grasp`` enumerates ``candidates``, which is already filtered
         # and truncated, so its ``chosen`` is a position in the survivor list
@@ -767,6 +772,15 @@ def run(
             result.timings = timings.stages
             result.outcome = "not_executed"
             return result
+        # Join the path where the check said the arm can. The prefix before
+        # ``start_index`` is unreachable or in collision and carries no task
+        # content -- it is the demonstration's own starting pose, warped. The
+        # plan recorded above (aim, orientation, the map) is the whole one;
+        # what is executed and diagnosed from here on starts at the join.
+        if start_index > 0:
+            transported = transported[int(start_index):]
+            result.transported = transported.positions
+            result.transported_labels = transported
         if executor == "replay":
             rollout = _replay_execution(env, result, transported, target_offset,
                                         gripper, rollout_kwargs or {})
@@ -1150,6 +1164,10 @@ def _choose_grasp(env, placement, target_of, labels, keypoint_parts, candidates,
             "first_violation": feasible["first_violation"],
             "reachable_fraction": round(feasible["reachable_fraction"], 3),
             "faults": {k: v for k, v in list(feasible["faults"].items())[:4]},
+            # Where the arm joins the path: 0 means the whole approach is
+            # followable, larger means an unreachable or colliding prefix was
+            # skipped, None means there was no usable approach.
+            "joined_at": feasible.get("joined_at"),
         }
         if feasible["violations"]:
             record["rejected"] = "collision"

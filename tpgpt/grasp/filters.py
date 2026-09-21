@@ -1195,6 +1195,13 @@ CONTACT_DEPTH_TOLERANCE = 0.001
 #: ahead, moving the object 17.9 to 113.6 mm. Three waypoints separates the two.
 GRASP_CONTACT_WINDOW = 3
 
+#: Waypoints before the close by which the arm must have joined the transported
+#: path for a plan to count as having an approach at all. Twenty of the 200 is
+#: a tenth of the demonstration: the executor needs a stretch of free approach
+#: to settle onto the path before the descent, and joining any later than that
+#: is closing on arrival. Not tuned; stated.
+JOIN_MARGIN = 20
+
 PHASES = ("approach", "carry", "retreat")
 
 
@@ -1260,6 +1267,7 @@ def path_feasibility(
     stop_early: bool = False,
     depth_tolerance: float = CONTACT_DEPTH_TOLERANCE,
     grasp_window: int = GRASP_CONTACT_WINDOW,
+    join_margin: int = JOIN_MARGIN,
 ) -> dict:
     """Can the arm fly this whole path, and does anything hit anything it should not?
 
@@ -1342,6 +1350,19 @@ def path_feasibility(
 
     seed, unreachable, violations, first = None, 0, 0, None
     faults: dict = {}
+    # **Where the arm can join the path.** The demonstration's starting pose
+    # carries no task content, and the map's affine part carries it wherever
+    # the deformation goes: on 25 of 210 YCB cells that was out of the arm's
+    # reach, the check fell back, and neither executor ever began (7.45). A
+    # prefix of the approach that the arm cannot reach or that collides is not
+    # a fault in the plan if the arm can join the path further along, well
+    # before the close. ``joined_at`` is the first approach waypoint that is
+    # both reachable and collision-free; waypoints before it count for
+    # nothing, and a plan whose first such waypoint is within ``join_margin``
+    # of the grasp -- or has none -- has no usable approach at all.
+    joined_at = None
+    join_limit = int(grasp_index) - int(join_margin)
+    skipped_unreachable = 0
     try:
         for k in indices:
             p = np.asarray(positions[k], dtype=float)
@@ -1351,6 +1372,9 @@ def path_feasibility(
                               seed_qpos=seed, position_tolerance=tolerance)
             if result.reachable:
                 seed = result.qpos
+            elif joined_at is None and k < join_limit:
+                skipped_unreachable += 1
+                continue
             else:
                 unreachable += 1
 
@@ -1410,6 +1434,13 @@ def path_feasibility(
                     continue
                 faults[key] = faults.get(key, 0) + 1
                 hit = True
+            if hit and joined_at is None and k < join_limit:
+                # Not joined yet: a colliding prefix is skipped like an
+                # unreachable one, and the search for a join point goes on.
+                skipped_unreachable += 1
+                continue
+            if joined_at is None:
+                joined_at = int(k)
             if hit:
                 violations += 1
                 first = k if first is None else first
@@ -1421,6 +1452,12 @@ def path_feasibility(
 
     tested = int(len(indices)) if not stop_early or first is None else int(
         len([i for i in indices if i <= first]))
+    tested -= skipped_unreachable
+    if joined_at is None:
+        # Never joined: every approach waypoint up to the margin was
+        # unreachable or in collision. That is an unreachable plan.
+        tested = max(tested, 1)
+        unreachable = tested
     return {
         "tested": tested,
         "unreachable": int(unreachable),
@@ -1429,6 +1466,8 @@ def path_feasibility(
         "violation_fraction": float(violations / tested) if tested else 0.0,
         "first_violation": None if first is None else int(first),
         "faults": faults,
+        "joined_at": joined_at,
+        "skipped_prefix": int(skipped_unreachable),
     }
 
 
@@ -1467,6 +1506,7 @@ def path_feasibility_observed(
     stride: int = 1,
     stop_early: bool = False,
     bodies=None,
+    join_margin: int = JOIN_MARGIN,
 ) -> dict:
     """The same question as :func:`path_feasibility`, asked with what the robot can see.
 
@@ -1547,6 +1587,11 @@ def path_feasibility_observed(
 
     seed, unreachable, violations, first = None, 0, 0, None
     faults: dict = {}
+    # Where the arm can join the path; see path_feasibility, which is the
+    # same rule on the simulator's true geometry.
+    joined_at = None
+    join_limit = int(grasp_index) - int(join_margin)
+    skipped_unreachable = 0
     try:
         for k in indices:
             p = np.asarray(positions[k], dtype=float)
@@ -1556,6 +1601,9 @@ def path_feasibility_observed(
                               seed_qpos=seed, position_tolerance=tolerance)
             if result.reachable:
                 seed = result.qpos
+            elif joined_at is None and k < join_limit:
+                skipped_unreachable += 1
+                continue
             else:
                 unreachable += 1
                 # **A configuration inverse kinematics did not reach is not a
@@ -1618,6 +1666,11 @@ def path_feasibility_observed(
                         key = f"{phase}: the carried object hits something sideways"
                         faults[key] = faults.get(key, 0) + len(lateral)
                         hit = True
+            if hit and joined_at is None and k < join_limit:
+                skipped_unreachable += 1
+                continue
+            if joined_at is None:
+                joined_at = int(k)
             if hit:
                 violations += 1
                 first = k if first is None else first
@@ -1629,6 +1682,12 @@ def path_feasibility_observed(
 
     tested = int(len(indices)) if not stop_early or first is None else int(
         len([i for i in indices if i <= first]))
+    tested -= skipped_unreachable
+    if joined_at is None:
+        # Never joined: every approach waypoint up to the margin was
+        # unreachable or in collision. That is an unreachable plan.
+        tested = max(tested, 1)
+        unreachable = tested
     return {
         "tested": tested,
         "unreachable": int(unreachable),
@@ -1637,6 +1696,8 @@ def path_feasibility_observed(
         "violation_fraction": float(violations / tested) if tested else 0.0,
         "first_violation": None if first is None else int(first),
         "faults": faults,
+        "joined_at": joined_at,
+        "skipped_prefix": int(skipped_unreachable),
     }
 
 
