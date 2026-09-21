@@ -38,16 +38,16 @@ GRASP_HEIGHT_OFFSET = PRODUCT_HALF_SIZE[2]
 
 #: How far the teacher lifts above the grasp and above the goal, metres.
 #:
-#: 0.16 was enough for the demonstration's own 90 mm box. It is not margin
-#: enough for what the map does to the middle of the path: with keypoints
-#: only at the pick and the release, the affine part shears the vertical
-#: lift into a slant -- on the YCB grid the carried banana had moved 180 mm
-#: forward by waypoint 84 while still 50 mm below the top board, and caught
-#: its front edge -- and the residual bends the transfer, swinging the object
-#: 130 mm past the top-left slot into the cubby's side wall. The paper states
-#: that limitation; what a careful teacher does about it is leave room.
-#: 0.26 is 100 mm more, chosen as the size of those two misses.
-HOVER_HEIGHT = 0.26
+#: 0.16 was written for the demonstration's own 90 mm box, and it stays. A
+#: 0.26 hover was tried against what the map does to the middle of the path
+#: (the sheared lift and the bent transfer of 7.46): it cleared the funnel
+#: (fallbacks 110 -> 97 of 210) and cost the executor far more than that --
+#: 91 -> 66 placed on the same grid, McNemar p = 0.004, place and settle
+#: failures 35 -> 60, the Panda 16 -> 6 -- because a 260 mm descent into the
+#: slot is where an impedance-controlled arm lags and lets go high. The
+#: paper-setting gate also dropped from 20/20 to 19/20. So the margin the
+#: map needs cannot be bought with height; it is the draft's limitation.
+HOVER_HEIGHT = 0.16
 
 
 @dataclass
