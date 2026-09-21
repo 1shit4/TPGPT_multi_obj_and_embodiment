@@ -6,11 +6,17 @@ TPGPT planning from real perception. Does NOT move the robot.
       -> base frame via config/camera_calibration.yaml (+ realsense TF)
       -> fuse `n_frames` clouds, crop to the workspace, voxel + outlier filter
       -> grasp: GraspGen-X candidates for the Franka Hand (franka_panda) from the
-         GraspGen-X ZMQ server, screened on the cloud (approach from above,
-         what lies between the pads fits, palm and fingers clear of the object
-         and the table), then planned best score first; the first plan that
-         passes its checks wins (tpgpt.hardware.grasp_selection). Falls back to
-         the scripted top-down grasp if the server is down or nothing passes.
+         GraspGen-X ZMQ server, screened (approach from above, visibility, on
+         target, what lies between the pads fits, table, shelf collision, place
+         zone, centred, duplicates), then planned best score first; the first
+         whose WHOLE transported path the arm can fly without touching the shelf
+         wins (tpgpt.hardware.grasp_selection, tpgpt.hardware.path_check -- the
+         simulation's _choose_grasp rule). The scripted top-down grasp is used
+         only when asked for (top_down_grasp / grasp_fallback_top_down).
+      -> the shelf: config/shelf.yaml (the measured model) plus /ycb_scene_cloud
+         cropped to the shelf's region, target and robot (at the /joint_states of
+         the capture) removed. /joint_states now also seeds the path check with
+         the arm's real configuration and checks the move onto the path.
       -> tpgpt.hardware.planner.plan(): keypoints (grasp-pose cube),
          transportation map, transported policy labels (fr3_hand_tcp)
       -> saved to <output_dir>/<object>_<timestamp>/ for tpgpt_executor_node
@@ -26,6 +32,8 @@ Published (latched / transient-local, fixed frame `base`):
                                z blue = approach), transported path (blue open /
                                red closed), destination disc, metrics text
   /tpgpt/plan/path             nav_msgs/Path of fr3_hand_tcp poses
+  /tpgpt/plan/shelf            the shelf model's panels (brown; support boards darker)
+  /tpgpt/plan/shelf_cloud      observed obstacle points on the shelf (magenta)
   /tpgpt/plan/overlay          the camera image with the fused cloud (green dots), the
                                chosen grasp's Franka Hand collision boxes (magenta, open)
                                and TCP (red cross) projected through the calibration; also
@@ -74,7 +82,7 @@ from visualization_msgs.msg import MarkerArray
 from ycb_pointcloud_pipeline import camera_calibration as cc
 from ycb_pointcloud_pipeline.camera_tf_publisher import default_calibration_yaml
 from ycb_pointcloud_pipeline.ros_utils import (
-    CalibrationProvider, axes_markers, colors_for, cylinder_marker, fuse_clouds,
+    CalibrationProvider, axes_markers, box_marker, colors_for, cylinder_marker, fuse_clouds,
     gripper_segments, line_list_marker, line_strip_marker, matrix_to_pose_stamped,
     pointcloud2_to_xyzrgb, sphere_list_marker, text_marker, xyz_to_pointcloud2,
 )
@@ -124,12 +132,24 @@ class TpgptPlannerNode(Node):
         d('graspgen_timeout', 30.0)               # s
         d('graspgen_autostart', True)             # start scripts/run_graspgenx_server.sh if unreachable
         d('grasp_max_tilt_deg', 85.0)             # approach vs straight down; lower = more top-down
-        d('grasp_max_plans', 12)                  # candidates planned, best score first
+        d('grasp_max_plans', 100)                 # candidates planned, best score first (sim: 100)
         d('grasp_min_path_clearance', -0.002)     # m, hand vs table/destination along the path
-        d('grasp_fallback_top_down', True)
+        d('grasp_fallback_top_down', False)       # the simulation has no scripted fallback
         d('grasp_offset', [-0.035, 0.0, -0.025])     # m, base frame, added to every planned grasp TCP
         d('grasp_markers_max', 60)                # candidates drawn in RViz
         d('min_determinant', 0.1)
+        # The shelf and the whole-path check (tpgpt.hardware.shelf / path_check)
+        d('shelf_config', default_config_path('shelf.yaml'))   # '' = no shelf model
+        d('use_scene_cloud', True)                # the observed cloud on the shelf
+        d('scene_cloud_topic', '/ycb_scene_cloud')
+        d('scene_max_age', 10.0)                  # s
+        d('scene_outlier_radius', 0.02)           # m; the scene cloud is ~7 mm apart at 1 m
+        d('scene_outlier_min_neighbors', 3)
+        d('joint_states_topic', '/joint_states')
+        d('check_path', True)
+        d('min_reachable_fraction', 0.60)         # pipeline.MIN_REACHABLE_FRACTION
+        d('allow_kinematic_fallback', True)       # never a colliding candidate
+        d('max_centre_offset', 0.025)             # by_centre_offset on a one-sided cloud
         d('output_dir', os.path.expanduser('~/tpgpt_plans'))
         d('auto_plan', False)                     # plan as soon as n_frames arrived
         d('republish_period', 2.0)
@@ -162,6 +182,25 @@ class TpgptPlannerNode(Node):
         self._color_msg = None
         self._camera_info = None
         self.plan_dir = None
+        self.scene = None          # (monotonic, points_base, joint angles at capture)
+        self.joints = None         # (monotonic, (7,) fr3_joint1..7)
+        self.shelf_model = None
+        shelf_path = p('shelf_config')
+        if shelf_path:
+            import yaml
+
+            from tpgpt.hardware.shelf import ShelfModel
+            with open(shelf_path) as f:
+                self.shelf_raw = yaml.safe_load(f) or {}
+            self.shelf_model = ShelfModel.from_config(self.shelf_raw)
+            self.get_logger().info(
+                f'Shelf model {shelf_path}: {len(self.shelf_model.boxes)} panels, supports '
+                f'{list(self.shelf_model.supports)}'
+                + ('' if self.shelf_model.measured else ' -- ESTIMATED dimensions (measured: false)'))
+        else:
+            self.shelf_raw = {}
+            self.get_logger().warn('No shelf model (shelf_config empty): paths are checked '
+                                   'against the observed cloud only')
 
         latched = QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL,
                              reliability=ReliabilityPolicy.RELIABLE)
@@ -175,6 +214,16 @@ class TpgptPlannerNode(Node):
                                  lambda m: setattr(self, '_color_msg', m), qos_profile_sensor_data)
         self.create_subscription(CameraInfo, p('camera_info_topic'),
                                  lambda m: setattr(self, '_camera_info', m), qos_profile_sensor_data)
+
+        self.shelf_pub = self.create_publisher(MarkerArray, '/tpgpt/plan/shelf', latched)
+        self.shelf_cloud_pub = self.create_publisher(PointCloud2, '/tpgpt/plan/shelf_cloud',
+                                                     latched)
+        if p('use_scene_cloud'):
+            self.create_subscription(PointCloud2, p('scene_cloud_topic'), self._scene_cb, 2,
+                                     callback_group=ReentrantCallbackGroup())
+        from sensor_msgs.msg import JointState
+        self.create_subscription(JointState, p('joint_states_topic'), self._joint_cb,
+                                 qos_profile_sensor_data, callback_group=ReentrantCallbackGroup())
 
         topic = p('cloud_topic') or f"/ycb_pointclouds/{p('object_name')}"
         self.create_subscription(PointCloud2, topic, self._cloud_cb, 5,
@@ -200,6 +249,50 @@ class TpgptPlannerNode(Node):
                                throttle_duration_sec=5.0)
         if ready and self.get_parameter('auto_plan').value and self.latest_plan is None:
             threading.Thread(target=self._plan, daemon=True).start()
+
+    def _joint_cb(self, msg):
+        index = {n: i for i, n in enumerate(msg.name)}
+        names = [f'fr3_joint{k}' for k in range(1, 8)]
+        if all(n in index for n in names):
+            q = np.array([msg.position[index[n]] for n in names], dtype=float)
+            self.joints = (time.monotonic(), q)
+
+    def _scene_cb(self, msg):
+        T = self.calib.T_base_optical(msg.header.frame_id or self.calib.cal.optical_frame)
+        if T is None:
+            return
+        xyz, _ = pointcloud2_to_xyzrgb(msg)
+        joints = self.joints[1].copy() if self.joints is not None else None
+        self.scene = (time.monotonic(), cc.transform_points(T, xyz), joints)
+
+    def shelf_world(self, target_points):
+        """The shelf model plus the recent scene cloud on it (tpgpt.hardware.shelf)."""
+        from tpgpt.hardware.fr3 import default_model
+        from tpgpt.hardware.shelf import ROI_ABOVE_SUPPORT, ROI_MARGIN, ShelfWorld
+        p = lambda n: self.get_parameter(n).value  # noqa: E731
+        scene_cfg = (self.shelf_raw or {}).get('scene', {}) or {}
+        points, q, age = None, None, None
+        if p('use_scene_cloud') and scene_cfg.get('use_cloud', True) and self.scene is not None:
+            t, pts, q = self.scene
+            age = time.monotonic() - t
+            if age <= float(p('scene_max_age')):
+                points = pts
+        world = ShelfWorld.build(
+            self.shelf_model, points, target_points=target_points, robot_q=q,
+            fr3=default_model(), end_effector=self.end_effector,
+            margin=float(scene_cfg.get('roi_margin', ROI_MARGIN)),
+            above_support=float(scene_cfg.get('roi_above_support', ROI_ABOVE_SUPPORT)))
+        if len(world.cloud) > int(p('scene_outlier_min_neighbors')):
+            before = len(world.cloud)
+            world.cloud = cc.radius_outlier_filter(world.cloud, float(p('scene_outlier_radius')),
+                                                   int(p('scene_outlier_min_neighbors')))
+            world.cloud_report['removed_as_outliers'] = before - len(world.cloud)
+            world.cloud_report['obstacle_points'] = int(len(world.cloud))
+        world.cloud_report['scene_age_s'] = age
+        if p('use_scene_cloud') and points is None:
+            world.cloud_report['scene_missing'] = (f"no {p('scene_cloud_topic')} within "
+                                                   f"{p('scene_max_age')} s")
+        return world
 
     def fused_cloud(self):
         p = lambda n: self.get_parameter(n).value  # noqa: E731
@@ -271,25 +364,51 @@ class TpgptPlannerNode(Node):
             # own (config side_grasp.grasp_offset_m, default zero).
             grasp_offset=(tuple(float(v) for v in self.side_offset) if side else
                           tuple(float(v) for v in p('grasp_offset'))),
+            check_path=bool(p('check_path')),
+            min_reachable_fraction=float(p('min_reachable_fraction')),
+            allow_kinematic_fallback=bool(p('allow_kinematic_fallback')),
+            max_centre_offset=float(p('max_centre_offset')),
         )
         info['settings'] = settings
+        from tpgpt.hardware.grasp_selection import PathContext, ScreenContext
+        from tpgpt.sim.keypoints import carry_transform
+        world = self.shelf_world(points)
+        log.info(f'Shelf world: {world.cloud_report}')
+        if world.cloud_report.get('scene_missing'):
+            log.warn(f"{world.cloud_report['scene_missing']}: the shelf model alone")
+        joints = self.joints[1] if self.joints is not None else None
+        if joints is None:
+            log.warn(f"no {p('joint_states_topic')}: the move onto the path is not checked "
+                     'and IK is seeded from home')
+        T_cam = self.calib.T_base_optical(self.calib.cal.optical_frame)
+        context = ScreenContext(
+            camera_position=None if T_cam is None else T_cam[:3, 3],
+            world=world, destination=destination[:2],
+            destination_height=scene.destination_height,
+            carry_rotation=carry_transform(self.source.tool_labels)[0])
+        path_ctx = PathContext(world=world, end_effector=self.end_effector, start_q=joints)
+        info['screen_context'] = context
+        info['world'] = world.to_dict()
         t_sel = time.monotonic()
         try:
             if side:
                 from tpgpt.hardware.grasp_selection import plan_side_grasp
                 selection = plan_side_grasp(self.source, scene, self.end_effector, settings,
-                                            self.side_settings)
+                                            self.side_settings, path=path_ctx)
             else:
                 selection = select_and_plan(
                     self.source, scene, poses, scores, settings, unavailable_reason=unavailable,
+                    context=context, path=path_ctx,
                     grasp_depth_below_top=float(p('grasp_depth_below_top')))
         except PlanningError as exc:
             info['timing_s']['selection_total'] = time.monotonic() - t_sel
             info['error'] = str(exc)
             info['failed_candidates'] = getattr(exc, 'candidates', None)
             info['failed_fallback'] = getattr(exc, 'fallback', None)
+            info['failed_stages'] = getattr(exc, 'stages', None)
             log.error(f'Planning refused: {exc}')
             self._publish_cloud_only(points)
+            self._publish_shelf(world)
             return False, str(exc)
         info['timing_s']['selection_total'] = time.monotonic() - t_sel
         info['selection'] = selection
@@ -312,6 +431,14 @@ class TpgptPlannerNode(Node):
             'grasp_candidates': len(selection.candidates),
             'grasp_rejections': selection.rejection_counts(),
             'grasp_notes': selection.notes,
+            'grasp_stages': selection.stages,
+            'grasp_rank_examined': selection.rank_examined,
+            'grasp_fell_back': selection.fell_back,
+            'path_check': selection.chosen.path_check,
+            'shelf': world.to_dict(),
+            'shelf_is_estimate': bool(self.shelf_model is not None
+                                      and not self.shelf_model.measured),
+            'joint_states_at_plan': None if joints is None else joints.tolist(),
             'end_effector_config': (self.end_effector.details.get('config_file')
                                     if side else None),
             'graspgen': {n: self.get_parameter(n).value for n in (
@@ -337,6 +464,7 @@ class TpgptPlannerNode(Node):
             cv2.imwrite(os.path.join(out, 'overlay.png'), overlay)
         with self.lock:
             self.latest_plan, self.latest_selection, self.plan_dir = result, selection, out
+            self.latest_world = world
             self.latest_colors = self._fused_colors
             self.latest_overlay = overlay
         m = result.metrics
@@ -492,6 +620,7 @@ class TpgptPlannerNode(Node):
         if selection is not None:
             markers.markers += self._candidate_markers(selection, stamp)
         self.marker_pub.publish(markers)
+        self._publish_shelf(getattr(self, 'latest_world', None))
 
         path = Path()
         path.header.frame_id, path.header.stamp = base, stamp
@@ -557,6 +686,23 @@ class TpgptPlannerNode(Node):
                     cv2.FONT_HERSHEY_SIMPLEX, 0.45, (255, 255, 255), 1, cv2.LINE_AA)
         return img
 
+    def _publish_shelf(self, world):
+        """The shelf model's panels and the observed obstacle points on the shelf."""
+        if world is None:
+            return
+        stamp = self.get_clock().now().to_msg()
+        markers = MarkerArray()
+        if world.model is not None:
+            for k, b in enumerate(world.model.boxes):
+                support = b.name in world.model.supports
+                color = (0.45, 0.28, 0.12, 0.8) if support else (0.75, 0.55, 0.3, 0.45)
+                markers.markers.append(box_marker('shelf', k, b.position, b.rotation,
+                                                  2.0 * np.asarray(b.size), self.base, stamp,
+                                                  color))
+        self.shelf_pub.publish(markers)
+        self.shelf_cloud_pub.publish(xyz_to_pointcloud2(world.cloud, self.base, stamp,
+                                                        (255, 0, 200)))
+
     def _candidate_markers(self, selection, stamp):
         """Gripper outlines for the candidates: chosen, planned-but-refused, screened out."""
         chosen = selection.chosen
@@ -612,6 +758,17 @@ def load_end_effector(name, config_file=''):
         base_xy=tuple(float(v) for v in sg.get('base_xy', defaults.base_xy)),
     )
     return ee, side, tuple(float(v) for v in sg.get('grasp_offset_m', (0.0, 0.0, 0.0)))
+
+
+def default_config_path(name):
+    """Installed config/<name>, else the source tree's."""
+    try:
+        from ament_index_python.packages import get_package_share_directory
+        return os.path.join(get_package_share_directory('ycb_pointcloud_pipeline'), 'config',
+                            name)
+    except Exception:  # noqa: BLE001 - package not installed
+        return os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                            'config', name)
 
 
 def graspgen_server_script():

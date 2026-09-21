@@ -224,6 +224,18 @@ def cylinder_marker(ns, mid, position, diameter, height, frame_id, stamp, color)
     return m
 
 
+def box_marker(ns, mid, centre, rotation, size, frame_id, stamp, color):
+    """An oriented box: ``size`` is the full extent along the box's own axes."""
+    m = _marker(ns, mid, Marker.CUBE, frame_id, stamp)
+    m.pose.position = _pt(centre)
+    q = cc.matrix_to_quat_xyzw(rotation)
+    m.pose.orientation.x, m.pose.orientation.y = float(q[0]), float(q[1])
+    m.pose.orientation.z, m.pose.orientation.w = float(q[2]), float(q[3])
+    m.scale.x, m.scale.y, m.scale.z = (float(v) for v in size)
+    m.color = _color(*color)
+    return m
+
+
 # --------------------------------------------------------------------------- calibration
 class CalibrationProvider:
     """Resolves base <- optical-frame transforms for a node, from the calibration YAML

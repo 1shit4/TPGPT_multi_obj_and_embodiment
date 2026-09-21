@@ -449,7 +449,9 @@ class Trial:
         if not ok:
             cands = info.get('failed_candidates') or []
             sel = SimpleNamespace(candidates=cands, chosen=None, source=None,
-                                  notes=[info.get('error', text)])
+                                  notes=[info.get('error', text)],
+                                  stages=info.get('failed_stages'), rank_examined=None,
+                                  world=info.get('world'), fell_back=False)
             doc, grasp = xr.candidates_document(sel, poses, scores)
             doc['planning_error'] = info.get('error', text)
             if info.get('failed_fallback') is not None:
@@ -481,7 +483,8 @@ class Trial:
         if support is None:
             support = float(np.percentile(np.asarray(points)[:, 2], 1.0))
         t_screen, reproduced = xr.time_screening(points, poses, scores, support, info['settings'],
-                                                 selection.candidates)
+                                                 selection.candidates,
+                                                 context=info.get('screen_context'))
         timing.update({'filtering': t_screen, 'map_fit': retimed['map_fit'],
                        'label_transport': retimed['label_transport'],
                        'total_plan': sum(timing.get(k, 0.0) for k in
@@ -495,7 +498,7 @@ class Trial:
         self.save_record()
         g = grasp
         print(f"\nPLAN: rank {g['rank_executed']} of {g['n_candidates_generated']} "
-              f"({'FELL BACK to top-down' if g['fell_back'] else 'generator grasp'}), "
+              f"({'FELL BACK (' + g['fallback_kind'] + ')' if g['fell_back'] else 'generator grasp'}), "
               f"min det J {map_block['min_det_J']:.3f}, aim {map_block['aim_error_mm']:.1f} mm")
         print(f"      overlay: {self.path('plan_overlay.png')}  (also RViz /tpgpt/plan/*)")
         return True

@@ -24,7 +24,9 @@ real arm. Three steps:
      :mod:`tpgpt.grasp.filters` themselves, and with its rule that a stage which
      would empty the set passes it through and says so (``FilterFunnel``):
      ``visibility`` (``by_visibility``), ``on_target`` (``by_target``),
-     ``collision`` (``by_collision``, against the shelf), ``place_zone``
+     ``grasp_collision`` (``by_collision`` -- the funnel's ``collision`` stage,
+     renamed so it is not confused with the whole-path verdict -- against the
+     shelf, at the grasp and along its approach), ``place_zone``
      (``by_place_approach``, against the shelf model) and ``centred``
      (``by_centre_offset``, on the cloud's box centre with a wider margin, as
      that function's own docstring prescribes for perception).
@@ -489,7 +491,7 @@ def screen_candidates(
         if len(scene):
             grasps, idx = g6(alive)
             keep = filters.by_collision(grasps, idx, scene, pair)
-            alive = _soft_stage(stages, alive, "collision",
+            alive = _soft_stage(stages, alive, "grasp_collision",
                                 "the hand or its approach meets the shelf", keep)
 
     # --- the place zone, against the shelf model (soft) --------------------------

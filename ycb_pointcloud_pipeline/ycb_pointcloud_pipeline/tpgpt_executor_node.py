@@ -107,6 +107,9 @@ class TpgptExecutorNode(Node):
         d('target_pose_topic', '')                  # '' -> derived from the controller
         d('target_stiffness_topic', '')
         d('current_pose_topic', '/current_pose')
+        # Measured joints seed the infeasible-pose fallback's IK (executor.C3); without
+        # fresh ones the fallback is off for that step and the log says how often.
+        d('joint_states_topic', '/joint_states')
         d('base_frame', 'base')
         # Execution (tpgpt.hardware.executor.ExecutorSettings)
         d('speed_scale', 0.35)
@@ -193,6 +196,10 @@ class TpgptExecutorNode(Node):
         self.gripper_state = None
         self.sim_T = None     # dry-run simulated TCP pose
         self.create_subscription(PoseStamped, p('current_pose_topic'), self._pose_cb, 1)
+        self._joints = None   # (monotonic, JointState) -- converted on demand
+        from sensor_msgs.msg import JointState
+        self.create_subscription(JointState, p('joint_states_topic'),
+                                 lambda m: setattr(self, '_joints', (time.monotonic(), m)), 1)
 
         if self.dry:
             self.pose_pub = self.create_publisher(PoseStamped, '/tpgpt/executor/commanded_pose', 1)
@@ -241,6 +248,19 @@ class TpgptExecutorNode(Node):
                            f'{pose[1].header.frame_id!r}, expected {self.base!r}')
         T = pose_to_matrix(pose[1].pose)
         return T[:3, 3].copy(), T[:3, :3].copy()
+
+    def measured_joints(self):
+        """The arm's seven joint angles, or None (dry run, or nothing fresh)."""
+        if self.dry or self._joints is None:
+            return None
+        t, msg = self._joints
+        if time.monotonic() - t > self.p('max_pose_age'):
+            return None
+        index = {n: i for i, n in enumerate(msg.name)}
+        names = [f'fr3_joint{k}' for k in range(1, 8)]
+        if not all(n in index for n in names):
+            return None
+        return np.array([msg.position[index[n]] for n in names], dtype=float)
 
     def wait_for_pose(self, timeout):
         deadline = time.monotonic() + timeout
@@ -592,7 +612,7 @@ class TpgptExecutorNode(Node):
             if time.monotonic() > policy_deadline:
                 raise AbortRun('max_policy_seconds exceeded')
             meas_p, meas_R = self.measured()
-            cmd = executor.step(meas_p, meas_R)
+            cmd = executor.step(meas_p, meas_R, self.measured_joints())
             if executor.stalled and p('on_stall') == 'continue':
                 log.warn(f'execution watchdog declared the arm stuck at phase {executor.phase:.3f} '
                          f'after {executor.steps} steps; on_stall=continue: lag gate OFF, '
@@ -645,7 +665,10 @@ class TpgptExecutorNode(Node):
                            f'{executor.phase:.3f} after {executor.steps} steps')
         self.moving = False
         text = (f'Policy complete: {executor.steps} steps, final phase {executor.phase:.3f}, '
-                f'sag re-baselines {executor.watchdog.rebaselines}')
+                f'sag re-baselines {executor.watchdog.rebaselines}; infeasible-pose fallback: '
+                f'{executor.relaxed_steps} relaxed steps, {executor.skips} skips '
+                f'({executor.skipped_steps} steps steering), '
+                f'{executor.feasibility_unavailable} gate-shut steps without joint angles')
         if self.use_stiffness and losses:
             text += (f'; stiffness off-diagonal share dropped: median {np.median(losses):.2f}, '
                      f'max {np.max(losses):.2f}')

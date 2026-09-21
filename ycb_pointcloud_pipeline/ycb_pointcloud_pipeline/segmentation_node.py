@@ -9,6 +9,11 @@ deprojected and published as a PointCloud2 on /ycb_pointclouds/<name>.
 An annotated image with the detections is published on
 /ycb_detections/image (view it with rqt_image_view).
 
+The whole depth frame of the same cycle, subsampled every `scene_cloud_stride`
+pixels, is published on /ycb_scene_cloud (same frame and stamp as the object
+clouds). The planner crops it to the shelf and uses it as the observed obstacle
+cloud (tpgpt.hardware.shelf.ShelfWorld).
+
 Run (after building the workspace and sourcing it):
     ros2 launch ycb_pointcloud_pipeline ycb_pipeline.launch.py
 """
@@ -91,6 +96,9 @@ class YCBSegmentationNode(Node):
         self.declare_parameter('save_pcd', False)
         self.declare_parameter('output_dir', os.path.expanduser('~/ycb_pointclouds'))
         self.declare_parameter('show_debug_window', False)
+        # The whole frame as the planner's observed obstacle cloud (/ycb_scene_cloud).
+        self.declare_parameter('publish_scene_cloud', True)
+        self.declare_parameter('scene_cloud_stride', 4)   # every 4th pixel: ~25k points at 848x480
         # Intrinsics used for deprojection: config/camera_calibration.yaml
         # `intrinsics.source` = camera_info (default) or yaml (the placeholder
         # values in that file). An empty path disables the YAML entirely.
@@ -138,6 +146,7 @@ class YCBSegmentationNode(Node):
             for t in self.targets
         }
         self.info_pub = self.create_publisher(String, '/ycb_detections/info', 5)
+        self.scene_pub = self.create_publisher(PointCloud2, '/ycb_scene_cloud', 1)
 
         self.bridge = CvBridge()
         self.intrinsics = None
@@ -236,6 +245,21 @@ class YCBSegmentationNode(Node):
         dt = (self.get_clock().now() - t0).nanoseconds / 1e9
         self.cycle += 1
 
+        p = lambda n: self.get_parameter(n).value  # noqa: E731
+        if p('publish_scene_cloud'):
+            stride = max(int(p('scene_cloud_stride')), 1)
+            every = np.zeros(depth.shape[:2], dtype=bool)
+            every[::stride, ::stride] = True
+            # Unfiltered: the 5 mm density filter would strip a cloud this sparse.
+            # The planner filters its shelf crop at a matching radius.
+            scene, scene_colors = mask_to_pointcloud(rgb, depth, every, self.intrinsics,
+                                                     depth_scale=self.depth_scale,
+                                                     depth_trunc=self.depth_trunc,
+                                                     remove_outliers=False)
+            if scene.shape[0]:
+                self.scene_pub.publish(points_to_ros2_pointcloud2(
+                    scene, scene_colors, color_msg.header.frame_id, color_msg.header.stamp))
+
         published = []
         for det in detections:
             points, colors = mask_to_pointcloud(rgb, depth, det['mask'], self.intrinsics,
@@ -257,7 +281,6 @@ class YCBSegmentationNode(Node):
                                             f"{det['label']}_{self.cycle:05d}.pcd"),
                                points, colors)
 
-        p = lambda n: self.get_parameter(n).value  # noqa: E731
         stamp = color_msg.header.stamp
         self.info_pub.publish(String(data=json.dumps({
             'cycle': self.cycle,

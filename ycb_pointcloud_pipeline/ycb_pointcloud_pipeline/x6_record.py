@@ -17,10 +17,13 @@ from ycb_pointcloud_pipeline.x6_common import write_json
 
 #: Rejection tags written by tpgpt.hardware.grasp_selection, by the stage that
 #: produces them. Used to name the stage of each rejection in the record.
-SCREENING_TAGS = ('from_below', 'too_wide', 'collides', 'empty', 'shallow', 'hits_support',
+SCREENING_TAGS = ('from_below', 'visibility', 'on_target', 'too_wide', 'collides', 'empty',
+                  'shallow', 'hits_support', 'grasp_collision', 'place_zone', 'centred',
                   'duplicate')
 PLANNING_TAGS = ('plan_refused', 'map_folds', 'misses_grasp', 'wrong_orientation',
-                 'path_hits_surface', 'not_tried')
+                 'path_hits_surface', 'collision', 'kinematics', 'not_tried')
+#: Rejections made by the whole-path check (tpgpt.hardware.path_check).
+PATH_TAGS = ('path_hits_surface', 'collision', 'kinematics')
 
 
 def split_rejection(text):
@@ -35,7 +38,7 @@ def rejection_stage(tag):
     if tag in SCREENING_TAGS:
         return 'screening'
     if tag in PLANNING_TAGS:
-        return 'path_feasibility' if tag == 'path_hits_surface' else 'planning'
+        return 'path_feasibility' if tag in PATH_TAGS else 'planning'
     return 'unknown'
 
 
@@ -106,7 +109,10 @@ def candidates_document(selection, raw_poses, raw_scores):
             'plan_metrics': c.plan_metrics,
         })
         entries.append(d)
-    fell_back = selection is not None and selection.source == 'top_down'
+    kinematic = bool(getattr(selection, 'fell_back', False))
+    fallback_kind = ('top_down' if selection is not None and selection.source == 'top_down'
+                     else 'kinematic' if kinematic else None)
+    fell_back = fallback_kind is not None
     scripted = selection is not None and selection.source in ('top_down', 'side')
     ee = plan_end_effector(getattr(selection, 'plan', None)) if selection is not None else None
     if scripted:
@@ -127,6 +133,10 @@ def candidates_document(selection, raw_poses, raw_scores):
         'raw_scores': None if raw_scores is None else np.asarray(raw_scores).tolist(),
         'candidates': entries,
         'fallback': (chosen.as_dict() if fell_back else None),
+        'fallback_kind': fallback_kind,
+        'screening_stages': getattr(selection, 'stages', None) if selection is not None else None,
+        'rank_examined': getattr(selection, 'rank_examined', None) if selection is not None else None,
+        'shelf_world': getattr(selection, 'world', None) if selection is not None else None,
     }
     grasp = {
         'n_candidates_generated': doc['n_candidates_generated'],
@@ -141,6 +151,9 @@ def candidates_document(selection, raw_poses, raw_scores):
                        if selection is not None and selection.source == 'side' else None),
         'generator_score': (None if chosen is None or scripted else float(chosen.score)),
         'fell_back': bool(fell_back),
+        'fallback_kind': fallback_kind,
+        'path_check': getattr(chosen, 'path_check', None) if chosen else None,
+        'screening_stages': doc['screening_stages'],
         'refined_depth_m': chosen.refined_depth if chosen else None,
         'refined_centre_m': chosen.refined_centre if chosen else None,
     }
@@ -194,15 +207,17 @@ def map_block(plan, source, cube_half_extent, construction):
     return block, {'map_fit': t_fit, 'label_transport': t_transport}
 
 
-def time_screening(points, poses, scores, support_height, settings, candidates):
+def time_screening(points, poses, scores, support_height, settings, candidates, context=None):
     """Re-run the screening stage on the same inputs: its duration, and whether it
-    reproduced the verdicts the selection recorded (screening is deterministic)."""
+    reproduced the verdicts the selection recorded (screening is deterministic).
+    ``context`` must be the planning call's (``info['screen_context']``)."""
     from tpgpt.hardware import hand
     from tpgpt.hardware.grasp_selection import screen_candidates
     if poses is None or not len(poses):
         return 0.0, None
     t0 = time.perf_counter()
-    again = screen_candidates(points, poses, scores, support_height, settings, hand.TCP_OFFSET)
+    again = screen_candidates(points, poses, scores, support_height, settings, hand.TCP_OFFSET,
+                              context=context)
     elapsed = time.perf_counter() - t0
     ok = True
     for a, b in zip(again, candidates):
