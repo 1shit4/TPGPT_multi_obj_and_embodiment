@@ -4371,6 +4371,62 @@ opposite of the parallel jaws. Per object: sugar 22, meat 31, mug 17, hammer
 **What would make this wrong.** One draw; the 85 is a count on that draw and
 the marginal population will reshuffle on another. The ledger's causes are
 the trace-based attribution of 7.43 applied to the replay's own trace.
+### 7.46 The funnel falls back on two cells in three, and the middle of the path is why
+
+A selection-only tally over the 210 seed-0 YCB cells (no physics; the same
+cached candidates every time) found the path check rejecting every candidate
+and falling back on **140 of 210** cells. On 100 of those the chosen fallback's
+own fault was "the carried object hits something sideways" at waypoints
+80-120, mid-carry; across all candidates, 513 such faults against 145 in the
+approach. A contact probe in physics confirmed it: `robotiq85/sugar`,
+`xarm/hammer` and `panda/banana` all dragged the object along `shelf_top`
+during the carry, the hammer for 188 control steps.
+
+The check's own debug trace of *what* it hits, on two cells, gave two
+mechanisms, both in the map rather than in the checks:
+
+* **The transported lift is not vertical.** The source lifts straight up at
+  the pick; with keypoints only at the pick and the release, the affine part
+  of the map shears that into a slant. The carried banana had moved 180 mm
+  forward by waypoint 84 while still 50 mm below the top board, and caught
+  its front edge (x = -0.010, z = 0.994).
+* **The transfer bends.** On the way to the top-left slot the residual swung
+  the object 130 mm past the slot, into the cubby's side wall (y = 0.305).
+
+Both are the draft's stated limitation: the map is pinned at 36 points and
+nowhere else. Three things were tried against it, in order, each predicted
+by the tally before any physics:
+
+| demonstration | tally: fallbacks | grid: placed | gate |
+|---|---|---|---|
+| diagonal transfer, hover 160 mm (as recorded) | 140 | 91 | 20/20 |
+| + `clear` waypoint (lift to the goal's hover height, then translate), 160 mm | 110 | **95** | 20/20 |
+| + hover 260 mm | 88 | **66** | 19/20 |
+
+The clear waypoint is kept: it is what a careful teacher does, it costs
+nothing on the paper's setting, and it moved the grid by +4 (29 gained, 25
+lost, McNemar p = 0.68 -- noise, and 86 cells reselected their grasp under
+the new plan shape, so it is not a paired result). The 260 mm hover is
+**withdrawn**: it cleared the funnel and cost the executor far more --
+place and settle failures 35 -> 60, the Panda 16 -> 6 -- because a 260 mm
+descent into the slot is where the impedance arm lags and lets go high
+(p = 0.004). The margin the map needs cannot be bought with height. Also
+found and fixed on the way: the vertical segments' step counts were fixed
+at 25 whatever the distance, so a higher descent was a faster one and the
+source demonstration stopped picking its product up at 190 mm; and the
+scene cloud keeps a halo of the object's own outline (32 points within
+20 mm of a banana at rest), now excluded from the carried-object test --
+measured inert on this grid and kept because it is right.
+
+**Where the rate sits after all of this: 91-95 of 210 on one draw, and the
+last five executor and selection changes have each moved it by fewer cells
+than flip between any two runs.** The 85 both-fail cells of 7.45 are the
+structural population; the rest is marginal. Two of the structural buckets
+are hand limitations to state rather than fix -- the Rethink's 66 mm jaw
+against 60-93 mm objects, and three-finger hands pinching the top of a 33 mm
+handle -- and the third is the map's own middle-of-path shape against a
+real-size object in a cubby, which the draft already concedes.
+
 ## 8. Open items
 
 > **Read 7.26 first.** Every end-to-end campaign has been deleted, so the items
