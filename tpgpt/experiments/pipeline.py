@@ -829,8 +829,8 @@ def run(
         # Indices into the plan *as executed*: the transported labels, which
         # may have been joined part-way (start_index), not the source labels.
         # The report figure indexes result.transported with this.
-        _, release = carry_indices(transported)
-        result.metrics["release_index"] = release
+        _, release = carry_indices(labels)
+        result.metrics["release_index"] = int(release) - int(start_index)
 
         if not rollout.success:
             if rollout.metadata.get("blocked"):
