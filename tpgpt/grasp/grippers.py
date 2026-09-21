@@ -27,10 +27,16 @@ import numpy as np
 #: ``GRASPGENX_GRIPPER_CFG_DIR`` points at the checkout *root*; the configs sit
 #: under ``gripper_descriptions/assets/x_grippers/<name>/config.json`` beneath
 #: it. This mirrors how GraspGen-X's own ``resolve_gripper_info`` searches.
+#: Without the variable, the ``6DOF_MultiEmbod_Grasp`` checkout next to this
+#: repository is used when it has the descriptions, else the original machine's path.
+_SIBLING_DESCRIPTIONS = (
+    Path(__file__).resolve().parents[3] / "6DOF_MultiEmbod_Grasp/assets/gripper_descriptions"
+)
 DEFAULT_DESCRIPTIONS_ROOT = Path(
     os.environ.get(
         "GRASPGENX_GRIPPER_CFG_DIR",
-        "/home/ishita/task_embod_aware_grasp/6dof_GraspMAS/assets/gripper_descriptions",
+        _SIBLING_DESCRIPTIONS if _SIBLING_DESCRIPTIONS.is_dir()
+        else "/home/ishita/task_embod_aware_grasp/6dof_GraspMAS/assets/gripper_descriptions",
     )
 )
 _CONFIG_SUBPATH = Path("gripper_descriptions/assets/x_grippers")

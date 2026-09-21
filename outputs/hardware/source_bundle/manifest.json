@@ -1,0 +1,65 @@
+{
+  "description": "TPGPT source demonstration, fingertip labels in the grasp convention, expressed in the source robot base frame",
+  "source_seed": 0,
+  "source_gripper": "panda",
+  "n_cloud_points": 1200,
+  "control_freq": 20,
+  "n_labels": 200,
+  "contact_offset_grip_site": [
+    2.5315097163019536e-07,
+    2.4911918365614514e-17,
+    -0.011099999999956946
+  ],
+  "T_world_source_base": [
+    [
+      1.0,
+      0.0,
+      0.0,
+      -0.56
+    ],
+    [
+      0.0,
+      1.0,
+      0.0,
+      0.0
+    ],
+    [
+      0.0,
+      0.0,
+      1.0,
+      0.912
+    ],
+    [
+      0.0,
+      0.0,
+      0.0,
+      1.0
+    ]
+  ],
+  "frame": "source_robot_base",
+  "orientation_convention": "grasp (+X closing, +Z approach)",
+  "provenance": {
+    "commit": "96b9bf9c7c224c09fbd37f9e05ec09c8badc0b63",
+    "commit_short": "96b9bf9",
+    "branch": "main",
+    "committed": "2026-09-13T13:51:16+05:30",
+    "dirty": [],
+    "diff_stat": null,
+    "untracked_code": [
+      "tpgpt/hardware/__init__.py",
+      "tpgpt/hardware/export_source.py",
+      "tpgpt/hardware/frames.py",
+      "tpgpt/hardware/source_bundle.py"
+    ],
+    "reproducible": false,
+    "python": "3.12.3",
+    "platform": "Linux-6.8.12-rt-tegra-aarch64-with-glibc2.39",
+    "packages": {
+      "numpy": "1.26.4",
+      "scipy": "1.15.3",
+      "mujoco": "3.7.0",
+      "robosuite": "1.5.2",
+      "similaritymeasures": "1.4.0"
+    }
+  }
+}

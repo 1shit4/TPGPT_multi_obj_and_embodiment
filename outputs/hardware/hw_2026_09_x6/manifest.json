@@ -1,0 +1,211 @@
+{
+  "run_id": "hw_2026_09_x6",
+  "config_path": "/home/krishna/thor_ws/src/ycb_point_cloud/x6_experiment/config/x6_experiment.yaml",
+  "config_sha256": "1e5cd636ea987f368b50471eb07b8fab5f06a6597947ce65b6bf2461c78e134b",
+  "frozen_digest": "4d774070f6a9647c9ab38b901a45b740e42379ddedaf8880544931429a40fba2",
+  "frozen_blocks": [
+    "experiment",
+    "demonstration",
+    "objects",
+    "destinations",
+    "method"
+  ],
+  "demonstration_sha256": {
+    "manifest.json": "84a671368b0787f299502c96ecbbdac073e63828316c2441f6283f8363277bed",
+    "placement.npz": "a5648468e053bb679393be00e357d7b8b1d51d3baa12f9f638d66a2e8d3e3f29",
+    "tool_labels.npz": "aa34cb32378f1def765735c9b5100631df31b278829cacc84cd8f25c80433267"
+  },
+  "provenance_at_first_trial": {
+    "repos": [
+      {
+        "repo": "/home/krishna/thor_ws/src/ycb_point_cloud",
+        "git_sha": "e11eef55197d19cb5cc603bc352379779ae3669a",
+        "branch": "master",
+        "dirty": true,
+        "modified_files": [
+          "ycb_pointcloud_pipeline/README.md",
+          "ycb_pointcloud_pipeline/config/target_objects.yaml",
+          "ycb_pointcloud_pipeline/launch/ycb_pipeline.launch.py",
+          "ycb_pointcloud_pipeline/package.xml",
+          "ycb_pointcloud_pipeline/requirements.txt",
+          "ycb_pointcloud_pipeline/setup.py",
+          "ycb_pointcloud_pipeline/ycb_pointcloud_pipeline/segmentation_node.py",
+          "ycb_pointcloud_pipeline/ycb_pointcloud_pipeline/ycb_detector.py"
+        ],
+        "untracked_code_files": [
+          "x6_experiment/config/hands/inspire.yaml",
+          "x6_experiment/config/hands/panda.yaml",
+          "x6_experiment/config/x6_experiment.yaml",
+          "x6_experiment/config/x6_target_objects.yaml",
+          "ycb_pointcloud_pipeline/config/camera_calibration.yaml",
+          "ycb_pointcloud_pipeline/config/joint_impedance_controller.yaml",
+          "ycb_pointcloud_pipeline/config/tpgpt_teaching_controller.yaml",
+          "ycb_pointcloud_pipeline/config/tpgpt_variable_stiffness_controller.yaml",
+          "ycb_pointcloud_pipeline/launch/tpgpt_teach.launch.py",
+          "ycb_pointcloud_pipeline/scripts/run_graspgenx_server.sh",
+          "ycb_pointcloud_pipeline/test/test_camera_calibration.py",
+          "ycb_pointcloud_pipeline/test/test_x6.py",
+          "ycb_pointcloud_pipeline/ycb_pointcloud_pipeline/calibration_check_node.py",
+          "ycb_pointcloud_pipeline/ycb_pointcloud_pipeline/camera_calibration.py",
+          "ycb_pointcloud_pipeline/ycb_pointcloud_pipeline/camera_tf_publisher.py",
+          "ycb_pointcloud_pipeline/ycb_pointcloud_pipeline/cartesian_target_publisher.py",
+          "ycb_pointcloud_pipeline/ycb_pointcloud_pipeline/free_drive.py",
+          "ycb_pointcloud_pipeline/ycb_pointcloud_pipeline/joint_homing.py",
+          "ycb_pointcloud_pipeline/ycb_pointcloud_pipeline/joint_target_publisher.py",
+          "ycb_pointcloud_pipeline/ycb_pointcloud_pipeline/ros_utils.py",
+          "ycb_pointcloud_pipeline/ycb_pointcloud_pipeline/tpgpt_executor_node.py",
+          "ycb_pointcloud_pipeline/ycb_pointcloud_pipeline/tpgpt_pick_place_node.py",
+          "ycb_pointcloud_pipeline/ycb_pointcloud_pipeline/tpgpt_planner_node.py",
+          "ycb_pointcloud_pipeline/ycb_pointcloud_pipeline/tpgpt_teach_keyboard.py",
+          "ycb_pointcloud_pipeline/ycb_pointcloud_pipeline/tpgpt_teach_node.py",
+          "ycb_pointcloud_pipeline/ycb_pointcloud_pipeline/x6_analyse.py",
+          "ycb_pointcloud_pipeline/ycb_pointcloud_pipeline/x6_capture.py",
+          "ycb_pointcloud_pipeline/ycb_pointcloud_pipeline/x6_common.py",
+          "ycb_pointcloud_pipeline/ycb_pointcloud_pipeline/x6_instrument_check.py",
+          "ycb_pointcloud_pipeline/ycb_pointcloud_pipeline/x6_record.py",
+          "ycb_pointcloud_pipeline/ycb_pointcloud_pipeline/x6_session.py",
+          "ycb_pointcloud_pipeline/ycb_pointcloud_pipeline/x6_trial.py"
+        ],
+        "error": null
+      },
+      {
+        "repo": "/home/krishna/thor_ws/src/ycb_point_cloud/TPGPT_multi_obj_and_embodiment",
+        "git_sha": "96b9bf9c7c224c09fbd37f9e05ec09c8badc0b63",
+        "branch": "main",
+        "dirty": true,
+        "modified_files": [
+          "README.md",
+          "ROBOTICS_NOTES.md",
+          "tpgpt/grasp/grippers.py",
+          "tpgpt/grasp/server.py"
+        ],
+        "untracked_code_files": [
+          "tests/integration/test_hardware_grasp_selection.py",
+          "tests/unit/test_grasp_selection.py",
+          "tests/unit/test_hardware.py",
+          "tpgpt/hardware/__init__.py",
+          "tpgpt/hardware/executor.py",
+          "tpgpt/hardware/export_source.py",
+          "tpgpt/hardware/frames.py",
+          "tpgpt/hardware/grasp_selection.py",
+          "tpgpt/hardware/hand.py",
+          "tpgpt/hardware/planner.py",
+          "tpgpt/hardware/source_bundle.py",
+          "tpgpt/hardware/teach.py"
+        ],
+        "error": null
+      },
+      {
+        "repo": "/home/krishna/thor_ws/src/ycb_point_cloud/6DOF_MultiEmbod_Grasp",
+        "git_sha": "3972f3a5c82c0e89f2b353012bf7b1c7debcc6e7",
+        "branch": "main",
+        "dirty": false,
+        "modified_files": [],
+        "untracked_code_files": [],
+        "error": null
+      }
+    ],
+    "git_sha": {
+      "/home/krishna/thor_ws/src/ycb_point_cloud": "e11eef55197d19cb5cc603bc352379779ae3669a",
+      "/home/krishna/thor_ws/src/ycb_point_cloud/TPGPT_multi_obj_and_embodiment": "96b9bf9c7c224c09fbd37f9e05ec09c8badc0b63",
+      "/home/krishna/thor_ws/src/ycb_point_cloud/6DOF_MultiEmbod_Grasp": "3972f3a5c82c0e89f2b353012bf7b1c7debcc6e7"
+    },
+    "dirty": true,
+    "modified_files": {
+      "/home/krishna/thor_ws/src/ycb_point_cloud": [
+        "ycb_pointcloud_pipeline/README.md",
+        "ycb_pointcloud_pipeline/config/target_objects.yaml",
+        "ycb_pointcloud_pipeline/launch/ycb_pipeline.launch.py",
+        "ycb_pointcloud_pipeline/package.xml",
+        "ycb_pointcloud_pipeline/requirements.txt",
+        "ycb_pointcloud_pipeline/setup.py",
+        "ycb_pointcloud_pipeline/ycb_pointcloud_pipeline/segmentation_node.py",
+        "ycb_pointcloud_pipeline/ycb_pointcloud_pipeline/ycb_detector.py"
+      ],
+      "/home/krishna/thor_ws/src/ycb_point_cloud/TPGPT_multi_obj_and_embodiment": [
+        "README.md",
+        "ROBOTICS_NOTES.md",
+        "tpgpt/grasp/grippers.py",
+        "tpgpt/grasp/server.py"
+      ]
+    },
+    "untracked_code_files": {
+      "/home/krishna/thor_ws/src/ycb_point_cloud": [
+        "x6_experiment/config/hands/inspire.yaml",
+        "x6_experiment/config/hands/panda.yaml",
+        "x6_experiment/config/x6_experiment.yaml",
+        "x6_experiment/config/x6_target_objects.yaml",
+        "ycb_pointcloud_pipeline/config/camera_calibration.yaml",
+        "ycb_pointcloud_pipeline/config/joint_impedance_controller.yaml",
+        "ycb_pointcloud_pipeline/config/tpgpt_teaching_controller.yaml",
+        "ycb_pointcloud_pipeline/config/tpgpt_variable_stiffness_controller.yaml",
+        "ycb_pointcloud_pipeline/launch/tpgpt_teach.launch.py",
+        "ycb_pointcloud_pipeline/scripts/run_graspgenx_server.sh",
+        "ycb_pointcloud_pipeline/test/test_camera_calibration.py",
+        "ycb_pointcloud_pipeline/test/test_x6.py",
+        "ycb_pointcloud_pipeline/ycb_pointcloud_pipeline/calibration_check_node.py",
+        "ycb_pointcloud_pipeline/ycb_pointcloud_pipeline/camera_calibration.py",
+        "ycb_pointcloud_pipeline/ycb_pointcloud_pipeline/camera_tf_publisher.py",
+        "ycb_pointcloud_pipeline/ycb_pointcloud_pipeline/cartesian_target_publisher.py",
+        "ycb_pointcloud_pipeline/ycb_pointcloud_pipeline/free_drive.py",
+        "ycb_pointcloud_pipeline/ycb_pointcloud_pipeline/joint_homing.py",
+        "ycb_pointcloud_pipeline/ycb_pointcloud_pipeline/joint_target_publisher.py",
+        "ycb_pointcloud_pipeline/ycb_pointcloud_pipeline/ros_utils.py",
+        "ycb_pointcloud_pipeline/ycb_pointcloud_pipeline/tpgpt_executor_node.py",
+        "ycb_pointcloud_pipeline/ycb_pointcloud_pipeline/tpgpt_pick_place_node.py",
+        "ycb_pointcloud_pipeline/ycb_pointcloud_pipeline/tpgpt_planner_node.py",
+        "ycb_pointcloud_pipeline/ycb_pointcloud_pipeline/tpgpt_teach_keyboard.py",
+        "ycb_pointcloud_pipeline/ycb_pointcloud_pipeline/tpgpt_teach_node.py",
+        "ycb_pointcloud_pipeline/ycb_pointcloud_pipeline/x6_analyse.py",
+        "ycb_pointcloud_pipeline/ycb_pointcloud_pipeline/x6_capture.py",
+        "ycb_pointcloud_pipeline/ycb_pointcloud_pipeline/x6_common.py",
+        "ycb_pointcloud_pipeline/ycb_pointcloud_pipeline/x6_instrument_check.py",
+        "ycb_pointcloud_pipeline/ycb_pointcloud_pipeline/x6_record.py",
+        "ycb_pointcloud_pipeline/ycb_pointcloud_pipeline/x6_session.py",
+        "ycb_pointcloud_pipeline/ycb_pointcloud_pipeline/x6_trial.py"
+      ],
+      "/home/krishna/thor_ws/src/ycb_point_cloud/TPGPT_multi_obj_and_embodiment": [
+        "tests/integration/test_hardware_grasp_selection.py",
+        "tests/unit/test_grasp_selection.py",
+        "tests/unit/test_hardware.py",
+        "tpgpt/hardware/__init__.py",
+        "tpgpt/hardware/executor.py",
+        "tpgpt/hardware/export_source.py",
+        "tpgpt/hardware/frames.py",
+        "tpgpt/hardware/grasp_selection.py",
+        "tpgpt/hardware/hand.py",
+        "tpgpt/hardware/planner.py",
+        "tpgpt/hardware/source_bundle.py",
+        "tpgpt/hardware/teach.py"
+      ]
+    },
+    "venvs": {
+      "/home/krishna/venvs/tpgpt": {
+        "n_packages": 33,
+        "sha256": "f444ef96da1b6f12e9d00c7d39e4e035ec9a9337302f0ee07b8637d882aeea2a"
+      },
+      "/home/krishna/venvs/ycb": {
+        "n_packages": 44,
+        "sha256": "7e6976ddf3db13d052b7a908ad3141ffddbdb0c885e310aaa049b2c2488a0c00"
+      },
+      "/home/krishna/venvs/graspgenx": {
+        "n_packages": 113,
+        "sha256": "2cff68a32b4b5ad5eb25baa512800a4e739ad4566c3f068fef3653c23b4741e2"
+      }
+    },
+    "package_versions": {
+      "numpy": "1.26.4",
+      "scipy": "1.15.3",
+      "yaml": "6.0.1",
+      "cv2": null,
+      "rclpy": null
+    },
+    "python": "3.12.3",
+    "platform": "Linux-6.8.12-rt-tegra-aarch64-with-glibc2.39"
+  },
+  "first_trial_id": "0001",
+  "hands_frozen": {
+    "panda": "72e557e7547744ca8da0ef9acc3adda89fcc0ab056f4470f4cb2384c81c9b5ab",
+    "inspire": "806b626757af224fa953100331bd528812169615786eeb848f4d2a598e909dc1"
+  }
+}

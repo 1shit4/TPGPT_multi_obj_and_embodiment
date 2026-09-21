@@ -1,0 +1,96 @@
+{
+  "description": "TPGPT source demonstration taught by hand on the FR3, fingertip labels in the grasp convention, expressed in the robot base frame",
+  "source": "taught_on_fr3",
+  "source_gripper": "fr3_hand",
+  "control_freq": 20,
+  "n_labels": 273,
+  "frame": "base",
+  "orientation_convention": "grasp (+X closing, +Z approach)",
+  "position_reference": "fr3_hand_tcp measured (fingertip centre), used as the attractor",
+  "stiffness": "static",
+  "static_stiffness": 400.0,
+  "static_damping": 40.0,
+  "teach_report": {
+    "grasp_index": 102,
+    "release_index": 267,
+    "grasp_to_cloud_m": 0.03995434265026085,
+    "carry_translation_m": [
+      -0.013614898720779589,
+      -0.6874710149274517,
+      0.40549543431266144
+    ],
+    "carry_rotation_deg": 31.763128730049303,
+    "carry_tilt_deg": 31.355502571251613,
+    "carry_tilt_ok": false,
+    "lift_at_release_m": 0.3526808566980623,
+    "n_labels": 273,
+    "duration_s": 13.600000000000001,
+    "recorded_duration_s": 30.699970722198486,
+    "max_speed_mps": 0.24102905151007128,
+    "mean_speed_mps": 0.09370296826707664,
+    "expected_execution_lag_at_max_speed_m": 0.02410290515100713,
+    "n_object_points": 1862,
+    "support_height_m": -0.006,
+    "destination_m": [
+      0.5476526868195907,
+      -0.35191128994953397,
+      0.3466808566980623
+    ],
+    "destination_height_m": 0.3466808566980623
+  },
+  "recording": {
+    "object_name": "banana",
+    "teach_mode": "compliant",
+    "teaching_controller": "tpgpt_teaching_controller",
+    "support_height_source": "calibration expected_table_height",
+    "calibration_yaml": "/home/krishna/thor_ws/install/ycb_pointcloud_pipeline/share/ycb_pointcloud_pipeline/config/camera_calibration.yaml",
+    "calibration_is_placeholder": false,
+    "T_base_camera": [
+      [
+        -0.009433331693015745,
+        0.7687326536014175,
+        -0.6395006798589764,
+        1.194543245
+      ],
+      [
+        0.999913342876633,
+        0.013124488428654324,
+        0.0010269083520575428,
+        0.053057121
+      ],
+      [
+        0.009182537255408574,
+        -0.6394355754025652,
+        -0.768789845093667,
+        0.833038305
+      ],
+      [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ]
+    ],
+    "raw_rate_hz": 249.99306565799938
+  },
+  "provenance": {
+    "commit": null,
+    "commit_short": null,
+    "branch": null,
+    "committed": null,
+    "dirty": [],
+    "diff_stat": null,
+    "untracked_code": [],
+    "reproducible": false,
+    "python": "3.12.3",
+    "platform": "Linux-6.8.12-rt-tegra-aarch64-with-glibc2.39",
+    "packages": {
+      "numpy": "1.26.4",
+      "scipy": "1.15.3",
+      "mujoco": "3.7.0",
+      "robosuite": "1.5.2",
+      "similaritymeasures": "1.4.0"
+    },
+    "note": "not a git repository, so this run cannot be reproduced"
+  }
+}

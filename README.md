@@ -150,6 +150,7 @@ work, which the paper has no counterpart for.
 | Execution laws, the surrogate plant and their sweep | `tpgpt/policy/rollout.py`, `tpgpt/experiments/sweep_execution.py`, `identity_execution.py` |
 | Which stage of a run failed, and by how much | `tpgpt/experiments/diagnose.py` |
 | What code produced a result | `tpgpt/reporting/provenance.py` |
+| Real-robot bridge: source export, planner on a measured cloud, execution loop | `tpgpt/hardware/` |
 
 ## Scope
 
@@ -178,6 +179,7 @@ number's provenance stated.
 |---|---|
 | **`outputs/keypoints_sweep/FINDINGS.md`** | **Which keypoints should pin the transportation map?** Experiments A–S. The answer is the *grasp-pose cube*: Experiment R places **16 of 20** across five grippers and four objects from a single Panda demonstration, and all of the remaining failures are the gripping mechanism rather than the map. |
 | **`docs/dynamics_execution.md`** | **How should the transported policy be executed?** Experiments A–H, comparing nine attractor laws and two query sites. Query the policy at the attractor, not the measured arm; keep the shipped integrator, because in physics no law beats another by more than the re-measurement noise. The chosen law then runs a seven-hand, four-object grid end-to-end at **17 of 28**, paired grasp for grasp against a position-control replay at 19/28: no success-rate difference (p = 0.78), but 6.1 mm less placement precision (p = 0.048). Includes four figures in `docs/figures/`. |
+| **`docs/hardware_integration.md`** | **How is it run on the real FR3?** Real object clouds from `ycb_pointcloud_pipeline` -> keypoints -> map -> policy -> CRISP. Frames, the camera calibration placeholders, five ways to verify the point cloud pose, the stiffness option, and what was validated (offline, synthetic camera, fake hardware; not yet a real robot). |
 | **`ROBOTICS_NOTES.md`** | The running log behind both — every finding, every deviation from the paper with the measurement that motivated it, and every retraction. **Read this first if you want to know *why* the code is the way it is.** Sections 7.26 and 7.27 in particular are about measurements that turned out to be wrong and how. |
 
 Raw run data sits under `outputs/<experiment>/`. Only the prose and the

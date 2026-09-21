@@ -313,6 +313,40 @@ Two scene details that were found the hard way:
   half-height bottom out on its shoulder or the table and the grasp fails
   outright (measured: 0/4 at offsets of 0, 15 and 30 mm; 4/4 at 45 mm).
 
+### 2.10 Hardware execution: what differs from the simulated rollout (2026-09-13)
+
+The real-robot path (`tpgpt/hardware/`, full account in
+`docs/hardware_integration.md`) reuses `scene_keypoints`, `TransportMap`,
+`transport_labels`, `GPPolicy` and the execution arithmetic of
+`tpgpt.policy.rollout` unchanged. Deviations, each with its reason:
+
+- **The source is moved into the source robot's base frame** at export, so the
+  affine stage of `phi` does not have to absorb robosuite's ~0.9 m world offset.
+  Equivariance is tested: translating the whole target scene by (70, -50, 30) mm
+  translates every transported label by the same amount to 2 mm.
+- **No infeasible-pose fallback on hardware**; it needs MuJoCo's `solve_ik`.
+- **An arm that never moves completes the simulated loop.** Measured with
+  `rollout_impedance(..., blocked_steps=(0, 10000))` on a straight-line policy:
+  one sag re-baseline, the clamp holds the attractor 48 mm ahead of the
+  motionless arm, the phase is advanced from the attractor and reaches 1.0 at
+  step 253, `terminated_on_phase=True`. Harmless in MuJoCo, where a pulled arm
+  moves; on a robot it is exactly an inactive controller or a protective stop.
+  `HardwareExecutor` reproduces the loop bit-for-bit, and a separate
+  `SafetyMonitor` (tracking error > 80 mm, or < 30% of the attractor's travel
+  over 40 steps) stops the run. What would make this moot: a watchdog that
+  measured progress on the *arm* rather than on the phase.
+- **Stiffness on CRISP is a diagonal in the end-effector frame**, so the
+  transported base-frame `K` is sent as `diag(R^T K R)` and the dropped
+  off-diagonal share is logged; damping is `2 sqrt(K)`, not the transported `D`.
+  Off by default (`use_transported_stiffness`).
+- **A single-camera cloud biases the top-down grasp toward the camera**: 11 mm on
+  a synthetic 40x70x120 mm box. Not a transport error; an input the map then
+  reproduces exactly.
+- **The demonstration bounds which destinations work.** Sideways and at the same
+  height as the pick, the map folds (`min det` -0.115 to 0.089 over three yaws)
+  where along the demonstrated direction or upward it stays at 0.32-0.64, aim
+  0.0 mm in all 15 plans. `docs/hardware_integration.md` §5.
+
 ---
 
 ## 3. Simulator choice
@@ -4170,6 +4204,37 @@ objects out in the order it is given, so a five-object scene is a *different*
 scene from the four-object one every campaign before this used -- different
 positions, different occlusions, different clouds. Nothing measured under the
 old set is cell-by-cell comparable with anything measured under the new one.
+
+### 7.41 On the FR3, width is measured between the pads and the grasp comes from GraspGen-X
+
+**Deviation, hardware path only** (`tpgpt/hardware/`; the simulation funnel in
+`tpgpt/grasp/filters.py` is unchanged).
+
+*What changed.* `hardware.planner.plan` used to refuse a grasp when the whole
+cloud's extent along the closing axis exceeded 80 mm, and the ROS planner always
+used the scripted `default_grasp`. Now `hardware.hand.check_jaws` judges a grasp
+on the cloud **between the finger pads** plus the open fingers and palm, modelled
+box by box from `franka_description`. `hardware.grasp_selection` chooses among
+GraspGen-X `franka_panda` candidates: screen on the cloud, then plan best score
+first, then keep the first plan that passes `min det(J)`, aim, orientation and
+hand-clearance gates.
+
+*Why, with the measurement.* A hollow cup 84 mm across, rendered from the real
+camera pose: the whole-cloud rule refuses every grasp on it, the scripted
+top-down grasp included (80 mm between the pads). With the pad-local rule and
+GraspGen-X, 4 of 5 calls chose a grasp closing on 7-15 mm of wall (`min det`
+0.22-0.81). On the real banana cloud the chosen grasps had `min det` 0.48-0.83,
+against 0.51 for the scripted grasp. Full method in
+`docs/hardware_integration.md` §6.1.
+
+*Two thresholds are judgement, not measurement:* `MIN_ENGAGEMENT = 10 mm` (of an
+18.5 mm pad) and the 3 mm table clearance. The first was introduced after two of
+three cup plans pinched the top 8 mm of the rim. Neither has been validated by
+execution.
+
+*What would make it false.* A cloud lopsided enough to hide material under a pad
+(§7.36: a cloud is a lower bound) would pass a grasp as `fits` that collides. Only
+execution on the robot, or a second viewpoint, tests that.
 
 ## 8. Open items
 

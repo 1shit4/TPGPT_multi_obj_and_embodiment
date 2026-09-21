@@ -1,0 +1,412 @@
+"""The hardware bridge: frames, the planner on a measured cloud, the executor.
+
+Three properties matter more than any other here, because each fails silently
+on a robot:
+
+* the **frame arithmetic** round-trips and matches the FR3 hand's geometry;
+* the **planner** is equivariant -- moving the whole scene moves the plan by
+  exactly that motion, so an extrinsic error becomes exactly that error at the
+  gripper and nothing larger;
+* the **executor** is the simulated execution loop, not a lookalike. It is
+  checked bit-for-bit against ``rollout_impedance``, which calls the same
+  functions in the same order.
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+import numpy as np
+import pytest
+from scipy.spatial.transform import Rotation
+
+from tpgpt.hardware import frames
+from tpgpt.hardware.executor import (
+    ExecutorSettings,
+    HardwareExecutor,
+    SafetyMonitor,
+    approach_trajectory,
+    crisp_stiffness,
+    stiffness_projection_loss,
+)
+from tpgpt.hardware.planner import (
+    KEYPOINT_BOX,
+    KEYPOINT_ORIENTATION,
+    Plan,
+    PlanningError,
+    TargetScene,
+    default_grasp,
+    plan,
+)
+from tpgpt.hardware.source_bundle import SourceBundle, transform_labels, transform_placement
+from tpgpt.policy.gp_policy import GPPolicy
+from tpgpt.policy.rollout import rollout_impedance
+from tpgpt.sim.keypoints import GraspFrame, ObjectPlacement
+from tpgpt.transport.labels import PolicyLabels
+from tpgpt.utils.rotations import is_rotation
+
+from tests.unit.test_keypoint_extraction import HALF, box_cloud, yaw_matrix
+
+DT = 0.05
+K_FREE = np.eye(3) * 350.0
+D_FREE = np.eye(3) * (2 * np.sqrt(350.0) * 0.9)
+REAL_BUNDLE = Path(__file__).resolve().parents[2] / "outputs/hardware/source_bundle"
+
+
+# --------------------------------------------------------------------- frames
+class TestFrames:
+    def test_transform_round_trip(self, rng):
+        for seed in range(10):
+            R = Rotation.random(random_state=seed).as_matrix()
+            T = frames.make_transform(R, rng.normal(size=3))
+            p = rng.normal(size=(20, 3))
+            back = frames.apply_to_points(frames.invert_transform(T), frames.apply_to_points(T, p))
+            assert np.allclose(back, p, atol=1e-12)
+
+    def test_quaternion_is_ros_xyzw(self):
+        # 90 degrees about z, written [x, y, z, w].
+        T = frames.transform_from_xyz_quat([1, 2, 3], [0, 0, np.sqrt(0.5), np.sqrt(0.5)])
+        assert np.allclose(T[:3, :3] @ [1, 0, 0], [0, 1, 0])
+        xyz, q = frames.transform_to_xyz_quat(T)
+        assert np.allclose(xyz, [1, 2, 3])
+        assert np.allclose(np.abs(q), [0, 0, np.sqrt(0.5), np.sqrt(0.5)])
+
+    def test_grasp_to_tcp_puts_fingers_on_y_and_approach_on_z(self):
+        # A grasp closing along world x and approaching straight down.
+        R_grasp = np.column_stack([[1, 0, 0], [0, 1, 0], [0, 0, 1]]) @ np.diag([1, -1, -1])
+        assert is_rotation(R_grasp)
+        R_tcp = frames.grasp_to_fr3_tcp(R_grasp)
+        assert is_rotation(R_tcp)
+        assert np.allclose(R_tcp[:, 1], R_grasp[:, 0])   # fingers travel along closing
+        assert np.allclose(R_tcp[:, 2], R_grasp[:, 2])   # approach unchanged
+        assert np.allclose(frames.fr3_tcp_to_grasp(R_tcp), R_grasp)
+
+    def test_stiffness_congruence_stays_symmetric(self, rng):
+        A = rng.normal(size=(3, 3))
+        K = A @ A.T + np.eye(3)
+        T = frames.make_transform(Rotation.random(random_state=4).as_matrix())
+        K2 = frames.apply_to_tensors(T, K[None])[0]
+        assert np.allclose(K2, K2.T)
+        assert np.allclose(np.linalg.eigvalsh(K2), np.linalg.eigvalsh(K))
+
+    def test_slerp_ends(self):
+        R_a = np.eye(3)
+        R_b = Rotation.from_euler("z", 80, degrees=True).as_matrix()
+        assert np.allclose(frames.slerp_rotation(R_a, R_b, 0.0), R_a)
+        assert np.allclose(frames.slerp_rotation(R_a, R_b, 1.0), R_b)
+        assert frames.rotation_angle(R_a, frames.slerp_rotation(R_a, R_b, 0.5)) == pytest.approx(
+            np.radians(40)
+        )
+
+
+# --------------------------------------------------------------------- source
+def grasp_rotation(yaw: float) -> np.ndarray:
+    """A top-down grasp in the grasp convention: +X closing, +Z approach (down)."""
+    c = yaw_matrix(yaw)[:, 0]
+    a = np.array([0.0, 0.0, -1.0])
+    return np.column_stack([c, np.cross(a, c), a])
+
+
+def synthetic_bundle(table=-0.10, shelf=0.15, n=60) -> SourceBundle:
+    """A pick on a table and a place on a shelf, in a robot base frame."""
+    centre = np.array([0.45, -0.15, table + HALF[2]])
+    points = box_cloud(centre, angle=0.4, faces="visible")
+    grasp = GraspFrame(tcp=centre + [0, 0, HALF[2] - 0.02], approach=[0, 0, -1],
+                       closing=yaw_matrix(0.4)[:, 0])
+    dest = np.array([0.65, 0.15, shelf])
+    place = np.array([dest[0], dest[1], shelf + HALF[2] + (HALF[2] - 0.02)])
+    # approach (open) | hold at the grasp (closed) | carry (closed)
+    # | hold at the place (closed) | release in place (open).
+    # The jaws must close *at* the grasp pose: carry_transform reads the hand
+    # pose at the first closed label, so closing anywhere else moves the object.
+    approach, hold, release = 6, 4, 5
+    carry = n - approach - 2 * hold - release
+    positions = np.vstack([
+        np.linspace(grasp.tcp + [0, 0, 0.1], grasp.tcp, approach),
+        np.repeat(grasp.tcp[None], hold, axis=0),
+        np.linspace(grasp.tcp, place, carry),
+        np.repeat(place[None], hold + release, axis=0),
+    ])
+    yaws = np.concatenate([np.full(approach + hold, 0.4), np.linspace(0.4, 0.0, carry),
+                           np.full(hold + release, 0.0)])
+    index = np.arange(n)
+    gripper = np.where((index >= approach) & (index < n - release), 1.0, -1.0)
+    labels = PolicyLabels(
+        positions=positions,
+        velocities=np.gradient(positions, DT, axis=0),
+        orientations=np.stack([grasp_rotation(y) for y in yaws]),
+        stiffness=np.tile(K_FREE, (n, 1, 1)),
+        damping=np.tile(D_FREE, (n, 1, 1)),
+        gripper=gripper,
+        time_belief=np.linspace(0.0, 1.0, n),
+        time_rate=np.full(n, 1.0 / (DT * (n - 1))),
+    )
+    placement = ObjectPlacement(points, grasp, table, dest, shelf)
+    return SourceBundle(labels, placement, {"control_freq": 20})
+
+
+@pytest.fixture(scope="module")
+def bundle():
+    return synthetic_bundle()
+
+
+class TestSourceBundle:
+    def test_save_load_round_trip(self, bundle, tmp_path):
+        bundle.save(tmp_path / "b")
+        loaded = SourceBundle.load(tmp_path / "b")
+        assert np.allclose(loaded.tool_labels.positions, bundle.tool_labels.positions)
+        assert np.allclose(loaded.tool_labels.stiffness, bundle.tool_labels.stiffness)
+        assert np.allclose(loaded.placement.grasp.closing, bundle.placement.grasp.closing)
+        assert loaded.placement.destination_height == bundle.placement.destination_height
+
+    def test_upright_transform_moves_heights_with_it(self, bundle):
+        T = frames.make_transform(yaw_matrix(0.3), [0.1, -0.2, 0.9])
+        moved = transform_placement(bundle.placement, T)
+        assert moved.support_height == pytest.approx(bundle.placement.support_height + 0.9)
+        assert np.allclose(moved.grasp.tcp, frames.apply_to_points(T, bundle.placement.grasp.tcp)[0])
+
+    def test_a_tilting_transform_is_refused(self, bundle):
+        T = frames.make_transform(Rotation.from_euler("x", 10, degrees=True).as_matrix())
+        with pytest.raises(ValueError, match="tilts the vertical"):
+            transform_placement(bundle.placement, T)
+
+    def test_labels_keep_every_family(self, bundle):
+        T = frames.make_transform(yaw_matrix(1.0), [1, 2, 3])
+        moved = transform_labels(bundle.tool_labels, T)
+        assert set(moved.present) == set(bundle.tool_labels.present)
+
+
+# -------------------------------------------------------------------- planner
+class TestPlanner:
+    def test_defaults_match_the_simulation_pipeline(self):
+        pipeline = pytest.importorskip("tpgpt.experiments.pipeline")
+        assert KEYPOINT_BOX == pipeline.DEFAULT_KEYPOINT_BOX
+        assert KEYPOINT_ORIENTATION == pipeline.DEFAULT_KEYPOINT_ORIENTATION
+
+    def _scene(self, bundle, shift=np.zeros(3), **kw):
+        p = bundle.placement
+        return TargetScene(
+            points=p.points + shift,
+            destination=p.destination + shift,
+            destination_height=p.destination_height + shift[2],
+            support_height=p.support_height + shift[2],
+            grasp=GraspFrame(tcp=p.grasp.tcp + shift, approach=p.grasp.approach,
+                             closing=p.grasp.closing),
+            **kw,
+        )
+
+    def test_same_scene_reproduces_the_demonstration(self, bundle):
+        result = plan(bundle, self._scene(bundle))
+        assert result.metrics["min_det"] > 0.9
+        assert np.allclose(result.labels.positions, bundle.tool_labels.positions, atol=2e-3)
+        expected = frames.grasp_to_fr3_tcp(bundle.tool_labels.orientations)
+        angles = [frames.rotation_angle(a, b) for a, b in zip(result.labels.orientations, expected)]
+        assert np.degrees(max(angles)) < 1.0
+
+    def test_translating_the_scene_translates_the_plan_exactly(self, bundle):
+        """An extrinsic offset becomes the same offset at the hand, nothing more."""
+        shift = np.array([0.07, -0.05, 0.03])
+        base = plan(bundle, self._scene(bundle))
+        moved = plan(bundle, self._scene(bundle, shift))
+        assert np.allclose(moved.labels.positions - base.labels.positions, shift, atol=2e-3)
+        assert moved.metrics["aim_grasp_m"] < 3e-3
+
+    def test_the_plan_aims_at_the_target_grasp(self, bundle):
+        # A different, yawed object in a different place.
+        centre = np.array([0.40, 0.05, -0.10 + 0.05])
+        points = box_cloud(centre, angle=-0.6, half=np.array([0.025, 0.04, 0.05]),
+                           seed=3, faces="visible")
+        scene = TargetScene(points=points, destination=np.array([0.55, 0.25, 0.15]),
+                            destination_height=0.15, support_height=-0.10)
+        result = plan(bundle, scene)
+        assert result.metrics["min_det"] > 0.3
+        assert result.metrics["aim_grasp_m"] < 5e-3
+        assert result.metrics["aim_release_m"] < 5e-3
+        assert all(is_rotation(R, atol=1e-6) for R in result.labels.orientations)
+
+    def test_default_grasp_sits_below_the_top(self):
+        centre = np.array([0.4, 0.0, 0.1])
+        points = box_cloud(centre, half=np.array([0.02, 0.03, 0.1]), faces="visible")
+        grasp = default_grasp(points, support_height=0.0, depth_below_top=0.03)
+        assert grasp.tcp[2] == pytest.approx(0.17, abs=5e-3)
+        assert np.allclose(grasp.approach, [0, 0, -1])
+
+    def test_a_sparse_cloud_is_refused(self, bundle):
+        scene = self._scene(bundle)
+        scene.points = scene.points[:10]
+        with pytest.raises(PlanningError, match="object_not_seen"):
+            plan(bundle, scene)
+
+    def test_a_provably_too_wide_object_is_refused(self, bundle):
+        points = box_cloud(np.array([0.4, 0.0, 0.0]), half=np.array([0.08, 0.08, 0.05]),
+                           faces="visible")
+        scene = TargetScene(points=points, destination=np.array([0.6, 0.2, 0.15]),
+                            destination_height=0.15, support_height=-0.05)
+        with pytest.raises(PlanningError, match="object_too_wide"):
+            plan(bundle, scene)
+
+    def test_plan_save_load_round_trip(self, bundle, tmp_path):
+        result = plan(bundle, self._scene(bundle))
+        result.save(tmp_path / "plan")
+        loaded = Plan.load(tmp_path / "plan")
+        assert np.allclose(loaded.labels.positions, result.labels.positions)
+        assert np.allclose(loaded.labels.orientations, result.labels.orientations)
+        assert loaded.metrics["min_det"] == pytest.approx(result.metrics["min_det"])
+        assert np.allclose(loaded.grasp.tcp, result.grasp.tcp)
+
+    @pytest.mark.skipif(not REAL_BUNDLE.exists(), reason="export_source has not been run")
+    def test_the_exported_mujoco_bundle_reproduces_itself(self):
+        real = SourceBundle.load(REAL_BUNDLE)
+        result = plan(real, self._scene(real))
+        assert result.metrics["min_det"] > 0.9
+        assert np.allclose(result.labels.positions, real.tool_labels.positions, atol=3e-3)
+
+
+# ------------------------------------------------------------------- executor
+def line_labels(n=120, speed=0.168, closed_from=60):
+    x = np.zeros((n, 3))
+    x[:, 0] = np.linspace(0.0, speed * DT * (n - 1), n)
+    return PolicyLabels(
+        positions=x, velocities=np.gradient(x, DT, axis=0),
+        stiffness=np.tile(K_FREE, (n, 1, 1)), damping=np.tile(D_FREE, (n, 1, 1)),
+        gripper=np.where(np.arange(n) >= closed_from, 1.0, -1.0),
+        time_belief=np.linspace(0, 1, n), time_rate=np.full(n, 1 / (DT * (n - 1))),
+    )
+
+
+@pytest.fixture(scope="module")
+def line_policy():
+    return GPPolicy().fit(line_labels())
+
+
+def run_executor_on_surrogate(policy, settings=None, n_steps=400, load=None):
+    """Drive the executor with the same first-order arm ``rollout_impedance`` uses."""
+    ex = HardwareExecutor(policy, DT, settings)
+    x = policy.labels.positions[0].copy()
+    attractors, phases = [], []
+    for _ in range(n_steps):
+        cmd = ex.step(x, np.eye(3))
+        attractors.append(cmd.attractor)
+        phases.append(cmd.phase)
+        A = np.linalg.solve(cmd.damping, cmd.stiffness)
+        x = x + A @ (cmd.tcp_position - x) * DT
+        if load is not None:
+            x = x + load * DT
+        if ex.finished:
+            break
+    return ex, np.array(attractors), np.array(phases)
+
+
+class TestExecutor:
+    def test_it_is_the_simulated_loop_bit_for_bit(self, line_policy):
+        reference = rollout_impedance(line_policy, dt=DT, n_steps=400, substeps=1)
+        ex, attractors, phases = run_executor_on_surrogate(line_policy)
+        assert len(attractors) == len(reference.attractors)
+        assert np.array_equal(attractors, reference.attractors)
+        assert np.array_equal(phases, reference.time_belief)
+        assert ex.finished and not ex.stalled
+
+    def test_it_matches_under_load_too(self, line_policy):
+        load = np.array([0.0, 0.0, -0.08])
+        reference = rollout_impedance(line_policy, dt=DT, n_steps=400, substeps=1, load=load)
+        _, attractors, _ = run_executor_on_surrogate(line_policy, load=load)
+        assert np.array_equal(attractors, reference.attractors)
+
+    def test_half_speed_takes_about_twice_as_long(self, line_policy):
+        fast, a_fast, _ = run_executor_on_surrogate(line_policy)
+        slow, a_slow, _ = run_executor_on_surrogate(
+            line_policy, ExecutorSettings(speed_scale=0.5), n_steps=900
+        )
+        assert slow.finished and not slow.stalled
+        assert 1.6 < len(a_slow) / len(a_fast) < 2.4
+        assert np.linalg.norm(a_slow[-1] - a_fast[-1]) < 0.01
+
+    def test_gripper_follows_the_labels(self, line_policy):
+        ex = HardwareExecutor(line_policy, DT)
+        x = line_policy.labels.positions[0].copy()
+        grippers, phases = [], []
+        while not ex.finished:
+            cmd = ex.step(x, np.eye(3))
+            grippers.append(cmd.gripper)
+            phases.append(cmd.phase)
+            x = cmd.tcp_position
+        grippers, phases = np.array(grippers), np.array(phases)
+        assert np.all(grippers[phases < 0.4] < 0)
+        assert np.all(grippers[phases > 0.6] > 0)
+
+    def test_tool_offset_is_applied_both_ways(self, line_policy):
+        off = (0.0, 0.0, 0.01)
+        ex = HardwareExecutor(line_policy, DT, ExecutorSettings(tool_offset=off))
+        R = yaw_matrix(0.7)
+        tcp = np.array([0.1, 0.2, 0.3])
+        assert np.allclose(ex.tcp_from_tool(ex.tool_position(tcp, R), R), tcp)
+        assert np.allclose(ex.tool_position(tcp, np.eye(3)) - tcp, off)
+
+    def test_a_motionless_arm_finishes_exactly_as_in_simulation(self, line_policy):
+        """The shared loop does not notice an arm that never moves -- by design
+        of the simulated rollout, which this must reproduce. SafetyMonitor is
+        what stops it on hardware."""
+        reference = rollout_impedance(line_policy, dt=DT, n_steps=1000,
+                                      blocked_steps=(0, 10_000))
+        ex = HardwareExecutor(line_policy, DT)
+        x = line_policy.labels.positions[0].copy()
+        steps = 0
+        while not ex.finished and steps < 1000:
+            ex.step(x, np.eye(3))
+            steps += 1
+        assert steps == reference.metadata["steps"]
+        assert reference.metadata["terminated_on_phase"] and not ex.stalled
+
+    def test_the_safety_monitor_stops_a_motionless_arm(self, line_policy):
+        ex = HardwareExecutor(line_policy, DT)
+        monitor = SafetyMonitor()
+        x = line_policy.labels.positions[0].copy()
+        reason = None
+        while not ex.finished:
+            cmd = ex.step(x, np.eye(3))
+            reason = monitor.check(x, cmd.attractor)
+            if reason:
+                break
+        assert reason is not None and ex.phase < 0.5
+
+    def test_the_safety_monitor_is_quiet_on_a_following_arm(self, line_policy):
+        ex = HardwareExecutor(line_policy, DT)
+        monitor = SafetyMonitor()
+        x = line_policy.labels.positions[0].copy()
+        while not ex.finished:
+            cmd = ex.step(x, np.eye(3))
+            assert monitor.check(x, cmd.attractor) is None
+            A = np.linalg.solve(cmd.damping, cmd.stiffness)
+            x = x + A @ (cmd.tcp_position - x) * DT
+
+    def test_speed_scale_is_validated(self, line_policy):
+        with pytest.raises(ValueError):
+            HardwareExecutor(line_policy, DT, ExecutorSettings(speed_scale=1.5))
+
+
+class TestApproachAndStiffness:
+    def test_approach_ends_on_the_goal_and_respects_speed(self):
+        R0, R1 = np.eye(3), yaw_matrix(1.0)
+        p, R = approach_trajectory([0, 0, 0], R0, [0.3, 0, 0], R1, DT, max_linear_speed=0.05)
+        assert np.allclose(p[0], 0) and np.allclose(p[-1], [0.3, 0, 0])
+        assert np.allclose(R[-1], R1, atol=1e-9)
+        speed = np.linalg.norm(np.diff(p, axis=0), axis=1) / DT
+        assert speed.max() <= 0.05 * 1.01
+
+    def test_crisp_stiffness_is_in_the_tcp_frame(self):
+        K = np.diag([100.0, 400.0, 800.0])
+        # Hand rotated 90 degrees about z: tcp x is base y.
+        R = yaw_matrix(np.pi / 2)
+        values = crisp_stiffness(K, R, rotational_stiffness=30.0)
+        assert np.allclose(values[:3], [400.0, 100.0, 800.0])
+        assert np.allclose(values[3:], 30.0)
+        assert stiffness_projection_loss(K, R) == pytest.approx(0.0, abs=1e-12)
+
+    def test_crisp_stiffness_is_clamped(self):
+        values = crisp_stiffness(np.diag([5.0, 5000.0, 300.0]), np.eye(3), 500.0)
+        assert np.allclose(values, [50.0, 900.0, 300.0, 60.0, 60.0, 60.0])
+
+    def test_dropped_off_diagonal_is_reported(self):
+        R45 = yaw_matrix(np.pi / 4)
+        K = R45 @ np.diag([100.0, 900.0, 500.0]) @ R45.T
+        assert stiffness_projection_loss(K, np.eye(3)) > 0.3

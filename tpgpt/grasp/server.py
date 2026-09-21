@@ -16,9 +16,15 @@ from pathlib import Path
 from tpgpt.grasp.client import DEFAULT_HOST, DEFAULT_PORT, GraspGenClient
 
 #: Sibling project holding the GraspGen-X checkout, weights and launch script.
+#: Without ``GRASPGENX_PROJECT_ROOT``, the ``6DOF_MultiEmbod_Grasp`` checkout next to
+#: this repository if present, else the original machine's path. On the Thor the
+#: ROS-side launcher is ``ycb_pointcloud_pipeline/scripts/run_graspgenx_server.sh``.
+_SIBLING_PROJECT = Path(__file__).resolve().parents[3] / "6DOF_MultiEmbod_Grasp"
 DEFAULT_PROJECT_ROOT = Path(
     os.environ.get(
-        "GRASPGENX_PROJECT_ROOT", "/home/ishita/task_embod_aware_grasp/6dof_GraspMAS"
+        "GRASPGENX_PROJECT_ROOT",
+        _SIBLING_PROJECT if _SIBLING_PROJECT.is_dir()
+        else "/home/ishita/task_embod_aware_grasp/6dof_GraspMAS",
     )
 )
 
