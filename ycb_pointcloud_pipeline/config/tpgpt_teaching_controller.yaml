@@ -1,0 +1,93 @@
+# CRISP CartesianController configured as a ZERO-STIFFNESS teaching controller.
+#
+# Loaded at runtime by tpgpt_teach_node (teach_mode:=compliant) into the robot
+# container's controller_manager (the container sees ~/thor_ws at
+# /workspaces/thor_ws). While it is active the FR3 floats: libfranka compensates
+# gravity, no spring pulls the hand anywhere, and a person moves the arm by hand
+# while /current_pose is recorded.
+#
+# The torque it commands is only
+#     tau = J^T ( -D_task * v_ee )  +  N ( -D_null * dq )  + Coriolis
+#           + joint-limit repulsion,                        clipped and rate limited
+# with every task stiffness k_* = 0 and nullspace stiffness 0. CRISP uses an
+# explicit damping when it is > 0 (utils/command_validation.hpp
+# damping_for_stiffness), so the d_* values below are the damping you feel:
+#   8 N s/m translational -> 2.4 N of drag at 0.3 m/s,
+#   0.5 N m s/rad rotational, 0.2 N m s/rad per joint in the nullspace.
+# Raise them if the arm drifts or feels "slippery"; lower them if it is heavy.
+#
+# PREREQUISITE: the hand's mass and centre of mass must be set correctly in Desk
+# (end-effector settings). With zero stiffness any gravity-model error shows up as
+# the arm sinking or rising on its own.
+#
+# NOT validated settings for your robot, tool or payload. Review before use and
+# keep the emergency stop within reach while teaching.
+tpgpt_teaching_controller:
+  ros__parameters:
+    joints:
+      - fr3_joint1
+      - fr3_joint2
+      - fr3_joint3
+      - fr3_joint4
+      - fr3_joint5
+      - fr3_joint6
+      - fr3_joint7
+    end_effector_frame: fr3_hand_tcp
+    base_frame: base
+    use_operational_space: false
+    task:
+      k_pos_x: 0.0
+      d_pos_x: 8.0
+      k_pos_y: 0.0
+      d_pos_y: 8.0
+      k_pos_z: 0.0
+      d_pos_z: 8.0
+      k_rot_x: 0.0
+      d_rot_x: 0.5
+      k_rot_y: 0.0
+      d_rot_y: 0.5
+      k_rot_z: 0.0
+      d_rot_z: 0.5
+    nullspace:
+      stiffness: 0.0
+      damping: 0.2           # > 0 -> used as given, times the (default 1.0) joint weights
+      projector_type: kinematic
+      regularization: 1.0e-06
+      max_tau: 5.0
+    filter:
+      target_pose: 0.1
+      q: 0.5
+      dq: 0.5
+      q_ref: 0.5
+      output_torque: 0.5
+    use_friction: false
+    use_coriolis_compensation: true
+    use_gravity_compensation: false   # libfranka already compensates gravity
+    use_local_jacobian: true
+    topics:                  # private topics, so nothing published on /target_pose reaches it
+      target_pose: ~/target_pose
+      target_joint: ~/target_joint
+      target_wrench: ~/target_wrench
+    limit_error: true
+    limit_torques: true
+    max_delta_tau: 0.5
+    stop_commands: false
+    joint_limit_repulsion:
+      enabled: true
+      safe_range: 0.1
+      max_torque: 5.0
+    noise:
+      add_random_noise: false
+      amplitude: 0.0
+    variable_stiffness:
+      enabled: false
+    enable_introspection: false
+    log:
+      enabled: false
+      robot_state: false
+      control_values: false
+      limits: false
+      controller_parameters: false
+      computed_torques: false
+      dynamic_params: false
+      timing: false

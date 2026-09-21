@@ -1,0 +1,30 @@
+# Objects to detect. Only these get a point cloud, published on
+# /ycb_pointclouds/<name>. Objects not listed are ignored.
+#
+# Each entry is either
+#   - a plain string:           - banana            -> topic /ycb_pointclouds/banana
+#   - or name + text prompt:    - name: master_chef_can
+#                                 prompt: blue coffee can
+# The prompt is what Grounding DINO searches for, so describe what the object
+# LOOKS like -- brand names from the YCB list ("master chef", "jell-o") are
+# often not recognised, visual descriptions are.
+
+target_objects:
+  # - name: master_chef_can
+  #   prompt: blue coffee can
+  # - name: cracker_box
+  #   prompt: red cracker box
+  # - name: sugar_box
+  #   prompt: yellow sugar box
+  # - name: tomato_soup_can
+  #   prompt: red soup can
+  - banana
+  - apple
+  # - name: cracker_box
+  #   prompt: small red box      # "cracker box" scored < 0.2 in the full caption, this 0.67
+  # - bleach_cleanser
+  # - mustard_bottle
+  # - spam
+  # - red cup
+  # - red mug
+  - tomato_soup_can

@@ -1,0 +1,96 @@
+# Camera calibration used by the TPGPT hardware pipeline.
+#
+#   base --(base_to_camera)--> camera_link --(camera_link_to_optical)--> camera_color_optical_frame
+#
+# Object clouds from segmentation_node are in camera_color_optical_frame (they
+# are deprojected with the colour intrinsics). Every millimetre of error here
+# lands directly on the grasp: the transportation map interpolates keypoints
+# built from these clouds exactly. VERIFY before execution -- see
+# docs/hardware_integration.md, "Verifying the point cloud pose".
+camera_calibration:
+  base_frame: base
+
+  # --------------------------------------------------------------------------
+  # EXTRINSICS: robot base -> camera            (hand-eye calibration, 2026-09-11)
+  # --------------------------------------------------------------------------
+  # Put your hand-eye calibration result here. child_frame may be
+  #   camera_link                 (RealSense body frame, x forward / z up), or
+  #   camera_color_optical_frame  (if your calibration is to the optical frame;
+  #                                then camera_link_to_optical is not used).
+  # Rotation: give ONE of rotation_quaternion_xyzw, rotation_rpy_deg,
+  # rotation_rpy_rad (ROS fixed-axis roll-pitch-yaw).
+  # REFINED 2026-09-21 (2nd pass): the 8 correspondences alone left a rotation
+  # error that showed up as position-dependent height bias -- table -9.6 mm,
+  # top shelf +4.1 mm, bottom shelf +8.5 mm against touched truth. Re-fit
+  # jointly against those 8 points AND three horizontal-plane constraints
+  # (thousands of cloud points on the table / both shelf boards, each held to
+  # its touched height). Validated on a FRESH frame: -4.9 / +0.1 / +5.4 mm,
+  # table tilt 3.17 -> 0.61 deg. Moved 13.4 mm and 0.76 deg from the 1st pass.
+  # First pass, superseded: 8 touched
+  # correspondences (2 of 10 rejected for hand tilt > 30 deg, where the flat
+  # fingertip-face probe model is invalid). Fit RMS 8.3 mm, but validated
+  # independently against the table plane over 35870 depth points:
+  # tilt 0.56 deg, height error -0.6 mm. Camera 1.20 m out, 0.85 m up,
+  # pitched 42 deg down. probe_offset [0,0,0.0095] (closed fingertip face).
+  # Superseded calibration received 2026-09-11 (translation + quaternion x,y,z,w).
+  # It is base -> OPTICAL frame, not camera_link: its +z (optical viewing axis)
+  # points (-0.640, 0.001, -0.769) and meets the table at (0.50, 0.05) in front of
+  # the robot, its +x (image right) is base +y and its +y (image down) points
+  # downward. Read as camera_link (x forward) the camera would look sideways at
+  # nothing, so child_frame is the optical frame and camera_link_to_optical below
+  # is not used. Camera centre 1.19 m in front of the base, 0.83 m up, pitched
+  # ~50 deg down.
+  # Verify manually (e.g. ros2 run ycb_pointcloud_pipeline calibration_check_node + RViz)
+  # before execution.
+  base_to_camera:
+    parent_frame: base
+    child_frame: camera_color_optical_frame
+    translation: [1.196360, 0.504620, 0.860023]                               # m
+    rotation_quaternion_xyzw: [-0.371615, -0.835432, 0.368495, 0.167833]
+    is_placeholder: false
+
+  # --------------------------------------------------------------------------
+  # camera_link -> colour optical frame
+  # --------------------------------------------------------------------------
+  # source: tf    -> read from /tf_static published by realsense2_camera
+  #                  (factory extrinsics; recommended)
+  # source: yaml  -> use the values below (use only if the driver's TF is absent)
+  # The nominal D435 colour sensor sits ~15 mm along camera_link +y; the exact
+  # value is per-unit, which is why tf is preferred.
+  camera_link_to_optical:
+    source: tf
+    child_frame: camera_color_optical_frame
+    translation: [0.0, 0.015, 0.0]           # m, PLACEHOLDER (used only when source: yaml)
+    rotation_rpy_deg: [-90.0, 0.0, -90.0]    # fixed optical convention, do not change
+
+  # --------------------------------------------------------------------------
+  # INTRINSICS (colour stream)                  (calibration, 2026-09-11)
+  # --------------------------------------------------------------------------
+  # source: camera_info -> use /camera/camera/color/camera_info (recommended);
+  #                        the values below are then only compared against it
+  #                        and a mismatch is reported.
+  # source: yaml        -> use the values below for deprojection.
+  # K = [[604.725353, 0, 425.857373], [0, 602.581260, 236.580043], [0, 0, 1]],
+  # D = [0, 0, 0, 0, 0]. Valid only at 848x480 -- the colour stream must run at
+  # that resolution (ycb_pipeline.launch.py profile:=848,480,30).
+  intrinsics:
+    source: camera_info
+    width: 848
+    height: 480
+    fx: 604.725353
+    fy: 602.581260
+    cx: 425.857373
+    cy: 236.580043
+    distortion_model: plumb_bob
+    distortion: [0.0, 0.0, 0.0, 0.0, 0.0]
+    is_placeholder: false
+
+  depth_scale: 1000.0            # raw depth units per metre (RealSense: mm)
+
+  verification:
+    # Height of the table surface in the base frame, measured independently
+    # (e.g. touch it with the fingertips and read /current_pose z). null = skip.
+    expected_table_height: -0.0136  # m: measured 2026-09-21 by touching (3 pts, 0.2 mm spread)
+    max_intrinsics_mismatch_px: 2.0
+    max_table_tilt_deg: 1.5
+    max_table_height_error_m: 0.005

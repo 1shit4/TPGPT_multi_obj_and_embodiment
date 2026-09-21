@@ -15,7 +15,7 @@ What each field of the bundle is made of, and why:
 
 * **positions** -- the measured ``fr3_hand_tcp`` (the fingertip centre, which is
   the reference ``scene_keypoints`` and ``transport_labels`` expect), resampled
-  onto the control grid. ``CLAUDE.md`` warns that labels are the *commanded
+  onto the control grid. ``docs/sim/SIM_CLAUDE.md`` warns that labels are the *commanded
   attractor* (the point the impedance spring pulls toward), not the measured
   pose, because an impedance arm lags its attractor by ``K^-1 D v``. A hand-held
   demonstration has no attractor at all. This version deliberately uses the
@@ -44,7 +44,7 @@ from ``recording.metadata['end_effector']`` when the teach node wrote it.
   held, which ``carry_indices`` and ``carry_transform`` need.
 * **time_belief / time_rate** -- ``linspace(0, 1, M)`` and its constant rate,
   from the step index and the control frequency. No wall-clock time survives
-  resampling (``CLAUDE.md`` rule 5).
+  resampling (``docs/sim/SIM_CLAUDE.md`` rule 5).
 * **placement** -- the object cloud captured before the demonstration, the
   grasp *actually taught* (TCP pose at the grasp mark), the measured table
   height, and a destination derived from the carry: the object's placed pose is

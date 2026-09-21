@@ -12,7 +12,7 @@ robot's measured ``fr3_hand_tcp`` pose, and ``controller.action(...)`` by a
 :class:`Command` the ROS node publishes to CRISP.
 
 What is intentionally different on hardware, stated so nothing is silently
-absorbed (``CLAUDE.md`` rule 3):
+absorbed (``docs/sim/SIM_CLAUDE.md`` rule 3):
 
 * **No infeasible-pose fallback.** ``rollout_policy``'s two tiers ask MuJoCo's
   ``solve_ik`` whether a pose exists for the arm. There is no simulator here,

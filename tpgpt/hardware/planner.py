@@ -27,7 +27,7 @@ millimetre of extrinsic error lands directly on the grasp, because ``phi``
 interpolates the keypoints built from this cloud exactly. The ROS side provides
 the tools to verify it.
 
-Also computed, because ``CLAUDE.md`` asks for geometric checks before any
+Also computed, because ``docs/sim/SIM_CLAUDE.md`` asks for geometric checks before any
 end-to-end run: the aim of the transported path at the grasp and at the
 release, the orientation error at the grasp, the minimum Jacobian determinant,
 and the keypoint residual. All are milliseconds, deterministic, and need no
@@ -73,7 +73,7 @@ MIN_CLOUD_POINTS = 40
 
 #: Refuse a map whose smallest Jacobian determinant is below this. A merely
 #: sign-consistent map can still be nearly folded somewhere along the path;
-#: ``CLAUDE.md`` records ``min det`` as the useful diagnostic, with healthy maps
+#: ``docs/sim/SIM_CLAUDE.md`` records ``min det`` as the useful diagnostic, with healthy maps
 #: at a median of 0.9 and a collapsed one at 0.008.
 MIN_DETERMINANT = 0.1
 
@@ -266,7 +266,7 @@ def plan(
     if ee.is_parallel_jaw:
         # Width is measured where the pads close, not over the whole cloud: a cup is
         # wider than the hand and its rim is not (tpgpt.hardware.hand). A cloud's
-        # extent is still a *lower bound* on width (CLAUDE.md, 7.36), so material
+        # extent is still a *lower bound* on width (docs/sim/SIM_CLAUDE.md, 7.36), so material
         # under an open pad proves "too wide" and nothing proves "fits".
         jaw = check_jaws(points, grasp.tcp, grasp.rotation, opening=max_object_width)
         if jaw.verdict == "too_wide":

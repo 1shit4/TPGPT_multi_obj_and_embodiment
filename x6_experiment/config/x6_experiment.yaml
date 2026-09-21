@@ -1,0 +1,242 @@
+# X6 hardware experiment -- the single configuration for the whole campaign.
+#
+# Brief: HARDWARE_EXPERIMENT.md. Run guide: x6_experiment/RUNNING_THE_EXPERIMENT.md.
+# Where the data goes: x6_experiment/experiments.md.
+#
+# RULES FOR THIS FILE
+#   * Fields marked TO_FILL are measured before trial 1 (demo, shelf, pick marks).
+#   * Once trial 1 has run, NOTHING under `method:` may change. Every experiment trial hashes
+#     this file into every trial record; a changed hash mid-campaign is a finding
+#     to report, not an edit to make.
+#   * Nothing here is set per hand, per object or per trial, except the physical
+#     description of each hand in hands/<hand>.yaml.
+#   * Read ONLY when tpgpt_pick_place runs with experiment:=true. With
+#     experiment:=false (the default) the nodes behave exactly as before and
+#     ignore this file.
+
+experiment:
+  name: X6
+  run_id: hw_2026_09_x6               # one run_id for the whole campaign, all sessions
+  data_root: ~/thor_ws/src/ycb_point_cloud/TPGPT_multi_obj_and_embodiment/outputs/hardware
+  control_rate_hz: 20                 # time in every record = step_index / control_rate_hz
+  topics:                             # read by the X6 recorder only
+    color: /camera/camera/color/image_raw
+    depth: /camera/camera/aligned_depth_to_color/image_raw
+    camera_info: /camera/camera/color/camera_info
+    joint_states: /joint_states
+    current_pose: /current_pose
+    robot_state: /franka_robot_state_broadcaster/robot_state   # wrench + end-effector mass
+
+# ----------------------------------------------------------------------------
+# The one demonstration. Recorded ONCE, Franka Hand, banana, into the shelf.
+# ----------------------------------------------------------------------------
+demonstration:
+  object: banana
+  hand: panda
+  placed_at_note: "<where you set the banana down; not slot_a or slot_b>"
+  recorded_dir: ~/tpgpt_demos/banana_20260915_113058
+  source_bundle_dir: ~/tpgpt_demos/banana_20260915_113058/source_bundle
+  sha256:
+    tool_labels.npz: aa34cb32378f1def765735c9b5100631df31b278829cacc84cd8f25c80433267
+    placement.npz: a5648468e053bb679393be00e357d7b8b1d51d3baa12f9f638d66a2e8d3e3f29
+    manifest.json: 84a671368b0787f299502c96ecbbdac073e63828316c2441f6283f8363277bed
+  re_record_allowed: false
+# ----------------------------------------------------------------------------
+# Calibration. The file the planner actually loads is the INSTALLED copy.
+# ----------------------------------------------------------------------------
+calibration:
+  camera_extrinsics_file: ~/thor_ws/install/ycb_pointcloud_pipeline/share/ycb_pointcloud_pipeline/config/camera_calibration.yaml
+  # Calibration is verified manually. Trials need no session; the file's sha256
+  # is recorded in every record.json.
+  session_record: <data_root>/<run_id>/sessions/<session_id>/calibration.json   # optional
+
+# ----------------------------------------------------------------------------
+# Factors
+# ----------------------------------------------------------------------------
+hands:
+  # The Inspire hand is MOUNTED now (2026-09-15): run trials with -p hand:=inspire and
+  # trial ids 0031-0060. Panda trials 0001-0007 already exist; a panda trial id re-run
+  # with the Inspire hand would OVERWRITE that trial.
+  mounted: panda
+  order: [panda, inspire]             # complete one hand before re-mounting
+  files:
+    panda: hands/panda.yaml
+    inspire: hands/inspire.yaml       # side grasp, no GraspGen-X (INSPIRE_HAND.md)
+
+objects:                              # 5 test objects; topic /ycb_pointclouds/<name>
+  - apple
+  - red_cup
+  - red_mug
+  - cereal_box
+  - tomato_soup_can
+  - bleach_cleanser
+
+# Pick poses: 3 taped marks on the table, SAME marks for every object and for
+# both hands. Spread across the reachable region, each with a different yaw.
+# The pick pose is NOT given on the command line: each trial records the object's
+# cloud centroid and yaw (principal axis) from the perception frame. The marks
+# below are only used by the analysis to label each trial with its nearest mark
+# (pick_pose_index); leave them TO_FILL if you prefer to label by clustering.
+# Measure x, y by touching the mark with the TCP and reading /current_pose.
+pick_poses:
+  - {index: 0, x: TO_FILL, y: TO_FILL, yaw_deg: TO_FILL, note: "near-left"}
+  - {index: 1, x: TO_FILL, y: TO_FILL, yaw_deg: TO_FILL, note: "centre-far"}
+  - {index: 2, x: TO_FILL, y: TO_FILL, yaw_deg: TO_FILL, note: "near-right"}
+
+# Destinations: hard-coded, base frame, no markers. Two shelf slots differing in
+# height AND lateral position. x, y = where the object's centre should end up;
+# surface_height = height of the board it is set down on (TCP touch on the board).
+destinations:
+  top_shelf: {x: 0.54, y: -0.4, surface_height: 0.35}
+  bottom_shelf: {x: 0.54, y: -0.4, surface_height: 0.08}
+  table_height: -0.006               # support height at the pick marks
+
+# ----------------------------------------------------------------------------
+# Grid and order
+# ----------------------------------------------------------------------------
+grid:
+  # trials per hand = 5 objects x 3 pick poses x 2 destinations = 30; total 60
+  # Trials are started one at a time by the operator (tpgpt_pick_place
+  # experiment:=true trial_id:=...). The order actually run is whatever trial ids
+  # were used; follow a randomised order sheet (orders/order_<hand>.csv, generated
+  # once from these seeds) so the order is randomised within each hand.
+  trials_per_condition: 1
+  randomise_within_hand: true
+  seeds: {panda: 6001, inspire: 6002}
+  trial_ids: {panda: "0001-0030", inspire: "0031-0060"}
+  stop_early: false                   # a hand doing badly still finishes its grid
+
+instrument_check:                     # §4 of the brief
+  repetitions: 10                     # re-segment each time, object never touched
+  object: can
+  location: top_shelf
+  when: [before_first_trial, after_remount, campaign_end]
+
+robustness_check:                     # optional, AFTER both grids, one sentence in the paper
+  enabled: true
+  n_scenes: 6                         # 3 per hand
+  admissible_ranks: [2, 3]            # 2nd and 3rd ADMISSIBLE candidates
+  counts_in_main_grid: false
+
+scratch_trials:                       # test trials (trial_id s001, s002), never analysed
+  n: 2
+  object: TO_FILL                     # any object that is neither a grid object nor the banana
+
+# ----------------------------------------------------------------------------
+# METHOD -- frozen. Values copied from the current node defaults (2026-09-15):
+# tpgpt_planner_node.py, tpgpt_executor_node.py, grasp_selection.SelectionSettings,
+# planner.plan. Identical for both hands.
+# ----------------------------------------------------------------------------
+method:
+  map:
+    construction: cube_grasp_pose     # planner.KEYPOINT_BOX grasp_cube, orientation grasp
+    cube_half_extent_m: 0.02          # sim.keypoints.GRASP_CUBE_HALF_EXTENT
+    min_determinant: 0.1
+
+  perception:
+    n_frames: 3
+    max_cloud_age_s: 10.0
+    workspace_min: [0.15, -0.6, -0.25]
+    workspace_max: [0.85, 0.6, 0.5]
+    voxel_size: 0.003
+    outlier_radius: 0.012
+    outlier_min_neighbors: 4
+    max_points: 8192
+    min_cloud_points: 40              # planner.MIN_CLOUD_POINTS; pre-flight uses this
+    segmentation_period_s: 3.0
+    detector_mode: grounded_sam
+
+  grasp_generation:
+    source: graspgenx
+    host: 127.0.0.1
+    port: 5556
+    planner: diffusion
+    num_grasps: 200
+    topk: 100
+    timeout_s: 30.0
+    # The GraspGen-X gripper model is the hand's own description (hands/<hand>.yaml).
+
+  selection:                          # grasp_selection.SelectionSettings
+    max_tilt_deg: 85.0
+    min_support_clearance_m: 0.003
+    duplicate_position_m: 0.01
+    duplicate_angle_deg: 15.0
+    max_plans: 12
+    max_aim_grasp_m: 0.01
+    max_orientation_error_deg: 15.0
+    min_path_clearance_m: -0.002
+    fallback_top_down: true           # kept ON; recorded as grasp.fell_back
+    grasp_depth_below_top_m: 0.03     # top-down fallback only
+    refine: true
+    refine_margin_m: 0.003
+    refine_max_depth_m: 0.025
+    refine_max_centre_m: 0.010
+    never_force_rank_in_main_grid: true
+
+  execution:                          # tpgpt_executor_node parameters
+    use_transported_stiffness: false  # taught demo carries static 400 N/m
+    # Fixed translational stiffness on tpgpt_cartesian_impedance_controller for the
+    # whole run. At the stock 400 N/m the arm trailed its target 20-30 mm (friction),
+    # the lag gate crawled the phase and arrive_grasp aborted (2026-09-15 logs).
+    # 800 with rotational 60 vibrated on the approach and at the grasp; lowered.
+    translational_stiffness: 600.0
+    speed_scale: 0.5
+    lag_tolerance: 0.035
+    speed_limit_factor: 3.0
+    belief_correction: 0.2
+    rotational_stiffness: 30.0        # stock CRISP k_rot
+    rotational_damping: 12.0
+    transit_rotational_scale: -1.0    # auto -> 1.0 for a static (taught) source
+    max_policy_seconds: 120.0
+    stiffness_min_translational: 50.0
+    stiffness_max_translational: 900.0
+    stiffness_max_rotational: 60.0
+    workspace_min: [0.15, -0.6, -0.25]
+    workspace_max: [0.85, 0.6, 0.7]
+    max_start_distance: 0.6
+    approach_max_linear_speed: 0.05
+    approach_max_angular_speed: 0.3
+    approach_settle_tolerance: 0.2
+    approach_settle_timeout: 5.0
+    max_tracking_error: 0.08
+    progress_window: 40
+    min_progress_ratio: 0.3
+    max_pose_age: 0.2
+    settle_time: 1.5
+    offset_compensation: z
+    max_offset_compensation: 0.03
+    arrival_hold: false
+    arrival_tolerance: 0.004
+    arrival_timeout: 4.0
+    arrival_gain: 1.5
+    arrival_max_gap: 0.04
+    require_confirmation: true        # a refusal = aborted trial, counted
+    allow_replan: false               # experiment:=true only: one plan per trial, no "Re-plan?" loop
+                                      # (experiment:=false keeps today's re-plan prompt)
+
+  outcome:
+    capture_timeout_s: 20.0           # wait for n_frames fresh segmentations (period 3 s)
+    # Settled measurement: same fusion as planning, cropped to this box so the shelf
+    # slots are inside it (planning crops z at 0.5 m). Also used by x6_instrument_check.
+    settled_workspace_min: [0.15, -0.6, -0.25]
+    settled_workspace_max: [0.85, 0.6, 0.7]
+    # Optional: after a completed policy the arm moves here (TCP pose, base frame,
+    # [x, y, z, qx, qy, qz, qw]) at approach speed, to clear the camera view.
+    # null = no retreat; clear the view yourself before pressing Ctrl-C.
+    retreat_tcp_pose: null
+    failure_stages: [planning, approach, reach, grasp, lift, carry, place, settle]
+    # Excluded (listed separately, not in the denominator) ONLY for causes outside
+    # the method. An E-stop pressed because the planned motion was unsafe is a
+    # method failure and COUNTS.
+    exclusion_reasons: [network_drop, e_stop_external_cause, camera_driver_crash,
+                        robot_container_crash, operator_setup_error]
+
+# ----------------------------------------------------------------------------
+# Provenance (read-only; no git commands that change anything)
+# ----------------------------------------------------------------------------
+provenance:
+  repos:                              # the ROS package lives in TPGPT's hardware branch since 2026-09-21
+    - ~/thor_ws/src/ycb_point_cloud/TPGPT_multi_obj_and_embodiment
+    - ~/thor_ws/src/ycb_point_cloud/6DOF_MultiEmbod_Grasp
+  venvs: [~/venvs/tpgpt, ~/venvs/ycb, ~/venvs/graspgenx]
+  dirty_tree_policy: warn             # warn now; switch to abort before the real grid

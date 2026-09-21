@@ -1,0 +1,648 @@
+#!/usr/bin/env python3
+"""
+TPGPT planning from real perception. Does NOT move the robot.
+
+  /ycb_pointclouds/<object>  (camera_color_optical_frame, from segmentation_node)
+      -> base frame via config/camera_calibration.yaml (+ realsense TF)
+      -> fuse `n_frames` clouds, crop to the workspace, voxel + outlier filter
+      -> grasp: GraspGen-X candidates for the Franka Hand (franka_panda) from the
+         GraspGen-X ZMQ server, screened on the cloud (approach from above,
+         what lies between the pads fits, palm and fingers clear of the object
+         and the table), then planned best score first; the first plan that
+         passes its checks wins (tpgpt.hardware.grasp_selection). Falls back to
+         the scripted top-down grasp if the server is down or nothing passes.
+      -> tpgpt.hardware.planner.plan(): keypoints (grasp-pose cube),
+         transportation map, transported policy labels (fr3_hand_tcp)
+      -> saved to <output_dir>/<object>_<timestamp>/ for tpgpt_executor_node
+      -> RViz markers for inspection before anything moves
+
+Published (latched / transient-local, fixed frame `base`):
+  /tpgpt/plan/target_cloud     fused object cloud used for planning (orange)
+  /tpgpt/plan/placed_cloud     where the plan will put that object (cyan)
+  /tpgpt/plan/markers          grasp candidates (chosen: thick green; planned but
+                               refused: orange; screened out: faint red),
+                               target keypoints (green), grasp and release
+                               fr3_hand_tcp axes (x red, y green = finger travel,
+                               z blue = approach), transported path (blue open /
+                               red closed), destination disc, metrics text
+  /tpgpt/plan/path             nav_msgs/Path of fr3_hand_tcp poses
+  /tpgpt/plan/overlay          the camera image with the fused cloud (green dots), the
+                               chosen grasp's Franka Hand collision boxes (magenta, open)
+                               and TCP (red cross) projected through the calibration; also
+                               saved as <plan>/overlay.png. The cloud is drawn in its real
+                               colours on /tpgpt/plan/target_cloud.
+
+Inspire hand (end_effector:=inspire): no GraspGen-X. The grasp is the scripted SIDE
+grasp for an upright round object (tpgpt.hardware.side_grasp): a circle fitted to the
+cloud gives the object's axis, the palm approaches horizontally and radially from the
+robot base, and stops `side_grasp.standoff_m` in front of the surface at
+`side_grasp.height_fraction` of the object's height. Mount geometry and those settings
+come from config/inspire_hand.yaml (end_effector_config); the plan records them in
+metadata['end_effector'], which is where the executor reads the palm offset from.
+
+    ros2 run --prefix python3 ycb_pointcloud_pipeline tpgpt_planner_node --ros-args \
+        -p end_effector:=inspire -p object_name:=tomato_soup_can -p destination:="[0.55, 0.25, 0.02]"
+
+Uses the GraspGen-X server (grasp_source:=graspgenx, the default) for the Franka Hand. If it is not
+running, the node starts it on the GPU (graspgen_autostart:=true, ~5 s). By hand:
+    ~/thor_ws/src/ycb_point_cloud/TPGPT_multi_obj_and_embodiment/ycb_pointcloud_pipeline/scripts/run_graspgenx_server.sh --daemon
+
+Must run with the TPGPT Python environment (it imports `tpgpt`):
+    source ~/venvs/tpgpt/bin/activate
+    ros2 run --prefix python3 ycb_pointcloud_pipeline tpgpt_planner_node --ros-args \
+        -p object_name:=mustard_bottle -p destination:="[0.55, 0.25, 0.02]"
+    ros2 service call /tpgpt_planner_node/plan std_srvs/srv/Trigger
+"""
+
+import json
+import os
+import threading
+import time
+
+import numpy as np
+import rclpy
+from nav_msgs.msg import Path
+from rclpy.callback_groups import MutuallyExclusiveCallbackGroup, ReentrantCallbackGroup
+from rclpy.executors import MultiThreadedExecutor
+from rclpy.node import Node
+from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
+from sensor_msgs.msg import CameraInfo, Image, PointCloud2
+from std_srvs.srv import Trigger
+from tf2_ros import Buffer, TransformListener
+from visualization_msgs.msg import MarkerArray
+
+from ycb_pointcloud_pipeline import camera_calibration as cc
+from ycb_pointcloud_pipeline.camera_tf_publisher import default_calibration_yaml
+from ycb_pointcloud_pipeline.ros_utils import (
+    CalibrationProvider, axes_markers, colors_for, cylinder_marker, fuse_clouds,
+    gripper_segments, line_list_marker, line_strip_marker, matrix_to_pose_stamped,
+    pointcloud2_to_xyzrgb, sphere_list_marker, text_marker, xyz_to_pointcloud2,
+)
+
+NAN = float('nan')
+
+
+def _finite(v):
+    return v is not None and not (isinstance(v, float) and np.isnan(v))
+
+
+class TpgptPlannerNode(Node):
+    def __init__(self, **kwargs):
+        super().__init__('tpgpt_planner_node', **kwargs)
+        d = self.declare_parameter
+        d('calibration_yaml', default_calibration_yaml())
+        d('source_bundle_dir', os.path.expanduser(
+            '~/thor_ws/src/ycb_point_cloud/TPGPT_multi_obj_and_embodiment/'
+            'outputs/hardware/source_bundle'))
+        d('object_name', 'mustard_bottle')
+        d('cloud_topic', '')                      # '' -> /ycb_pointclouds/<object_name>
+        d('n_frames', 3)                          # clouds fused per plan
+        d('max_cloud_age', 10.0)                  # s; older clouds are discarded
+        d('workspace_min', [0.15, -0.6, -0.25])   # base frame crop, m
+        d('workspace_max', [0.85, 0.6, 0.5])
+        d('voxel_size', 0.003)
+        d('outlier_radius', 0.012)
+        d('outlier_min_neighbors', 4)
+        d('max_points', 8192)
+        # Scene description, base frame. NaN = estimate from the cloud.
+        d('support_height', NAN)                  # NaN -> verification.expected_table_height
+        d('destination', [0.55, 0.25, 0.0])       # where to put the object (x, y used)
+        d('destination_height', NAN)              # surface height there; NaN -> destination z
+        d('grasp_depth_below_top', 0.03)          # top-down fallback grasp only
+        # Grasp selection
+        # Hand on the flange: panda (Franka Hand, GraspGen-X / top-down) | inspire (side grasp)
+        d('end_effector', 'panda')
+        d('end_effector_config', '')              # '' -> installed config/inspire_hand.yaml
+        d('grasp_source', 'graspgenx')            # graspgenx | top_down (panda); side is implied by inspire
+        d('top_down_grasp', False)                # true: scripted top-down grasp only, GraspGen-X never called
+        d('graspgen_host', '127.0.0.1')
+        d('graspgen_port', 5556)
+        d('graspgen_gripper', 'franka_panda')     # GraspGen-X model of the Franka Hand
+        d('graspgen_planner', 'diffusion')        # diffusion | graspmoe
+        d('graspgen_num_grasps', 200)
+        d('graspgen_topk', 100)
+        d('graspgen_timeout', 30.0)               # s
+        d('graspgen_autostart', True)             # start scripts/run_graspgenx_server.sh if unreachable
+        d('grasp_max_tilt_deg', 85.0)             # approach vs straight down; lower = more top-down
+        d('grasp_max_plans', 12)                  # candidates planned, best score first
+        d('grasp_min_path_clearance', -0.002)     # m, hand vs table/destination along the path
+        d('grasp_fallback_top_down', True)
+        d('grasp_offset', [-0.035, 0.0, -0.025])     # m, base frame, added to every planned grasp TCP
+        d('grasp_markers_max', 60)                # candidates drawn in RViz
+        d('min_determinant', 0.1)
+        d('output_dir', os.path.expanduser('~/tpgpt_plans'))
+        d('auto_plan', False)                     # plan as soon as n_frames arrived
+        d('republish_period', 2.0)
+        d('color_topic', '/camera/camera/color/image_raw')
+        d('camera_info_topic', '/camera/camera/color/camera_info')
+
+        p = lambda n: self.get_parameter(n).value  # noqa: E731
+        self.end_effector, self.side_settings, self.side_offset = load_end_effector(
+            p('end_effector'), p('end_effector_config'))
+        self.get_logger().info(f'Hand on the flange: {self.end_effector.name} '
+                               f'(controller frame {self.end_effector.controller_frame}, grasp point '
+                               f'{[round(v * 1000, 1) for v in self.end_effector.tool_offset]} mm)')
+        from tpgpt.hardware.source_bundle import SourceBundle
+        self.source = SourceBundle.load(p('source_bundle_dir'))
+        self.get_logger().info(f"Source bundle {p('source_bundle_dir')}: "
+                               f'{self.source.tool_labels.describe()}')
+
+        self.tf_buffer = Buffer()
+        self.tf_listener = TransformListener(self.tf_buffer, self)
+        self.calib = CalibrationProvider(self, p('calibration_yaml'), self.tf_buffer)
+        self.base = self.calib.cal.base_frame
+        self.lock = threading.Lock()
+        self.clouds = []     # (monotonic, points_base)
+        self.latest_plan = None
+        self.latest_selection = None
+        self.latest_colors = None
+        self._fused_colors = None
+        self.latest_overlay = None
+        self.last_plan_inputs = None
+        self._color_msg = None
+        self._camera_info = None
+        self.plan_dir = None
+
+        latched = QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL,
+                             reliability=ReliabilityPolicy.RELIABLE)
+        self.cloud_pub = self.create_publisher(PointCloud2, '/tpgpt/plan/target_cloud', latched)
+        self.placed_pub = self.create_publisher(PointCloud2, '/tpgpt/plan/placed_cloud', latched)
+        self.marker_pub = self.create_publisher(MarkerArray, '/tpgpt/plan/markers', latched)
+        self.path_pub = self.create_publisher(Path, '/tpgpt/plan/path', latched)
+        self.overlay_pub = self.create_publisher(Image, '/tpgpt/plan/overlay', latched)
+        from rclpy.qos import qos_profile_sensor_data
+        self.create_subscription(Image, p('color_topic'),
+                                 lambda m: setattr(self, '_color_msg', m), qos_profile_sensor_data)
+        self.create_subscription(CameraInfo, p('camera_info_topic'),
+                                 lambda m: setattr(self, '_camera_info', m), qos_profile_sensor_data)
+
+        topic = p('cloud_topic') or f"/ycb_pointclouds/{p('object_name')}"
+        self.create_subscription(PointCloud2, topic, self._cloud_cb, 5,
+                                 callback_group=ReentrantCallbackGroup())
+        self.create_service(Trigger, '~/plan', self._plan_srv,
+                            callback_group=MutuallyExclusiveCallbackGroup())
+        self.create_timer(p('republish_period'), self._republish)
+        self.get_logger().info(f'Listening on {topic}. Call ~/plan to plan '
+                               f"(auto_plan={p('auto_plan')}).")
+
+    # ------------------------------------------------------------------ clouds
+    def _cloud_cb(self, msg):
+        T = self.calib.T_base_optical(msg.header.frame_id or self.calib.cal.optical_frame)
+        if T is None:
+            return
+        xyz, rgb = pointcloud2_to_xyzrgb(msg)
+        pts = cc.transform_points(T, xyz)
+        with self.lock:
+            self.clouds.append((time.monotonic(), pts, rgb))
+            self.clouds = self.clouds[-int(self.get_parameter('n_frames').value):]
+            ready = len(self.clouds) >= int(self.get_parameter('n_frames').value)
+        self.get_logger().info(f'cloud: {len(pts)} points in {msg.header.frame_id} -> base',
+                               throttle_duration_sec=5.0)
+        if ready and self.get_parameter('auto_plan').value and self.latest_plan is None:
+            threading.Thread(target=self._plan, daemon=True).start()
+
+    def fused_cloud(self):
+        p = lambda n: self.get_parameter(n).value  # noqa: E731
+        now = time.monotonic()
+        with self.lock:
+            recent = [(c, rgb) for t, c, rgb in self.clouds if now - t <= p('max_cloud_age')]
+        clouds = [c for c, _ in recent]
+        if not clouds:
+            raise RuntimeError('no recent object cloud; is segmentation_node detecting '
+                               f"{p('object_name')}?")
+        pts, stats = fuse_clouds(clouds, p('workspace_min'), p('workspace_max'), p('voxel_size'),
+                                 p('outlier_radius'), p('outlier_min_neighbors'), p('max_points'))
+        self.get_logger().info(f"fused {len(clouds)} clouds: {stats['n_raw']} -> "
+                               f"{stats['n_in_workspace']} in workspace -> {len(pts)} after "
+                               'voxel/outlier filtering')
+        raw = np.vstack(clouds)
+        colored = all(rgb is not None for _, rgb in recent)
+        self._fused_colors = colors_for(pts, raw, np.vstack([rgb for _, rgb in recent])
+                                        if colored else None)
+        return pts, len(clouds)
+
+    # ------------------------------------------------------------------ planning
+    def _plan_srv(self, request, response):
+        ok, text = self._plan()
+        response.success, response.message = ok, text
+        return response
+
+    def _plan(self):
+        from tpgpt.hardware.grasp_selection import SelectionSettings, select_and_plan
+        from tpgpt.hardware.planner import PlanningError, TargetScene
+        p = lambda n: self.get_parameter(n).value  # noqa: E731
+        log = self.get_logger()
+        # Inputs, raw candidates and stage durations of this call, kept for the X6
+        # trial record (x6_trial). Read-only bookkeeping; planning does not use it.
+        info = self.last_plan_inputs = {'timing_s': {}}
+        t_start = time.monotonic()
+        try:
+            points, n_clouds = self.fused_cloud()
+        except RuntimeError as exc:
+            log.error(str(exc))
+            info['error'] = str(exc)
+            return False, str(exc)
+        info['timing_s']['perception'] = time.monotonic() - t_start
+        info['points'] = points
+        destination = np.asarray(p('destination'), dtype=float)
+        dest_h = p('destination_height')
+        scene = TargetScene(
+            points=points,
+            destination=destination,
+            destination_height=float(dest_h) if _finite(dest_h) else float(destination[2]),
+            support_height=self._support_height(),
+        )
+        t0 = time.monotonic()
+        side = not self.end_effector.is_parallel_jaw
+        if side:
+            poses, scores, unavailable = None, None, f'{self.end_effector.name} uses the side grasp'
+        else:
+            poses, scores, unavailable = self._grasp_candidates(points)
+        info['timing_s']['grasp_generation'] = time.monotonic() - t0
+        info.update({'poses': poses, 'scores': scores, 'unavailable': unavailable,
+                     'scene': scene})
+        settings = SelectionSettings(
+            max_tilt_deg=float(p('grasp_max_tilt_deg')),
+            max_plans=int(p('grasp_max_plans')),
+            min_determinant=float(p('min_determinant')),
+            min_path_clearance=float(p('grasp_min_path_clearance')),
+            fallback_top_down=bool(p('grasp_fallback_top_down')) or bool(p('top_down_grasp')),
+            # grasp_offset was tuned on the Franka Hand's grasps; the side grasp has its
+            # own (config side_grasp.grasp_offset_m, default zero).
+            grasp_offset=(tuple(float(v) for v in self.side_offset) if side else
+                          tuple(float(v) for v in p('grasp_offset'))),
+        )
+        info['settings'] = settings
+        t_sel = time.monotonic()
+        try:
+            if side:
+                from tpgpt.hardware.grasp_selection import plan_side_grasp
+                selection = plan_side_grasp(self.source, scene, self.end_effector, settings,
+                                            self.side_settings)
+            else:
+                selection = select_and_plan(
+                    self.source, scene, poses, scores, settings, unavailable_reason=unavailable,
+                    grasp_depth_below_top=float(p('grasp_depth_below_top')))
+        except PlanningError as exc:
+            info['timing_s']['selection_total'] = time.monotonic() - t_sel
+            info['error'] = str(exc)
+            info['failed_candidates'] = getattr(exc, 'candidates', None)
+            info['failed_fallback'] = getattr(exc, 'fallback', None)
+            log.error(f'Planning refused: {exc}')
+            self._publish_cloud_only(points)
+            return False, str(exc)
+        info['timing_s']['selection_total'] = time.monotonic() - t_sel
+        info['selection'] = selection
+        result = selection.plan
+        log.info(selection.describe())
+        for note in selection.notes:
+            log.warning(note)
+        cal = self.calib.cal
+        result.metadata.update({
+            'object_name': p('object_name'),
+            'n_fused_clouds': n_clouds,
+            'calibration_yaml': p('calibration_yaml'),
+            'calibration_is_placeholder': cal.camera_is_placeholder,
+            'T_base_camera': cal.T_base_camera.tolist(),
+            'camera_child_frame': cal.camera_child_frame,
+            'source_bundle_dir': p('source_bundle_dir'),
+            'planning_seconds': time.monotonic() - t0,
+            'grasp_source': selection.source,
+            'grasp_score': selection.chosen.score,
+            'grasp_candidates': len(selection.candidates),
+            'grasp_rejections': selection.rejection_counts(),
+            'grasp_notes': selection.notes,
+            'end_effector_config': (self.end_effector.details.get('config_file')
+                                    if side else None),
+            'graspgen': {n: self.get_parameter(n).value for n in (
+                'graspgen_gripper', 'graspgen_planner', 'graspgen_num_grasps', 'graspgen_topk',
+                'grasp_max_tilt_deg', 'grasp_max_plans', 'grasp_min_path_clearance',
+                'grasp_offset')},
+            'parameters': {n: self.get_parameter(n).value for n in (
+                'workspace_min', 'workspace_max', 'voxel_size', 'destination',
+                'destination_height', 'support_height', 'grasp_depth_below_top',
+                'min_determinant', 'n_frames')},
+        })
+        out = os.path.join(p('output_dir'),
+                           f"{p('object_name')}_{time.strftime('%Y%m%d_%H%M%S')}")
+        result.save(out)
+        with open(os.path.join(out, 'grasp_candidates.json'), 'w') as f:
+            json.dump({'source': selection.source, 'notes': selection.notes,
+                       'chosen_index': selection.chosen.index,
+                       'candidates': [c.as_dict() for c in selection.candidates]},
+                      f, indent=1, default=float)
+        overlay = self._render_overlay(result)
+        if overlay is not None:
+            import cv2
+            cv2.imwrite(os.path.join(out, 'overlay.png'), overlay)
+        with self.lock:
+            self.latest_plan, self.latest_selection, self.plan_dir = result, selection, out
+            self.latest_colors = self._fused_colors
+            self.latest_overlay = overlay
+        m = result.metrics
+        grasp_text = (f'{selection.describe()}' if side else
+                      f'grasp {selection.source} (score {selection.chosen.score:.3f}, tilt '
+                      f'{m["grasp_tilt_deg"]:.0f} deg, {m["jaw_points_between_pads"]} pts between pads)')
+        text = (f'Plan saved to {out} [{self.end_effector.name}]: {grasp_text}, '
+                f'min det(J) {m["min_det"]:.3f}, keypoint residual '
+                f'{m["keypoint_residual_m"] * 1000:.2f} mm, aim at grasp '
+                f'{m["aim_grasp_m"] * 1000:.1f} mm / release {m["aim_release_m"] * 1000:.1f} mm, '
+                f'orientation error at grasp {m["orientation_error_grasp_deg"]:.1f} deg, '
+                f'width between pads {m["object_width_closing_m"] * 1000:.0f} mm (object '
+                f'{m["object_extent_closing_m"] * 1000:.0f} mm across), hand clearance '
+                f'{m["hand_clearance_pick_m"] * 1000:.0f} mm at pick / '
+                f'{m["hand_clearance_place_m"] * 1000:.0f} mm at place, support '
+                f'{m["support_height_m"]:+.3f} m'
+                f'{" (estimated)" if m["support_height_estimated"] else ""}, lowest path point '
+                f'{m["path_min_height_above_support_m"] * 1000:.0f} mm above support')
+        if cal.camera_is_placeholder:
+            text += ' -- WARNING: extrinsics are a PLACEHOLDER, do not execute this plan'
+        log.info(text)
+        self._publish_plan(result, selection)
+        return True, text
+
+    def _grasp_candidates(self, points):
+        """GraspGen-X poses and scores in the base frame, or (None, None, reason)."""
+        p = lambda n: self.get_parameter(n).value  # noqa: E731
+        if p('top_down_grasp'):
+            return None, None, 'top_down_grasp is true'
+        if p('grasp_source') == 'top_down':
+            return None, None, 'grasp_source is top_down'
+        if p('grasp_source') != 'graspgenx':
+            raise ValueError(f"grasp_source must be graspgenx or top_down, not {p('grasp_source')!r}")
+        from tpgpt.grasp.client import GraspGenUnavailable
+        from tpgpt.hardware.grasp_selection import request_candidates
+        problem = self._ensure_graspgen_server()
+        if problem:
+            self.get_logger().error(f'GraspGen-X unavailable: {problem}')
+            return None, None, f'GraspGen-X unavailable: {problem}'
+        t = time.monotonic()
+        try:
+            poses, scores = request_candidates(
+                points, host=p('graspgen_host'), port=int(p('graspgen_port')),
+                gripper=p('graspgen_gripper'), num_grasps=int(p('graspgen_num_grasps')),
+                topk=int(p('graspgen_topk')), planner=p('graspgen_planner'),
+                timeout_ms=int(float(p('graspgen_timeout')) * 1000))
+        except GraspGenUnavailable as exc:
+            self.get_logger().error(f'GraspGen-X unavailable: {exc}')
+            return None, None, f'GraspGen-X unavailable: {exc}'
+        self.get_logger().info(f'GraspGen-X: {len(poses)} candidates for {len(points)} points in '
+                               f'{time.monotonic() - t:.2f} s')
+        return poses, scores, None if len(poses) else 'GraspGen-X returned no grasps'
+
+    def _ensure_graspgen_server(self):
+        """None if the server answers (starting it first if allowed), else why not."""
+        import subprocess
+
+        from tpgpt.grasp.client import GraspGenClient
+        p = lambda n: self.get_parameter(n).value  # noqa: E731
+        host, port = p('graspgen_host'), int(p('graspgen_port'))
+
+        def alive():
+            client = GraspGenClient(host=host, port=port, timeout_ms=2000)
+            try:
+                return client.is_alive()
+            finally:
+                client.close()
+
+        if alive():
+            return None
+        if not p('graspgen_autostart'):
+            return f'no server at tcp://{host}:{port} and graspgen_autostart is false'
+        if host not in ('127.0.0.1', 'localhost'):
+            return f'no server at tcp://{host}:{port}; autostart only works for a local server'
+        script = graspgen_server_script()
+        if script is None:
+            return 'run_graspgenx_server.sh not found in the package share or source tree'
+        self.get_logger().info(f'GraspGen-X server not running; starting {script} --daemon')
+        env = dict(os.environ, GRASPGEN_SERVER_PORT=str(port))
+        try:
+            out = subprocess.run(['bash', script, '--daemon'], env=env, capture_output=True,
+                                 text=True, timeout=90)
+        except subprocess.TimeoutExpired:
+            return 'server start timed out after 90 s (see ~/.ros/graspgenx_server.log)'
+        if out.returncode != 0:
+            return f'server failed to start: {(out.stderr or out.stdout).strip()[-400:]}'
+        for _ in range(30):
+            if alive():
+                self.get_logger().info('GraspGen-X server is up')
+                return None
+            time.sleep(1.0)
+        return 'server started but does not answer (see ~/.ros/graspgenx_server.log)'
+
+    def _support_height(self):
+        """Explicit parameter, else the calibration's measured table height, else None
+        (estimated from the object's cloud, which truncation biases a few mm high)."""
+        value = self.get_parameter('support_height').value
+        if _finite(value):
+            return float(value)
+        return self.calib.cal.expected_table_height
+
+    # ------------------------------------------------------------------ rviz
+    def _publish_cloud_only(self, points):
+        self.cloud_pub.publish(xyz_to_pointcloud2(points, self.base,
+                                                  self.get_clock().now().to_msg(), (255, 140, 0)))
+
+    def _republish(self):
+        with self.lock:
+            result, selection = self.latest_plan, self.latest_selection
+        if result is not None:
+            self._publish_plan(result, selection)
+
+    def _publish_plan(self, result, selection=None):
+        stamp = self.get_clock().now().to_msg()
+        base = self.base
+        labels = result.labels
+        m = result.metrics
+        colors = self.latest_colors
+        if colors is None or len(colors) != len(result.target_points):
+            colors = (255, 140, 0)
+        self.cloud_pub.publish(xyz_to_pointcloud2(result.target_points, base, stamp, colors))
+        if self.latest_overlay is not None:
+            from cv_bridge import CvBridge
+            msg = CvBridge().cv2_to_imgmsg(self.latest_overlay, encoding='bgr8')
+            msg.header.stamp, msg.header.frame_id = stamp, self.calib.cal.optical_frame
+            self.overlay_pub.publish(msg)
+        placed = result.diagnostics.get('target_place_points')
+        if placed is not None and len(placed):
+            self.placed_pub.publish(xyz_to_pointcloud2(placed, base, stamp, (0, 220, 255)))
+
+        markers = MarkerArray()
+        markers.markers.append(sphere_list_marker('keypoints_target', 0,
+                                                  result.target_keypoints.points, base, stamp,
+                                                  (0.1, 0.9, 0.1), 0.01))
+        gi, ri = int(m['grasp_index']), int(m['release_index'])
+        markers.markers += axes_markers('tcp_at_grasp', 0, labels.positions[gi],
+                                        labels.orientations[gi], base, stamp)
+        markers.markers += axes_markers('tcp_at_release', 0, labels.positions[ri],
+                                        labels.orientations[ri], base, stamp)
+        markers.markers += axes_markers('tcp_at_start', 0, labels.positions[0],
+                                        labels.orientations[0], base, stamp, length=0.05)
+        colors = [(1.0, 0.1, 0.1) if g > 0 else (0.2, 0.4, 1.0) for g in labels.gripper]
+        markers.markers.append(line_strip_marker('path', 0, labels.positions, base, stamp,
+                                                 colors=colors, width=0.004))
+        markers.markers.append(cylinder_marker(
+            'destination', 0, [result.destination[0], result.destination[1],
+                               result.destination_height + 0.001],
+            0.06, 0.002, base, stamp, (0.0, 0.9, 0.9, 0.6)))
+        markers.markers.append(text_marker(
+            'metrics', 0, labels.positions[gi] + [0, 0, 0.12],
+            f"min det {m['min_det']:.2f} | aim {m['aim_grasp_m'] * 1000:.1f} mm | "
+            f"width {m['object_width_closing_m'] * 1000:.0f} mm", base, stamp))
+        if selection is not None:
+            markers.markers += self._candidate_markers(selection, stamp)
+        self.marker_pub.publish(markers)
+
+        path = Path()
+        path.header.frame_id, path.header.stamp = base, stamp
+        path.poses = [matrix_to_pose_stamped(pos, rot, base, stamp)
+                      for pos, rot in zip(labels.positions[::2], labels.orientations[::2])]
+        self.path_pub.publish(path)
+
+
+    def _render_overlay(self, result):
+        """The latest colour image with the plan drawn through the calibration, or None."""
+        import cv2
+        from cv_bridge import CvBridge
+        color, info = self._color_msg, self._camera_info
+        if color is None or info is None:
+            self.get_logger().warn('no colour image / camera_info yet; overlay.png not written')
+            return None
+        T = self.calib.T_base_optical(color.header.frame_id or self.calib.cal.optical_frame)
+        if T is None:
+            return None
+        K = np.array(info.k, dtype=float).reshape(3, 3)
+        T_opt_base = cc.invert_transform(T)
+        img = CvBridge().imgmsg_to_cv2(color, desired_encoding='bgr8').copy()
+        h, w = img.shape[:2]
+
+        def project(points):
+            q = cc.transform_points(T_opt_base, np.atleast_2d(points))
+            z = np.maximum(q[:, 2], 1e-6)
+            return np.column_stack([K[0, 0] * q[:, 0] / z + K[0, 2],
+                                    K[1, 1] * q[:, 1] / z + K[1, 2]]), q[:, 2] > 0
+
+        uv, front = project(result.target_points)
+        for (u, v), f in zip(uv.astype(int), front):
+            if f and 0 <= u < w and 0 <= v < h:
+                img[v, u] = (0, 255, 0)
+        g = result.grasp
+        R = g.rotation
+        for box in self.end_effector.boxes():
+            corners = box.corners() @ R.T + g.tcp
+            c2, ok = project(corners)
+            if not ok.all():
+                continue
+            c2 = c2.astype(int)
+            for i in range(8):
+                for j in range(i + 1, 8):
+                    if bin(i ^ j).count('1') == 1:
+                        cv2.line(img, tuple(c2[i]), tuple(c2[j]),
+                                 (255, 0, 255) if box.name != 'body' else (200, 0, 200), 1,
+                                 cv2.LINE_AA)
+        tcp_uv, ok = project(g.tcp)
+        if ok[0]:
+            cv2.drawMarker(img, tuple(tcp_uv[0].astype(int)), (0, 0, 255), cv2.MARKER_CROSS, 16, 2)
+        table = result.support_height
+        ring = [g.tcp + [0.03 * np.cos(a), 0.03 * np.sin(a), 0.0] for a in np.linspace(0, 2 * np.pi, 25)]
+        ring = np.array(ring)
+        ring[:, 2] = table
+        r2, ok = project(ring)
+        if ok.all():
+            cv2.polylines(img, [r2.astype(np.int32)], True, (0, 200, 255), 1, cv2.LINE_AA)
+        m = result.metrics
+        cv2.putText(img, f"grasp TCP z {g.tcp[2]:+.3f} m ({(g.tcp[2] - table) * 1000:.0f} mm above "
+                    f"table), tilt {m.get('grasp_tilt_deg', 0):.0f} deg, pad engaged "
+                    f"{m.get('jaw_engagement_m', 0) * 1000:.0f} mm", (8, h - 10),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.45, (255, 255, 255), 1, cv2.LINE_AA)
+        return img
+
+    def _candidate_markers(self, selection, stamp):
+        """Gripper outlines for the candidates: chosen, planned-but-refused, screened out."""
+        chosen = selection.chosen
+        limit = int(self.get_parameter('grasp_markers_max').value)
+        others = [c for c in selection.candidates if c is not chosen][:max(limit, 0)]
+        refused, screened = [], []
+        for c in others:
+            segs = gripper_segments(c.grasp.tcp, c.grasp.approach, c.grasp.closing)
+            (refused if c.plan_metrics is not None else screened).append(segs)
+        markers = []
+        for mid, (segs, color, width) in enumerate((
+                (screened, (1.0, 0.2, 0.2, 0.25), 0.001),
+                (refused, (1.0, 0.6, 0.0, 0.9), 0.002),
+                ([gripper_segments(chosen.grasp.tcp, chosen.grasp.approach, chosen.grasp.closing)],
+                 (0.1, 1.0, 0.2, 1.0), 0.004))):
+            m = line_list_marker('grasp_candidates', mid,
+                                 np.concatenate(segs) if segs else np.zeros((0, 2, 3)),
+                                 self.base, stamp, color=color, width=width)
+            markers.append(m)
+        label = (f"{selection.source} score {chosen.score:.2f}" if selection.source == 'graspgenx'
+                 else 'side grasp (palm point)' if selection.source == 'side'
+                 else 'top-down fallback')
+        markers.append(text_marker('grasp_candidates', 3, chosen.grasp.tcp - chosen.grasp.approach * 0.12,
+                                   label, self.base, stamp, color=(0.1, 1.0, 0.2)))
+        return markers
+
+
+def load_end_effector(name, config_file=''):
+    """(EndEffector, SideGraspSettings or None, side grasp offset) for `end_effector`."""
+    from tpgpt.hardware.end_effector import FRANKA_HAND, inspire_from_config
+    name = str(name).strip().lower()
+    if name in ('panda', 'franka', 'franka_hand'):
+        return FRANKA_HAND, None, (0.0, 0.0, 0.0)
+    if name != 'inspire':
+        raise SystemExit(f"end_effector must be 'panda' or 'inspire', not {name!r}")
+    import dataclasses
+
+    from tpgpt.hardware.side_grasp import SideGraspSettings
+
+    from ycb_pointcloud_pipeline.inspire_hand import load_config
+    cfg = load_config(config_file or None)
+    ee = inspire_from_config(cfg)
+    ee = dataclasses.replace(ee, details={**ee.details, 'config_file': cfg['_path']})
+    sg = cfg.get('side_grasp', {})
+    defaults = SideGraspSettings()
+    side = SideGraspSettings(
+        standoff=float(sg.get('standoff_m', defaults.standoff)),
+        height_fraction=float(sg.get('height_fraction', defaults.height_fraction)),
+        min_height_above_support=float(sg.get('min_height_above_support_m',
+                                              defaults.min_height_above_support)),
+        max_below_top=float(sg.get('max_below_top_m', defaults.max_below_top)),
+        thumb_up=bool(sg.get('thumb_up', defaults.thumb_up)),
+        base_xy=tuple(float(v) for v in sg.get('base_xy', defaults.base_xy)),
+    )
+    return ee, side, tuple(float(v) for v in sg.get('grasp_offset_m', (0.0, 0.0, 0.0)))
+
+
+def graspgen_server_script():
+    """Installed copy of scripts/run_graspgenx_server.sh, else the source tree's."""
+    try:
+        from ament_index_python.packages import get_package_share_directory
+        share = os.path.join(get_package_share_directory('ycb_pointcloud_pipeline'), 'scripts',
+                             'run_graspgenx_server.sh')
+        if os.path.isfile(share):
+            return share
+    except Exception:  # noqa: BLE001 - package not installed
+        pass
+    source = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'scripts',
+                          'run_graspgenx_server.sh')
+    return source if os.path.isfile(source) else None
+
+
+def main(args=None):
+    rclpy.init(args=args)
+    node = TpgptPlannerNode()
+    executor = MultiThreadedExecutor(num_threads=3)
+    executor.add_node(node)
+    try:
+        executor.spin()
+    except (KeyboardInterrupt, rclpy.executors.ExternalShutdownException):
+        pass
+    finally:
+        executor.shutdown()
+        node.destroy_node()
+        rclpy.try_shutdown()
+
+
+if __name__ == '__main__':
+    main()

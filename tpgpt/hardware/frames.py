@@ -1,7 +1,7 @@
 """Rigid transforms and hand conventions for the real robot.
 
 Three coordinate conventions meet on the hardware path, and every one of them
-has already cost this project a silent error in simulation (``CLAUDE.md``,
+has already cost this project a silent error in simulation (``docs/sim/SIM_CLAUDE.md``,
 "Keypoints live in the grasp convention"). They are made explicit here:
 
 * **Frames.** Everything the planner and executor touch is expressed in the

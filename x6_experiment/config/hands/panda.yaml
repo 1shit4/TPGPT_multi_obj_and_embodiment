@@ -1,0 +1,38 @@
+# Franka Hand (parallel jaw) on the FR3. The physical description of the hand only.
+# Nothing in here is a tuning knob; it is fixed before this hand's first trial.
+hand:
+  name: panda
+  integrated: true
+  morphology: parallel_jaw_2f
+  graspgen_gripper: franka_panda
+  geometry_model: tpgpt.hardware.hand          # collision boxes, pads, TCP 0.1034 m
+  ee_frame: fr3_hand_tcp
+  grasp_to_ee_rotation: tpgpt.hardware.frames.GRASP_TO_FR3_TCP
+  tool_offset: [0.0, 0.0, 0.0]                  # fr3_hand_tcp is already the fingertip centre
+
+  # Caliper measurements (brief §6), NOT datasheet values
+  measured:
+    jaw_aperture_mm: TO_FILL
+    tcp_offset_from_flange_mm: TO_FILL
+    fingertip_depth_mm: TO_FILL
+    pad_width_mm: TO_FILL
+    measured_by: TO_FILL
+    measured_on: TO_FILL
+
+  # Franka Desk end-effector settings for this hand (payload model, not tuning)
+  desk:
+    mass_kg: TO_FILL
+    F_T_EE_translation_m: [0.0, 0.0, 0.1034]
+
+  gripper:
+    mode: franka_grasp                          # /franka_gripper/{grasp,move}
+    namespace: /franka_gripper
+    open_width_m: 0.08
+    grasp_speed_mps: 0.05
+    grasp_force_n: 20.0
+    width_topic: /franka_gripper/joint_states   # recorded as gripper_width
+
+  mount_check:                                  # pre-flight: this hand is the one mounted
+    require_action_servers: [/franka_gripper/grasp, /franka_gripper/move]
+    width_range_m: [0.0, 0.081]
+    desk_mass_tolerance_kg: 0.05

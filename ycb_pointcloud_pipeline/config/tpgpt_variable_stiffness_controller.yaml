@@ -1,0 +1,93 @@
+# CRISP CartesianController for TPGPT with the TRANSPORTED stiffness.
+#
+# Loaded at runtime by tpgpt_executor_node when use_transported_stiffness:=true
+# (the container sees ~/thor_ws at /workspaces/thor_ws). It is the FR3 real
+# profile of fr3_crisp_bringup/config/controllers.real.yaml with three changes:
+#
+#   1. variable_stiffness.enabled: true -- the executor streams
+#      [k_x, k_y, k_z, k_rx, k_ry, k_rz] on ~/target_stiffness every control step.
+#      With use_local_jacobian: true these act on the pose error expressed in the
+#      END-EFFECTOR frame; the executor rotates the transported 3x3 K into the
+#      measured TCP frame and sends its diagonal.
+#   2. d_pos_* and d_rot_* are -1.0, so damping tracks the commanded stiffness
+#      as 2*sqrt(K). Explicit positive damping would stay fixed while K changes.
+#      (For K = 350 N/m that is 37.4 N s/m; the source demonstration used 33.7.)
+#   3. Private topics: /tpgpt_cartesian_impedance_controller/target_pose and
+#      .../target_stiffness, so it cannot pick up commands meant for the stock
+#      cartesian_impedance_controller on /target_pose.
+#
+# The task gains below are only used until the first stiffness message arrives.
+# NOT validated settings for your robot, tool or payload -- review before use.
+tpgpt_cartesian_impedance_controller:
+  ros__parameters:
+    joints:
+      - fr3_joint1
+      - fr3_joint2
+      - fr3_joint3
+      - fr3_joint4
+      - fr3_joint5
+      - fr3_joint6
+      - fr3_joint7
+    end_effector_frame: fr3_hand_tcp
+    base_frame: base
+    use_operational_space: false
+    task:
+      k_pos_x: 400.0
+      d_pos_x: -1.0
+      k_pos_y: 400.0
+      d_pos_y: -1.0
+      k_pos_z: 400.0
+      d_pos_z: -1.0
+      k_rot_x: 30.0
+      d_rot_x: -1.0
+      k_rot_y: 30.0
+      d_rot_y: -1.0
+      k_rot_z: 30.0
+      d_rot_z: -1.0
+    nullspace:
+      stiffness: 2.0
+      damping: 2.8284271247461903
+      projector_type: kinematic
+      regularization: 1.0e-06
+      max_tau: 5.0
+    filter:
+      target_pose: 0.1
+      q: 0.5
+      dq: 0.5
+      q_ref: 0.5
+      output_torque: 0.5
+    use_friction: false
+    use_coriolis_compensation: true
+    use_gravity_compensation: false   # libfranka already compensates gravity
+    use_local_jacobian: true
+    topics:
+      target_pose: ~/target_pose
+      target_joint: ~/target_joint
+      target_wrench: ~/target_wrench
+    limit_error: true
+    limit_torques: true
+    max_delta_tau: 0.5
+    stop_commands: false
+    joint_limit_repulsion:
+      enabled: true
+      safe_range: 0.1
+      max_torque: 5.0
+    noise:
+      add_random_noise: false
+      amplitude: 0.0
+    variable_max_stiffness:
+      translational: 900.0      # executor's stiffness_max_translational must not exceed this
+      rotational: 60.0
+    variable_stiffness:
+      enabled: true
+      topic: ~/target_stiffness
+    enable_introspection: false
+    log:
+      enabled: false
+      robot_state: false
+      control_values: false
+      limits: false
+      controller_parameters: false
+      computed_torques: false
+      dynamic_params: false
+      timing: false

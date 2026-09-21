@@ -1,0 +1,63 @@
+# Inspire RH56 LEFT hand on the FR3 -- the single description every node reads.
+#
+# Read by: inspire_hand_node (serial, grasp), tpgpt_planner_node / tpgpt_pick_place
+# (-p end_effector:=inspire: mount geometry + side grasp), tpgpt_teach_node
+# (-p end_effector:=inspire: converts the taught pose to the palm point), and the X6
+# harness through x6_experiment/config/hands/inspire.yaml.
+#
+# Frames (see INSPIRE_HAND.md for the mounting drawing):
+#   fr3_link8     the flange: +Z out of the flange face along the joint-7 axis.
+#   fr3_hand_tcp  fr3_link8 turned -45 deg about +Z and moved 0.1034 m along +Z.
+#                 It stays in the URDF because the robot is still launched with the
+#                 Franka Hand description (load_gripper:=true); with the Inspire hand
+#                 mounted it is just a fixed virtual point in front of the flange.
+#   palm frame    grasp convention: +Z palm normal (out of the palm), +X wrist ->
+#                 fingertips (the "closing" axis), +Y = Z x X across the palm (towards
+#                 the thumb on a left hand). Origin = the grasp point on the palm.
+#
+# Lengths marked MEASURE are estimates from the RH56 manual drawing (217.8 mm
+# mount face -> fingertip, 80.7 mm palm width). Measure them with a caliper before
+# the first run: an error here moves where the palm stops by the same amount.
+# After changing this file: colcon build --packages-select ycb_pointcloud_pipeline.
+inspire_hand:
+  handedness: left
+
+  serial:
+    port: /dev/ttyUSB0          # CH340 USB-RS485 adapter (1a86:7523), needs the ch341 driver
+    baud: 115200
+    hand_id: 2                  # found with `inspire_hand scan`; factory default is 1
+
+  grasp:                        # the fixed open/close, verified on the hand 2026-09-15
+    speed: 500                  # 0-1000; 1000 = 0.8 s full stroke
+    force_g: 400                # per-finger stop threshold, grams (0-1000)
+    step_timeout_s: 3.0         # wait per motion step before moving on
+    state_rate_hz: 10.0         # /inspire_hand/joint_states while idle
+
+  mount:
+    # Frame CRISP commands and /current_pose reports. fr3_hand_tcp needs NO change to the
+    # robot bringup. fr3_link8 requires load_gripper:=false AND end_effector_frame:
+    # fr3_link8 in every CRISP controller config (see INSPIRE_HAND.md).
+    controller_frame: fr3_hand_tcp
+    # Rotation of the hand about the joint-7 axis: palm normal = Rz(yaw) * fr3_link8 +X.
+    # -45 = the palm faces fr3_hand_tcp +X (the red axis in RViz). MOUNTED THIS WAY
+    # (user, 2026-09-15): palm facing the end effector's +X, fingers along its +Z.
+    # (If the palm faced the bare flange's fr3_link8 +X instead, this would be 0.)
+    yaw_deg: -45.0
+    adapter_thickness_m: 0.012  # MEASURE: flange face -> hand mounting face
+    palm_along_axis_m: 0.095    # MEASURE: hand mounting face -> palm centre, along the hand axis
+    palm_normal_offset_m: 0.020 # MEASURE: hand axis -> palm surface, along the palm normal
+    palm_lateral_offset_m: 0.0  # palm centre off the axis, towards the little finger (left hand)
+
+  envelope:                     # one box around the open hand, palm frame, for clearance
+    lo_m: [-0.115, -0.045, -0.045]   # behind the palm point (wrist) / palm width / back of hand
+    hi_m: [0.125, 0.045, 0.080]      # fingertips / palm width / opposed thumb
+
+  side_grasp:                   # tpgpt.hardware.side_grasp.SideGraspSettings
+    standoff_m: 0.015           # palm surface this far in front of the object's surface
+    height_fraction: 0.5        # of the object's height above the support
+    min_height_above_support_m: 0.05   # keeps the little finger off the table
+    max_below_top_m: 0.02
+    thumb_up: true              # thumb + index on top, little finger nearest the table
+    base_xy: [0.0, 0.0]         # approach is radial from this point (robot base)
+    grasp_offset_m: [0.0, 0.0, 0.0]    # base-frame shift of the palm point (the Franka
+                                       # Hand's planner grasp_offset does NOT apply here)

@@ -1,0 +1,5 @@
+# hardware branch: CLAUDE.md is the hardware session guide. The simulation's own
+# CLAUDE.md is kept at docs/sim/SIM_CLAUDE.md and refreshed by scripts/merge_sim.sh,
+# so a merge of origin/main must never overwrite this one. Needs the local driver
+# `git config merge.ours.driver true`, which that script sets.
+CLAUDE.md merge=ours

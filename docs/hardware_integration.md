@@ -330,7 +330,7 @@ How each field is made (`tpgpt/hardware/teach.py`):
 | `velocities` | the Savitzky-Golay derivative at the 50 ms control period |
 | `stiffness`, `damping` | constant 400 N/m and 40 N·s/m on the diagonal (§5.5) |
 | `gripper` | +1 from the `g` mark to the `r` mark, −1 elsewhere |
-| `time_belief`, `time_rate` | `linspace(0, 1, M)` and `1 / (dt·(M−1))`, from the step index; the message stamps are discarded after resampling (CLAUDE.md rule 5) |
+| `time_belief`, `time_rate` | `linspace(0, 1, M)` and `1 / (dt·(M−1))`, from the step index; the message stamps are discarded after resampling (`docs/sim/SIM_CLAUDE.md` rule 5) |
 | `placement.points` | the `capture_scene` cloud |
 | `placement.grasp` | TCP position and grasp-convention axes at the first held label |
 | `support_height` | `expected_table_height` from the calibration YAML (−0.006 m), unless given as a parameter |
@@ -357,7 +357,7 @@ between the measured and the predicted placed centroids, and both lowest points.
 
 TPGPT's labels are the **commanded attractor** (the point the impedance spring
 pulls toward), not the measured pose. An impedance arm lags a moving attractor by
-`K⁻¹·D·v` (CLAUDE.md, §2.7 of `ROBOTICS_NOTES.md`). A hand-guided demonstration has
+`K⁻¹·D·v` (`docs/sim/SIM_CLAUDE.md`, §2.7 of `ROBOTICS_NOTES.md`). A hand-guided demonstration has
 no attractor, only the path the hand took. This version deliberately uses that
 measured path as the attractor, with one **static** stiffness and damping taken
 from the controller that will execute it: `cartesian_impedance_controller` runs
