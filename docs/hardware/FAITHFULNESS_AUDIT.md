@@ -16,6 +16,15 @@ way the sim does it.
 Severity: **H** changes which grasp is executed or what a trial measures. **M** changes behaviour in
 some runs. **L** is a small numerical mismatch.
 
+## Status
+
+| item | status |
+|---|---|
+| A1, A2, A3, A6, C3 | **Addressed 2026-09-21** (commits `f5f1e77`..`a647573`). Details, and where the robot deliberately keeps a different answer, are in `SHELF_AND_PATH_CHECK.md`. The kept differences: the shelf model plus the cloud on the shelf instead of a cloud-only scene; the least-bad fallback only for kinematics-only failures; the top-down grasp opt-in; the hardware jaw, refine, table and duplicate checks kept hard; per-candidate release poses in the place zone; a 25 mm centre margin on the cloud's box centre. |
+| A5 | **Open, and now measured to be harmful.** On the trial 0005 apple, the node's `grasp_offset` of [−35, 0, −25] mm puts candidates' hands 10–20 mm into the table, and no grasp was executable. With 0, rank 2 was chosen, clear along its whole path. The offset predates the recalibration. |
+| A4, A7, B1, B2, C1, C2, C4–C7 | Open. |
+| X6 | `x6_experiment.yaml`'s frozen `method:` still sets `max_plans: 12` and `fallback_top_down: true`, which override the new defaults in X6 trials. It is left for the X6 rework. |
+
 ---
 
 ## A. Grasp selection (the largest group)
@@ -76,7 +85,7 @@ deviations are in the node around it.
 
 ## Suggested order of fixes
 
-1. **A1 + A3 + C3 + A2.** Publish a scene cloud with the robot subtracted, and add FR3 IK. Then
+1. ~~**A1 + A3 + C3 + A2.**~~ Done, with A6 (see Status). Publish a scene cloud with the robot subtracted, and add FR3 IK. Then
    replace the selection with `_choose_grasp`'s rule: first admissible at every waypoint, least-bad
    fallback. `path_feasibility_observed` and `by_collision` need only numpy and scipy plus
    kinematics.

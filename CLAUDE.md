@@ -85,10 +85,18 @@ cd ~/thor_ws/src/ycb_point_cloud/TPGPT_multi_obj_and_embodiment
 # The method. test_gripper_actuation.py errors at COLLECTION (robosuite lacks UMIGripper),
 # which aborts the whole run unless ignored. testpaths = tests, so the ROS tests are not collected.
 ~/venvs/tpgpt/bin/python -m pytest tests/ -q --ignore=tests/integration/test_gripper_actuation.py
-# Just the hardware bridge (fast, and what most changes touch)
+# Just the hardware bridge (fast, ~10 s, and what most changes touch)
 ~/venvs/tpgpt/bin/python -m pytest tests/unit/test_hardware.py tests/unit/test_end_effector.py \
-    tests/unit/test_grasp_selection.py tests/integration/test_hardware_grasp_selection.py -q
+    tests/unit/test_grasp_selection.py tests/integration/test_hardware_grasp_selection.py \
+    tests/unit/test_fr3.py tests/unit/test_shelf.py tests/unit/test_path_check.py -q
 ```
+`test_hardware_grasp_selection.py` needs a running GraspGen-X server and skips without one.
+`test_fr3.py` checks FK against 40 at-rest samples of the real arm (`tests/data/`).
+
+**Offline ROS dry runs** go on another domain so nothing reaches the robot (`ROS_DOMAIN_ID=88`,
+without `host_ros_env.sh`), with fake `/ycb_pointclouds/<obj>`, `/ycb_scene_cloud` and
+`/joint_states` publishers. Base-frame points must be sent in the optical frame through the inverse
+of the installed calibration. If you start the GraspGen-X server for a test, stop it afterwards.
 
 Known failures, not regressions: `test_x6.py` × 2 (`x6_experiment.yaml` lists 6 objects where the
 grid expects 5); TPGPT × 7, all gripper-registry tests, because the local GraspGen-X checkout lacks
@@ -98,13 +106,15 @@ not installed. The two hands on the robot (`franka_panda`, `inspire_hand`) are u
 ## Architecture
 
 ```
-D435 (host) -> segmentation_node -> /ycb_pointclouds/<object>   (camera optical frame)
+D435 (host) -> segmentation_node -> /ycb_pointclouds/<object>, /ycb_scene_cloud  (optical frame)
                                           |
      camera_calibration.yaml (base <- optical) applied by the consumer
                                           |
-   tpgpt_planner_node -> tpgpt.hardware.{planner, grasp_selection} (+ GraspGen-X over ZMQ)
+   tpgpt_planner_node -> tpgpt.hardware.{planner, grasp_selection, path_check}  (+ GraspGen-X, ZMQ)
+        + config/shelf.yaml -> tpgpt.hardware.shelf (model + scene cloud on the shelf)
+        + /joint_states -> tpgpt.hardware.fr3 (IK seed; robot removed from the cloud)
                                           |  plan dir: ~/tpgpt_plans/<object>_<time>/
-   tpgpt_executor_node -> tpgpt.hardware.executor -> CRISP controller in the Docker container
+   tpgpt_executor_node -> tpgpt.hardware.executor (+ /joint_states) -> CRISP in the container
 ```
 `tpgpt_pick_place` runs planner then executor in one process; with `-p experiment:=true` it runs one
 X6 trial and writes the full trial record.
@@ -118,12 +128,20 @@ Two facts that need several files to see, and that decide whether a change is fa
   0.035), `rotational_stiffness` 30 (60), `speed_scale` 0.35, `use_transported_stiffness` False,
   and `on_stall: continue`, which **switches the lag gate and its clamp off** for the rest of a run
   after a stall.
-- **Grasp selection is a thinner reimplementation, and has no scene.** Hardware never imports
-  `tpgpt.grasp.filters`; it uses `tpgpt.hardware.grasp_selection.screen_candidates`. `TargetScene`
-  carries only the object cloud plus two scalar heights, and `segmentation_node` publishes no scene
-  cloud — so the planner cannot see the shelf. Collision is checked only against the object itself
-  and an infinite support plane. `filters.by_collision` and `path_feasibility_observed` are pure
-  numpy/scipy and would port directly once a scene cloud exists.
+- **Grasp selection is the simulation's rule, and sees the shelf** (since 2026-09-21,
+  `docs/hardware/SHELF_AND_PATH_CHECK.md`). `grasp_selection.select_and_plan` walks survivors in
+  score order and takes the first whose **whole transported path** passes
+  `path_check.path_feasibility`: `filters.path_feasibility_observed` on the FR3 model
+  (`tpgpt/hardware/fr3.py`, the live URDF, a hull per link, `solve_ik` transcribed) and the shelf
+  world (`tpgpt/hardware/shelf.py`: the measured model everywhere, plus the observed cloud only
+  inside the shelf's region). The funnel calls the sim's own `tpgpt.grasp.filters` stage functions
+  (visibility, on_target, grasp_collision, place_zone, centred), with the sim's pass-through rule.
+  The hardware's jaw, refine, table and duplicate checks stay as hard stages. Deliberate
+  differences, all documented there: a collision is never executed as a fallback, the top-down
+  grasp is opt-in, and the A4 gates are kept. Importing `tpgpt.grasp.*` loads robosuite (~0.5 s);
+  `fr3`, `shelf`, `path_check` and `executor` do not.
+- **The executor has the sim's infeasible-pose fallback**, on FR3 IK seeded from the measured
+  joints (`HardwareExecutor.step(..., joint_positions)`).
 
 The planner's support height is: its `support_height` parameter, else the calibration's
 `expected_table_height`, else estimated from the object cloud (biased a few mm high).
@@ -145,6 +163,19 @@ The planner's support height is: its `support_height` parameter, else the calibr
 - **`free_drive` "pose went stale"** means its own callback received nothing for `max_pose_age`
   (0.5 s) — subscriber starvation, while `/current_pose` itself holds 250 Hz. Intermittent.
   `-p max_pose_age:=2.0` works around it; that is a safety parameter, so it is the user's call.
+- **The shelf model is an estimate until measured** (`config/shelf.yaml`, `measured: false`). Only
+  the board heights and yaw are touched. Width, depth, walls and top are guesses, with no roof
+  assumed. A wrong guess causes false collisions or missed ones. How to measure:
+  `docs/hardware/SHELF_AND_PATH_CHECK.md`.
+- **`grasp_offset` (planner node default [−35, 0, −25] mm) predates the recalibration** and now
+  pushes grasps 10–20 mm into the table (measured on the trial 0005 apple). Audit item A5, open.
+- **X6 trials override the selection defaults** from the frozen `method:` block (`max_plans: 12`,
+  `fallback_top_down: true`) via `x6_trial.py`. Don't be surprised; it waits for the X6 rework.
+- **`auto_plan:=true` re-plans every second** after a refusal (each cloud arrival starts a plan
+  while `latest_plan` is unset). Old behaviour; `tpgpt_pick_place` calls the planner once.
+- **The planner and the executor need `/joint_states`** (robot container up). Without it the move
+  onto the path isn't checked, IK seeds from home, the robot isn't removed from the scene cloud, and
+  the executor's fallback stays off. Every one of these is logged.
 - **`franka_robot_state_broadcaster` logs "Failed to lock the realtime publisher"** several times a
   minute. Drops messages on `/franka_robot_state_broadcaster/robot_state` (wrench, EE mass), which
   the X6 recorder reads. Unresolved.
@@ -155,7 +186,10 @@ The planner's support height is: its `support_height` parameter, else the calibr
   shelf geometry.
 - `docs/hardware/commands.md` — how to launch the robot, pipeline, teaching, planning and execution.
 - `docs/hardware/FAITHFULNESS_AUDIT.md` — every place the hardware implementation differs from the
-  simulation's, with file:line on both sides, severity and fix order.
+  simulation's, with file:line on both sides, severity, fix order and status.
+- `docs/hardware/SHELF_AND_PATH_CHECK.md` — the shelf model, the scene cloud, the whole-path check
+  and grasp selection: which side's method was kept and why, how to measure and check the shelf,
+  parameters, and what was verified.
 - `docs/hardware/HARDWARE_EXPERIMENT.md` + `docs/hardware/HANDOVER_PROMPT.md` — the X6 experiment
   brief and its rules (one demonstration, no per-hand tuning, never force a grasp rank, clean tree).
 - `x6_experiment/RUNNING_THE_EXPERIMENT.md` — operating the X6 harness.
@@ -171,5 +205,9 @@ The planner's support height is: its `support_height` parameter, else the calibr
   table height and object list predate the move. The new shelf geometry is recorded in
   `docs/hardware/CALIBRATION.md` only. The user will rework X6 (including a new `run_id` and
   possibly four slots) later — do not edit it unprompted.
-- Open work, in the user's order: publish a scene cloud and port shelf collision filtering; add
-  grippers; decide on the executor-default deviations listed above.
+- **Done 2026-09-21 (audit A1, A2, A3, A6, C3):** the scene cloud, the shelf model, FR3
+  kinematics, the whole-path check, the sim's selection rule and funnel stages, and the executor's
+  infeasible-pose fallback. Tested offline and in a ROS dry run; **not yet run on the robot.**
+- Open, in the user's order: measure the shelf (`shelf.yaml`); decide `grasp_offset` (A5); then add
+  grippers; then the executor-default deviations (C1, C2, C4–C7), A4, A7, and B1/B2 (whether the
+  paper claims transported stiffness on hardware).

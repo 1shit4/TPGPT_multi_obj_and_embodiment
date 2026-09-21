@@ -38,6 +38,11 @@ ros2 run --prefix python3 ycb_pointcloud_pipeline tpgpt_pick_place --ros-args \
 - `dry_run` defaults to `true` (nothing moves, no `yes` prompt); `dry_run:=false` moves the robot.
 - On a failed plan, a `no` at the prompt, or an abort before the arm moved, it asks `Re-plan? [y/N]`.
 - Every `-p` reaches both nodes; `workspace_min` / `workspace_max` change both.
+- The planner checks every candidate's whole path against the shelf (`config/shelf.yaml`, rebuild
+  after editing) and the scene cloud on it, and needs `/joint_states` (robot container up). In RViz:
+  "Shelf model" and "Shelf cloud (obstacles)". The log line `Shelf world: {...}` gives
+  `explained_by_model` (close to 1 for an empty, correctly modelled shelf).
+  See `docs/hardware/SHELF_AND_PATH_CHECK.md`.
 
 Planning node (separately)
 ```bash
