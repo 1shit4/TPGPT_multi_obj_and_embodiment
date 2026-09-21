@@ -36,6 +36,19 @@ from tpgpt.utils.rotations import quat_to_matrix
 #: the box or the table and the grasp fails outright.
 GRASP_HEIGHT_OFFSET = PRODUCT_HALF_SIZE[2]
 
+#: How far the teacher lifts above the grasp and above the goal, metres.
+#:
+#: 0.16 was enough for the demonstration's own 90 mm box. It is not margin
+#: enough for what the map does to the middle of the path: with keypoints
+#: only at the pick and the release, the affine part shears the vertical
+#: lift into a slant -- on the YCB grid the carried banana had moved 180 mm
+#: forward by waypoint 84 while still 50 mm below the top board, and caught
+#: its front edge -- and the residual bends the transfer, swinging the object
+#: 130 mm past the top-left slot into the cubby's side wall. The paper states
+#: that limitation; what a careful teacher does about it is leave room.
+#: 0.26 is 100 mm more, chosen as the size of those two misses.
+HOVER_HEIGHT = 0.26
+
 
 @dataclass
 class Waypoint:
@@ -65,7 +78,7 @@ def pick_place_waypoints(
     place_rotation: np.ndarray,
     grasp_approach: np.ndarray = (0.0, 0.0, -1.0),
     place_approach: np.ndarray | None = None,
-    hover_height: float = 0.16,
+    hover_height: float = HOVER_HEIGHT,
     free_stiffness: float = 350.0,
     insertion_stiffness: float = 900.0,
 ) -> list[Waypoint]:
@@ -116,16 +129,26 @@ def pick_place_waypoints(
     climb = float((above_goal - above_object) @ (-place_approach))
     clear = above_object - place_approach * max(0.0, climb)
 
+    # **Segments take the time their length needs.** The counts below were
+    # written for a 160 mm hover; held fixed while the hover grows, the descent
+    # gets faster, the impedance-controlled arm lags its attractor further, and
+    # the jaws close before the hand is down -- at 190 mm the product never
+    # left the table. Vertical segments therefore run at the speed the 160 mm
+    # ones had (6.4 mm per step), and the clear segment likewise.
+    per_m = 25 / 0.16
+    vertical = max(25, int(round(hover_height * per_m)))
+    clearing = max(1, int(round(max(0.0, climb) * per_m)))
+
     return [
         Waypoint(above_object, -1.0, free_stiffness, 25, "approach", grasp_rotation),
-        Waypoint(grasp_position, -1.0, free_stiffness, 25, "descend", grasp_rotation),
+        Waypoint(grasp_position, -1.0, free_stiffness, vertical, "descend", grasp_rotation),
         Waypoint(grasp_position, 1.0, insertion_stiffness, 15, "grasp", grasp_rotation),
-        Waypoint(above_object, 1.0, free_stiffness, 25, "lift", grasp_rotation),
-        Waypoint(clear, 1.0, free_stiffness, 20, "clear", grasp_rotation),
+        Waypoint(above_object, 1.0, free_stiffness, vertical, "lift", grasp_rotation),
+        Waypoint(clear, 1.0, free_stiffness, clearing, "clear", grasp_rotation),
         Waypoint(above_goal, 1.0, free_stiffness, 40, "transfer", place_rotation),
-        Waypoint(place_position, 1.0, insertion_stiffness, 30, "insert", place_rotation),
+        Waypoint(place_position, 1.0, insertion_stiffness, max(30, vertical), "insert", place_rotation),
         Waypoint(place_position, -1.0, insertion_stiffness, 15, "release", place_rotation),
-        Waypoint(above_goal, -1.0, free_stiffness, 25, "retreat", place_rotation),
+        Waypoint(above_goal, -1.0, free_stiffness, vertical, "retreat", place_rotation),
     ]
 
 
@@ -133,7 +156,7 @@ def reshelving_waypoints(
     product_position: np.ndarray,
     goal_position: np.ndarray,
     product_yaw: float = 0.0,
-    hover_height: float = 0.16,
+    hover_height: float = HOVER_HEIGHT,
     free_stiffness: float = 350.0,
     insertion_stiffness: float = 900.0,
 ) -> list[Waypoint]:

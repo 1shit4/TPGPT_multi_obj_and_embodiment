@@ -1507,6 +1507,7 @@ def path_feasibility_observed(
     stop_early: bool = False,
     bodies=None,
     join_margin: int = JOIN_MARGIN,
+    debug: list | None = None,
 ) -> dict:
     """The same question as :func:`path_feasibility`, asked with what the robot can see.
 
@@ -1567,9 +1568,25 @@ def path_feasibility_observed(
 
     bodies = bodies if bodies is not None else robot_bodies(env)
     scene = np.atleast_2d(np.asarray(scene_points, dtype=float))
-    scene_tree = cKDTree(scene) if len(scene) else None
     held = np.atleast_2d(np.asarray(object_points, dtype=float)) if len(
         np.asarray(object_points)) else np.empty((0, 3))
+    # **A scene point that touches the object before it moves is not an
+    # obstacle to it.** The camera-built scene cloud keeps a halo of the
+    # object's own outline -- depth-edge pixels labelled as background at the
+    # object's height; a banana at rest had 32 "scene" points within 20 mm at
+    # z = 0.80-0.837 on a table at 0.800 -- and the surface it rests on. Once
+    # the object rises a few centimetres those points sit beside it and read
+    # as a sideways collision, which is what rejected the flat objects on
+    # every hand (7.46). Points within the contact radius of the object at
+    # its initial pose are removed from what the carried object is tested
+    # against; the robot is still tested against all of them.
+    carried_scene = scene
+    if len(held) and len(scene):
+        near = cKDTree(held).query_ball_point(scene, contact_radius)
+        halo = np.array([len(n) > 0 for n in near])
+        carried_scene = scene[~halo]
+    scene_tree = cKDTree(scene) if len(scene) else None
+    carried_tree = cKDTree(carried_scene) if len(carried_scene) else None
     normal = np.asarray(support_normal, dtype=float)
     normal = normal / np.linalg.norm(normal)
 
@@ -1642,10 +1659,10 @@ def path_feasibility_observed(
                     hit = True
 
             # --- the object it is carrying, against everything else ---------
-            if local is not None and scene_tree is not None and phase in (
+            if local is not None and carried_tree is not None and phase in (
                     "carry", "place"):
                 world = p + local @ R.T
-                near = scene_tree.query_ball_point(world, contact_radius)
+                near = carried_tree.query_ball_point(world, contact_radius)
                 touched = {int(i) for group in near for i in group}
                 if touched:
                     # **From underneath is a surface; from the side is a
@@ -1659,13 +1676,17 @@ def path_feasibility_observed(
                     centre = world.mean(axis=0)
                     lateral = [
                         i for i in touched
-                        if (scene[i] - centre) @ normal
-                        > -0.5 * float(np.linalg.norm(scene[i] - centre) + 1e-12)
+                        if (carried_scene[i] - centre) @ normal
+                        > -0.5 * float(np.linalg.norm(carried_scene[i] - centre) + 1e-12)
                     ]
                     if lateral:
                         key = f"{phase}: the carried object hits something sideways"
                         faults[key] = faults.get(key, 0) + len(lateral)
                         hit = True
+                        if debug is not None:
+                            debug.append({"waypoint": int(k), "object_centre": centre,
+                                          "object_z": (float(world[:, 2].min()), float(world[:, 2].max())),
+                                          "points": carried_scene[lateral]})
             if hit and joined_at is None and k < join_limit:
                 skipped_unreachable += 1
                 continue
