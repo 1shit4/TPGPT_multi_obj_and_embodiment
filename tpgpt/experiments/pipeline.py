@@ -826,7 +826,10 @@ def run(
         result.metrics.update(rollout.metadata)
         result.timings = timings.stages
         _record_errors(result, env, rollout)
-        _, release = carry_indices(labels)
+        # Indices into the plan *as executed*: the transported labels, which
+        # may have been joined part-way (start_index), not the source labels.
+        # The report figure indexes result.transported with this.
+        _, release = carry_indices(transported)
         result.metrics["release_index"] = release
 
         if not rollout.success:
