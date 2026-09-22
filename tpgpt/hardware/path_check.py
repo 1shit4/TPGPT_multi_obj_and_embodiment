@@ -213,8 +213,12 @@ def _robot_faults(pieces, world, phase: str, depth_tolerance: float,
     return faults
 
 
-#: The object's base, the face it stood on at the pick: its cloud points within
-#: this of its lowest point, metres. The face that must be the one set down.
+#: The face the plan sets the object down on: its cloud points within this of
+#: its lowest point **in the planned release pose**, metres. Not the face it
+#: stood on at the pick -- a plan may turn the object (a box picked lying flat
+#: and shelved upright); the release pose is the map's transport of the
+#: demonstration's release, so the face down in it is the one the method means
+#: to set down.
 BASE_BAND = 0.010
 #: A support surface is the pick or the destination support when its top lies
 #: within this of the object's lowest point / the destination height, metres.
@@ -277,9 +281,9 @@ def path_feasibility(
         touches it.
     ``place`` (``r - place_window`` .. ``r``)
         The object may touch the destination surface -- the top face of the
-        destination board, or the table -- with its **base** only (the points
-        it stood on at the pick), at most ``contact_radius`` deep. Any other
-        contact, or a non-base point touching, is a fault.
+        destination board, or the table -- with its **place face** only (the
+        points lowest in the planned release pose), at most ``contact_radius``
+        deep. Any other contact, or another face touching, is a fault.
     ``retreat`` (after ``r``)
         The placed object stays where it was set down and is an obstacle. The
         fingers may touch it **until they first clear it**; the rest of the
@@ -332,7 +336,8 @@ def path_feasibility(
     local = base = None
     if len(held):
         local = (held - positions[g]) @ rotations[g]
-        base = held[:, 2] <= float(held[:, 2].min()) + BASE_BAND
+        at_release = positions[r] + local @ rotations[r].T
+        base = at_release[:, 2] <= float(at_release[:, 2].min()) + BASE_BAND
     # Which surface the object is picked from, and which it is set down on.
     pick_support = _support_at(model, table, float(held[:, 2].min()) if len(held) else None)
     place_support = _support_at(model, table, destination_height)
@@ -453,7 +458,7 @@ def path_feasibility(
             if not lifted:
                 allowed.add(("rest", pick_support))           # still standing on its support
             if stage == "place":
-                allowed.add(("base_rest", place_support))     # being set down, on its base
+                allowed.add(("base_rest", place_support))     # set down, on its place face
             for kind, where, n in contact:
                 ok = ((kind in ("rest", "base_rest") and ("rest", where) in allowed)
                       or (kind == "base_rest" and ("base_rest", where) in allowed))
@@ -557,8 +562,9 @@ def _support_at(model, table, height):
 def _object_contacts(obj, base, world, model, table, depth_tolerance, contact_radius):
     """Every contact of the carried object with the world, classified.
 
-    Returns ``[(kind, where, count)]``: ``kind`` is ``"base_rest"`` (base
-    points on a support's top face, at most ``contact_radius`` into it),
+    Returns ``[(kind, where, count)]``: ``kind`` is ``"base_rest"`` (points of
+    ``base`` -- the place face -- on a support's top face, at most
+    ``contact_radius`` into it),
     ``"rest"`` (other points there), ``"deep"`` (into a support deeper than
     that), ``"into"`` (into a non-support face: a side panel, a board's
     underside or edge) or ``"seen"`` (within ``contact_radius`` of a seen
@@ -615,7 +621,7 @@ def _clear_of(obj, support, model, table, contact_radius) -> bool:
 def _describe(kind: str, where: str) -> str:
     return {
         "base_rest": f"touches {where}",
-        "rest": f"touches {where} with a face other than its base",
+        "rest": f"touches {where} with a face other than the one it is set down on",
         "deep": f"pressed into {where}",
         "into": f"in shelf {where}",
         "seen": "touches seen points",

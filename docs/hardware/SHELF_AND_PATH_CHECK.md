@@ -130,21 +130,26 @@ release.
 | **approach** | before *g* − 3 | no part of the robot may touch it | — |
 | **pick** | *g* − 3 … *g* | the **fingers** may touch it; the palm and links may not | it stands on its support |
 | **carry** | after *g*, before *r* − 12 | held by the fingers; **no arm link** may touch it | it may rest on the surface it was picked from **until it first clears it**, then never again. It touches nothing else. |
-| **place** | *r* − 12 … *r* | held by the fingers; no arm link may touch it | only its **base** may touch, and only the **destination surface** (the destination board's top face, or the table if that is the destination), at most 5 mm in. Another face touching (it's being put down on its side), another surface, a side panel, or any seen point is a fault. |
+| **place** | *r* − 12 … *r* | held by the fingers; no arm link may touch it | only its **place face** may touch, and only the **destination surface** (the destination board's top face, or the table if that is the destination), at most 5 mm in. Another face touching (it's being put down on its side), another surface, a side panel, or any seen point is a fault. |
 | **retreat** | after *r* | the object stays where it was set down and is an obstacle. The **fingers** may touch it **until they first clear it**, then never again; the palm and links never. | — |
 
-**The base** is the object's cloud points within 10 mm of its lowest point at the pick: the face it
-stood on. It moves rigidly with the hand from the close, so "which face touches the board" holds
-however the carry turns it. This replaces the sim's rule, which called a contact "support" when it
-lay within 60° of straight down from the object's centre, and misreads the bottom corners of a wide
-flat object as side hits. "Until it first clears" is measured, not counted: the object clears its
+**The place face** is the face the plan sets the object down on: its cloud points within 10 mm of
+its lowest point **in the planned release pose**. It is *not* the face the object stood on at the
+pick. A plan may turn the object (a box picked lying flat and shelved upright), and the release pose
+is the map's transport of the demonstration's release, so the face down in it is the one the method
+means to set down. The object's cloud is carried rigidly with the hand, so the check can ask, at
+every waypoint of the place, whether a point of *another* face is touching (tilting in, dropping on
+an edge). This replaces the sim's rule, which called a contact "support" when it lay within 60° of
+straight down from the object's centre, and misreads the bottom corners of a wide flat object as
+side hits. "Until it first clears" is measured, not counted: the object clears its
 support when its lowest point is more than 5 mm above it, and the fingers clear the placed object
 when none of them touches it.
 
 **Limits of this.**
 - The Inspire hand is modelled as one envelope, so its fingers can't be told from its palm. The
   envelope counts as fingers.
-- The camera sees the object from one side, so its "base" is the bottom of what was seen.
+- The camera sees the object from one side, so its place face is the lowest part of what was seen,
+  turned into the release pose.
 - Link 5's convex hull is 1.78× its real volume. Postures that fold the hand back toward the forearm
   may be reported as self-collisions that aren't real; splitting link 5 into two parts would settle
   it.

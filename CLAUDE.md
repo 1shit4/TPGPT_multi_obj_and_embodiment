@@ -140,7 +140,7 @@ Two facts that need several files to see, and that decide whether a change is fa
   the target, and the camera's points on the table and shelf removed), and **itself** (exact convex
   tests between pieces not joined at a joint). Contacts are allowed **by stage** (pick: fingers on
   the object; carry: the object on its pick support only until it first clears it; place: only the
-  object's base on the destination surface; retreat: fingers on the placed object only until they
+  face that is lowest in the planned release pose, on the destination surface; retreat: fingers on the placed object only until they
   first clear it). Reachability is **strict** by default: every waypoint reachable in position, the
   pick and place with their orientation, and IK retried first. Full account: `SHELF_AND_PATH_CHECK.md`,
   "How a path is checked". The funnel calls the sim's own `tpgpt.grasp.filters` stage functions

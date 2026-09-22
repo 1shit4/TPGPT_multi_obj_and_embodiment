@@ -349,3 +349,35 @@ def test_in_the_retreat_the_fingers_may_not_go_back_into_the_placed_object():
     r = _check(positions, rotations, ShelfWorld.build(None), grasp=2, release=19,
                object_points=cube)
     assert any("retreat" in k and "placed object" in k for k in r["faults"])
+
+
+def test_the_face_set_down_is_the_one_down_at_the_release_not_at_the_pick():
+    """A 20 x 40 x 60 mm block picked standing on its 20 x 40 end, turned by the
+    hand during the carry, and set down on a long side: the face that touches is
+    the one lowest in the planned release pose, so this is a correct placement."""
+    from scipy.spatial.transform import Rotation, Slerp
+
+    g, rise, over, down = 5, 20, 20, 15
+    n = g + 1 + rise + over + down
+    r = n - 1
+    side = Rotation.from_euler("x", -90, degrees=True).as_matrix() @ DOWN
+    turn = Slerp([0, 1], Rotation.from_matrix([DOWN, side]))(np.linspace(0, 1, rise)).as_matrix()
+    rotations = np.vstack([np.repeat(DOWN[None], g + 1, axis=0), turn,
+                           np.repeat(side[None], over + down, axis=0)])
+    # Picked in front of the shelf (its front edge is at x = 0.35), lifted and
+    # turned, carried over the board, lowered onto it.
+    positions = np.vstack([np.linspace([0.28, 0.10, 0.12], [0.28, 0.10, 0.12], g + 1),
+                           np.linspace([0.28, 0.10, 0.12], [0.28, 0.0, 0.40], rise),
+                           np.linspace([0.28, 0.0, 0.40], [0.45, 0.0, 0.40], over),
+                           np.linspace([0.45, 0.0, 0.40], [0.45, 0.0, 0.30], down)])
+    block = np.mgrid[-0.01:0.0101:0.005, -0.02:0.0201:0.005, -0.03:0.0301:0.005].reshape(3, -1).T
+    obj = positions[g] + block + [0.0, 0.0, -0.035]              # standing, below the fingertips
+    # Where it ends up, and how far to shift it so its lowest face is 3 mm into the board.
+    local = (obj - positions[g]) @ rotations[g]
+    final = positions[r] + local @ rotations[r].T
+    obj = obj + [0.0, 0.0, (0.20 - 0.003) - final[:, 2].min()]
+    world = ShelfWorld.build(_shelf(0.20, x0=0.35))
+    res = _check(positions, rotations, world, grasp=g, release=r, object_points=obj,
+                 destination_height=0.20)
+    assert res["skipped"] == 0 and res["relaxed_in_pick_or_place"] == 0
+    assert not [k for k in res["faults"] if "carried object" in k], res["faults"]
