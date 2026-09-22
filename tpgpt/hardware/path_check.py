@@ -31,6 +31,13 @@ What is new, and why:
   panel), since a thin board can pass through a link with no vertex inside it.
   The observed cloud inside the shelf's region is treated exactly as the
   simulation treats its scene cloud.
+* **The arm against itself.** The simulation's check skips robot-robot contacts.
+  On the robot a folded arm is as real a collision as the shelf, so every pair
+  of robot pieces is tested -- exactly, as convex bodies (:func:`penetration`) --
+  except the pairs that overlap by construction: links joined at a joint
+  (``link k``/``link k+1``, ``link7``/hand) and the hand's own pieces. Measured on
+  40 at-rest poses of the real arm (``tests/data/fr3_still_samples.npz``) plus
+  home: only those pairs ever intersect (by up to 34 mm), no other pair touches.
 * **The move onto the path.** The simulated arm starts every run from the same
   home, which the scene was built around. The real arm starts wherever it was
   left, and the executor drives it in a straight line to the path's first pose
@@ -107,9 +114,60 @@ def robot_pieces(fr3: FR3, q, end_effector, opening: float) -> tuple[list[_Piece
     return pieces, T
 
 
-def _robot_faults(pieces, world, phase: str, depth_tolerance: float) -> dict:
-    """Robot pieces against the shelf model and the shelf cloud."""
+def penetration(A: np.ndarray, B: np.ndarray) -> float:
+    """How deep two convex bodies, given by their vertices, interpenetrate, metres.
+
+    Exact: they intersect exactly when their Minkowski difference ``A - B``
+    contains the origin, and the origin's distance to that hull's nearest face
+    is then the penetration depth. Negative when they are apart (a lower bound
+    on the gap, not the gap).
+    """
+    from scipy.spatial import ConvexHull
+
+    D = (np.asarray(A)[:, None, :] - np.asarray(B)[None, :, :]).reshape(-1, 3)
+    return float(-ConvexHull(D).equations[:, 3].max())
+
+
+def _joined(a: str, b: str) -> bool:
+    """Pieces that overlap by construction: joint neighbours and the hand's own parts."""
+    if a.startswith("hand_") and b.startswith("hand_"):
+        return True
+    pair = {a, b}
+    if "fr3_link7" in pair and any(n.startswith("hand_") for n in pair):
+        return True
+    if a.startswith("fr3_link") and b.startswith("fr3_link"):
+        return abs(int(a[-1]) - int(b[-1])) == 1
+    return False
+
+
+def _self_faults(pieces, phase: str, depth_tolerance: float) -> dict:
+    """The arm against itself: every pair not joined by construction."""
     faults: dict = {}
+    for i in range(len(pieces)):
+        for j in range(i + 1, len(pieces)):
+            a, b = pieces[i], pieces[j]
+            if _joined(a.name, b.name):
+                continue
+            ca, cb = a.vertices.mean(axis=0), b.vertices.mean(axis=0)
+            d = cb - ca
+            ra = float(np.linalg.norm(a.vertices - ca, axis=1).max())
+            rb = float(np.linalg.norm(b.vertices - cb, axis=1).max())
+            if float(np.linalg.norm(d)) > ra + rb:
+                continue
+            # Cheap exact reject: separated along the line between centroids.
+            if float((a.vertices @ d).max()) + depth_tolerance * float(np.linalg.norm(d)) \
+                    < float((b.vertices @ d).min()):
+                continue
+            if penetration(a.vertices, b.vertices) > depth_tolerance:
+                key = f"{phase}: self {a.name} <-> {b.name}"
+                faults[key] = faults.get(key, 0) + 1
+    return faults
+
+
+def _robot_faults(pieces, world, phase: str, depth_tolerance: float,
+                  check_self: bool = True) -> dict:
+    """Robot pieces against the shelf model, the observed cloud and themselves."""
+    faults: dict = _self_faults(pieces, phase, depth_tolerance) if check_self else {}
     model = world.model
     if model is not None:
         surface, owner = world.surface()
@@ -164,6 +222,7 @@ def path_feasibility(
     support_normal=(0.0, 0.0, 1.0),
     stop_early: bool = False,
     min_reachable_fraction: float | None = MIN_REACHABLE_FRACTION,
+    check_self: bool = True,
 ) -> dict:
     """Solve and check a transported path, waypoint by waypoint.
 
@@ -239,7 +298,8 @@ def path_feasibility(
                 continue
             seed = result.qpos
             pieces, _ = robot_pieces(fr3, seed, end_effector, MAX_OPENING)
-            for key, count in _robot_faults(pieces, world, "approach_in", depth_tolerance).items():
+            for key, count in _robot_faults(pieces, world, "approach_in", depth_tolerance,
+                                            check_self).items():
                 bad[key] = bad.get(key, 0) + count
         approach_in = {"steps": int(n), "unreachable": int(unreached), "faults": bad}
         if bad:
@@ -277,7 +337,7 @@ def path_feasibility(
         opening = closed_width if gripper[k] > 0 else MAX_OPENING
         pieces, _ = robot_pieces(fr3, seed, end_effector, opening)
 
-        hits = _robot_faults(pieces, world, phase, depth_tolerance)
+        hits = _robot_faults(pieces, world, phase, depth_tolerance, check_self)
 
         # --- the robot against the object it has not picked up yet ---------------
         # Outside the grasp window only, as in the simulation: within it the jaws
@@ -362,6 +422,6 @@ def verdict(check: dict, min_reachable_fraction: float = MIN_REACHABLE_FRACTION)
     return None
 
 
-__all__ = ["CLOUD_CONTACT_RADIUS", "CONTACT_DEPTH_TOLERANCE", "GRASP_CONTACT_WINDOW",
+__all__ = ["penetration", "CLOUD_CONTACT_RADIUS", "CONTACT_DEPTH_TOLERANCE", "GRASP_CONTACT_WINDOW",
            "MIN_REACHABLE_FRACTION", "PLACE_WINDOW", "REACH_TOLERANCE", "STRIDE",
            "check_plan", "path_feasibility", "robot_pieces", "verdict"]

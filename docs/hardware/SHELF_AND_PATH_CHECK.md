@@ -32,7 +32,7 @@ shelf is still an estimate.
 
 | question | simulation | robot, now | why |
 |---|---|---|---|
-| What the arm can hit | an **observed** scene cloud, robot subtracted | the **measured shelf model**, plus the observed cloud **inside the shelf's region only** | The camera sees part of the shelf and little of the arm's workspace. Cloud-only is blind at the unseen shelf. Treating unseen space as occupied would reject almost every path, since most of the arm's motion is out of view. The shelf is known by touch (±1 mm, independent of the camera), and it is the only thing on the bench the arm can hit. The cloud keeps what the model can't know (an object standing in a slot, a panel the model gets wrong) wherever the camera sees it. Outside the shelf region nothing counts as an obstacle. |
+| What the arm can hit | an **observed** scene cloud, robot subtracted; robot-robot contacts ignored | (1) **everything the camera sees** within reach (target, table and robot removed); (2) where it can't see, **only the shelf**: the measured model, seen or unseen; (3) **its own body**, checked exactly between every pair of pieces not joined at a joint | The user's statement of the bench (2026-09-22). The camera sees part of the shelf and little of the arm's workspace: cloud-only is blind at the unseen shelf, and treating unseen space as occupied would reject almost every path. The shelf is known by touch, independent of the camera. Self-collision is added because a folded arm is as real a collision as the shelf; at 40 real at-rest poses only joint neighbours' hulls touch, so excluding exactly those gives no false faults. Without joint angles the robot can't be removed from the cloud, so it falls back to the shelf region only, and says so. |
 | The arm's shape and reach | MuJoCo's geoms and `solve_ik` | the FR3's own URDF (live `/robot_description`), a convex hull per link, and `solve_ik` transcribed | Same semantics as the sim: MuJoCo also collides a mesh by its hull. FK matches `/current_pose` to 0.01 mm median, 0.18 mm worst, at rest. |
 | Where the IK path starts | the sim's fixed home | the **measured joints**, and the straight move onto the path is checked too (`approach_in`) | The real arm starts wherever it was left. This also puts the IK on the configuration branch the impedance controller will actually be on. |
 | Exact geometry vs cloud tolerances | 1 mm on exact geometry, 5 mm on clouds | the same numbers: 1 mm on the model, 5 mm on the cloud and for the carried object | Constants are restated without importing robosuite, and a test asserts they match. |
@@ -79,8 +79,8 @@ base frame).
 Run the planner (or `tpgpt_pick_place` with `dry_run:=true`) and look at RViz, fixed frame `base`:
 
 - `/tpgpt/plan/shelf`: the model's panels, with support boards drawn darker.
-- `/tpgpt/plan/shelf_cloud`: the observed points kept on the shelf (magenta). With the arm out of
-  view and the shelf empty, these should lie on the panels.
+- `/tpgpt/plan/shelf_cloud`: the observed obstacle points (magenta). With the shelf empty,
+  those on the shelf should lie on the panels, and nothing should remain on the arm or the table.
 
 The planner logs `Shelf world: {...}`. **`explained_by_model`** is the fraction of observed shelf
 points within 15 mm of the model's surface. With an empty shelf it should be close to 1. A low
@@ -91,11 +91,19 @@ on the shelf, or model error.
 
 `segmentation_node` publishes `/ycb_scene_cloud` each cycle: every 4th pixel of the same depth frame
 as the object clouds (~25k points), in the optical frame. The planner keeps a cloud only if it is
-under `scene_max_age` (10 s) old. It crops it to the shelf region (the model's box plus 3 cm,
-reaching 0.30 m above the highest support board so objects standing on an open-top shelf stay in).
-It then removes points within 15 mm of the target's cloud, removes the robot using the FR3 hulls and
-hand boxes at the `/joint_states` recorded with that cloud, and applies a radius-outlier filter at
-20 mm. Without joint angles, the robot is not removed, and the report says so.
+under `scene_max_age` (10 s) old. With `scene.scope: visible` (the default), it keeps every point
+within the arm's reach (1.15 m from the shoulder) and removes:
+
+- the table: everything below the support height + 15 mm. The table is the support plane the
+  planner checks separately, and the cloud's table lies within about 10 mm of it (4.9 mm offset,
+  0.61° tilt). The cost: anything flatter than 15 mm lying on the table isn't an obstacle.
+- the target: points within 15 mm of its cloud;
+- the robot: the FR3 hulls and hand boxes at the `/joint_states` recorded with that cloud.
+
+It then applies a radius-outlier filter at 20 mm. Without joint angles the robot can't be removed,
+so only the shelf region is kept (`scope: shelf`: the model's box plus 3 cm, and 0.30 m above the
+highest support board). The report says so. `explained_by_model` is always measured on the shelf
+region.
 
 ## Parameters (planner node)
 

@@ -13,9 +13,9 @@ TPGPT planning from real perception. Does NOT move the robot.
          wins (tpgpt.hardware.grasp_selection, tpgpt.hardware.path_check -- the
          simulation's _choose_grasp rule). The scripted top-down grasp is used
          only when asked for (top_down_grasp / grasp_fallback_top_down).
-      -> the shelf: config/shelf.yaml (the measured model) plus /ycb_scene_cloud
-         cropped to the shelf's region, target and robot (at the /joint_states of
-         the capture) removed. /joint_states now also seeds the path check with
+      -> what the arm can hit: config/shelf.yaml (the measured shelf, seen or not),
+         everything /ycb_scene_cloud sees within reach (target, table and the
+         robot at the /joint_states of the capture removed), and the arm itself. /joint_states now also seeds the path check with
          the arm's real configuration and checks the move onto the path.
       -> tpgpt.hardware.planner.plan(): keypoints (grasp-pose cube),
          transportation map, transported policy labels (fr3_hand_tcp)
@@ -33,7 +33,7 @@ Published (latched / transient-local, fixed frame `base`):
                                red closed), destination disc, metrics text
   /tpgpt/plan/path             nav_msgs/Path of fr3_hand_tcp poses
   /tpgpt/plan/shelf            the shelf model's panels (brown; support boards darker)
-  /tpgpt/plan/shelf_cloud      observed obstacle points on the shelf (magenta)
+  /tpgpt/plan/shelf_cloud      observed obstacle points (magenta)
   /tpgpt/plan/overlay          the camera image with the fused cloud (green dots), the
                                chosen grasp's Franka Hand collision boxes (magenta, open)
                                and TCP (red cross) projected through the calibration; also
@@ -281,7 +281,8 @@ class TpgptPlannerNode(Node):
             self.shelf_model, points, target_points=target_points, robot_q=q,
             fr3=default_model(), end_effector=self.end_effector,
             margin=float(scene_cfg.get('roi_margin', ROI_MARGIN)),
-            above_support=float(scene_cfg.get('roi_above_support', ROI_ABOVE_SUPPORT)))
+            above_support=float(scene_cfg.get('roi_above_support', ROI_ABOVE_SUPPORT)),
+            scope=str(scene_cfg.get('scope', 'visible')), support_height=self._support_height())
         if len(world.cloud) > int(p('scene_outlier_min_neighbors')):
             before = len(world.cloud)
             world.cloud = cc.radius_outlier_filter(world.cloud, float(p('scene_outlier_radius')),

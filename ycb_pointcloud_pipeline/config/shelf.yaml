@@ -35,8 +35,11 @@ shelf:
   # (frame: shelf) or the base frame (frame: base).
   extra_boxes: []
 
-# How the observed cloud is used around the model (tpgpt.hardware.shelf.ShelfWorld).
+# How the observed cloud is used (tpgpt.hardware.shelf.ShelfWorld).
 scene:
-  roi_margin: 0.03                   # cloud points this far outside the model still count
+  scope: visible                     # visible: everything seen within reach is an obstacle (target,
+                                     # table and robot removed); shelf: only what is on the shelf.
+                                     # Without /joint_states the robot can't be removed -> shelf.
+  roi_margin: 0.03                   # the shelf region (scope shelf, and explained_by_model)
   roi_above_support: 0.30            # ...and this far above the highest board objects stand on
   use_cloud: true                    # false: the model alone

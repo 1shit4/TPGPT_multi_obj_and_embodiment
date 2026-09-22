@@ -99,3 +99,43 @@ def test_observed_panels_are_explained_by_the_model(shelf):
 
 def test_tcp_link_is_known():
     assert TCP_LINK in default_model().link_poses(HOME_Q)
+
+
+# ------------------------------------------------ everything the camera sees
+def _visible_scene(shelf):
+    rng = np.random.default_rng(1)
+    neighbour = np.column_stack([rng.uniform(0.25, 0.30, 60), rng.uniform(0.30, 0.35, 60),
+                                 rng.uniform(0.02, 0.10, 60)])      # a box on the table, off the shelf
+    table = np.column_stack([rng.uniform(0.2, 0.9, 300), rng.uniform(-0.5, 0.5, 300),
+                             rng.normal(0.0, 0.003, 300)])          # table at z = 0, noisy
+    far = np.array([[2.0, 0.0, 0.5], [0.0, -1.8, 1.0]])             # the lab, out of reach
+    fr3 = default_model()
+    T = fr3.tcp(HOME_Q)
+    arm = T[:3, 3] - T[:3, :3][:, 2] * np.linspace(0.03, 0.06, 5)[:, None]   # on the hand
+    return neighbour, table, far, arm, fr3
+
+
+def test_everything_seen_within_reach_is_an_obstacle(shelf):
+    neighbour, table, far, arm, fr3 = _visible_scene(shelf)
+    world = ShelfWorld.build(shelf, np.vstack([neighbour, table, far, arm]), robot_q=HOME_Q,
+                             fr3=fr3, end_effector=FRANKA_HAND, support_height=0.0)
+    r = world.cloud_report
+    assert r["scope"] == "visible"
+    assert r["outside_reach"] == 2
+    assert r["removed_as_table"] >= 290
+    assert r["removed_as_robot"] == 5
+    assert len(world.cloud) >= 55                # the neighbouring box stays
+    assert np.all(world.cloud[:, 2] > 0.015)
+
+
+def test_without_joint_angles_only_the_shelf_region_is_kept(shelf):
+    neighbour, table, far, arm, _ = _visible_scene(shelf)
+    world = ShelfWorld.build(shelf, np.vstack([neighbour, table, far, arm]), support_height=0.0)
+    r = world.cloud_report
+    assert r["scope"] == "shelf" and "robot cannot be removed" in r["scope_fallback"]
+    assert len(world.cloud) == 0                 # nothing here is on the shelf
+
+
+def test_a_wrong_scope_is_refused(shelf):
+    with pytest.raises(ValueError):
+        ShelfWorld.build(shelf, np.zeros((1, 3)), scope="everything")

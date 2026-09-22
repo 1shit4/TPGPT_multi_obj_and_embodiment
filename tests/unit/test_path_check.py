@@ -134,3 +134,46 @@ def test_verdict_ranks_collision_before_kinematics():
 def test_the_reachability_threshold(fraction):
     r = {"violations": 0, "first_violation": None, "faults": {}, "reachable_fraction": fraction}
     assert (pc.verdict(r) is None) == (fraction >= 0.60)
+
+
+# ---------------------------------------------------------------- the arm itself
+#: A within-limits pose that folds the forearm into the base (link 5 104 mm deep
+#: in link 0), found by random search over the joint limits.
+FOLDED = np.array([1.958, 1.518, -0.328, -2.969, 0.372, 4.022, 2.689])
+
+
+def test_penetration_is_exact_for_boxes():
+    cube = np.array([[x, y, z] for x in (0, 1) for y in (0, 1) for z in (0, 1)], dtype=float)
+    assert pc.penetration(cube, cube + [0.9, 0, 0]) == pytest.approx(0.1)
+    assert pc.penetration(cube, cube + [1.2, 0, 0]) < 0
+
+
+def test_the_real_arm_at_rest_never_collides_with_itself():
+    """40 at-rest poses of the real arm (robot-only data) and home: no self fault.
+
+    The pairs that overlap by construction (joint neighbours, the hand's own
+    pieces) are excluded; this is what shows the exclusion is enough.
+    """
+    from pathlib import Path
+
+    from tpgpt.hardware.fr3 import default_model
+
+    fr3 = default_model()
+    data = np.load(Path(__file__).resolve().parents[1] / "data" / "fr3_still_samples.npz")
+    for q in [*data["joint_positions"], HOME_Q]:
+        pieces, _ = pc.robot_pieces(fr3, q, FRANKA_HAND, 0.08)
+        assert pc._self_faults(pieces, "test", pc.CONTACT_DEPTH_TOLERANCE) == {}
+
+
+def test_a_folded_arm_is_a_self_collision():
+    from tpgpt.hardware.fr3 import default_model
+
+    pieces, _ = pc.robot_pieces(default_model(), FOLDED, FRANKA_HAND, 0.08)
+    faults = pc._self_faults(pieces, "carry", pc.CONTACT_DEPTH_TOLERANCE)
+    assert "carry: self fr3_link0 <-> fr3_link5" in faults
+
+
+def test_joint_neighbours_are_not_faults():
+    assert pc._joined("fr3_link3", "fr3_link4") and pc._joined("fr3_link7", "hand_body")
+    assert pc._joined("hand_body", "hand_left_pad")
+    assert not pc._joined("fr3_link0", "fr3_link5") and not pc._joined("fr3_link5", "hand_body")

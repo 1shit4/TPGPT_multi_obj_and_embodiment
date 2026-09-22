@@ -19,20 +19,25 @@ On this bench that argument turns round, for two measured reasons:
   fingertip in the base frame (``docs/hardware/CALIBRATION.md``, repeatable to
   about 1 mm), which is independent of the camera calibration.
 
-And the user's statement of the bench: the shelf is the only thing the arm can
-collide with; the space around it is free. So the obstacle world is:
+What the arm can hit, as the user stated it (2026-09-22):
 
-1. **the shelf model** -- boxes built from the measured dimensions -- which is
-   the authority everywhere, seen or unseen;
-2. **the observed cloud, but only inside the shelf's region of interest** (its
-   bounding box plus a margin), with the target object and the robot removed.
-   That keeps what the model cannot know -- another object standing in a slot,
-   a panel the model gets wrong -- wherever the camera happens to see it;
-3. **nothing outside that region.** Unseen space away from the shelf is free
-   by the statement above, not by assumption about what the camera missed.
+1. **everything the camera sees** -- the observed scene cloud, over the whole of
+   the arm's reach, with the target, the robot itself (FR3 hulls and hand boxes
+   at the joint angles of the capture) and the table removed;
+2. **where the camera cannot see, only the shelf** -- the shelf model, boxes built
+   from the measured dimensions, is the authority everywhere, seen or unseen;
+   unseen space away from the shelf is free, not assumed occupied;
+3. **its own body**, anywhere -- checked in ``tpgpt.hardware.path_check``, not here.
+
+Without the joint angles of the capture the robot cannot be removed from the
+cloud, and the arm would collide with its own image, so the cloud is then kept
+only inside the shelf's region of interest (its box plus a margin), and the
+report says so (``scope``).
 
 The table is not in this world: it is the support plane the planner already
-checks against (``planner._hand_clearance``).
+checks against (``planner._hand_clearance``, the ``hits_support`` stage), so
+cloud points within :data:`TABLE_BAND` above it are removed -- otherwise its
+depth noise would put table points inside the fingers of every low grasp.
 
 The inside-test machinery is the simulation's: shelf panels are
 :class:`tpgpt.perception.obstacles.Obstacle` boxes with its exact signed
@@ -46,6 +51,18 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 import numpy as np
+
+#: Scene points below ``support + TABLE_BAND`` are the table, metres. The cloud's
+#: table reads 4.9 mm from the touched height with a 0.61 deg tilt
+#: (CALIBRATION.md), about 4 mm across 0.4 m, so table points lie within about
+#: 10 mm of the plane over the reach. Cost: anything flatter than 15 mm lying on
+#: the table is not an obstacle.
+TABLE_BAND = 0.015
+
+#: Points further than this from the shoulder (joint 2, 0.333 m above the base)
+#: cannot be touched: the FR3 reaches 0.855 m to the wrist, plus the hand.
+REACH_RADIUS = 1.15
+SHOULDER = (0.0, 0.0, 0.333)
 
 #: Region-of-interest margin around the shelf model, metres. Cloud points this
 #: far outside the model still count as "on the shelf" (an object standing at a
@@ -321,26 +338,47 @@ class ShelfWorld:
               target_points: np.ndarray | None = None, robot_q=None, fr3=None,
               end_effector=None, margin: float = ROI_MARGIN,
               above_support: float = ROI_ABOVE_SUPPORT,
-              target_exclusion: float = TARGET_EXCLUSION) -> "ShelfWorld":
-        """Crop an observed scene cloud to the shelf and clean it.
+              target_exclusion: float = TARGET_EXCLUSION, scope: str = "visible",
+              support_height: float | None = None,
+              table_band: float = TABLE_BAND) -> "ShelfWorld":
+        """Turn an observed scene cloud into obstacle points.
 
         Args:
             scene_points: The whole observed scene, base frame, or ``None``.
             target_points: The object being picked; points near it are removed.
-            robot_q: Joint angles when the scene was captured. ``None`` skips
-                removing the robot and says so in the report.
+            robot_q: Joint angles when the scene was captured. ``None`` means the
+                robot cannot be removed, so ``scope`` falls back to ``"shelf"``.
+            scope: ``"visible"`` keeps everything seen within reach (module
+                docstring); ``"shelf"`` only what lies in the shelf's region.
+            support_height: The table's height; points within ``table_band``
+                above it (and anything below it) are the table and removed.
         """
         from scipy.spatial import cKDTree
 
+        if scope not in ("visible", "shelf"):
+            raise ValueError(f"scope must be 'visible' or 'shelf', not {scope!r}")
         report: dict = {"model": model is not None,
                         "model_measured": bool(model.measured) if model else False}
         pts = np.zeros((0, 3))
         if scene_points is not None and len(scene_points):
             pts = np.atleast_2d(np.asarray(scene_points, dtype=float))
             report["scene_points"] = int(len(pts))
-            if model is not None:
+            if scope == "visible" and (robot_q is None or fr3 is None):
+                scope = "shelf"
+                report["scope_fallback"] = ("no joint angles at capture time: the robot cannot "
+                                            "be removed, so only the shelf's region is kept")
+            report["scope"] = scope
+            if scope == "shelf" and model is not None:
                 pts = pts[model.in_roi(pts, margin, above_support)]
                 report["in_shelf_region"] = int(len(pts))
+            elif scope == "visible":
+                reach = np.linalg.norm(pts - np.asarray(SHOULDER), axis=1) <= REACH_RADIUS
+                report["outside_reach"] = int((~reach).sum())
+                pts = pts[reach]
+            if support_height is not None and len(pts):
+                table = pts[:, 2] < float(support_height) + float(table_band)
+                report["removed_as_table"] = int(table.sum())
+                pts = pts[~table]
             if target_points is not None and len(target_points) and len(pts):
                 d, _ = cKDTree(np.asarray(target_points, dtype=float)).query(pts)
                 keep = d > target_exclusion
@@ -354,9 +392,12 @@ class ShelfWorld:
                 report["removed_as_robot"] = None
                 report["robot_not_removed"] = "no joint angles at capture time"
             if model is not None and len(pts):
-                explained = model.explained(pts)
-                report["explained_by_model"] = float(explained.mean())
-                report["unexplained_points"] = int((~explained).sum())
+                on_shelf = pts[model.in_roi(pts, margin, above_support)]
+                report["obstacle_points_on_shelf"] = int(len(on_shelf))
+                if len(on_shelf):
+                    explained = model.explained(on_shelf)
+                    report["explained_by_model"] = float(explained.mean())
+                    report["unexplained_points"] = int((~explained).sum())
         report["obstacle_points"] = int(len(pts))
         return cls(model=model, cloud=pts, cloud_report=report)
 
@@ -391,4 +432,4 @@ class ShelfWorld:
                 "cloud_report": self.cloud_report}
 
 
-__all__ = ["ROI_ABOVE_SUPPORT", "ROI_MARGIN", "ShelfModel", "ShelfWorld", "box_surface", "robot_mask"]
+__all__ = ["REACH_RADIUS", "TABLE_BAND", "ROI_ABOVE_SUPPORT", "ROI_MARGIN", "ShelfModel", "ShelfWorld", "box_surface", "robot_mask"]

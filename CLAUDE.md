@@ -135,8 +135,10 @@ Two facts that need several files to see, and that decide whether a change is fa
   score order and takes the first whose **whole transported path** passes
   `path_check.path_feasibility`: `filters.path_feasibility_observed` on the FR3 model
   (`tpgpt/hardware/fr3.py`, the live URDF, a hull per link, `solve_ik` transcribed) and the shelf
-  world (`tpgpt/hardware/shelf.py`: the measured model everywhere, plus the observed cloud only
-  inside the shelf's region). The funnel calls the sim's own `tpgpt.grasp.filters` stage functions
+  world (`tpgpt/hardware/shelf.py`). The arm can hit (1) everything the camera sees within reach
+  (target, table band and robot removed), (2) where unseen, only the shelf: the measured model,
+  and (3) itself: exact convex tests between pieces not joined at a joint. Without `/joint_states`
+  the cloud falls back to the shelf region, because the robot can't be removed. The funnel calls the sim's own `tpgpt.grasp.filters` stage functions
   (visibility, on_target, grasp_collision, place_zone, centred), with the sim's pass-through rule.
   The hardware's jaw, refine, table and duplicate checks stay as hard stages. Deliberate
   differences, all documented there: a collision is never executed as a fallback, the top-down
