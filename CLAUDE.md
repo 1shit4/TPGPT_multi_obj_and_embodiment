@@ -149,6 +149,13 @@ Two facts that need several files to see, and that decide whether a change is fa
   differences, all documented there: a collision is never executed as a fallback, the top-down
   grasp is opt-in, and the A4 gates are kept. Importing `tpgpt.grasp.*` loads robosuite (~0.5 s);
   `fr3`, `shelf`, `path_check` and `executor` do not.
+- **The object cloud is the object's YCB scan, fitted to the camera cloud** (`tpgpt/hardware/object_model.py`,
+  planner `object_model`, default true; audit A8). This is what the sim's YCB experiment does (full scan,
+  observed scene). Scans for the banana, apple, mug and tomato soup can are downloaded into
+  `assets/ycb/` (gitignored: re-download `<id>_google_16k.tgz` from the YCB site on a new machine).
+  A fit the camera doesn't support is refused and the planner falls back to the camera cloud. The plan
+  says which (`object_cloud_source`). A refused plan writes `<object>_<time>_refused/` with every
+  candidate's rejection.
 - **The executor has the sim's infeasible-pose fallback**, on FR3 IK seeded from the measured
   joints (`HardwareExecutor.step(..., joint_positions)`).
 
