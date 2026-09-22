@@ -146,6 +146,11 @@ class TpgptPlannerNode(Node):
         d('scene_outlier_radius', 0.02)           # m; the scene cloud is ~7 mm apart at 1 m
         d('scene_outlier_min_neighbors', 3)
         d('joint_states_topic', '/joint_states')
+        # Without fresh joint angles the robot can't be removed from the scene cloud and
+        # the move onto the path can't be checked, so planning is refused. Set true only to
+        # plan with the robot container off (offline dry runs); the plan records it.
+        d('allow_missing_joint_states', False)
+        d('joint_states_max_age', 1.0)            # s
         d('check_path', True)
         d('min_reachable_fraction', 0.60)         # pipeline.MIN_REACHABLE_FRACTION
         d('allow_kinematic_fallback', True)       # never a colliding candidate
@@ -257,6 +262,26 @@ class TpgptPlannerNode(Node):
             q = np.array([msg.position[index[n]] for n in names], dtype=float)
             self.joints = (time.monotonic(), q)
 
+    def _joint_problem(self):
+        """Why planning must not go ahead for lack of joint angles, or None."""
+        p = lambda n: self.get_parameter(n).value  # noqa: E731
+        if p('allow_missing_joint_states'):
+            return None
+        topic = p('joint_states_topic')
+        if self.joints is None:
+            return (f'no {topic} received: the robot cannot be removed from the scene cloud and the '
+                    'move onto the path cannot be checked. Is the robot container up (FCI on), and '
+                    'was host_ros_env.sh sourced (ROS_DOMAIN_ID)? To plan with the robot off, set '
+                    'allow_missing_joint_states:=true.')
+        age = time.monotonic() - self.joints[0]
+        if age > float(p('joint_states_max_age')):
+            return (f'{topic} is {age:.1f} s old (max {p("joint_states_max_age")} s): the robot '
+                    'stopped publishing')
+        if p('use_scene_cloud') and self.scene is not None and self.scene[2] is None:
+            return ('the latest scene cloud arrived before any joint angles, so the robot cannot be '
+                    'removed from it; wait for the next segmentation cycle and plan again')
+        return None
+
     def _scene_cb(self, msg):
         T = self.calib.T_base_optical(msg.header.frame_id or self.calib.cal.optical_frame)
         if T is None:
@@ -329,6 +354,11 @@ class TpgptPlannerNode(Node):
         # Inputs, raw candidates and stage durations of this call, kept for the X6
         # trial record (x6_trial). Read-only bookkeeping; planning does not use it.
         info = self.last_plan_inputs = {'timing_s': {}}
+        problem = self._joint_problem()
+        if problem:
+            log.error(problem)
+            info['error'] = problem
+            return False, problem
         t_start = time.monotonic()
         try:
             points, n_clouds = self.fused_cloud()
@@ -379,8 +409,10 @@ class TpgptPlannerNode(Node):
             log.warn(f"{world.cloud_report['scene_missing']}: the shelf model alone")
         joints = self.joints[1] if self.joints is not None else None
         if joints is None:
-            log.warn(f"no {p('joint_states_topic')}: the move onto the path is not checked "
-                     'and IK is seeded from home')
+            # Only reachable with allow_missing_joint_states:=true (see _joint_problem).
+            log.warn(f"no {p('joint_states_topic')} (allowed by allow_missing_joint_states): the "
+                     'robot is not removed from the scene cloud, the move onto the path is not '
+                     'checked, and IK is seeded from home')
         T_cam = self.calib.T_base_optical(self.calib.cal.optical_frame)
         context = ScreenContext(
             camera_position=None if T_cam is None else T_cam[:3, 3],
@@ -440,6 +472,7 @@ class TpgptPlannerNode(Node):
             'shelf_is_estimate': bool(self.shelf_model is not None
                                       and not self.shelf_model.measured),
             'joint_states_at_plan': None if joints is None else joints.tolist(),
+            'allow_missing_joint_states': bool(p('allow_missing_joint_states')),
             'end_effector_config': (self.end_effector.details.get('config_file')
                                     if side else None),
             'graspgen': {n: self.get_parameter(n).value for n in (

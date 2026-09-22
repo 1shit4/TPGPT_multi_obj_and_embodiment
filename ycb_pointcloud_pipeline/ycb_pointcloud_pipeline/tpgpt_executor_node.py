@@ -477,6 +477,13 @@ class TpgptExecutorNode(Node):
         object_width = float(m.get('object_width_closing_m', 0.04))
 
         # --- where the arm is -------------------------------------------------
+        if not self.dry:
+            deadline = time.monotonic() + 5.0
+            while self.measured_joints() is None and time.monotonic() < deadline:
+                time.sleep(0.05)
+            if self.measured_joints() is None:
+                raise AbortRun(f"no fresh {p('joint_states_topic')}: the infeasible-pose fallback "
+                               'needs the arm\'s joint angles. Is the robot container up?')
         T_now = self.wait_for_pose(3.0 if self.dry else 10.0)
         if T_now is None:
             if not self.dry:
