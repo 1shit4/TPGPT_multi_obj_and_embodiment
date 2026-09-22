@@ -62,6 +62,7 @@ class ShelfFitNode(Node):
         self.base = self.calib.cal.base_frame
         self.joints = None
         self.frames = []
+        self.camera = None
         self.done = False
 
         from tpgpt.hardware.end_effector import FRANKA_HAND
@@ -101,6 +102,7 @@ class ShelfFitNode(Node):
                 'Robot container up and host_ros_env.sh sourced? With the robot off and out of '
                 'view: -p allow_missing_joint_states:=true', throttle_duration_sec=5.0)
             return
+        self.camera = np.asarray(T)[:3, 3]
         xyz, _ = pointcloud2_to_xyzrgb(msg)
         pts = cc.transform_points(T, xyz)
         pts = pts[np.all(np.isfinite(pts), axis=1)]
@@ -123,7 +125,7 @@ class ShelfFitNode(Node):
         p = lambda n: self.get_parameter(n).value  # noqa: E731
         pts = cc.voxel_downsample(np.vstack(self.frames), float(p('voxel_size')))
         shelf = dict(self.shelf_raw.get('shelf', self.shelf_raw))
-        report = fit_to_cloud({'shelf': shelf}, pts)
+        report = fit_to_cloud({'shelf': shelf}, pts, camera=self.camera)
         log = self.get_logger()
         for line in describe_fit(report).splitlines():
             log.info(line)

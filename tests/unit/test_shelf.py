@@ -256,7 +256,7 @@ def test_the_fit_finds_where_the_shelf_really_is():
     cloud = _seen(ShelfModel.from_config({"shelf": {**REAL, "cloud_fit": true}}))
     rng = np.random.default_rng(1)
     cloud = np.vstack([cloud, np.array([0.6, -0.35, 0.36]) + rng.uniform(-0.03, 0.03, (400, 3))])
-    report = fit_to_cloud({"shelf": REAL}, cloud)
+    report = fit_to_cloud({"shelf": REAL}, cloud, camera=CAMERA)
     fit = report["cloud_fit"]
     assert report["refused"] is None and all(report["fitted"].values())
     assert fit["shift_along_front_mm"] == pytest.approx(7.0, abs=2.0)
@@ -270,8 +270,8 @@ def test_a_fit_already_in_the_config_does_not_change_the_answer():
     true = {"shift_along_front_mm": 4.0, "shift_into_shelf_mm": 5.0, "yaw_deg": -0.5}
     cloud = _seen(ShelfModel.from_config({"shelf": {**REAL, "cloud_fit": true}}))
     stale = {"shift_along_front_mm": -20.0, "shift_into_shelf_mm": 0.0, "yaw_deg": 1.0}
-    a = fit_to_cloud({"shelf": REAL}, cloud)["fit"]
-    b = fit_to_cloud({"shelf": {**REAL, "cloud_fit": stale}}, cloud)["fit"]
+    a = fit_to_cloud({"shelf": REAL}, cloud, camera=CAMERA)["fit"]
+    b = fit_to_cloud({"shelf": {**REAL, "cloud_fit": stale}}, cloud, camera=CAMERA)["fit"]
     assert a == b
 
 
@@ -279,7 +279,7 @@ def test_a_direction_the_cloud_does_not_see_keeps_the_tapes_value():
     """Only board tops seen (say, from above): they say nothing about x/y."""
     true = {"shift_along_front_mm": 6.0, "shift_into_shelf_mm": 6.0, "yaw_deg": 0.0}
     cloud = _seen(ShelfModel.from_config({"shelf": {**REAL, "cloud_fit": true}}), faces=2)
-    report = fit_to_cloud({"shelf": REAL}, cloud)
+    report = fit_to_cloud({"shelf": REAL}, cloud, camera=CAMERA)
     assert not any(report["fitted"].values()) and report["refused"]
     assert report["cloud_fit"] is None
 
@@ -287,7 +287,7 @@ def test_a_direction_the_cloud_does_not_see_keeps_the_tapes_value():
 def test_a_correction_beyond_any_tape_error_is_refused():
     true = {"shift_along_front_mm": 0.0, "shift_into_shelf_mm": 34.0, "yaw_deg": 0.0}
     cloud = _seen(ShelfModel.from_config({"shelf": {**REAL, "cloud_fit": true}}))
-    report = fit_to_cloud({"shelf": REAL}, cloud)
+    report = fit_to_cloud({"shelf": REAL}, cloud, camera=CAMERA)
     assert report["refused"] and "beyond" in report["refused"] and report["cloud_fit"] is None
 
 

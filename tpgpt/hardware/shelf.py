@@ -156,6 +156,12 @@ FIT_MAX_YAW_DEG = 3.0
 #: wrong, a correction beyond the capture distance). Depth noise alone gives ~2-3 mm.
 FIT_MAX_MEDIAN = 0.006
 
+#: After the fit, every well-seen side or front face (at least
+#: FIT_MIN_FACE_POINTS points) must sit within this of its points, metres.
+#: Depth noise averages out over that many points; a face further off means the
+#: model's dimensions and the cloud disagree, which no placement fixes.
+FIT_FACE_TOLERANCE = 0.003
+
 
 def resolve_tape(c: dict) -> dict:
     """The shelf's geometry from tape measurements anchored to touched points.
@@ -630,37 +636,50 @@ def apply_cloud_fit(left, right, fit: dict):
     return move(left), move(right)
 
 
-def _faces(model: ShelfModel, points: np.ndarray, inset: float = 0.0):
+def _faces(model: ShelfModel, points: np.ndarray, inset: float = 0.0, camera=None):
     """Each point's signed distance to the model and the face it is nearest.
 
     Returns ``(distance (n,), box index (n,), normal in the shelf frame (n, 3))``;
-    distance > 0 is outside. Exact for boxes, the only kind the model builds.
+    distance > 0 is on the outer side of the face. Exact for boxes, the only kind
+    the model builds.
+
+    With ``camera`` (base frame), only faces turned towards it are candidates: a
+    point the camera saw lies on a face it can see. Without this an 18 mm panel
+    can be matched from either side, and a fit may slide it through the points,
+    matching its outer face's points with its hidden inner face (it did, on the
+    first live run, 2026-09-22).
+
     With ``inset`` > 0 the normal is zero for points that do not project onto
     their face at least that far inside its edges: a point just past a board's
     front edge is nearest the front face whether the board is really there or
     6 mm further back, so it tells nothing about which.
     """
-    best = np.full(len(points), np.inf)
-    box_of = np.zeros(len(points), dtype=int)
-    normal = np.zeros((len(points), 3))
-    rows = np.arange(len(points))
+    n_pts = len(points)
+    best = np.full(n_pts, np.inf)
+    box_of = np.zeros(n_pts, dtype=int)
+    normal = np.zeros((n_pts, 3))
     for k, box in enumerate(model.boxes):
         local = (points - box.position) @ box.rotation
-        gap = np.abs(local) - np.asarray(box.size)
-        outside = np.linalg.norm(np.maximum(gap, 0.0), axis=1)
-        d = np.where(gap.max(axis=1) > 0.0, outside, gap.max(axis=1))
-        closer = np.abs(d) < np.abs(best)
-        axis = gap.argmax(axis=1)
-        n = np.zeros((len(points), 3))
-        n[rows, axis] = np.sign(local[rows, axis])
-        if inset > 0.0:
-            across = gap.copy()
-            across[rows, axis] = -np.inf
-            n[across.max(axis=1) > -inset] = 0.0
-        n = n @ box.rotation.T @ model.R_base_shelf
-        best = np.where(closer, d, best)
-        box_of = np.where(closer, k, box_of)
-        normal[closer] = n[closer]
+        half = np.asarray(box.size)
+        for axis in range(3):
+            others = [u for u in range(3) if u != axis]
+            for sign in (-1.0, 1.0):
+                outward = box.rotation[:, axis] * sign
+                if camera is not None:
+                    centre = box.position + outward * half[axis]
+                    if float(outward @ (np.asarray(camera, dtype=float) - centre)) <= 0.0:
+                        continue
+                plane = sign * local[:, axis] - half[axis]
+                past = np.abs(local[:, others]) - half[others]
+                d = np.sqrt(plane ** 2 + (np.maximum(past, 0.0) ** 2).sum(axis=1))
+                d = np.where(plane < 0.0, -d, d)
+                closer = np.abs(d) < np.abs(best)
+                best = np.where(closer, d, best)
+                box_of = np.where(closer, k, box_of)
+                n = outward @ model.R_base_shelf
+                square = past.max(axis=1) <= -inset if inset > 0.0 else np.ones(n_pts, bool)
+                normal[closer] = 0.0
+                normal[closer & square] = n
     return best, box_of, normal
 
 
@@ -670,16 +689,16 @@ _WALL_WORDS = {("left_wall", "right face"): "inner face", ("left_wall", "left fa
                ("right_wall", "left face"): "inner face", ("right_wall", "right face"): "outer face"}
 
 
-def _face_table(model: ShelfModel, points: np.ndarray, capture: float) -> dict:
+def _face_table(model: ShelfModel, points: np.ndarray, capture: float, camera=None) -> dict:
     """Per face: how many points lie on it, and their median signed offset."""
-    d, box_of, n = _faces(model, points)
+    d, box_of, n = _faces(model, points, camera=camera)
     near = np.abs(d) <= capture
     axis = np.abs(n).argmax(axis=1)
     sign = np.sign(n[np.arange(len(n)), axis]).astype(int)
     out = {}
     for k, box in enumerate(model.boxes):
         for (ax, sg), word in _FACE_WORDS.items():
-            on = near & (box_of == k) & (axis == ax) & (sign == sg)
+            on = near & (box_of == k) & (axis == ax) & (sign == sg) & (np.abs(n).max(axis=1) > 0.5)
             if on.sum():
                 word = _WALL_WORDS.get((box.name, word), word)
                 out[f"{box.name} {word}"] = (int(on.sum()), float(np.median(d[on])))
@@ -696,7 +715,7 @@ def _implied_tape(model: ShelfModel) -> dict:
             "M3": L[1] * 1000.0, "M4": R[1] * 1000.0}
 
 
-def fit_to_cloud(config: dict, points: np.ndarray) -> dict:
+def fit_to_cloud(config: dict, points: np.ndarray, camera=None) -> dict:
     """Measure the shelf's x/y placement and yaw against the observed cloud.
 
     The shelf's dimensions come from the tape and its heights from touching, and
@@ -726,6 +745,9 @@ def fit_to_cloud(config: dict, points: np.ndarray) -> dict:
             is made from the tape and touched placement, so it is absolute, not
             incremental).
         points: The observed scene, base frame, robot removed.
+        camera: The camera's position, base frame. Points are then matched only
+            to faces turned towards it (:func:`_faces`). Always pass it on
+            real data.
 
     Returns:
         A report: ``cloud_fit`` (the block to store in ``shelf.yaml``, or
@@ -754,7 +776,7 @@ def fit_to_cloud(config: dict, points: np.ndarray) -> dict:
         q[:, :2] = pivot + xy @ np.array([[c_, -s_], [s_, c_]]).T
         return model.origin + q @ model.R_base_shelf.T
 
-    d0, _, n0 = _faces(model, pts, inset=FIT_NOISE)
+    d0, _, n0 = _faces(model, pts, inset=FIT_NOISE, camera=camera)
     on = np.abs(d0) <= FIT_CAPTURE
     axis = np.where(np.abs(n0).max(axis=1) > 0.5, np.abs(n0).argmax(axis=1), -1)
     side_pts = int((on & (axis == 0)).sum())
@@ -768,12 +790,12 @@ def fit_to_cloud(config: dict, points: np.ndarray) -> dict:
               "front_span_mm": span * 1000.0,
               "fitted": {"along_front": bool(free[0]), "into_shelf": bool(free[1]),
                          "yaw": bool(free[2])},
-              "previous_cloud_fit": previous, "faces_before": _face_table(model, pts, FIT_CAPTURE),
+              "previous_cloud_fit": previous, "faces_before": _face_table(model, pts, FIT_CAPTURE, camera),
               "implied_tape_before_mm": _implied_tape(model)}
     theta = np.zeros(3)
     if free.any():
         for capture in (FIT_CAPTURE, FIT_CAPTURE / 2.0):
-            d, _, _ = _faces(model, moved(theta))
+            d, _, _ = _faces(model, moved(theta), camera=camera)
             use = np.abs(d) <= capture
             if use.sum() < FIT_MIN_FACE_POINTS:
                 break
@@ -782,7 +804,7 @@ def fit_to_cloud(config: dict, points: np.ndarray) -> dict:
                 full = theta.copy()
                 full[free] = v
                 q = moved(full)[use]
-                return _faces(model, q)[0]
+                return _faces(model, q, camera=camera)[0]
 
             sol = least_squares(residual, theta[free], loss="cauchy", f_scale=FIT_NOISE,
                                 x_scale=np.array([0.01, 0.01, 0.01])[free], diff_step=1e-3)
@@ -793,22 +815,34 @@ def fit_to_cloud(config: dict, points: np.ndarray) -> dict:
     shift = float(np.hypot(theta[0], theta[1]))
     fitted = ShelfModel.from_config({"shelf": {**c, "cloud_fit": fit}})
     for key, m in (("median_abs_before_mm", model), ("median_abs_after_mm", fitted)):
-        d = np.abs(_faces(m, pts)[0])
+        d = np.abs(_faces(m, pts, camera=camera)[0])
         near = d <= FIT_CAPTURE / 2.0
         report[key] = float(np.median(d[near]) * 1000.0) if near.any() else None
     refused = None
     after = report["median_abs_after_mm"]
+    faces_after = _face_table(fitted, pts, FIT_CAPTURE, camera)
+    # The faces that decide the placement (sides and fronts, not the board tops,
+    # whose heights were touched) must each land on their points.
+    disagree = {k: v[1] * 1000.0 for k, v in faces_after.items()
+                if v[0] >= FIT_MIN_FACE_POINTS and ("face" in k)
+                and abs(v[1]) > FIT_FACE_TOLERANCE}
     if shift > FIT_MAX_SHIFT or abs(np.degrees(theta[2])) > FIT_MAX_YAW_DEG:
         refused = (f"correction of {shift * 1000:.0f} mm / {np.degrees(theta[2]):+.1f} deg is beyond "
                    f"any tape error ({FIT_MAX_SHIFT * 1000:.0f} mm / {FIT_MAX_YAW_DEG} deg): check "
                    "the calibration, the arm or an object against a panel, and the tape keys")
     elif not free.any():
         refused = "the cloud does not constrain the shelf's placement (too few points on its faces)"
+    elif disagree:
+        refused = ("after the fit these faces are still off (median, mm): "
+                   + ", ".join(f"{k} {v:+.1f}" for k, v in disagree.items())
+                   + ". One rigid move cannot put every face on its points, so the tape's "
+                   "dimensions and the cloud disagree (or the camera is off at the shelf): "
+                   "find out which before storing anything")
     elif after is None or after > FIT_MAX_MEDIAN * 1000.0:
         refused = (f"the fitted model still sits {after} mm (median) from the shelf's points, more "
                    f"than {FIT_MAX_MEDIAN * 1000:.0f} mm: it does not match what the camera sees")
     report.update({"refused": refused, "cloud_fit": None if refused else fit, "fit": fit,
-                   "faces_after": _face_table(fitted, pts, FIT_CAPTURE),
+                   "faces_after": faces_after,
                    "implied_tape_after_mm": _implied_tape(fitted)})
     return report
 

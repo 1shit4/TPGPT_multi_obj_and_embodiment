@@ -101,7 +101,11 @@ How it works:
   faces for the shift along the front, as many on front faces for the shift into the shelf, and
   front faces spanning at least 150 mm for the yaw. Board tops say nothing about x/y. A direction
   not fitted keeps the tape's value;
-- a result is **refused** above 30 mm or 3° (beyond any tape error: suspect the calibration, an
+- points are matched only to faces turned towards the camera, so a thin panel can't be slid
+  through its own points (the first live run matched the left panel's outer-face points to its
+  hidden inner face and returned a 23 mm correction);
+- a result is **refused** if any well-seen side or front face stays more than 3 mm off after the
+  fit (no single placement fits the tape's dimensions to the cloud), or above 30 mm or 3° (beyond any tape error: suspect the calibration, an
   object or the arm against a panel, or a mis-keyed reading). It is also refused if the fitted
   model still sits more than 6 mm (median) from the shelf's points;
 - the fit always starts from the tape, ignoring any `cloud_fit` already in the config, so re-running
@@ -135,7 +139,24 @@ within about ±2 mm, both panels' faces agreeing. What would make the result wro
 Tested on synthetic clouds of the real shelf, seen from the calibrated camera position with 3 mm
 depth noise and a clutter object: a 7 / −9 mm, 0.8° misplacement came back within 1.5 mm and 0.1°
 (`tests/unit/test_shelf.py`). A ROS dry run on a fake `/ycb_scene_cloud` (domain 88) recovered
-5 / 8 mm, −0.6° as 5.0 / 7.3 mm, −0.54°. **Not yet run on the real cloud.**
+5 / 8 mm, −0.6° as 5.0 / 7.3 mm, −0.54°.
+
+**First live run (2026-09-22, shelf empty): refused.** Faces seen, offset from the tape model:
+- top board: front face +3.8 mm, top +2.5 mm. So the front edge (M3, M4) and the top board are
+  confirmed.
+- bottom board: top +11 mm. This board is badly seen (`CALIBRATION.md`), so it is not evidence.
+- side panels, along the front edge: the left panel's outer face is 11 mm further left than the
+  model, and the right panel's inner face 25 mm further left. The top board's surface also ends
+  10–20 mm short of the model's right panel.
+
+So the cloud puts both panels towards the left, and the far one more. That fits either explanation:
+- M1/M2 (and M5) are off;
+- the camera is off horizontally at the shelf. A yaw error of about 1° grows with range: the
+  left panel is about 0.8 m from the camera, the right about 1.4 m.
+
+The calibration validated heights, not horizontal positions this far out. **Unresolved:** it takes
+a check that separates the two (clicking the touched slot marks in the cloud, or a robot touch on
+a panel) before anything is stored.
 
 ### Checking it
 
