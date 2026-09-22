@@ -121,6 +121,11 @@ class SelectionSettings:
     #: from a one-sided cloud, which under-reports an object's extent by 11-21 mm
     #: (``ROBOTICS_NOTES`` 7.36) and so biases its box centre toward the camera.
     max_centre_offset: float = 0.025
+    #: The box the executor will refuse to leave (its ``workspace_min`` /
+    #: ``workspace_max``), so a path that leaves it is rejected here rather than
+    #: at the first executed step. ``None`` on either: not checked.
+    workspace_min: tuple | None = None
+    workspace_max: tuple | None = None
     #: The whole-path check (``tpgpt.hardware.path_check``).
     check_path: bool = True
     #: ``"strict"``: every waypoint reachable in position, the pick and place
@@ -262,12 +267,16 @@ def refine_grasp(
     support_height: float,
     settings: SelectionSettings | None = None,
 ) -> tuple[GraspFrame, float, float]:
-    """Slide a grasp deeper along its approach and centre the object between the pads.
+    """Slide a grasp along its approach and centre the object between the pads.
 
-    Only ever moves the hand *in* (never shallower than the generator put it),
-    and only to poses where :func:`tpgpt.hardware.hand.check_jaws` still says
-    ``fits`` and the hand clears the support by ``min_support_clearance``. The
-    orientation is untouched.
+    It moves the hand *in* to poses where :func:`tpgpt.hardware.hand.check_jaws`
+    still says ``fits`` and the hand clears the support by
+    ``min_support_clearance``. If the generator's own pose does not clear the
+    support, it also tries moving *out*, up to ``refine_max_depth``: on a low
+    object the generator aims at the object's middle, which puts the fingertips
+    through the table, while the same grasp a centimetre higher holds it. On a
+    YCB banana (37 mm tall) 44 of 100 candidates were refused for this, several
+    by a single millimetre. The orientation is untouched.
 
     Returns:
         ``(grasp, depth, centre)`` -- the refined grasp and how far it moved
@@ -290,7 +299,12 @@ def refine_grasp(
         return (hand.check_jaws(points, tcp, R).ok
                 and hand.lowest_point(tcp, R) - float(support_height) >= s.min_support_clearance)
 
-    for depth in np.arange(want, -1e-9, -0.002):
+    clears = hand.lowest_point(grasp.tcp, R) - float(support_height) >= s.min_support_clearance
+    # Out of the object (negative depth) only when the pose as generated does not
+    # clear the support; in that case a shallower grasp is the only one available.
+    span = np.arange(want, -1e-9, -0.002) if clears else \
+        np.r_[np.arange(want, -1e-9, -0.002), -np.arange(0.002, s.refine_max_depth + 1e-9, 0.002)]
+    for depth in span:
         tcp = grasp.tcp + grasp.approach * depth
         loc = hand.to_grasp_frame(points, tcp, R)
         between = np.all((loc >= lo) & (loc <= hi), axis=1)
@@ -546,6 +560,16 @@ def _verify(result: Plan, s: SelectionSettings) -> str | None:
     if m["orientation_error_grasp_deg"] > s.max_orientation_error_deg:
         return (f"wrong_orientation: {m['orientation_error_grasp_deg']:.0f} deg from the grasp "
                 "at closing")
+    if s.workspace_min is not None and s.workspace_max is not None:
+        lo = np.asarray(s.workspace_min, dtype=float)
+        hi = np.asarray(s.workspace_max, dtype=float)
+        p = np.asarray(result.labels.positions, dtype=float)
+        outside = np.any((p < lo) | (p > hi), axis=1)
+        if outside.any():
+            k = int(np.flatnonzero(outside)[0])
+            return (f"outside_workspace: label {k} {np.round(p[k], 3).tolist()} is outside the "
+                    f"executor's box {lo.tolist()} .. {hi.tolist()} "
+                    f"({int(outside.sum())} of {len(p)} labels)")
     pick, place = m["hand_clearance_pick_m"], m["hand_clearance_place_m"]
     if min(pick, place) < s.min_path_clearance:
         return (f"path_hits_surface: hand {pick * 1000:.0f} mm above the table on the pick side, "

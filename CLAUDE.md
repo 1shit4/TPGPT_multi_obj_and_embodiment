@@ -195,6 +195,13 @@ The planner's support height is: its `support_height` parameter, else the calibr
   the best-scoring band: horizontal grasps around an upright can), and `check_visibility` is
   **`auto`** -- on only when the object's scan was not fitted, since a fitted scan has no unseen
   side, and this camera faces the robot so the filter otherwise removes the robot-side approaches.
+- **A plan that leaves the executor's workspace box is now refused at selection**
+  (`SelectionSettings.workspace_min/max`, fed from the planner's own parameters). It used to be
+  found only by the executor, which aborted the whole run instead of taking the next grasp
+  (seen 2026-09-23: label 0 at x = 0.138 against a box starting at 0.15).
+- **`refine_grasp` may also lift the hand**, not only push it deeper, when the generator's pose
+  puts the fingertips through the table. On a 37 mm banana that accounted for 44 of 100
+  candidates, several failing by a millimetre.
 - **Flying pixels at a silhouette.** A pixel on an object's outline takes its depth partly from
   the background, so it lands on the ray between the two: an upright YCB can (68 mm) fused to a
   116 mm blob with a 60 mm tail streaming away from the camera, which broke its scan fit and most

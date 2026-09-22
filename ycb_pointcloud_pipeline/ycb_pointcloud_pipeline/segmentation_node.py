@@ -111,9 +111,12 @@ class YCBSegmentationNode(Node):
         # 2026-09-23: an upright YCB can (68 mm across) fused to a 116 mm blob with a
         # 60 mm comet tail streaming away from the camera; a flat banana, whose silhouette
         # has a small depth step, showed none. Such pixels sit on a steep depth ramp, so
-        # pixels whose neighbouring depths change faster than this are dropped. On a good
-        # frame the 99th percentile of the gradient over an object is about 8 mm/px.
-        self.declare_parameter('depth_gradient_max_mm_px', 8.0)   # 0 disables
+        # pixels whose neighbouring depths change faster than this are dropped. Measured on a
+        # clean frame (a banana, no tail): median 2 mm/px over the object, 90th percentile 4,
+        # 95th 5, 99th 8. The tails themselves are ramps of about 60 mm over 10-15 px, i.e.
+        # 4-6 mm/px, so 8 left them in place on the first live run and 5 is the setting that
+        # cuts them while keeping ~95% of a good object's pixels.
+        self.declare_parameter('depth_gradient_max_mm_px', 5.0)   # 0 disables
         self.declare_parameter('publish_scene_cloud', True)
         self.declare_parameter('scene_cloud_stride', 4)   # every 4th pixel: ~25k points at 848x480
         # Intrinsics used for deprojection: config/camera_calibration.yaml

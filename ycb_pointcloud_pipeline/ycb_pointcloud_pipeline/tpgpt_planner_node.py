@@ -434,6 +434,9 @@ class TpgptPlannerNode(Node):
             allow_kinematic_fallback=bool(p('allow_kinematic_fallback')),
             max_centre_offset=float(p('max_centre_offset')),
             check_visibility=self._check_visibility(),
+            # The executor refuses to leave this box, so a path that does is no use.
+            workspace_min=tuple(float(v) for v in p('workspace_min')),
+            workspace_max=tuple(float(v) for v in p('workspace_max')),
         )
         info['settings'] = settings
         from tpgpt.hardware.grasp_selection import PathContext, ScreenContext

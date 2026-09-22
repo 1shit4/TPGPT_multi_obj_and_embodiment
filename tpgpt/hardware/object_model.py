@@ -20,10 +20,18 @@ grid of headings is scored, the best few are refined by robust ICP in
 measured two ways:
 
 * the camera's points must lie on the model (``median_mm``, ``explained``);
-* the model's surface facing the camera must have been seen (``seen``): a
-  model placed too big, or through empty space, leaves camera-facing surface
-  with no points on it. Self-occlusion is ignored (the facing test is by
-  normal), which only makes this lenient on concave objects such as the mug.
+* the model must not stand in space the camera measured as empty
+  (``in_front``): along each ray the camera's own surface is the nearest thing
+  there is, so a model point closer than it, by more than the depth noise, is
+  where the camera saw nothing. Rays the camera has no reading for (a mug's
+  dark interior) say nothing and are skipped; ``seen`` reports the fraction of
+  the model's visible surface that the camera did measure, as information
+  rather than as a test.
+
+  Both use a z-buffer -- the nearest model point along each ray from the
+  camera, binned at the depth camera's own pixel -- rather than a normal test,
+  because a mug's far wall faces the camera and is hidden behind its near
+  wall.
 
 A fit that fails any threshold is **refused** and the planner falls back to
 the camera cloud, saying so in the plan.
@@ -72,6 +80,10 @@ ICP_ITERATIONS = 30
 #: about 0.8 m.
 NOISE = 0.004
 
+#: Angular bin of the visibility z-buffer, degrees: the D435's pixel at
+#: 848 x 480 over a 69 deg field of view.
+VISIBILITY_BIN_DEG = 0.12
+
 #: A resting face is a distinct one if its normal differs from every kept face's
 #: by more than this, degrees; at most :data:`MAX_RESTS` are tried.
 REST_SEPARATION_DEG = 20.0
@@ -79,8 +91,9 @@ MAX_RESTS = 12
 
 #: Acceptance. A fit is refused if the camera's points sit further from the
 #: model than ``MAX_MEDIAN`` (median), if fewer than ``MIN_EXPLAINED`` of them
-#: are within ``EXPLAINED_DISTANCE``, or if less than ``MIN_SEEN`` of the model's
-#: camera-facing surface has a camera point within ``SEEN_DISTANCE``.
+#: are within ``EXPLAINED_DISTANCE``, or if more than ``MAX_IN_FRONT`` of the
+#: model's visible surface stands in front of what the camera measured along
+#: the same ray (by more than ``SEEN_DISTANCE``).
 #:
 #: **Set from measurements, not from synthetic noise.** On simulated views
 #: (3-5 mm noise) a correct fit reads about 3 mm, 0.93-0.99 explained and
@@ -91,13 +104,13 @@ MAX_RESTS = 12
 #: fixes. The wrong object, measured on every pair of these four scans, is
 #: caught by the fractions rather than the median: its best case (a mug's scan
 #: on an apple) reads 3.9 mm but only 0.50 seen, and the next (an apple's scan
-#: on a can) 0.62 explained. So the median is generous and the two fractions do
-#: the rejecting.
+#: on a can) 0.62 explained. So the median is generous and the fractions do the
+#: rejecting.
 MAX_MEDIAN = 0.007
 EXPLAINED_DISTANCE = 0.008
 MIN_EXPLAINED = 0.75
 SEEN_DISTANCE = 0.010
-MIN_SEEN = 0.70
+MAX_IN_FRONT = 0.15
 
 
 @dataclass
@@ -194,6 +207,7 @@ class ObjectFit:
     median_mm: float
     explained: float
     seen: float
+    in_front: float
     dz_mm: float
     observed_points: int
     dropped_below_table: int = 0
@@ -204,7 +218,8 @@ class ObjectFit:
                 "rest_index": self.rest_index, "heading_deg": round(self.heading_deg, 1),
                 "position": np.round(self.position, 4).tolist(),
                 "median_mm": round(self.median_mm, 2), "explained": round(self.explained, 3),
-                "seen": round(self.seen, 3), "dz_mm": round(self.dz_mm, 1),
+                "seen": round(self.seen, 3), "in_front": round(self.in_front, 3),
+                "dz_mm": round(self.dz_mm, 1),
                 "observed_points": self.observed_points,
                 "dropped_below_table": self.dropped_below_table}
 
@@ -239,7 +254,7 @@ def fit_object(model: ObjectModel, observed: np.ndarray, support_height: float,
     def score(body, nrm, t):
         world = body + t
         d_obs = cKDTree(world).query(obs)[0]
-        facing = ((camera - world) * nrm).sum(axis=1) > 0.0
+        facing = _visible(world, camera)
         d_face = tree_obs.query(world[facing])[0] if facing.any() else np.zeros(1)
         rho = lambda d: np.log1p((d / NOISE) ** 2)  # noqa: E731  Cauchy
         return float(rho(d_obs).mean() + 0.5 * rho(np.minimum(d_face, 0.03)).mean())
@@ -263,7 +278,7 @@ def fit_object(model: ObjectModel, observed: np.ndarray, support_height: float,
             d, j = cKDTree(world).query(obs)
             w = 1.0 / (1.0 + (d / NOISE) ** 2)
             src, dst = world[j], obs               # move model points onto observed
-            facing = ((camera - world) * nrm).sum(axis=1) > 0.0
+            facing = _visible(world, camera)
             if facing.any():
                 d2, j2 = tree_obs.query(world[facing])
                 keep = d2 < 0.03
@@ -284,31 +299,106 @@ def fit_object(model: ObjectModel, observed: np.ndarray, support_height: float,
     body, nrm, R = placed(model.rests[k], heading, t)
     world = body + t
     d_obs = cKDTree(world).query(obs)[0]
-    facing = ((camera - world) * nrm).sum(axis=1) > 0.0
+    facing = _visible(world, camera)
     d_face = tree_obs.query(world[facing])[0] if facing.any() else np.zeros(0)
     median = float(np.median(d_obs))
     explained = float((d_obs <= EXPLAINED_DISTANCE).mean())
-    seen = float((d_face <= SEEN_DISTANCE).mean()) if len(d_face) else 0.0
+    seen, in_front = _free_space(world[facing], obs, camera)
     # Set it down where the real object is: on the touched support.
     resting_z = support_height - body[:, 2].min()
     dz = float(t[2] - resting_z)
     position = np.array([t[0], t[1], resting_z])
 
     reason = None
-    if median > MAX_MEDIAN:
+    if in_front > MAX_IN_FRONT:
+        reason = (f"{in_front:.0%} of the scan's visible surface stands in front of what the "
+                  f"camera measured along the same ray (max {MAX_IN_FRONT:.0%}): the scan is too "
+                  "big, or placed through space the camera saw as empty")
+    elif median > MAX_MEDIAN:
         reason = f"camera points sit {median * 1000:.1f} mm from the scan (median; max {MAX_MEDIAN * 1000:.0f})"
     elif explained < MIN_EXPLAINED:
         reason = (f"only {explained:.0%} of the camera points lie within "
                   f"{EXPLAINED_DISTANCE * 1000:.0f} mm of the scan (min {MIN_EXPLAINED:.0%})")
-    elif seen < MIN_SEEN:
-        reason = (f"only {seen:.0%} of the scan's camera-facing surface was seen (min "
-                  f"{MIN_SEEN:.0%}): the scan is too big or placed through empty space")
     full, _ = model.sample(FULL_CLOUD_POINTS, seed + 1)
     return ObjectFit(name=model.name, accepted=reason is None, reason=reason, rotation=R,
                      position=position, rest_index=k,
                      heading_deg=float(np.degrees(heading) % 360.0), median_mm=median * 1000.0,
-                     explained=explained, seen=seen, dz_mm=dz * 1000.0,
+                     explained=explained, seen=seen, in_front=in_front, dz_mm=dz * 1000.0,
                      observed_points=int(len(obs)), dropped_below_table=int(below.sum()), full_cloud=full @ R.T + position)
+
+
+def _free_space(model_visible: np.ndarray, observed: np.ndarray, camera: np.ndarray,
+                bin_deg: float = VISIBILITY_BIN_DEG, tolerance: float = SEEN_DISTANCE):
+    """How much of the model's visible surface the camera measured, and how much
+    of it stands in front of that measurement.
+
+    Returns ``(seen, in_front)`` as fractions of the visible surface. A ray with
+    no camera reading counts in neither: it is unknown, not empty.
+    """
+    if not len(model_visible) or not len(observed):
+        return 0.0, 0.0
+
+    def rays(p):
+        d = p - camera
+        r = np.linalg.norm(d, axis=1)
+        return d / np.maximum(r, 1e-9)[:, None], r
+
+    u_m, r_m = rays(model_visible)
+    u_o, r_o = rays(observed)
+    fwd = u_m.mean(axis=0)
+    fwd /= np.linalg.norm(fwd)
+    right = np.cross(fwd, [0.0, 0.0, 1.0])
+    right /= max(np.linalg.norm(right), 1e-9)
+    up = np.cross(right, fwd)
+    step = np.radians(bin_deg)
+
+    def key(u):
+        return (np.round(np.arctan2(u @ right, u @ fwd) / step).astype(np.int64) * 1_000_003
+                + np.round(np.arctan2(u @ up, u @ fwd) / step).astype(np.int64))
+
+    k_m, k_o = key(u_m), key(u_o)
+    # Nearest camera reading in each ray bin.
+    order = np.argsort(k_o)
+    k_sorted, r_sorted = k_o[order], r_o[order]
+    edges = np.flatnonzero(np.r_[True, k_sorted[1:] != k_sorted[:-1]])
+    bins = k_sorted[edges]
+    nearest = np.minimum.reduceat(r_sorted, edges)
+    idx = np.searchsorted(bins, k_m)
+    idx = np.clip(idx, 0, len(bins) - 1)
+    has = bins[idx] == k_m
+    delta = r_m - nearest[idx]                     # < 0: the model is in front
+    seen = float((has & (np.abs(delta) <= tolerance)).mean())
+    in_front = float((has & (delta < -tolerance)).mean())
+    return seen, in_front
+
+
+def _visible(points: np.ndarray, camera: np.ndarray,
+             bin_deg: float = VISIBILITY_BIN_DEG) -> np.ndarray:
+    """Which of ``points`` the camera could see: a z-buffer over angular bins.
+
+    The nearest point along each ray wins; everything behind it is hidden by
+    the object itself. Bins are the depth camera's own pixel, so the test has
+    the resolution of the measurement it will be compared against.
+    """
+    ray = points - camera
+    dist = np.linalg.norm(ray, axis=1)
+    u = ray / np.maximum(dist, 1e-9)[:, None]
+    # Two angles about the mean viewing direction are enough: the object
+    # subtends a few degrees.
+    fwd = u.mean(axis=0)
+    fwd /= np.linalg.norm(fwd)
+    right = np.cross(fwd, [0.0, 0.0, 1.0])
+    right /= max(np.linalg.norm(right), 1e-9)
+    up = np.cross(right, fwd)
+    step = np.radians(bin_deg)
+    key = (np.round(np.arctan2(u @ right, u @ fwd) / step).astype(np.int64) * 1_000_003
+           + np.round(np.arctan2(u @ up, u @ fwd) / step).astype(np.int64))
+    order = np.lexsort((dist, key))
+    first = np.ones(len(order), dtype=bool)
+    first[1:] = key[order][1:] != key[order][:-1]
+    seen = np.zeros(len(points), dtype=bool)
+    seen[order[first]] = True
+    return seen
 
 
 # ------------------------------------------------------------------ geometry
