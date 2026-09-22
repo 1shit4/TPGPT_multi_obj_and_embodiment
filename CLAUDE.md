@@ -135,10 +135,12 @@ Two facts that need several files to see, and that decide whether a change is fa
   score order and takes the first whose **whole transported path** passes
   `path_check.path_feasibility`: `filters.path_feasibility_observed` on the FR3 model
   (`tpgpt/hardware/fr3.py`, the live URDF, a hull per link, `solve_ik` transcribed) and the shelf
-  world (`tpgpt/hardware/shelf.py`). The arm can hit (1) everything the camera sees within reach
-  (target, table band and robot removed), (2) where unseen, only the shelf: the measured model,
-  and (3) itself: exact convex tests between pieces not joined at a joint. Without `/joint_states`
-  the cloud falls back to the shelf region, because the robot can't be removed. The funnel calls the sim's own `tpgpt.grasp.filters` stage functions
+  world (`tpgpt/hardware/shelf.py`). The arm can hit the **table** (an exact plane), the **shelf**
+  (the measured model, seen or not), **everything else the camera sees** within reach (the robot,
+  the target, and the camera's points on the table and shelf removed), and **itself** (exact convex
+  tests between pieces not joined at a joint). The carried object may rest only on the table or a
+  support board's top face. Waypoints the arm can't hold as planned are checked at the executor's
+  fallback posture. Full account: `SHELF_AND_PATH_CHECK.md`, "How a path is checked". The funnel calls the sim's own `tpgpt.grasp.filters` stage functions
   (visibility, on_target, grasp_collision, place_zone, centred), with the sim's pass-through rule.
   The hardware's jaw, refine, table and duplicate checks stay as hard stages. Deliberate
   differences, all documented there: a collision is never executed as a fallback, the top-down
@@ -185,9 +187,9 @@ The planner's support height is: its `support_height` parameter, else the calibr
   `fallback_top_down: true`) via `x6_trial.py`. Don't be surprised; it waits for the X6 rework.
 - **`auto_plan:=true` re-plans every second** after a refusal (each cloud arrival starts a plan
   while `latest_plan` is unset). Old behaviour; `tpgpt_pick_place` calls the planner once.
-- **The planner and the executor need `/joint_states`** (robot container up). Without it the move
-  onto the path isn't checked, IK seeds from home, the robot isn't removed from the scene cloud, and
-  the executor's fallback stays off. Every one of these is logged.
+- **The planner and the executor refuse to run without fresh `/joint_states`**: robot container
+  up, FCI on, and `host_ros_env.sh` sourced (ROS domain 61). For offline dry runs with the robot off,
+  pass `-p allow_missing_joint_states:=true`.
 - **`franka_robot_state_broadcaster` logs "Failed to lock the realtime publisher"** several times a
   minute. Drops messages on `/franka_robot_state_broadcaster/robot_state` (wrench, EE mass), which
   the X6 recorder reads. Unresolved.

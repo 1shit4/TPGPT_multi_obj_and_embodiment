@@ -94,29 +94,89 @@ points within 15 mm of the model's surface. With an empty shelf it should be clo
 value means the shelf has moved or the model is wrong. `unexplained_points` counts the rest: objects
 on the shelf, or model error.
 
+## How a path is checked for collisions (plain account)
+
+The plan is a path of a few hundred hand poses (waypoints). The check walks it, testing every 4th
+waypoint (the sim's spacing). At each one:
+
+1. **The arm's posture.** Inverse kinematics finds the seven joint angles for the planned hand pose,
+   starting from the previous waypoint's answer. If only the **orientation** can't be reached, the
+   executor will relax it (its fallback), so the check solves for position alone and tests *that*
+   posture, marked `(relaxed)`. If even the **position** can't be reached, the executor will steer
+   straight to the next reachable pose, so the check tests points every 2 cm along that line, marked
+   `(steered)`.
+2. **The robot's pieces** at that posture: 8 arm links as convex shapes wrapped around their real
+   collision meshes, and the hand as boxes (fingers open before the grasp, closed to the object's
+   width while holding).
+3. **The world**, and what counts as touching:
+
+| what | how it is represented | robot touching it | the carried object touching it |
+|---|---|---|---|
+| **the table** | an exact flat surface at the touched height (−0.0136 m) | any robot piece more than 1 mm below it | allowed if resting on it (at most 5 mm into it), deeper is a fault |
+| **the shelf** | the measured model: panels as exact boxes | any piece more than 1 mm into a panel | allowed only on the **top face of a support board**, at most 5 mm in. Any side panel, a board's underside or front edge is a fault. |
+| **everything else the camera sees** | the camera's points within reach, after removing the robot, the target, the table (up to 15 mm above it) and the shelf panels (within 15 mm of the model) | any point inside a piece | any point within 5 mm is a fault |
+| **the robot itself** | its own pieces | two pieces more than 1 mm into each other, except neighbours joined at a joint and the hand's own parts | — |
+| **the object to be picked** | its cloud, where it stands | fault on the way onto the path, and during the approach except in the last 3 waypoints before the close | — |
+
+What each stage allows (a waypoint's stage comes from the gripper schedule):
+
+- **Onto the path** (hardware only): the move from where the arm is to the plan's start. Nothing may
+  be touched, the object to be picked included.
+- **Approach:** nothing may be touched. The fingers may be around the object only in the last 3
+  waypoints before the close; the jaw check has judged the grasp pose itself.
+- **Carry and place** (the last 12 waypoints of the carry): the robot touches nothing. The object moves
+  rigidly with the hand and may only rest on the table or a support board's top face.
+- **Retreat:** the robot touches nothing. The object just placed is not an obstacle (as in the sim).
+
+**Why faces and not directions.** The sim decides "support vs side" for the carried object by
+direction: a touched point within 60° of straight down from the object's centre is "below". That
+misreads the bottom corners of a wide flat object (a cereal box lying flat has its corners about 80°
+off vertical) as side hits. With exact geometry the question is answered by *which face* the point
+went through, so the object's rotation during the carry doesn't matter.
+
+**Reachability.** A candidate is admitted when no waypoint collides (the relaxed and steered ones
+included) and at least 60 % of the tested waypoints are reachable *as planned*, orientation
+included. The 60 % is the sim's number. Whether it should be stricter (for example: every waypoint
+reachable in position, and the grasp and release windows reachable with orientation) is **open**,
+waiting on the user's decision. The result reports `orientation_relaxed`, `skipped` and
+`steered_unreachable`.
+
+**Known limitation.** Link 5 is L-shaped and its convex hull is 1.78× its real volume, filling the
+inside of the L. Postures that fold the hand back toward the forearm may therefore be reported as
+self-collisions that aren't real. Splitting link 5 into two convex parts would settle it.
+
 ## The scene cloud
 
 `segmentation_node` publishes `/ycb_scene_cloud` each cycle: every 4th pixel of the same depth frame
 as the object clouds (~25k points), in the optical frame. The planner keeps a cloud only if it is
-under `scene_max_age` (10 s) old. With `scene.scope: visible` (the default), it keeps every point
-within the arm's reach (1.15 m from the shoulder) and removes:
+under `scene_max_age` (10 s) old. It keeps every point within the arm's reach (1.15 m from the
+shoulder), then removes:
 
-- the table: everything below the support height + 15 mm. The table is the support plane the
-  planner checks separately, and the cloud's table lies within about 10 mm of it (4.9 mm offset,
-  0.61° tilt). The cost: anything flatter than 15 mm lying on the table isn't an obstacle.
-- the target: points within 15 mm of its cloud;
-- the robot: the FR3 hulls and hand boxes at the `/joint_states` recorded with that cloud.
+- the robot, at the joint angles recorded with that cloud;
+- the target, within 15 mm of its cloud;
+- the table, everything below its height + 15 mm. The cloud's table lies within about 10 mm of the
+  touched plane (4.9 mm offset, 0.61° tilt). The cost: anything flatter than 15 mm lying on the table
+  isn't an obstacle.
+- the shelf, points within 15 mm of the model's panels. The cost: the bottom 15 mm of an object
+  standing on a board. The gain: a panel mis-measured by more than 15 mm keeps its real points as
+  obstacles.
 
-It then applies a radius-outlier filter at 20 mm. Without joint angles the robot can't be removed,
-so only the shelf region is kept (`scope: shelf`: the model's box plus 3 cm, and 0.30 m above the
-highest support board). The report says so. `explained_by_model` is always measured on the shelf
-region.
+It then applies a radius-outlier filter at 20 mm.
+
+**Joint angles are required.** The planner refuses to plan without fresh `/joint_states` (under
+1 s old), or when the scene cloud arrived before any joint angles. Without them the robot can't be
+removed from its own picture. They are always published while the robot container runs, so their
+absence means the container is down, FCI is off, or the terminal is on the wrong ROS domain
+(`host_ros_env.sh`). `allow_missing_joint_states:=true` permits planning with the robot off
+(offline dry runs). The cloud then keeps only the shelf region, and the plan records it. The
+executor refuses a real run without them.
 
 ## Parameters (planner node)
 
 `shelf_config` (installed `shelf.yaml`; `''` = none), `use_scene_cloud` (true),
 `scene_cloud_topic`, `scene_max_age`, `scene_outlier_radius`, `scene_outlier_min_neighbors`,
-`joint_states_topic`, `check_path` (true), `min_reachable_fraction` (0.60),
+`joint_states_topic`, `allow_missing_joint_states` (false), `joint_states_max_age` (1 s),
+`check_path` (true), `min_reachable_fraction` (0.60),
 `allow_kinematic_fallback` (true), `max_centre_offset` (0.025), `grasp_max_plans` (100),
 `grasp_fallback_top_down` (false).
 
