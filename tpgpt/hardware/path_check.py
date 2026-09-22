@@ -331,37 +331,28 @@ def path_feasibility(
     max_unreachable = (int(np.floor((1.0 - float(min_reachable_fraction)) * len(indices)))
                        if min_reachable_fraction is not None else len(indices))
     tested, unreachable = 0, 0
-    for k in indices:
-        tested += 1
-        target_p, target_R = tcp_target(k)
-        result = fr3.solve_ik(target_p, target_R, seed=seed, position_tolerance=tolerance)
-        if not result.reachable:
-            unreachable += 1
-            if stop_early and unreachable > max_unreachable:
-                # Report the fraction as if the rest were reachable: still below
-                # the threshold, which is all a selection needs to know.
-                return _result(len(indices), unreachable, violations, first, faults, approach_in,
-                               decided_early=True)
-            continue
-        seed = result.qpos
+    relaxed, skipped, gap_unreached = 0, 0, 0
+    last_good = None                       # (grasp point, TCP rotation) of the last posture
+    offset_ee = offset
 
-        phase = ("approach" if k < grasp_index
-                 else "carry" if k <= release_index else "retreat")
-        if phase == "carry" and k >= place_from:
-            phase = "place"
+    def phase_of(k):
+        ph = ("approach" if k < grasp_index else "carry" if k <= release_index else "retreat")
+        return "place" if ph == "carry" and k >= place_from else ph
+
+    def check_posture(k, q, phase, point, R_ee):
+        """Every rule of this phase, with the robot at ``q`` and the grasp point
+        at ``point`` / ``R_ee`` (used to carry the object)."""
         opening = closed_width if gripper[k] > 0 else MAX_OPENING
-        pieces, _ = robot_pieces(fr3, seed, end_effector, opening)
-
+        pieces, _ = robot_pieces(fr3, q, end_effector, opening)
         hits = _robot_faults(pieces, world, phase, depth_tolerance, check_self)
 
-        # --- the robot against the object it has not picked up yet ---------------
+        # --- the robot against the object it has not picked up yet -----------
         # Outside the grasp window only, as in the simulation: within it the jaws
         # are closing on the target, and the jaw check at the grasp pose
         # (``hand.check_jaws``) has already judged the palm and fingers there.
         if len(held) and phase == "approach" and abs(int(k) - int(grasp_index)) > int(grasp_window):
             for piece in pieces:
-                inside = piece.contains(held)
-                if inside.any():
+                if piece.contains(held).any():
                     key = f"approach: {piece.name} in the target's cloud"
                     hits[key] = hits.get(key, 0) + 1
 
@@ -371,7 +362,7 @@ def path_feasibility(
         # the contact radius into it); anything else it enters is a fault, and so
         # is any contact with the remaining seen points (other objects).
         if local is not None and phase in ("carry", "place"):
-            world_obj = positions[k] + local @ rotations[k].T
+            world_obj = point + local @ R_ee.T
             if world.model is not None and world.model.near(world_obj, 0.0):
                 for panel, count in world.model.object_faults(
                         world_obj, rest=contact_radius, tolerance=depth_tolerance).items():
@@ -389,6 +380,69 @@ def path_feasibility(
                 if touched:
                     key = f"{phase}: the carried object touches seen points"
                     hits[key] = hits.get(key, 0) + len(touched)
+        return hits
+
+    def actual_pose(q):
+        """Grasp point and controller-frame rotation where the arm really is."""
+        T = fr3.tcp(q)
+        return T[:3, 3] + T[:3, :3] @ offset_ee, T[:3, :3]
+
+    stop = False
+    for k in indices:
+        tested += 1
+        target_p, target_R = tcp_target(k)
+        phase = phase_of(k)
+        result = fr3.solve_ik(target_p, target_R, seed=seed, position_tolerance=tolerance)
+        kind = "full"
+        if not result.reachable:
+            unreachable += 1
+            if stop_early and unreachable > max_unreachable:
+                # Report the fraction as if the rest were reachable: still below
+                # the threshold, which is all a selection needs to know.
+                return _result(len(indices), unreachable, violations, first, faults, approach_in,
+                               decided_early=True, relaxed=relaxed, skipped=skipped,
+                               gap_unreached=gap_unreached)
+            # What the executor will do here (its infeasible-pose fallback): give
+            # up the orientation if the position alone is reachable ...
+            position_only = fr3.solve_ik(target_p, None, seed=seed, position_tolerance=tolerance)
+            if position_only.reachable:
+                result, kind = position_only, "relaxed"
+                relaxed += 1
+            else:
+                # ... else steer straight on to the next pose it can reach.
+                skipped += 1
+                continue
+
+        hits: dict = {}
+        if last_good is not None and last_good[2] < k - int(stride):
+            # A skipped stretch ended here: check the straight line the arm was
+            # steered along, from the last posture reached to this one.
+            p0, _, _ = last_good
+            p1 = target_p + target_R @ offset
+            n = max(int(np.ceil(np.linalg.norm(p1 - p0) / APPROACH_IN_STEP)), 1)
+            q_line = last_good_q
+            for s_ in np.linspace(0.0, 1.0, n + 1)[1:-1]:
+                point = p0 + s_ * (p1 - p0)
+                step = fr3.solve_ik(point - actual_pose(q_line)[1] @ offset, None, seed=q_line,
+                                    position_tolerance=tolerance)
+                if not step.reachable:
+                    gap_unreached += 1
+                    continue
+                q_line = step.qpos
+                gp, gR = actual_pose(q_line)
+                for key, count in check_posture(k, q_line, phase, gp, gR).items():
+                    key = key.replace(f"{phase}:", f"{phase} (steered):", 1)
+                    hits[key] = hits.get(key, 0) + count
+        seed = result.qpos
+        if kind == "full":
+            point, R_ee = positions[k], rotations[k]          # as the simulation carries it
+        else:
+            point, R_ee = actual_pose(seed)                    # the wrist is where IK put it
+        for key, count in check_posture(k, seed, phase, point, R_ee).items():
+            key = key if kind == "full" else key.replace(f"{phase}:", f"{phase} (relaxed):", 1)
+            hits[key] = hits.get(key, 0) + count
+        last_good = (point, R_ee, int(k))
+        last_good_q = seed
         if hits:
             for key, count in hits.items():
                 faults[key] = faults.get(key, 0) + count
@@ -396,13 +450,22 @@ def path_feasibility(
             first = int(k) if first is None else first
             if stop_early:
                 break
-    return _result(tested, unreachable, violations, first, faults, approach_in)
+    return _result(tested, unreachable, violations, first, faults, approach_in,
+                   relaxed=relaxed, skipped=skipped, gap_unreached=gap_unreached)
 
 
 def _result(tested, unreachable, violations, first, faults, approach_in,
-            decided_early: bool = False) -> dict:
+            decided_early: bool = False, relaxed: int = 0, skipped: int = 0,
+            gap_unreached: int = 0) -> dict:
     return {
         "decided_early": bool(decided_early),
+        # Of the waypoints not reachable as planned: how many the executor will
+        # hold with the orientation relaxed (checked at that posture), how many
+        # it will skip past (the straight line it steers along is checked), and
+        # how many points on those lines the arm could not reach at all.
+        "orientation_relaxed": int(relaxed),
+        "skipped": int(skipped),
+        "steered_unreachable": int(gap_unreached),
         "tested": int(tested),
         "unreachable": int(unreachable),
         "reachable_fraction": float(1.0 - unreachable / tested) if tested else 0.0,

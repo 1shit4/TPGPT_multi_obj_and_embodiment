@@ -217,3 +217,37 @@ def test_the_move_onto_the_path_must_not_go_through_the_object_to_be_picked():
                object_points=obj, start_q=start.qpos)
     assert r["first_violation"] == -1
     assert any("approach_in" in k and "target's cloud" in k for k in r["faults"])
+
+
+# ------------------------------------ where the arm cannot hold the planned pose
+#: fr3_hand_tcp pointing back at the robot base: the position is reachable at
+#: (0.45, 0, 0.35-0.45), this orientation is not (IK stops 24.5 mm short).
+BACK = np.array([[0.0, 0.0, -1.0], [0.0, 1.0, 0.0], [1.0, 0.0, 0.0]])
+
+
+def test_an_unreachable_orientation_is_checked_where_the_executor_relaxes_it():
+    positions, _ = _path([0.45, 0.0, 0.45], [0.45, 0.0, 0.35])
+    rotations = np.repeat(BACK[None], len(positions), axis=0)
+    r = _check(positions, rotations, ShelfWorld.build(None))
+    assert r["orientation_relaxed"] > 0
+    # The relaxed postures are checked, not skipped: here IK folds the hand back
+    # onto link 5 to point it at the base, which the self check reports.
+    assert any("(relaxed)" in k for k in r["faults"])
+
+
+def test_a_stretch_out_of_reach_is_checked_along_the_line_the_executor_steers():
+    a = np.linspace([0.45, -0.10, 0.30], [0.45, -0.10, 0.30], 10)
+    out = np.linspace([1.40, 0.0, 0.30], [1.40, 0.0, 0.30], 20)      # far out of reach
+    b = np.linspace([0.45, 0.10, 0.30], [0.45, 0.10, 0.30], 30)
+    positions = np.vstack([a, out, b])
+    rotations = np.repeat(DOWN[None], len(positions), axis=0)
+    clear = _check(positions, rotations, ShelfWorld.build(None), grasp=55, release=58)
+    assert clear["skipped"] > 0 and clear["violations"] == 0
+    # A thin wall standing between y = -0.10 and y = +0.10, where the arm is
+    # steered straight across once the out-of-reach stretch is skipped.
+    wall = ShelfModel.from_config({"shelf": {
+        "measured": True, "front_left": [0.30, 0.01], "front_right": [0.60, 0.01],
+        "depth": 0.01, "bottom": 0.0, "top": 0.40, "wall_thickness": 0.0,
+        "boards": [{"name": "wall", "top": 0.40, "thickness": 0.40, "support": False}]}})
+    r = _check(positions, rotations, ShelfWorld.build(wall), grasp=55, release=58)
+    assert any("(steered)" in k for k in r["faults"])
