@@ -17,9 +17,9 @@ grasp_selection,executor}.py`; the ROS wiring is in `segmentation_node`, `tpgpt_
      follow the sim's rule: a stage that would reject every remaining candidate passes them all
      through and records `fell_back: true`.
 2. **Choose** by the sim's rule (`pipeline._choose_grasp`): walk the survivors in score order (up to
-   100), plan each, and take the **first whose whole transported path is admissible**. Admissible
-   means no collision at any tested waypoint, and at least 60 % of the waypoints within the arm's
-   reach.
+   100), plan each, and take the **first whose whole transported path is admissible**: no forbidden
+   contact at any stage, and every waypoint reachable in position, with the pick and place reachable
+   with their orientation ("How a path is checked", below).
 3. **Execute** with the sim's fallback for poses the arm can't hold. While the lag gate is shut,
    the executor relaxes the orientation, or steers to the next reachable label and jumps the phase
    on arrival.
@@ -38,7 +38,7 @@ shelf is still an estimate.
 | Exact geometry vs cloud tolerances | 1 mm on exact geometry, 5 mm on clouds | the same numbers: 1 mm on the model, 5 mm on the cloud and for the carried object | Constants are restated without importing robosuite, and a test asserts they match. |
 | Place-zone release pose | one provisional pose for all candidates (the hand at the object's top above the slot) | each candidate's own release: its grasp point's offset from the object base, turned by the demonstration's carry rotation | The same question, asked exactly. It is cheap. |
 | Centre of mass | exact (simulator) | the centre of the cloud's horizontal box, with a 25 mm margin instead of 15 mm | The sim's `by_centre_offset` docstring prescribes exactly this for perception. A one-sided cloud under-reports extent by 11–21 mm (`ROBOTICS_NOTES` 7.36). |
-| Nothing admissible | execute the candidate whose first fault comes latest | only a candidate that failed on **kinematics alone** (`allow_kinematic_fallback`); **never** one that collides | On the robot, a fault is a collision with the shelf. |
+| Nothing admissible | execute the candidate whose first fault comes latest | refuse. The option `allow_kinematic_fallback` (off by default) takes a candidate that failed on kinematics alone; **never** one that collides | On the robot, a fault is a collision; and under the strict criterion a kinematic failure means the grasp or place pose, or some position, can't be reached. |
 | Scripted top-down grasp | none | off by default; when on, it passes the same checks | The X6 brief forbids overriding the generator's choice. |
 | Jaw / refine / table / duplicates | `by_jaw_width`, 20 mm / 20° duplicates | the hardware checks, unchanged | Validated on real partial clouds. A7 remains open. |
 | min det / aim / orientation / plane gates | none (recorded only) | still applied (`_verify`) | Audit A4, not decided yet. |
