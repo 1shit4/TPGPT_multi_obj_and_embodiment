@@ -1,0 +1,443 @@
+<title>Shelf Tape Sheet</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+  :root {
+    --ground: #F5F6F2;
+    --surface: #FFFFFF;
+    --ink: #1D2320;
+    --muted: #5D6862;
+    --rule: #D5DAD4;
+    --wood: #D8C7A6;
+    --wood-edge: #8A7452;
+    --board: #C4AE86;
+    --table: #B9C0BA;
+    --tape: #1D5FB4;
+    --tape-soft: #E3ECF8;
+    --touched: #2F7D3A;
+    --touched-soft: #E2F0E3;
+    --warn: #B3261E;
+    --warn-soft: #FBE4E2;
+    --sans: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+    --mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ground: #141816; --surface: #1B201D; --ink: #E4EAE6; --muted: #9AA69F; --rule: #2E3531;
+      --wood: #5E5140; --wood-edge: #B39C75; --board: #7A6A50; --table: #3D4540;
+      --tape: #86B4F2; --tape-soft: #1C2A3D; --touched: #7CC98A; --touched-soft: #1B2E1F;
+      --warn: #F2A09A; --warn-soft: #3A1E1C;
+    }
+  }
+  :root[data-theme="dark"] {
+    --ground: #141816; --surface: #1B201D; --ink: #E4EAE6; --muted: #9AA69F; --rule: #2E3531;
+    --wood: #5E5140; --wood-edge: #B39C75; --board: #7A6A50; --table: #3D4540;
+    --tape: #86B4F2; --tape-soft: #1C2A3D; --touched: #7CC98A; --touched-soft: #1B2E1F;
+    --warn: #F2A09A; --warn-soft: #3A1E1C;
+  }
+  body { background: var(--ground); color: var(--ink); font: 15px/1.55 var(--sans); }
+  .wrap { max-width: 780px; margin: 0 auto; padding-inline: 16px; padding-block: 28px 56px;
+          display: flex; flex-direction: column; gap: 28px; }
+  h1 { font: 600 26px/1.2 var(--sans); margin: 0; text-wrap: balance; }
+  h2 { font: 600 18px/1.3 var(--sans); margin: 0 0 6px; text-wrap: balance; }
+  p { margin: 0; max-width: 68ch; }
+  .lede { color: var(--muted); }
+  .key { display: flex; flex-wrap: wrap; gap: 8px 18px; font-size: 13px; color: var(--muted); }
+  .key span { display: inline-flex; align-items: center; gap: 6px; }
+  .sw { width: 22px; height: 0; border-top: 2px solid; display: inline-block; }
+  .sw.tape { border-color: var(--tape); }
+  .sw.touched { border-color: var(--touched); border-top-style: dashed; }
+  .rules { display: grid; gap: 6px; padding: 14px 16px; background: var(--surface);
+           border: 1px solid var(--rule); border-radius: 6px; }
+  .rules p { font-size: 14px; }
+  figure { margin: 0; display: flex; flex-direction: column; gap: 8px; }
+  .fig-scroll { overflow-x: auto; background: var(--surface); border: 1px solid var(--rule);
+                border-radius: 6px; }
+  .fig-scroll svg { display: block; width: 100%; min-width: 520px; height: auto; color: var(--ink); }
+  figcaption { font-size: 13px; color: var(--muted); max-width: 68ch; }
+  svg text { font-family: var(--mono); font-size: 12px; fill: currentColor; }
+  svg .lbl-tape { fill: var(--tape); font-weight: 600; }
+  svg .lbl-touched { fill: var(--touched); font-weight: 600; }
+  svg .lbl-muted { fill: var(--muted); }
+  svg .dim-tape { stroke: var(--tape); stroke-width: 1.4; fill: none; }
+  svg .dim-touched { stroke: var(--touched); stroke-width: 1.4; fill: none; stroke-dasharray: 4 3; }
+  svg .ext { stroke: var(--muted); stroke-width: 0.8; fill: none; stroke-dasharray: 2 3; }
+  svg .panel { fill: var(--wood); stroke: var(--wood-edge); stroke-width: 1.2; }
+  svg .board { fill: var(--board); stroke: var(--wood-edge); stroke-width: 1.2; }
+  svg .ghost { fill: none; stroke: var(--wood-edge); stroke-width: 1; stroke-dasharray: 5 4; }
+  svg .table { fill: var(--table); stroke: none; }
+  svg .outline { stroke: currentColor; stroke-width: 1; fill: none; }
+  svg .mark { fill: var(--touched); stroke: var(--surface); stroke-width: 1.5; }
+  svg .ah-tape { fill: var(--tape); }
+  svg .ah-touched { fill: var(--touched); }
+  svg .ah-ink { fill: currentColor; }
+  table { border-collapse: collapse; width: 100%; font-size: 14px; }
+  .tbl-scroll { overflow-x: auto; background: var(--surface); border: 1px solid var(--rule); border-radius: 6px; }
+  th, td { text-align: left; padding: 9px 10px; border-bottom: 1px solid var(--rule); vertical-align: top; }
+  th { font-size: 12px; letter-spacing: 0.04em; text-transform: uppercase; color: var(--muted); font-weight: 500; }
+  tr:last-child td { border-bottom: none; }
+  td.id { font: 600 14px var(--mono); color: var(--tape); white-space: nowrap; }
+  td.what b { font-weight: 600; }
+  td.what small { display: block; color: var(--muted); font-size: 13px; margin-top: 2px; }
+  input[type=number] { width: 7.5em; font: 15px var(--mono); padding: 6px 8px; border: 1px solid var(--rule);
+                       border-radius: 4px; background: var(--ground); color: var(--ink);
+                       font-variant-numeric: tabular-nums; }
+  input[type=number]:focus-visible, button:focus-visible, textarea:focus-visible {
+    outline: 2px solid var(--tape); outline-offset: 2px; }
+  .unit { color: var(--muted); font-size: 13px; margin-left: 4px; }
+  .checks { display: grid; gap: 8px; }
+  .check { display: flex; gap: 10px; align-items: baseline; padding: 10px 12px; border-radius: 6px;
+           background: var(--surface); border: 1px solid var(--rule); font-size: 14px; }
+  .chip { font: 600 12px var(--mono); padding: 2px 8px; border-radius: 999px; white-space: nowrap; }
+  .chip.wait { background: var(--ground); color: var(--muted); border: 1px solid var(--rule); }
+  .chip.ok { background: var(--touched-soft); color: var(--touched); }
+  .chip.bad { background: var(--warn-soft); color: var(--warn); }
+  .num { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+  textarea { width: 100%; min-height: 330px; box-sizing: border-box; font: 13px/1.5 var(--mono);
+             padding: 12px; border: 1px solid var(--rule); border-radius: 6px; background: var(--surface);
+             color: var(--ink); resize: vertical; }
+  .row { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+  button { font: 500 14px var(--sans); padding: 8px 14px; border-radius: 4px; border: 1px solid var(--tape);
+           background: var(--tape); color: var(--surface); cursor: pointer; }
+  button.quiet { background: transparent; color: var(--tape); }
+  .status { font-size: 13px; color: var(--muted); }
+  code { font-family: var(--mono); font-size: 0.92em; }
+</style>
+
+<div class="wrap">
+  <header style="display:grid;gap:10px">
+    <h1>Shelf tape measurements, M1–M14</h1>
+    <p class="lede">The robot can't touch the side panels' tops or the topmost board squarely, so the shelf's own
+      dimensions come from a tape. They are tied into the robot's frame by the two slot marks on the top board
+      that the robot already touched (<code>CALIBRATION.md</code>). Measure every blue item in millimetres, fill the
+      table, and paste the block it produces.</p>
+    <div class="key">
+      <span><i class="sw tape"></i>measure with the tape</span>
+      <span><i class="sw touched"></i>already touched by the robot (don't measure)</span>
+    </div>
+  </header>
+
+  <section class="rules" aria-label="How to read the drawings">
+    <p><b>Stand where the robot is, facing the shelf's open front.</b> "Left" and "right" are your left and right
+      from there. The left slot is the one on your left.</p>
+    <p><b>The slot marks</b> are the two spots on the <b>top board</b> touched for "top shelf, left slot" and
+      "top shelf, right slot" (233 mm apart). M1–M4 are measured from those exact spots. If you can't re-find them,
+      say so before measuring.</p>
+    <p><b>The shelf is turned about 19° to the robot.</b> Measure along the shelf itself, not along the room:
+      M1 and M2 parallel to the boards' front edge, M3 and M4 square to it.</p>
+  </section>
+
+  <!-- ============================== TOP VIEW ============================== -->
+  <figure>
+    <h2>1 · From above, at the top board</h2>
+    <div class="fig-scroll">
+      <svg viewBox="0 0 560 400" role="img" aria-label="Plan view of the shelf at the top board level with the topmost board removed. The two slot marks on the top board are 233 mm apart. M1 runs from the left slot mark to the left side panel's inner face and M2 from the right slot mark to the right side panel's inner face, both parallel to the front edge. M3 and M4 run from each slot mark straight toward the robot to the boards' front edge. M5 is the inner width between the side panels, M6 and M7 the side panel thicknesses.">
+        <defs>
+          <marker id="tA" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,1 L9,5 L0,9 z" class="ah-tape"/></marker>
+          <marker id="gA" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,1 L9,5 L0,9 z" class="ah-touched"/></marker>
+          <marker id="kA" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto"><path d="M0,1 L9,5 L0,9 z" class="ah-ink"/></marker>
+        </defs>
+        <!-- side panels (seen from above), boards area -->
+        <rect class="panel" x="116" y="70" width="14" height="222"/>
+        <rect class="panel" x="430" y="70" width="14" height="222"/>
+        <rect class="board" x="130" y="80" width="300" height="204"/>
+        <text x="280" y="62" text-anchor="middle" class="lbl-muted">no back (open)</text>
+        <text x="280" y="302" text-anchor="middle" class="lbl-muted">front edge of the boards</text>
+        <text x="123" y="316" text-anchor="middle" class="lbl-muted">LEFT</text>
+        <text x="437" y="316" text-anchor="middle" class="lbl-muted">RIGHT</text>
+
+        <!-- M5 inner width -->
+        <line class="dim-tape" x1="131" y1="98" x2="429" y2="98" marker-start="url(#tA)" marker-end="url(#tA)"/>
+        <text x="280" y="92" text-anchor="middle" class="lbl-tape">M5 inner width</text>
+        <!-- M6 / M7 panel thickness -->
+        <line class="dim-tape" x1="100" y1="120" x2="115" y2="120" marker-end="url(#tA)"/>
+        <line class="dim-tape" x1="146" y1="120" x2="131" y2="120" marker-end="url(#tA)"/>
+        <text x="96" y="124" text-anchor="end" class="lbl-tape">M6</text>
+        <line class="dim-tape" x1="414" y1="120" x2="429" y2="120" marker-end="url(#tA)"/>
+        <line class="dim-tape" x1="460" y1="120" x2="445" y2="120" marker-end="url(#tA)"/>
+        <text x="464" y="124" class="lbl-tape">M7</text>
+
+        <!-- slot marks -->
+        <circle class="mark" cx="220" cy="200" r="6"/>
+        <circle class="mark" cx="360" cy="200" r="6"/>
+        <text x="220" y="184" text-anchor="middle" class="lbl-touched">L</text>
+        <text x="360" y="184" text-anchor="middle" class="lbl-touched">R</text>
+        <!-- 233 touched -->
+        <line class="dim-touched" x1="228" y1="200" x2="352" y2="200" marker-start="url(#gA)" marker-end="url(#gA)"/>
+        <text x="290" y="194" text-anchor="middle" class="lbl-touched">233 touched</text>
+        <!-- M1 / M2 -->
+        <line class="dim-tape" x1="131" y1="200" x2="212" y2="200" marker-start="url(#tA)" marker-end="url(#tA)"/>
+        <text x="171" y="194" text-anchor="middle" class="lbl-tape">M1</text>
+        <line class="dim-tape" x1="368" y1="200" x2="429" y2="200" marker-start="url(#tA)" marker-end="url(#tA)"/>
+        <text x="398" y="194" text-anchor="middle" class="lbl-tape">M2</text>
+        <!-- M3 / M4 -->
+        <line class="dim-tape" x1="220" y1="208" x2="220" y2="283" marker-start="url(#tA)" marker-end="url(#tA)"/>
+        <text x="228" y="252" class="lbl-tape">M3</text>
+        <line class="dim-tape" x1="360" y1="208" x2="360" y2="283" marker-start="url(#tA)" marker-end="url(#tA)"/>
+        <text x="368" y="252" class="lbl-tape">M4</text>
+
+        <!-- robot -->
+        <line x1="280" y1="378" x2="280" y2="334" stroke="currentColor" stroke-width="1.4" marker-end="url(#kA)"/>
+        <text x="292" y="372" class="lbl-muted">robot (you) looking in</text>
+      </svg>
+    </div>
+    <figcaption>The topmost board is left out so the top board and its slot marks show. Blue: take with the tape.
+      Green dashed: already known from the robot's touches. M1 + 233 + M2 must come out equal to M5, to within 6 mm.</figcaption>
+  </figure>
+
+  <!-- ============================== FRONT VIEW ============================== -->
+  <figure>
+    <h2>2 · From the front, where the robot stands</h2>
+    <div class="fig-scroll">
+      <svg viewBox="0 0 560 440" role="img" aria-label="Front view of the shelf standing on the table: two side panels and three boards. The bottom board's top is 90 mm above the table and the top board's top 335 mm, both touched. M8 is the side panel height from the table to its top edge. M12 is from the top board's upper surface to the topmost board's upper surface. M13 is the board thickness. M14 is the height of a front panel under the bottom board, if there is one.">
+        <defs>
+          <marker id="tB" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,1 L9,5 L0,9 z" class="ah-tape"/></marker>
+          <marker id="gB" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,1 L9,5 L0,9 z" class="ah-touched"/></marker>
+        </defs>
+        <rect class="table" x="40" y="390" width="480" height="14"/>
+        <text x="500" y="384" text-anchor="end" class="lbl-muted">table</text>
+        <!-- panels -->
+        <rect class="panel" x="146" y="60" width="16" height="330"/>
+        <rect class="panel" x="418" y="60" width="16" height="330"/>
+        <!-- boards: bottom top 90mm, top 335mm, topmost -->
+        <rect class="board" x="162" y="336" width="256" height="10"/>
+        <rect class="board" x="162" y="214" width="256" height="10"/>
+        <rect class="board" x="162" y="96" width="256" height="10"/>
+        <text x="290" y="331" text-anchor="middle" class="lbl-muted">bottom board</text>
+        <text x="290" y="209" text-anchor="middle" class="lbl-muted">top board</text>
+        <text x="290" y="91" text-anchor="middle" class="lbl-muted">topmost board</text>
+        <!-- apron (optional) -->
+        <rect class="ghost" x="162" y="352" width="256" height="38"/>
+        <text x="290" y="376" text-anchor="middle" class="lbl-muted">front panel under it? (if any)</text>
+
+        <!-- touched heights -->
+        <line class="ext" x1="162" y1="336" x2="190" y2="336"/>
+        <line class="dim-touched" x1="184" y1="389" x2="184" y2="337" marker-start="url(#gB)" marker-end="url(#gB)"/>
+        <line class="ext" x1="162" y1="214" x2="222" y2="214"/>
+        <line class="dim-touched" x1="216" y1="389" x2="216" y2="215" marker-start="url(#gB)" marker-end="url(#gB)"/>
+        <text x="190" y="372" class="lbl-touched">90</text>
+        <text x="222" y="300" class="lbl-touched">335</text>
+
+        <!-- M8 panel height (left, outside) -->
+        <line class="ext" x1="146" y1="60" x2="104" y2="60"/>
+        <line class="dim-tape" x1="110" y1="389" x2="110" y2="61" marker-start="url(#tB)" marker-end="url(#tB)"/>
+        <text x="100" y="228" text-anchor="end" class="lbl-tape">M8</text>
+        <text x="100" y="244" text-anchor="end" class="lbl-muted">table → top</text>
+        <text x="100" y="258" text-anchor="end" class="lbl-muted">of panel</text>
+
+        <!-- M12 top board surface to topmost surface (right, outside) -->
+        <line class="ext" x1="434" y1="214" x2="474" y2="214"/>
+        <line class="ext" x1="434" y1="96" x2="474" y2="96"/>
+        <line class="dim-tape" x1="468" y1="213" x2="468" y2="97" marker-start="url(#tB)" marker-end="url(#tB)"/>
+        <text x="478" y="152" class="lbl-tape">M12</text>
+        <text x="478" y="168" class="lbl-muted">surface to</text>
+        <text x="478" y="182" class="lbl-muted">surface</text>
+
+        <!-- M13 board thickness callout -->
+        <line class="dim-tape" x1="394" y1="236" x2="394" y2="225" marker-end="url(#tB)"/>
+        <line class="dim-tape" x1="394" y1="202" x2="394" y2="213" marker-end="url(#tB)"/>
+        <text x="386" y="250" text-anchor="end" class="lbl-tape">M13 thickness</text>
+
+        <!-- M14 apron height -->
+        <line class="dim-tape" x1="440" y1="389" x2="440" y2="353" marker-start="url(#tB)" marker-end="url(#tB)"/>
+        <text x="448" y="376" class="lbl-tape">M14</text>
+
+        <!-- slot marks on the top board -->
+        <circle class="mark" cx="240" cy="214" r="5"/>
+        <circle class="mark" cx="340" cy="214" r="5"/>
+        <text x="240" y="203" text-anchor="middle" class="lbl-touched">L</text>
+        <text x="340" y="203" text-anchor="middle" class="lbl-touched">R</text>
+      </svg>
+    </div>
+    <figcaption>Heights are from the table; the green 90 and 335 mm are the bottom and top boards' surfaces, already
+      touched. M12 is surface to surface (top face of the top board up to top face of the
+      topmost board). M13: the top board's thickness at its front edge. M14 is 0 if there is no front panel below the
+      bottom board.</figcaption>
+  </figure>
+
+  <!-- ============================== SIDE VIEW ============================== -->
+  <figure>
+    <h2>3 · From the right side</h2>
+    <div class="fig-scroll">
+      <svg viewBox="0 0 560 380" role="img" aria-label="Side view of the shelf with the robot on the left. M9 is the side panel's depth, front edge to back edge. M11 is the boards' depth. M10 is how far the side panel's front edge stands in front of the boards' front edge.">
+        <defs>
+          <marker id="tC" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,1 L9,5 L0,9 z" class="ah-tape"/></marker>
+          <marker id="kC" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto"><path d="M0,1 L9,5 L0,9 z" class="ah-ink"/></marker>
+        </defs>
+        <rect class="table" x="40" y="320" width="480" height="14"/>
+        <!-- side panel -->
+        <rect class="panel" x="180" y="60" width="230" height="260"/>
+        <text x="295" y="52" text-anchor="middle" class="lbl-muted">right side panel</text>
+        <!-- boards seen edge-on behind the panel: dashed -->
+        <rect class="ghost" x="196" y="277" width="206" height="8"/>
+        <rect class="ghost" x="196" y="182" width="206" height="8"/>
+        <rect class="ghost" x="196" y="86" width="206" height="8"/>
+        <text x="299" y="175" text-anchor="middle" class="lbl-muted">top board (behind)</text>
+        <text x="408" y="340" text-anchor="end" class="lbl-muted">back (open)</text>
+
+        <!-- M9 panel depth -->
+        <line class="dim-tape" x1="181" y1="352" x2="409" y2="352" marker-start="url(#tC)" marker-end="url(#tC)"/>
+        <text x="295" y="370" text-anchor="middle" class="lbl-tape">M9 panel depth</text>
+        <!-- M11 board depth -->
+        <line class="ext" x1="196" y1="182" x2="196" y2="130"/>
+        <line class="ext" x1="402" y1="182" x2="402" y2="130"/>
+        <line class="dim-tape" x1="197" y1="138" x2="401" y2="138" marker-start="url(#tC)" marker-end="url(#tC)"/>
+        <text x="299" y="130" text-anchor="middle" class="lbl-tape">M11 board depth</text>
+        <!-- M10 -->
+        <line class="dim-tape" x1="150" y1="210" x2="179" y2="210" marker-end="url(#tC)"/>
+        <line class="dim-tape" x1="226" y1="210" x2="197" y2="210" marker-end="url(#tC)"/>
+        <line class="ext" x1="196" y1="190" x2="196" y2="216"/>
+        <text x="146" y="214" text-anchor="end" class="lbl-tape">M10</text>
+        <text x="146" y="230" text-anchor="end" class="lbl-muted">panel front</text>
+        <text x="146" y="244" text-anchor="end" class="lbl-muted">ahead of boards</text>
+        <!-- robot -->
+        <line x1="44" y1="100" x2="100" y2="100" stroke="currentColor" stroke-width="1.4" marker-end="url(#kC)"/>
+        <text x="44" y="90" class="lbl-muted">robot side</text>
+      </svg>
+    </div>
+    <figcaption>M10 is 0 if the side panels and boards are flush at the front, and negative if the boards stick out
+      past the panels. If the three boards differ in depth, give the top board's as M11 and say so.</figcaption>
+  </figure>
+
+  <!-- ============================== TABLE ============================== -->
+  <section style="display:grid;gap:12px">
+    <h2>Fill in (millimetres)</h2>
+    <div class="tbl-scroll">
+      <table>
+        <thead><tr><th>ID</th><th>What, from → to</th><th>Value</th></tr></thead>
+        <tbody id="rows"></tbody>
+      </table>
+    </div>
+    <div class="checks" id="checks" aria-live="polite"></div>
+  </section>
+
+  <section style="display:grid;gap:10px">
+    <h2>The block to paste</h2>
+    <p class="lede">Paste this to Claude, or under <code>shelf:</code> in
+      <code>ycb_pointcloud_pipeline/config/shelf.yaml</code> in place of the empty <code>tape_mm</code> block.
+      Values you leave empty stay <code>null</code>.</p>
+    <textarea id="yaml" readonly aria-label="tape_mm block for shelf.yaml"></textarea>
+    <div class="row">
+      <button id="copy" type="button">Copy block</button>
+      <button id="clear" type="button" class="quiet">Clear all values</button>
+      <span class="status" id="status" role="status"></span>
+    </div>
+  </section>
+</div>
+
+<script>
+(function () {
+  var ITEMS = [
+    ["M1", "slot_left_to_left_panel", "Left slot mark → left side panel's inner face", "Along the front edge (parallel to it). View 1."],
+    ["M2", "slot_right_to_right_panel", "Right slot mark → right side panel's inner face", "Along the front edge. View 1."],
+    ["M3", "slot_left_to_front_edge", "Left slot mark → top board's front edge", "Straight toward the robot, square to the edge. View 1."],
+    ["M4", "slot_right_to_front_edge", "Right slot mark → top board's front edge", "Square to the edge. View 1."],
+    ["M5", "inner_width", "Inner width between the side panels", "Face to face, at the top board. View 1."],
+    ["M6", "left_panel_thickness", "Left side panel thickness", "At its front edge. View 1."],
+    ["M7", "right_panel_thickness", "Right side panel thickness", "At its front edge. View 1."],
+    ["M8", "panel_height", "Side panel height", "Table surface → top edge of the side panels. View 2."],
+    ["M9", "panel_depth", "Side panel depth", "Its front edge → its back edge. View 3."],
+    ["M10", "panel_front_ahead_of_boards", "Side panel front ahead of the boards' front", "0 if flush; negative if the boards stick out. View 3."],
+    ["M11", "board_depth", "Board depth", "Top board: front edge → back edge. View 3."],
+    ["M12", "topmost_above_top_board", "Top board surface → topmost board surface", "Vertical, top face to top face. View 2."],
+    ["M13", "board_thickness", "Board thickness", "Top board, at its front edge. View 2."],
+    ["M14", "apron_height", "Front panel under the bottom board: height", "Table → its top edge; 0 if there is none. View 2."]
+  ];
+  var SPACING = 233.2;           // touched: the two slot marks, CALIBRATION.md
+  var TOL = 6;                   // tpgpt.hardware.shelf.TAPE_WIDTH_TOLERANCE, mm
+  var KEY = "shelf-tape-sheet-v1";
+  var rows = document.getElementById("rows");
+  var values = {};
+  try { values = JSON.parse(localStorage.getItem(KEY) || "{}") || {}; } catch (e) { values = {}; }
+
+  ITEMS.forEach(function (it) {
+    var tr = document.createElement("tr");
+    tr.innerHTML = '<td class="id">' + it[0] + '</td>' +
+      '<td class="what"><b>' + it[2] + '</b><small>' + it[3] + '</small></td>' +
+      '<td><input type="number" step="0.5" inputmode="decimal" id="in-' + it[0] + '" aria-label="' + it[0] + ' ' + it[2] + ' in millimetres"><span class="unit">mm</span></td>';
+    rows.appendChild(tr);
+    var input = tr.querySelector("input");
+    if (values[it[0]] !== undefined && values[it[0]] !== "") input.value = values[it[0]];
+    input.addEventListener("input", function () {
+      values[it[0]] = input.value;
+      try { localStorage.setItem(KEY, JSON.stringify(values)); } catch (e) {}
+      render();
+    });
+  });
+
+  function num(id) {
+    var v = document.getElementById("in-" + id).value;
+    return v === "" ? null : Number(v);
+  }
+
+  function check(label, state, text) {
+    return '<div class="check"><span class="chip ' + state + '">' + label + '</span><span>' + text + '</span></div>';
+  }
+
+  function render() {
+    var lines = ["  tape_mm:"];
+    ITEMS.forEach(function (it) {
+      var v = num(it[0]);
+      var key = "    " + it[1] + ":";
+      var pad = Array(Math.max(1, 38 - key.length)).join(" ");
+      lines.push(key + " " + (v === null ? "null" : String(v)) + pad + "# " + it[0]);
+    });
+    document.getElementById("yaml").value = lines.join("\n");
+
+    var html = "";
+    var m1 = num("M1"), m2 = num("M2"), m5 = num("M5");
+    if (m1 === null || m2 === null || m5 === null) {
+      html += check("width", "wait", "M1 + " + SPACING + " + M2 against M5 — fill all three.");
+    } else {
+      var d = m1 + SPACING + m2 - m5;
+      var ok = Math.abs(d) <= TOL;
+      html += check("width", ok ? "ok" : "bad",
+        '<span class="num">' + m1 + " + " + SPACING + " + " + m2 + " = " + (m1 + SPACING + m2).toFixed(1) +
+        "</span> against M5 <span class=\"num\">" + m5 + "</span>: off by <span class=\"num\">" +
+        (d > 0 ? "+" : "") + d.toFixed(1) + " mm</span>" +
+        (ok ? " — within " + TOL + " mm." : " — more than " + TOL + " mm; the planner will refuse this. Re-check M1, M2, M5, and the slot marks."));
+    }
+    var m3 = num("M3"), m4 = num("M4");
+    if (m3 !== null && m4 !== null) {
+      var e = m3 - m4;
+      html += check("slots", Math.abs(e) <= 10 ? "ok" : "bad",
+        "M3 − M4 = <span class=\"num\">" + (e > 0 ? "+" : "") + e.toFixed(1) + " mm</span>" +
+        (Math.abs(e) <= 10 ? ": the slot marks sit about parallel to the front edge." :
+         ": the slot line is not parallel to the front edge by that much — fine if real, but worth a second look."));
+    }
+    var m8 = num("M8"), m12 = num("M12");
+    if (m8 !== null && m12 !== null) {
+      var topmost = 334.9 + m12;
+      html += check("heights", topmost <= m8 + 1 ? "ok" : "bad",
+        "Topmost board surface <span class=\"num\">" + topmost.toFixed(0) + " mm</span> above the table against panel height M8 <span class=\"num\">" + m8 + " mm</span>" +
+        (topmost <= m8 + 1 ? "." : " — the topmost board would stand above the panels; re-check M8 and M12."));
+    }
+    var filled = ITEMS.filter(function (it) { return num(it[0]) !== null; }).length;
+    html += check(filled + "/14", filled >= 12 ? "ok" : "wait",
+      "M10 and M14 may be 0; everything else is needed before the model can use the tape.");
+    document.getElementById("checks").innerHTML = html;
+  }
+
+  var status = document.getElementById("status");
+  document.getElementById("copy").addEventListener("click", function () {
+    var ta = document.getElementById("yaml");
+    var done = function () { status.textContent = "Copied."; };
+    var fallback = function () {
+      ta.focus(); ta.select();
+      try { document.execCommand("copy"); done(); }
+      catch (e) { status.textContent = "Selected — press Ctrl+C (or long-press → Copy)."; }
+    };
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(ta.value).then(done, fallback);
+    } else { fallback(); }
+  });
+  document.getElementById("clear").addEventListener("click", function () {
+    values = {};
+    try { localStorage.removeItem(KEY); } catch (e) {}
+    ITEMS.forEach(function (it) { document.getElementById("in-" + it[0]).value = ""; });
+    status.textContent = "Cleared.";
+    render();
+  });
+  render();
+})();
+</script>

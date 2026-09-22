@@ -17,8 +17,9 @@ before the next one moves the arm closer to the shelf.
 
 ## 0. Before anything moves
 
-- **Measure the shelf** into `ycb_pointcloud_pipeline/config/shelf.yaml` (procedure:
-  `SHELF_AND_PATH_CHECK.md`), set `measured: true`, and rebuild. Stages 1–3 can run on the estimate;
+- **Measure the shelf with a tape**: M1–M14 on `docs/hardware/shelf_measurements.html`. Paste the
+  block it produces into `ycb_pointcloud_pipeline/config/shelf.yaml`, set `measured: true`, and
+  rebuild. Stages 1–3 can run on the estimate;
   stage 5 needs the measured shelf.
 - For the first runs, pass **`-p on_stall:=abort`**. The default, `continue`, switches the lag gate
   off after a stall (audit C1).

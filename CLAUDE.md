@@ -167,10 +167,13 @@ The planner's support height is: its `support_height` parameter, else the calibr
 - **`free_drive` "pose went stale"** means its own callback received nothing for `max_pose_age`
   (0.5 s) — subscriber starvation, while `/current_pose` itself holds 250 Hz. Intermittent.
   `-p max_pose_age:=2.0` works around it; that is a safety parameter, so it is the user's call.
-- **The shelf model is an estimate until measured** (`config/shelf.yaml`, `measured: false`). Only
-  the board heights and yaw are touched. Width, depth, walls and top are guesses, with no roof
-  assumed. A wrong guess causes false collisions or missed ones. How to measure:
-  `docs/hardware/SHELF_AND_PATH_CHECK.md`.
+- **The shelf model is an estimate until the tape measurements are in** (`config/shelf.yaml`,
+  `measured: false`). The shelf has no back and three boards (bottom, top, topmost). The robot
+  touched only the slot marks and the bottom and top boards' heights. The rest comes from a tape
+  (M1–M14, `docs/hardware/shelf_measurements.html`), because the arm can't reach the panel tops or
+  the topmost board squarely. `shelf.resolve_tape` anchors the tape to the touched slots and
+  refuses more than 6 mm of disagreement. Private artifact of that sheet:
+  https://claude.ai/artifact/FgicphG5cmo9hvRnoutXpp
 - **`grasp_offset` (planner node default [−35, 0, −25] mm) predates the recalibration**: a fixed
   base-frame shift applied to every grasp, probably absorbing the old calibration's error. Measure it
   on fresh captures (plan with it and with 0) before trusting it. Audit item A5, open.

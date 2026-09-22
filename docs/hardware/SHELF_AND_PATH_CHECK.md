@@ -48,8 +48,9 @@ shelf is still an estimate.
 Rebuild after editing (`colcon build --packages-select ycb_pointcloud_pipeline`). The planner reads
 the installed copy.
 
-**Currently only the board heights and the shelf's yaw are measured** (the four slot points in
-`CALIBRATION.md`). Width, depth, walls, back and top are **estimates** (`measured: false`). Every
+**Currently only the board heights, the slot marks and the shelf's yaw are measured** (the touched
+points in `CALIBRATION.md`). Width, depth, the side panels and the topmost board are **estimates**
+(`measured: false`) until the tape measurements below are in. Every
 plan says so in its notes and in `metadata['shelf_is_estimate']`. Until you measure them, the check
 may report a collision at an estimated wall that isn't there, or miss one that is. The estimate
 also assumes **no roof** above the top board (an open-top two-tier shelf, from `CALIBRATION.md`'s
@@ -58,21 +59,27 @@ so it is left out until it is seen or touched.
 
 ### Measuring it
 
-Close the gripper, run `python3 ~/calib_tools/touch_point.py` (a live fingertip-face readout, with
-the 9.5 mm probe offset applied), and free-drive the arm (`ros2 run ycb_pointcloud_pipeline
-free_drive`). Keep the hand tilt under 30°.
+The shelf has **no back and three boards** (bottom, top, topmost). The arm can't touch the side
+panels' tops or the topmost board squarely without risk, so the shelf's own dimensions come from a
+**tape**. The shelf is placed in the robot frame by the points already touched on 2026-09-21: the
+two slot marks on the top board, and both board heights (`anchors` in `shelf.yaml`).
 
-| field | touch |
-|---|---|
-| `front_left` [x, y] | The front edge of a board, at the inner face of the wall on the robot's left as it faces the open front (the "left slot" side). Touch the corner where the board's front edge meets the wall. |
-| `front_right` [x, y] | The same corner at the other wall. The builder refuses a swapped pair. |
-| `depth` | Touch the back panel's inner face at board height. `depth` is its distance from the front edge line. |
-| `top` | The top of the side walls. If there is a roof above the top board, add it under `boards` with `support: false`. |
-| `wall_thickness`, `back_thickness`, board `thickness` | A ruler at an exposed edge (0 for an open back). |
-| `bottom` | Already the touched table height. |
+`docs/hardware/shelf_measurements.html` (published as a private artifact, openable on a phone at
+the shelf) has top, front and side drawings with each measurement M1–M14 marked. It also has a
+fill-in table with live checks, and produces the `tape_mm:` block to paste into `shelf.yaml`.
+`shelf.resolve_tape` then:
 
-Then set `measured: true`. Anything else solid goes under `extra_boxes` (lo/hi corners, shelf or
-base frame).
+- steps from each touched slot mark square to the front edge (M3, M4) and along it to each side
+  panel (M1, M2);
+- takes panel thicknesses, height and depth, board depth and thickness, the topmost board's height
+  above the top board, and an optional front apron from the tape;
+- **refuses** a result whose width by the slots (M1 + 233.2 + M2) disagrees with the tape's inner
+  width (M5) by more than 6 mm. That usually means a slot mark was re-found in the wrong place, or a
+  reading is wrong.
+
+While every `tape_mm` value is `null`, the estimate below it stays in use (now without a back panel,
+and without the topmost board, whose height is unknown). Once one value is filled, all required ones
+must be. Then set `measured: true` and rebuild.
 
 ### Checking it
 
