@@ -465,7 +465,7 @@ class TpgptPlannerNode(Node):
             info['failed_fallback'] = getattr(exc, 'fallback', None)
             info['failed_stages'] = getattr(exc, 'stages', None)
             log.error(f'Planning refused: {exc}')
-            self._save_refused(exc, observed, points)
+            self._save_refused(exc, observed, points, world)
             self._publish_cloud_only(points)
             self._publish_shelf(world)
             return False, str(exc)
@@ -600,7 +600,7 @@ class TpgptPlannerNode(Node):
                  'camera cloud')
         return observed
 
-    def _save_refused(self, exc, observed, points):
+    def _save_refused(self, exc, observed, points, world=None):
         """A refused plan's candidates and clouds, so the refusal can be diagnosed."""
         p = lambda n: self.get_parameter(n).value  # noqa: E731
         out = os.path.join(p('output_dir'),
@@ -610,13 +610,15 @@ class TpgptPlannerNode(Node):
             cands = getattr(exc, 'candidates', None) or []
             with open(os.path.join(out, 'grasp_candidates.json'), 'w') as f:
                 json.dump({'error': str(exc), 'stages': getattr(exc, 'stages', None),
+                           'shelf_world': None if world is None else world.cloud_report,
                            'object_cloud_source': self.object_cloud_source,
                            'object_model': (None if self.object_fit is None
                                             else self.object_fit.summary()),
                            'candidates': [c.as_dict() for c in cands]},
                           f, indent=1, default=float)
             np.savez_compressed(os.path.join(out, 'clouds.npz'), observed=observed,
-                                object_cloud=points)
+                                object_cloud=points,
+                                obstacles=(np.zeros((0, 3)) if world is None else world.cloud))
             self.get_logger().info(f'Refused plan recorded in {out}')
         except Exception as err:  # the record must never mask the refusal itself
             self.get_logger().warn(f'could not record the refused plan: {err}')
