@@ -190,6 +190,13 @@ The planner's support height is: its `support_height` parameter, else the calibr
 - **The camera is about 10 mm off sideways at the shelf** (`CALIBRATION.md`, open). This applies
   to object clouds there too: expect grasps near the shelf to be off by that much until the
   calibration is refit with correspondences on the shelf.
+- **The FR3's meshes are not a host package.** RViz's RobotModel display needs
+  `franka_description`, which lives only in the robot container. It was copied out on 2026-09-22
+  into `~/thor_ws/install/franka_description` (118 MB, outside git, and colcon leaves it alone), so
+  the arm now draws on the host. If the container is rebuilt or the workspace install is wiped:
+  `docker cp docker-thor-robot:/opt/docker_thor/install/franka_description ~/thor_ws/install/`,
+  then re-source. Without it RViz spams "Could not load resource
+  [package://franka_description/meshes/...]" and draws no robot; nothing else is affected.
 - **`grasp_offset` (planner node default [−35, 0, −25] mm) predates the recalibration**: a fixed
   base-frame shift applied to every grasp, probably absorbing the old calibration's error. Measure it
   on fresh captures (plan with it and with 0) before trusting it. Audit item A5, open.
