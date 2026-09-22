@@ -190,6 +190,11 @@ The planner's support height is: its `support_height` parameter, else the calibr
 - **The camera is about 10 mm off sideways at the shelf** (`CALIBRATION.md`, open). This applies
   to object clouds there too: expect grasps near the shelf to be off by that much until the
   calibration is refit with correspondences on the shelf.
+- **Object clouds are only as good as the mask.** `segmentation_node` erodes each mask by
+  `mask_erosion` (default 1 px, the sim's value; audit A9). Without it the boundary pixels take
+  their depth partly from the background and fly towards the camera: a 68 mm YCB can fused to
+  133 mm wide, which broke the scan fit, the `centred` stage and the jaw check. Restart the node
+  after changing it.
 - **The FR3's meshes are not a host package.** RViz's RobotModel display needs
   `franka_description`, which lives only in the robot container. It was copied out on 2026-09-22
   into `~/thor_ws/install/franka_description` (118 MB, outside git, and colcon leaves it alone), so

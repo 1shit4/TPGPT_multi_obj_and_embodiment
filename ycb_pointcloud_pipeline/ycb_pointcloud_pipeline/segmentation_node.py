@@ -97,6 +97,15 @@ class YCBSegmentationNode(Node):
         self.declare_parameter('output_dir', os.path.expanduser('~/ycb_pointclouds'))
         self.declare_parameter('show_debug_window', False)
         # The whole frame as the planner's observed obstacle cloud (/ycb_scene_cloud).
+        # Pixels eroded off each object mask before it is deprojected. The simulation
+        # does this (tpgpt.perception.cameras.DEFAULT_MASK_EROSION = 1) and measured why:
+        # a mask's boundary pixels take their depth partly from whatever is behind the
+        # object, so they fly off towards the camera. On a 5 x 5 x 9 cm box the fused
+        # extents were [17.3, 8.8, 9.7] cm unerooded and [5.8, 6.2, 8.9] cm with one
+        # pixel. Two pixels can empty the mask of a small or distant object, so the
+        # erosion is skipped for any mask it would leave under `mask_min_pixels`.
+        self.declare_parameter('mask_erosion', 1)
+        self.declare_parameter('mask_min_pixels', 60)
         self.declare_parameter('publish_scene_cloud', True)
         self.declare_parameter('scene_cloud_stride', 4)   # every 4th pixel: ~25k points at 848x480
         # Intrinsics used for deprojection: config/camera_calibration.yaml
@@ -214,6 +223,24 @@ class YCBSegmentationNode(Node):
         with self._lock:
             self._latest = (color_msg, depth_msg)
 
+    def _eroded(self, mask, label):
+        """The mask without its boundary pixels, whose depth is part background."""
+        p = lambda n: self.get_parameter(n).value  # noqa: E731
+        n = int(p('mask_erosion'))
+        if n <= 0:
+            return mask
+        import cv2
+
+        small = cv2.erode(mask.astype(np.uint8), np.ones((3, 3), np.uint8), iterations=n)
+        kept = int(small.sum())
+        if kept < int(p('mask_min_pixels')):
+            self.get_logger().warn(
+                f'{label}: {n} px erosion would leave {kept} pixels (min '
+                f"{p('mask_min_pixels')}); using the mask as detected, so its edge pixels "
+                'will fly towards the camera', throttle_duration_sec=10.0)
+            return mask
+        return small.astype(bool)
+
     def process(self):
         with self._lock:
             frame, self._latest = self._latest, None
@@ -262,6 +289,7 @@ class YCBSegmentationNode(Node):
 
         published = []
         for det in detections:
+            det['mask'] = self._eroded(det['mask'], det['label'])
             points, colors = mask_to_pointcloud(rgb, depth, det['mask'], self.intrinsics,
                                                 depth_scale=self.depth_scale,
                                                 depth_trunc=self.depth_trunc)
