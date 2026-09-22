@@ -11,12 +11,12 @@ run it on the robot.
 
 | path | what it is | owned by |
 |---|---|---|
-| `tpgpt/` (except `tpgpt/hardware/`), `tests/`, `docs/*.md`, `README.md`, `ROBOTICS_NOTES.md` | **The method**, as the simulation built it. | `main` (sim) |
+| `tpgpt/` (except `tpgpt/hardware/`), `tests/`, `README.md` | **The method**, as the simulation built it. | `main` (sim) |
 | `tpgpt/hardware/` | The robot bridge: planner, grasp selection, executor, teach, end effectors. No ROS. | `hardware` |
 | `ycb_pointcloud_pipeline/` | **The ROS 2 package** (ament_python): camera segmentation, calibration, and the nodes that call `tpgpt.hardware`. | `hardware` |
 | `x6_experiment/` | Config and run guide for the paper's real-robot experiment ("X6"). | `hardware` |
 | `docs/hardware/` | Hardware docs: calibration, commands, the X6 brief, the faithfulness audit. | `hardware` |
-| `docs/sim/SIM_CLAUDE.md` | The simulation's own `CLAUDE.md`, **kept for comparison only** (see below). | `main` |
+| `docs/sim/` | The simulation's documents, moved here on this branch: its `CLAUDE.md` as `SIM_CLAUDE.md` (**kept for comparison only**, see below), `ROBOTICS_NOTES.md`, `dynamics_execution.md`, `gripper_configs.md`, `gripper_diversity.md`, `realworld_failures.md`, `ycb_grid.md`, `figures/`. | `main` |
 
 Beside this repo, in `~/thor_ws/src/ycb_point_cloud/`, sits `6DOF_MultiEmbod_Grasp/`: another
 project, **used only to run the GraspGen-X server** (`ycb_pointcloud_pipeline/scripts/run_graspgenx_server.sh`)
@@ -34,7 +34,9 @@ The robot itself runs in a separate Docker container (`docker-thor-robot`, from
 `docs/sim/SIM_CLAUDE.md` is the simulation's guide (1000+ lines: its rules, its pitfalls, its
 measurement history). **It does not govern hardware sessions** -- this file does -- but it is the
 reference for what the method *is*, so read the relevant part before changing anything that the
-simulation also implements. Comments in sim-owned code that say "CLAUDE.md" mean that file.
+simulation also implements. Comments in sim-owned code that say "CLAUDE.md" mean that file, and
+ones naming `ROBOTICS_NOTES.md` or `docs/<name>.md` mean `docs/sim/...` (the sim's own code is left
+unedited so merges stay clean; git follows the renames when `main` edits those files).
 
 Rules carried over from it that apply here too: run the tests after every change; cite the paper
 section in docstrings of anything implementing theory; **document every deviation from the paper or
@@ -202,7 +204,7 @@ The planner's support height is: its `support_height` parameter, else the calibr
 - `x6_experiment/RUNNING_THE_EXPERIMENT.md` — operating the X6 harness.
 - `ycb_pointcloud_pipeline/INSPIRE_HAND.md` — the Inspire RH56 hand: mounting, side grasp, caveats.
 - `docs/hardware_integration.md` — frames and the hardware bridge.
-- `docs/dynamics_execution.md` — why the executor's law and gates are what they are.
+- `docs/sim/dynamics_execution.md` — why the executor's law and gates are what they are.
 - `docs/sim/SIM_CLAUDE.md` — the simulation's own guide (reference, not instructions).
 
 ## Current state (2026-09-21)
