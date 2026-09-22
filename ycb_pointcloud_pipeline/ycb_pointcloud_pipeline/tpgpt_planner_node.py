@@ -112,6 +112,10 @@ class TpgptPlannerNode(Node):
         d('outlier_radius', 0.012)
         d('outlier_min_neighbors', 4)
         d('max_points', 8192)
+        # The object cloud: the object's YCB scan fitted to the camera's cloud, as the
+        # simulation's YCB experiment uses the full scan (tpgpt.hardware.object_model).
+        # Falls back to the camera cloud when there is no scan or the fit is refused.
+        d('object_model', True)
         # Scene description, base frame. NaN = estimate from the cloud.
         d('support_height', NAN)                  # NaN -> verification.expected_table_height
         d('destination', [0.55, 0.25, 0.0])       # where to put the object (x, y used)
@@ -192,6 +196,9 @@ class TpgptPlannerNode(Node):
         self.plan_dir = None
         self.scene = None          # (monotonic, points_base, joint angles at capture)
         self.joints = None         # (monotonic, (7,) fr3_joint1..7)
+        self.object_models = {}    # name -> tpgpt.hardware.object_model.ObjectModel
+        self.object_fit = None
+        self.object_cloud_source = None
         self.shelf_model = None
         shelf_path = p('shelf_config')
         if shelf_path:
@@ -213,6 +220,10 @@ class TpgptPlannerNode(Node):
         latched = QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL,
                              reliability=ReliabilityPolicy.RELIABLE)
         self.cloud_pub = self.create_publisher(PointCloud2, '/tpgpt/plan/target_cloud', latched)
+        # What the camera saw of the object; target_cloud is what was planned on (the
+        # fitted scan when object_model accepts it).
+        self.observed_pub = self.create_publisher(PointCloud2, '/tpgpt/plan/observed_cloud',
+                                                  latched)
         self.placed_pub = self.create_publisher(PointCloud2, '/tpgpt/plan/placed_cloud', latched)
         self.marker_pub = self.create_publisher(MarkerArray, '/tpgpt/plan/markers', latched)
         self.path_pub = self.create_publisher(Path, '/tpgpt/plan/path', latched)
@@ -369,8 +380,16 @@ class TpgptPlannerNode(Node):
             log.error(str(exc))
             info['error'] = str(exc)
             return False, str(exc)
+        observed = points
+        points = self._full_object_cloud(observed)
+        self.observed_pub.publish(xyz_to_pointcloud2(observed, self.base,
+                                                     self.get_clock().now().to_msg(),
+                                                     (255, 255, 255)))
         info['timing_s']['perception'] = time.monotonic() - t_start
         info['points'] = points
+        info['observed_points'] = observed
+        info['object_cloud_source'] = self.object_cloud_source
+        info['object_model'] = None if self.object_fit is None else self.object_fit.summary()
         destination = np.asarray(p('destination'), dtype=float)
         dest_h = p('destination_height')
         scene = TargetScene(
@@ -407,7 +426,9 @@ class TpgptPlannerNode(Node):
         info['settings'] = settings
         from tpgpt.hardware.grasp_selection import PathContext, ScreenContext
         from tpgpt.sim.keypoints import carry_transform
-        world = self.shelf_world(points)
+        # The target is removed from the scene cloud: what the camera saw of it,
+        # and the fitted scan's hidden side.
+        world = self.shelf_world(np.vstack([observed, points]))
         log.info(f'Shelf world: {world.cloud_report}')
         if world.cloud_report.get('scene_missing'):
             log.warn(f"{world.cloud_report['scene_missing']}: the shelf model alone")
@@ -444,6 +465,7 @@ class TpgptPlannerNode(Node):
             info['failed_fallback'] = getattr(exc, 'fallback', None)
             info['failed_stages'] = getattr(exc, 'stages', None)
             log.error(f'Planning refused: {exc}')
+            self._save_refused(exc, observed, points)
             self._publish_cloud_only(points)
             self._publish_shelf(world)
             return False, str(exc)
@@ -457,6 +479,8 @@ class TpgptPlannerNode(Node):
         result.metadata.update({
             'object_name': p('object_name'),
             'n_fused_clouds': n_clouds,
+            'object_cloud_source': self.object_cloud_source,
+            'object_model': None if self.object_fit is None else self.object_fit.summary(),
             'calibration_yaml': p('calibration_yaml'),
             'calibration_is_placeholder': cal.camera_is_placeholder,
             'T_base_camera': cal.T_base_camera.tolist(),
@@ -526,6 +550,76 @@ class TpgptPlannerNode(Node):
         log.info(text)
         self._publish_plan(result, selection)
         return True, text
+
+    def _full_object_cloud(self, observed):
+        """The fitted YCB scan (tpgpt.hardware.object_model), or the camera cloud.
+
+        Sets ``object_cloud_source`` and ``object_fit`` for the plan record.
+        """
+        p = lambda n: self.get_parameter(n).value  # noqa: E731
+        log = self.get_logger()
+        name = p('object_name')
+        self.object_fit = None
+        if not p('object_model'):
+            self.object_cloud_source = 'camera (object_model is false)'
+            return observed
+        from tpgpt.hardware.object_model import YCB_SCANS, ObjectModel, fit_object
+        if name not in YCB_SCANS:
+            self.object_cloud_source = f'camera (no YCB scan for {name})'
+            log.warn(f'No YCB scan for {name!r} (known: {sorted(YCB_SCANS)}): planning on the '
+                     'camera cloud')
+            return observed
+        support = self._support_height()
+        T_cam = self.calib.T_base_optical(self.calib.cal.optical_frame)
+        if support is None or T_cam is None:
+            self.object_cloud_source = 'camera (no support height or camera pose to fit with)'
+            log.warn(f'{self.object_cloud_source}: planning on the camera cloud')
+            return observed
+        if name not in self.object_models:
+            try:
+                self.object_models[name] = ObjectModel.load(name)
+            except FileNotFoundError as exc:
+                self.object_cloud_source = 'camera (scan not downloaded)'
+                log.warn(f'{exc}: planning on the camera cloud')
+                return observed
+        t = time.monotonic()
+        fit = fit_object(self.object_models[name], observed, float(support), T_cam[:3, 3])
+        self.object_fit = fit
+        s = fit.summary()
+        detail = (f"rest {s['rest_index']}, heading {s['heading_deg']:.0f} deg, camera points "
+                  f"{s['median_mm']:.1f} mm from the scan (median), {s['explained']:.0%} within "
+                  f"8 mm, {s['seen']:.0%} of the camera-facing scan seen, fitted height "
+                  f"{s['dz_mm']:+.1f} mm off the table; {time.monotonic() - t:.1f} s")
+        if fit.accepted:
+            self.object_cloud_source = 'ycb scan (fitted)'
+            log.info(f'Object model: {name} scan fitted ({detail}); planning on its '
+                     f'{len(fit.full_cloud)}-point full cloud')
+            return fit.full_cloud
+        self.object_cloud_source = 'camera (fit refused)'
+        log.warn(f'Object model: {name} fit REFUSED, {fit.reason} ({detail}); planning on the '
+                 'camera cloud')
+        return observed
+
+    def _save_refused(self, exc, observed, points):
+        """A refused plan's candidates and clouds, so the refusal can be diagnosed."""
+        p = lambda n: self.get_parameter(n).value  # noqa: E731
+        out = os.path.join(p('output_dir'),
+                           f"{p('object_name')}_{time.strftime('%Y%m%d_%H%M%S')}_refused")
+        try:
+            os.makedirs(out, exist_ok=True)
+            cands = getattr(exc, 'candidates', None) or []
+            with open(os.path.join(out, 'grasp_candidates.json'), 'w') as f:
+                json.dump({'error': str(exc), 'stages': getattr(exc, 'stages', None),
+                           'object_cloud_source': self.object_cloud_source,
+                           'object_model': (None if self.object_fit is None
+                                            else self.object_fit.summary()),
+                           'candidates': [c.as_dict() for c in cands]},
+                          f, indent=1, default=float)
+            np.savez_compressed(os.path.join(out, 'clouds.npz'), observed=observed,
+                                object_cloud=points)
+            self.get_logger().info(f'Refused plan recorded in {out}')
+        except Exception as err:  # the record must never mask the refusal itself
+            self.get_logger().warn(f'could not record the refused plan: {err}')
 
     def _grasp_candidates(self, points):
         """GraspGen-X poses and scores in the base frame, or (None, None, reason)."""
