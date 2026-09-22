@@ -138,9 +138,12 @@ Two facts that need several files to see, and that decide whether a change is fa
   world (`tpgpt/hardware/shelf.py`). The arm can hit the **table** (an exact plane), the **shelf**
   (the measured model, seen or not), **everything else the camera sees** within reach (the robot,
   the target, and the camera's points on the table and shelf removed), and **itself** (exact convex
-  tests between pieces not joined at a joint). The carried object may rest only on the table or a
-  support board's top face. Waypoints the arm can't hold as planned are checked at the executor's
-  fallback posture. Full account: `SHELF_AND_PATH_CHECK.md`, "How a path is checked". The funnel calls the sim's own `tpgpt.grasp.filters` stage functions
+  tests between pieces not joined at a joint). Contacts are allowed **by stage** (pick: fingers on
+  the object; carry: the object on its pick support only until it first clears it; place: only the
+  object's base on the destination surface; retreat: fingers on the placed object only until they
+  first clear it). Reachability is **strict** by default: every waypoint reachable in position, the
+  pick and place with their orientation, and IK retried first. Full account: `SHELF_AND_PATH_CHECK.md`,
+  "How a path is checked". The funnel calls the sim's own `tpgpt.grasp.filters` stage functions
   (visibility, on_target, grasp_collision, place_zone, centred), with the sim's pass-through rule.
   The hardware's jaw, refine, table and duplicate checks stay as hard stages. Deliberate
   differences, all documented there: a collision is never executed as a fallback, the top-down

@@ -100,50 +100,69 @@ The plan is a path of a few hundred hand poses (waypoints). The check walks it, 
 waypoint (the sim's spacing). At each one:
 
 1. **The arm's posture.** Inverse kinematics finds the seven joint angles for the planned hand pose,
-   starting from the previous waypoint's answer. If only the **orientation** can't be reached, the
-   executor will relax it (its fallback), so the check solves for position alone and tests *that*
-   posture, marked `(relaxed)`. If even the **position** can't be reached, the executor will steer
-   straight to the next reachable pose, so the check tests points every 2 cm along that line, marked
-   `(steered)`.
-2. **The robot's pieces** at that posture: 8 arm links as convex shapes wrapped around their real
-   collision meshes, and the hand as boxes (fingers open before the grasp, closed to the object's
-   width while holding).
-3. **The world**, and what counts as touching:
+   starting from the previous waypoint's answer. If it fails, it is retried (400 iterations, then 3
+   starting postures near the previous answer, never a jump of more than 0.5 rad on any joint, which
+   the controller couldn't follow).
+   - If only the **orientation** can't be reached, the executor will relax it, so the check tests
+     the posture it will actually take, marked `(relaxed)`.
+   - If even the **position** can't be reached, the path is rejected (see Reachability).
+2. **The robot's pieces** at that posture: the 8 arm links as convex shapes around their real
+   collision meshes, and the hand as boxes. On the Franka Hand, the palm (`hand_body`) is separate
+   from the finger boxes. Fingers are open before the grasp and closed to the object's width while
+   holding.
+3. **The world:**
+   - **the table:** an exact flat surface at the touched height;
+   - **the shelf:** the measured model;
+   - **everything else the camera sees** within reach: its points, minus the robot, the target, and
+     the camera's points on the table and the shelf;
+   - **the robot itself.**
 
-| what | how it is represented | robot touching it | the carried object touching it |
+**In every stage** the robot must not touch the table, the shelf, the seen points, or itself (except
+links joined at a joint, and the hand's own parts). "Touch" means more than 1 mm into exact geometry,
+or any seen point inside a piece.
+
+**What each stage allows.** The stages come from the gripper schedule: *g* is the close, *r* the
+release.
+
+| stage | waypoints | the object and the robot | the object and the world |
 |---|---|---|---|
-| **the table** | an exact flat surface at the touched height (−0.0136 m) | any robot piece more than 1 mm below it | allowed if resting on it (at most 5 mm into it), deeper is a fault |
-| **the shelf** | the measured model: panels as exact boxes | any piece more than 1 mm into a panel | allowed only on the **top face of a support board**, at most 5 mm in. Any side panel, a board's underside or front edge is a fault. |
-| **everything else the camera sees** | the camera's points within reach, after removing the robot, the target, the table (up to 15 mm above it) and the shelf panels (within 15 mm of the model) | any point inside a piece | any point within 5 mm is a fault |
-| **the robot itself** | its own pieces | two pieces more than 1 mm into each other, except neighbours joined at a joint and the hand's own parts | — |
-| **the object to be picked** | its cloud, where it stands | fault on the way onto the path, and during the approach except in the last 3 waypoints before the close | — |
+| **onto the path** | the move from where the arm is to the plan's start | no part of the robot may touch the object | — (it stands where it is) |
+| **approach** | before *g* − 3 | no part of the robot may touch it | — |
+| **pick** | *g* − 3 … *g* | the **fingers** may touch it; the palm and links may not | it stands on its support |
+| **carry** | after *g*, before *r* − 12 | held by the fingers; **no arm link** may touch it | it may rest on the surface it was picked from **until it first clears it**, then never again. It touches nothing else. |
+| **place** | *r* − 12 … *r* | held by the fingers; no arm link may touch it | only its **base** may touch, and only the **destination surface** (the destination board's top face, or the table if that is the destination), at most 5 mm in. Another face touching (it's being put down on its side), another surface, a side panel, or any seen point is a fault. |
+| **retreat** | after *r* | the object stays where it was set down and is an obstacle. The **fingers** may touch it **until they first clear it**, then never again; the palm and links never. | — |
 
-What each stage allows (a waypoint's stage comes from the gripper schedule):
+**The base** is the object's cloud points within 10 mm of its lowest point at the pick: the face it
+stood on. It moves rigidly with the hand from the close, so "which face touches the board" holds
+however the carry turns it. This replaces the sim's rule, which called a contact "support" when it
+lay within 60° of straight down from the object's centre, and misreads the bottom corners of a wide
+flat object as side hits. "Until it first clears" is measured, not counted: the object clears its
+support when its lowest point is more than 5 mm above it, and the fingers clear the placed object
+when none of them touches it.
 
-- **Onto the path** (hardware only): the move from where the arm is to the plan's start. Nothing may
-  be touched, the object to be picked included.
-- **Approach:** nothing may be touched. The fingers may be around the object only in the last 3
-  waypoints before the close; the jaw check has judged the grasp pose itself.
-- **Carry and place** (the last 12 waypoints of the carry): the robot touches nothing. The object moves
-  rigidly with the hand and may only rest on the table or a support board's top face.
-- **Retreat:** the robot touches nothing. The object just placed is not an obstacle (as in the sim).
+**Limits of this.**
+- The Inspire hand is modelled as one envelope, so its fingers can't be told from its palm. The
+  envelope counts as fingers.
+- The camera sees the object from one side, so its "base" is the bottom of what was seen.
+- Link 5's convex hull is 1.78× its real volume. Postures that fold the hand back toward the forearm
+  may be reported as self-collisions that aren't real; splitting link 5 into two parts would settle
+  it.
 
-**Why faces and not directions.** The sim decides "support vs side" for the carried object by
-direction: a touched point within 60° of straight down from the object's centre is "below". That
-misreads the bottom corners of a wide flat object (a cereal box lying flat has its corners about 80°
-off vertical) as side hits. With exact geometry the question is answered by *which face* the point
-went through, so the object's rotation during the carry doesn't matter.
-
-**Reachability.** A candidate is admitted when no waypoint collides (the relaxed and steered ones
-included) and at least 60 % of the tested waypoints are reachable *as planned*, orientation
-included. The 60 % is the sim's number. Whether it should be stricter (for example: every waypoint
-reachable in position, and the grasp and release windows reachable with orientation) is **open**,
-waiting on the user's decision. The result reports `orientation_relaxed`, `skipped` and
-`steered_unreachable`.
-
-**Known limitation.** Link 5 is L-shaped and its convex hull is 1.78× its real volume, filling the
-inside of the L. Postures that fold the hand back toward the forearm may therefore be reported as
-self-collisions that aren't real. Splitting link 5 into two convex parts would settle it.
+**Reachability** (`kinematic_criterion`, the user's choice 2026-09-22):
+- **`strict`** (the default):
+  - every tested waypoint, and every step of the move onto the path, must be reachable in
+    **position**;
+  - the orientation may be relaxed in **transit** only (approach and carry), and is checked at that
+    posture;
+  - in the **pick and place** it must be reached.
+- **`sim`**: at least 60 % of the waypoints reachable as planned (the simulation's rule). The rest
+  are checked where the executor will put the arm, including the straight line it steers along past
+  positions it can't reach.
+- **The least-bad fallback** (`allow_kinematic_fallback`) is **off**: under `strict` it would execute
+  a plan the criterion refused.
+- **Reported:** `orientation_relaxed`, `relaxed_in_pick_or_place`, `skipped` (position out of reach)
+  and `first_kinematic`.
 
 ## The scene cloud
 
@@ -176,8 +195,8 @@ executor refuses a real run without them.
 `shelf_config` (installed `shelf.yaml`; `''` = none), `use_scene_cloud` (true),
 `scene_cloud_topic`, `scene_max_age`, `scene_outlier_radius`, `scene_outlier_min_neighbors`,
 `joint_states_topic`, `allow_missing_joint_states` (false), `joint_states_max_age` (1 s),
-`check_path` (true), `min_reachable_fraction` (0.60),
-`allow_kinematic_fallback` (true), `max_centre_offset` (0.025), `grasp_max_plans` (100),
+`check_path` (true), `kinematic_criterion` (`strict`), `min_reachable_fraction` (0.60, `sim`
+only), `allow_kinematic_fallback` (false), `max_centre_offset` (0.025), `grasp_max_plans` (100),
 `grasp_fallback_top_down` (false).
 
 Executor node: `joint_states_topic`. Without fresh joints the fallback is off for that step, and
