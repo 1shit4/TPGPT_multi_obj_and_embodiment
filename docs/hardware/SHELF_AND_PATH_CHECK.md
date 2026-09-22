@@ -48,14 +48,20 @@ shelf is still an estimate.
 Rebuild after editing (`colcon build --packages-select ycb_pointcloud_pipeline`). The planner reads
 the installed copy.
 
-**Currently only the board heights, the slot marks and the shelf's yaw are measured** (the touched
-points in `CALIBRATION.md`). Width, depth, the side panels and the topmost board are **estimates**
-(`measured: false`) until the tape measurements below are in. Every
-plan says so in its notes and in `metadata['shelf_is_estimate']`. Until you measure them, the check
-may report a collision at an estimated wall that isn't there, or miss one that is. The estimate
-also assumes **no roof** above the top board (an open-top two-tier shelf, from `CALIBRATION.md`'s
-"recessed under the top shelf"). A roof that isn't there would block every top-board placement,
-so it is left out until it is seen or touched.
+**Measured 2026-09-22** (`measured: true`): heights and the two slot marks were touched by the
+robot on 2026-09-21 (about 1 mm). Every other dimension is from a tape (M1–M14), taken by the user.
+Two cross-checks agree:
+- the width by the slots, M1 + 233.2 + M2 = 576 mm, against the inner width M5 = 580 mm: −3.8 mm;
+- the apron plus the board, 72 + 18 = 90 mm, against the touched bottom board above the table,
+  90.4 mm.
+
+The model has two side panels (18 mm, 902 mm tall, 242 mm deep, flush with the boards), three
+18 mm boards 242 mm deep (bottom at 0.0768 m, top at 0.3213 m, topmost 489 mm above the top), a
+72 mm apron under the bottom board, and no back or roof.
+
+**M1–M4 were hard to hold square** (the user). They are the only readings that place the shelf in
+x/y and set its yaw, so they are corrected from the camera (`shelf_fit`, below) before the shelf
+is used.
 
 ### Measuring it
 
@@ -77,9 +83,59 @@ fill-in table with live checks, and produces the `tape_mm:` block to paste into 
   width (M5) by more than 6 mm. That usually means a slot mark was re-found in the wrong place, or a
   reading is wrong.
 
-While every `tape_mm` value is `null`, the estimate below it stays in use (now without a back panel,
-and without the topmost board, whose height is unknown). Once one value is filled, all required ones
-must be. Then set `measured: true` and rebuild.
+The width used is **M5**, the one direct reading across the shelf. The −3.8 mm by which M1 + M2
+disagree with it is split between the two ends.
+
+### Grounding the placement in the cloud: `shelf_fit`
+
+The camera sees the shelf's faces directly: the right panel's inner face, the left panel's outer
+face, the panels' and boards' front edges, the apron and the board tops. `shelf.fit_to_cloud`
+finds the rigid correction that puts the model's faces on those points. It is a yaw about the front
+edge's midpoint plus a shift along the front edge and into the shelf. Heights are never moved: they
+were touched, and the camera's bottom-board reading is 5 mm off (`CALIBRATION.md`).
+
+How it works:
+- it takes the cloud points within 40 mm of the tape-placed model, and fits each point's distance
+  to the nearest face by robust least squares (Cauchy, 4 mm scale), then again within 20 mm;
+- a direction is fitted only if the cloud constrains it: at least 150 points squarely on side
+  faces for the shift along the front, as many on front faces for the shift into the shelf, and
+  front faces spanning at least 150 mm for the yaw. Board tops say nothing about x/y. A direction
+  not fitted keeps the tape's value;
+- a result is **refused** above 30 mm or 3° (beyond any tape error: suspect the calibration, an
+  object or the arm against a panel, or a mis-keyed reading). It is also refused if the fitted
+  model still sits more than 6 mm (median) from the shelf's points;
+- the fit always starts from the tape, ignoring any `cloud_fit` already in the config, so re-running
+  it gives the same absolute answer, not a correction on top of a correction.
+
+Run it with the **shelf empty and the arm out of view**. The robot is also removed from the cloud
+at `/joint_states`, but a hand resting on a panel would be read as the panel. Segmentation must be
+running (`/ycb_scene_cloud`):
+
+```bash
+ros2 run --prefix python3 ycb_pointcloud_pipeline shelf_fit
+```
+
+It prints:
+- the correction;
+- the median distance of the shelf points to the model, before and after;
+- **M1–M4 as the cloud places the shelf**, beside the tape's values;
+- the median offset of each face seen, before and after.
+
+It writes all of it to `~/tpgpt_calibration/shelf_fit_<time>.yaml`. In RViz, `/shelf_fit/model_tape`
+(orange) and `/shelf_fit/model_fitted` (green) are drawn over `/shelf_fit/cloud`. It never edits
+`shelf.yaml`: paste the printed `cloud_fit:` block under `shelf:`, rebuild, and restart the planner.
+
+**Judge it by the faces, not the correction.** After the fit, each well-seen face should read
+within about ±2 mm, both panels' faces agreeing. What would make the result wrong:
+- a calibration error, which moves the cloud and so the fitted shelf with it (the calibration was
+  validated to about 5 mm on these boards);
+- one panel reading −3 mm and the other +3 mm after the fit, which means the width (M5) is off
+  rather than the placement.
+
+Tested on synthetic clouds of the real shelf, seen from the calibrated camera position with 3 mm
+depth noise and a clutter object: a 7 / −9 mm, 0.8° misplacement came back within 1.5 mm and 0.1°
+(`tests/unit/test_shelf.py`). A ROS dry run on a fake `/ycb_scene_cloud` (domain 88) recovered
+5 / 8 mm, −0.6° as 5.0 / 7.3 mm, −0.54°. **Not yet run on the real cloud.**
 
 ### Checking it
 

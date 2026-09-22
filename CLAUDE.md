@@ -172,13 +172,14 @@ The planner's support height is: its `support_height` parameter, else the calibr
 - **`free_drive` "pose went stale"** means its own callback received nothing for `max_pose_age`
   (0.5 s) — subscriber starvation, while `/current_pose` itself holds 250 Hz. Intermittent.
   `-p max_pose_age:=2.0` works around it; that is a safety parameter, so it is the user's call.
-- **The shelf model is an estimate until the tape measurements are in** (`config/shelf.yaml`,
-  `measured: false`). The shelf has no back and three boards (bottom, top, topmost). The robot
-  touched only the slot marks and the bottom and top boards' heights. The rest comes from a tape
-  (M1–M14, `docs/hardware/shelf_measurements.html`), because the arm can't reach the panel tops or
-  the topmost board squarely. `shelf.resolve_tape` anchors the tape to the touched slots and
-  refuses more than 6 mm of disagreement. Private artifact of that sheet:
-  https://claude.ai/artifact/FgicphG5cmo9hvRnoutXpp
+- **The shelf is measured (2026-09-22), but its x/y placement and yaw wait for `shelf_fit`.** The
+  shelf has no back and three boards (bottom, top, topmost). Heights and two slot marks were
+  touched; everything else is from a tape (M1–M14, `docs/hardware/shelf_measurements.html`,
+  private artifact https://claude.ai/artifact/FgicphG5cmo9hvRnoutXpp). M1–M4 (slot mark to panel
+  and to front edge) were hard to hold square and place the shelf, so `shelf_fit` corrects the
+  placement from the camera's cloud. It writes a `cloud_fit:` block, pasted by hand into
+  `shelf.yaml`; until then the shelf may be misplaced by up to about 10 mm.
+  `SHELF_AND_PATH_CHECK.md`, "Grounding the placement in the cloud".
 - **`grasp_offset` (planner node default [−35, 0, −25] mm) predates the recalibration**: a fixed
   base-frame shift applied to every grasp, probably absorbing the old calibration's error. Measure it
   on fresh captures (plan with it and with 0) before trusting it. Audit item A5, open.
@@ -231,6 +232,8 @@ The planner's support height is: its `support_height` parameter, else the calibr
   any capture from the new setup.**
 - **Fresh start agreed 2026-09-22:** a new demonstration in the new setup; the old runs and demo are
   not used. The staged test order is in `docs/hardware/FRESH_START.md`.
-- Open, in the user's order: measure the shelf (`shelf.yaml`); decide `grasp_offset` (A5); then add
+- **Shelf measured by tape 2026-09-22**; its placement is to be grounded with `shelf_fit` on the
+  live cloud (not yet run).
+- Open, in the user's order: run `shelf_fit` and store its `cloud_fit`; decide `grasp_offset` (A5); then add
   grippers; then the executor-default deviations (C1, C2, C4–C7), A4, A7, and B1/B2 (whether the
   paper claims transported stiffness on hardware).

@@ -39,6 +39,7 @@ setup(
             'tpgpt_pick_place = ycb_pointcloud_pipeline.tpgpt_pick_place_node:main',
             'tpgpt_teach_node = ycb_pointcloud_pipeline.tpgpt_teach_node:main',
             'tpgpt_teach_keyboard = ycb_pointcloud_pipeline.tpgpt_teach_keyboard:main',
+            'shelf_fit = ycb_pointcloud_pipeline.shelf_fit:main',
             'x6_session = ycb_pointcloud_pipeline.x6_session:main',
             'x6_order_sheet = ycb_pointcloud_pipeline.x6_session:order_sheet_main',
             'x6_instrument_check = ycb_pointcloud_pipeline.x6_instrument_check:main',

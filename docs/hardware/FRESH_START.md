@@ -17,10 +17,9 @@ before the next one moves the arm closer to the shelf.
 
 ## 0. Before anything moves
 
-- **Measure the shelf with a tape**: M1–M14 on `docs/hardware/shelf_measurements.html`. Paste the
-  block it produces into `ycb_pointcloud_pipeline/config/shelf.yaml`, set `measured: true`, and
-  rebuild. Stages 1–3 can run on the estimate;
-  stage 5 needs the measured shelf.
+- The shelf is measured by tape (done 2026-09-22, `shelf.yaml`). In stage 1, with the shelf empty
+  and the arm out of view, run **`shelf_fit`** and store its `cloud_fit` (`SHELF_AND_PATH_CHECK.md`,
+  "Grounding the placement in the cloud"). Stages 1–4 can run without it; stage 5 needs it.
 - For the first runs, pass **`-p on_stall:=abort`**. The default, `continue`, switches the lag gate
   off after a stall (audit C1).
 - Leave X6 alone (`experiment:=false`, the default). Plans go to `~/tpgpt_plans/`.
@@ -32,7 +31,9 @@ Robot container, camera and segmentation up (`commands.md`). Check:
 - `/ycb_scene_cloud` is published (`ros2 topic hz`);
 - the object clouds and masks look right (`/ycb_detections/image`);
 - the calibration overlay still sits on the fingertips (`calibration_check_node`), since the camera
-  must not have been knocked.
+  must not have been knocked;
+- `shelf_fit` with the shelf empty: each well-seen face within about ±2 mm after the fit. Then
+  paste its `cloud_fit` into `shelf.yaml` and rebuild.
 
 ## 2. A fresh demonstration
 
@@ -64,7 +65,7 @@ infeasible-pose fallback: read the completion log line.
 
 ## 5. Onto the shelf
 
-With the measured shelf: first the top board, then the bottom one. Watch the move onto the path
+With the measured shelf and its `cloud_fit`: first the top board, then the bottom one. Watch the move onto the path
 (`approach_in`) and the placement in RViz before typing `yes`.
 
 ## 6. After that

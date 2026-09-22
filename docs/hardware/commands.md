@@ -43,6 +43,10 @@ ros2 run --prefix python3 ycb_pointcloud_pipeline tpgpt_pick_place --ros-args \
   "Shelf model" and "Shelf cloud (obstacles)". The log line `Shelf world: {...}` gives
   `explained_by_model` (close to 1 for an empty, correctly modelled shelf).
   See `docs/hardware/SHELF_AND_PATH_CHECK.md`.
+- **Grounding the shelf's placement** (once per shelf move; shelf empty, arm out of view,
+  segmentation running): `ros2 run --prefix python3 ycb_pointcloud_pipeline shelf_fit`. It prints a
+  `cloud_fit:` block to paste under `shelf:` in `config/shelf.yaml` (then rebuild). See
+  "Grounding the placement in the cloud" in `SHELF_AND_PATH_CHECK.md`.
 
 Planning node (separately)
 ```bash

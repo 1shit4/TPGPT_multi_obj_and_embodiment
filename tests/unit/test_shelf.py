@@ -5,7 +5,10 @@ import pytest
 
 from tpgpt.hardware.end_effector import FRANKA_HAND
 from tpgpt.hardware.fr3 import HOME_Q, TCP_LINK, default_model
-from tpgpt.hardware.shelf import ShelfModel, ShelfWorld, box_surface, robot_mask
+from tpgpt.hardware.shelf import (
+    ShelfModel, ShelfWorld, _faces, apply_cloud_fit, box_surface, describe_fit, fit_to_cloud,
+    robot_mask,
+)
 
 # A square shelf 0.5 m wide and 0.3 m deep, open front facing the robot at +x = 0.4.
 CONFIG = {
@@ -194,6 +197,98 @@ def test_missing_tape_readings_are_named():
     del taped["shelf"]["tape_mm"]["panel_height"]
     with pytest.raises(ValueError, match="M8"):
         ShelfModel.from_config(taped)
+
+
+def test_m5_is_the_width_and_the_slot_readings_disagreement_is_split():
+    _, taped = _tape_case()
+    taped["shelf"]["tape_mm"]["slot_left_to_left_panel"] += 4    # M1 read 4 mm long
+    model = ShelfModel.from_config(taped)
+    assert model.width == pytest.approx(0.52, abs=1e-9)          # M5, not M1 + 233 + M2
+    assert model.config["derived"]["width_mismatch_mm"] == pytest.approx(4.0, abs=1e-6)
+
+
+# ------------------------------------------------ the placement, from the cloud
+def test_a_cloud_fit_moves_the_front_edge_rigidly_and_never_its_height():
+    left, right = np.array([0.8, -0.1]), np.array([0.3, -0.3])
+    fit = {"shift_along_front_mm": 5.0, "shift_into_shelf_mm": -3.0, "yaw_deg": 1.0}
+    l2, r2 = apply_cloud_fit(left, right, fit)
+    assert np.linalg.norm(r2 - l2) == pytest.approx(np.linalg.norm(right - left))
+    x = (right - left) / np.linalg.norm(right - left)
+    y = np.array([-x[1], x[0]])
+    mid, mid2 = (left + right) / 2, (l2 + r2) / 2
+    assert (mid2 - mid) @ x == pytest.approx(0.005) and (mid2 - mid) @ y == pytest.approx(-0.003)
+    x2 = (r2 - l2) / np.linalg.norm(r2 - l2)
+    assert np.degrees(np.arctan2(np.cross(x, x2), x @ x2)) == pytest.approx(1.0)
+
+
+# The real shelf's tape and touched points (config/shelf.yaml, 2026-09-22) and the
+# camera's position (camera_calibration.yaml), so the faces the fit gets are the
+# ones this camera sees.
+REAL = {"measured": True,
+        "anchors": {"left_slot": [0.6842, -0.2774], "right_slot": [0.4636, -0.3529],
+                    "bottom_board_top": 0.0768, "top_board_top": 0.3213, "table": -0.0136},
+        "tape_mm": {"slot_left_to_left_panel": 201, "slot_right_to_right_panel": 142,
+                    "slot_left_to_front_edge": 90, "slot_right_to_front_edge": 92,
+                    "inner_width": 580, "left_panel_thickness": 18, "right_panel_thickness": 18,
+                    "panel_height": 902, "panel_depth": 242, "panel_front_ahead_of_boards": 0,
+                    "board_depth": 242, "topmost_above_top_board": 489, "board_thickness": 18,
+                    "apron_height": 72}}
+CAMERA = np.array([1.196, 0.505, 0.860])
+
+
+def _seen(model, faces=None, noise=0.003, seed=0):
+    """The model's faces that look towards the camera, with depth noise."""
+    pts, _ = model.surface_points(0.006)
+    _, _, n = _faces(model, pts)
+    toward = ((CAMERA - pts) * (n @ model.R_base_shelf.T)).sum(axis=1) > 0
+    if faces is not None:
+        toward &= np.abs(n[:, faces]).max(axis=1) > 0.5 if np.ndim(faces) else \
+            np.abs(n[:, faces]) > 0.5
+    rng = np.random.default_rng(seed)
+    return pts[toward] + rng.normal(0.0, noise, (int(toward.sum()), 3))
+
+
+def test_the_fit_finds_where_the_shelf_really_is():
+    """The real shelf, but standing 7 mm right, 9 mm nearer and turned 0.8 deg
+    from where the tape puts it; with a clutter of points (an object) on the
+    top board. The fit recovers the placement to depth-noise accuracy."""
+    true = {"shift_along_front_mm": 7.0, "shift_into_shelf_mm": -9.0, "yaw_deg": 0.8}
+    cloud = _seen(ShelfModel.from_config({"shelf": {**REAL, "cloud_fit": true}}))
+    rng = np.random.default_rng(1)
+    cloud = np.vstack([cloud, np.array([0.6, -0.35, 0.36]) + rng.uniform(-0.03, 0.03, (400, 3))])
+    report = fit_to_cloud({"shelf": REAL}, cloud)
+    fit = report["cloud_fit"]
+    assert report["refused"] is None and all(report["fitted"].values())
+    assert fit["shift_along_front_mm"] == pytest.approx(7.0, abs=2.0)
+    assert fit["shift_into_shelf_mm"] == pytest.approx(-9.0, abs=2.0)
+    assert fit["yaw_deg"] == pytest.approx(0.8, abs=0.2)
+    assert report["median_abs_after_mm"] < report["median_abs_before_mm"]
+    assert "M3" in describe_fit(report)
+
+
+def test_a_fit_already_in_the_config_does_not_change_the_answer():
+    true = {"shift_along_front_mm": 4.0, "shift_into_shelf_mm": 5.0, "yaw_deg": -0.5}
+    cloud = _seen(ShelfModel.from_config({"shelf": {**REAL, "cloud_fit": true}}))
+    stale = {"shift_along_front_mm": -20.0, "shift_into_shelf_mm": 0.0, "yaw_deg": 1.0}
+    a = fit_to_cloud({"shelf": REAL}, cloud)["fit"]
+    b = fit_to_cloud({"shelf": {**REAL, "cloud_fit": stale}}, cloud)["fit"]
+    assert a == b
+
+
+def test_a_direction_the_cloud_does_not_see_keeps_the_tapes_value():
+    """Only board tops seen (say, from above): they say nothing about x/y."""
+    true = {"shift_along_front_mm": 6.0, "shift_into_shelf_mm": 6.0, "yaw_deg": 0.0}
+    cloud = _seen(ShelfModel.from_config({"shelf": {**REAL, "cloud_fit": true}}), faces=2)
+    report = fit_to_cloud({"shelf": REAL}, cloud)
+    assert not any(report["fitted"].values()) and report["refused"]
+    assert report["cloud_fit"] is None
+
+
+def test_a_correction_beyond_any_tape_error_is_refused():
+    true = {"shift_along_front_mm": 0.0, "shift_into_shelf_mm": 34.0, "yaw_deg": 0.0}
+    cloud = _seen(ShelfModel.from_config({"shelf": {**REAL, "cloud_fit": true}}))
+    report = fit_to_cloud({"shelf": REAL}, cloud)
+    assert report["refused"] and "beyond" in report["refused"] and report["cloud_fit"] is None
 
 
 # ------------------------------------------------ where a carried object may rest

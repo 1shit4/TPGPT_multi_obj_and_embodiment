@@ -126,6 +126,36 @@ TAPE_KEYS = {
 #: is wrong (a slot mark re-found in the wrong place, or a misread tape).
 TAPE_WIDTH_TOLERANCE = 0.006
 
+# ---- fit_to_cloud: the shelf's placement corrected from the camera -------------
+#: Cloud points further than this from the tape-placed model are not the shelf,
+#: metres (first round; the second uses half). Above the ~10 mm the tape's
+#: least certain readings (M1-M4) could be out, below the gap to the nearest
+#: other thing standing near a panel.
+FIT_CAPTURE = 0.04
+
+#: Residual scale of the robust (Cauchy) loss, metres: the cloud's depth noise on
+#: a surface at 1 m (CALIBRATION.md: surfaces within ~5 mm).
+FIT_NOISE = 0.004
+
+#: Points on faces square to a direction needed to fit a shift along it; fewer,
+#: and that shift is left at 0 (the tape's value) and the report says so.
+FIT_MIN_FACE_POINTS = 150
+
+#: The front faces seen must span this much along the front edge to fit the yaw,
+#: metres (a 1 deg yaw moves the ends of a 0.58 m shelf by 5 mm).
+FIT_MIN_YAW_SPAN = 0.15
+
+#: A correction larger than this is refused, not applied (metres, degrees): it
+#: is beyond any plausible tape error, so something else is wrong -- the
+#: calibration, an object or the arm against a panel, or a mis-keyed reading.
+FIT_MAX_SHIFT = 0.03
+FIT_MAX_YAW_DEG = 3.0
+
+#: After the fit, the median distance of the shelf's points to the model must be
+#: under this, metres, or the model does not describe what is seen (a dimension
+#: wrong, a correction beyond the capture distance). Depth noise alone gives ~2-3 mm.
+FIT_MAX_MEDIAN = 0.006
+
 
 def resolve_tape(c: dict) -> dict:
     """The shelf's geometry from tape measurements anchored to touched points.
@@ -139,7 +169,12 @@ def resolve_tape(c: dict) -> dict:
 
     * the front edge is found by stepping back from each slot mark, square to
       the slot line, by M3 / M4, then the two ends by M1 / M2 along it;
-    * the width that gives is checked against the tape's own inner width (M5).
+    * the width that gives is checked against the tape's own inner width (M5),
+      and M5 is the width used.
+
+    What the tape cannot fix well (M1-M4, the slot marks to the panel and the
+    front edge) sets the shelf's x/y and yaw; :func:`fit_to_cloud` measures a
+    correction for those from the camera, stored as ``cloud_fit``.
 
     Returns the config with the builder's keys filled in, and ``derived``
     holding the checks. Raises if the two widths disagree by more than
@@ -162,10 +197,14 @@ def resolve_tape(c: dict) -> dict:
     front_l = L - y * t["slot_left_to_front_edge"]
     front_r = R - y * t["slot_right_to_front_edge"]
     x = (front_r - front_l) / np.linalg.norm(front_r - front_l)
-    corner_l = front_l - x * t["slot_left_to_left_panel"]
-    corner_r = front_r + x * t["slot_right_to_right_panel"]
-    width_slots = float(np.linalg.norm(corner_r - corner_l))
+    width_slots = float(np.linalg.norm(front_r - front_l)
+                        + t["slot_left_to_left_panel"] + t["slot_right_to_right_panel"])
     mismatch = width_slots - t["inner_width"]
+    # The width is the one direct reading across the shelf (M5); M1 and M2 are the
+    # less certain ones (hard to hold square), so their disagreement with it is
+    # split between the two ends. ``cloud_fit`` then moves the whole shelf.
+    corner_l = front_l - x * (t["slot_left_to_left_panel"] - mismatch / 2.0)
+    corner_r = front_r + x * (t["slot_right_to_right_panel"] - mismatch / 2.0)
     if abs(mismatch) > TAPE_WIDTH_TOLERANCE:
         raise ValueError(
             f"shelf tape: the width from the slot marks (M1 + slot spacing + M2 = "
@@ -199,7 +238,8 @@ def resolve_tape(c: dict) -> dict:
         # is not measured, so it is taken as the boards'.
         c.setdefault("extra_boxes", [])
         c["extra_boxes"] = list(c["extra_boxes"]) + [{
-            "name": "apron", "lo": [0.0, 0.0, table], "hi": [width_slots, thick, table + apron]}]
+            "name": "apron", "lo": [0.0, 0.0, table],
+            "hi": [t["inner_width"], thick, table + apron]}]
     c["derived"] = {"width_from_slots_mm": width_slots * 1000.0,
                     "width_mismatch_mm": mismatch * 1000.0,
                     "front_edge_yaw_deg": float(np.degrees(np.arctan2(x[1], x[0])))}
@@ -237,6 +277,8 @@ class ShelfModel:
     origin: np.ndarray
     measured: bool
     config: dict = field(default_factory=dict)
+    #: Inner width: the front edge runs from ``origin`` this far along ``+x``.
+    width: float = 0.0
 
     # ------------------------------------------------------------ building
     @classmethod
@@ -255,6 +297,8 @@ class ShelfModel:
             c = resolve_tape(c)
         left = np.asarray(c["front_left"], dtype=float)[:2]
         right = np.asarray(c["front_right"], dtype=float)[:2]
+        if c.get("cloud_fit"):
+            left, right = apply_cloud_fit(left, right, c["cloud_fit"])
         width = float(np.linalg.norm(right - left))
         if width < 0.05:
             raise ValueError("front_left and front_right must be the two ends of the front edge")
@@ -311,7 +355,7 @@ class ShelfModel:
             if extra.get("support", False):
                 supports.append(str(extra["name"]))
         return cls(boxes=boxes, supports=tuple(supports), R_base_shelf=R, origin=origin,
-                   measured=bool(c.get("measured", False)), config=c)
+                   measured=bool(c.get("measured", False)), config=c, width=width)
 
     # ------------------------------------------------------------ queries
     def penetration(self, points: np.ndarray) -> tuple[np.ndarray, list]:
@@ -562,3 +606,238 @@ class ShelfWorld:
 
 
 __all__ = ["TAPE_KEYS", "resolve_tape", "REACH_RADIUS", "TABLE_BAND", "ROI_ABOVE_SUPPORT", "ROI_MARGIN", "ShelfModel", "ShelfWorld", "box_surface", "robot_mask"]
+
+
+# ------------------------------------------------ the placement, from the cloud
+def apply_cloud_fit(left, right, fit: dict):
+    """The front edge's two ends moved by a ``cloud_fit`` correction.
+
+    The correction is expressed in the shelf frame as the tape and touched
+    points place it: a yaw about the front edge's midpoint, then a shift along
+    the front edge (``shift_along_front_mm``, towards ``front_right``) and into
+    the shelf (``shift_into_shelf_mm``). Heights are never moved -- they were
+    touched.
+    """
+    left, right = np.asarray(left, dtype=float)[:2], np.asarray(right, dtype=float)[:2]
+    x = (right - left) / np.linalg.norm(right - left)
+    y = np.array([-x[1], x[0]])
+    pivot = (left + right) / 2.0
+    a = np.radians(float(fit.get("yaw_deg", 0.0)))
+    Rz = np.array([[np.cos(a), -np.sin(a)], [np.sin(a), np.cos(a)]])
+    shift = (x * float(fit.get("shift_along_front_mm", 0.0))
+             + y * float(fit.get("shift_into_shelf_mm", 0.0))) / 1000.0
+    move = lambda p: pivot + Rz @ (p - pivot) + shift  # noqa: E731
+    return move(left), move(right)
+
+
+def _faces(model: ShelfModel, points: np.ndarray, inset: float = 0.0):
+    """Each point's signed distance to the model and the face it is nearest.
+
+    Returns ``(distance (n,), box index (n,), normal in the shelf frame (n, 3))``;
+    distance > 0 is outside. Exact for boxes, the only kind the model builds.
+    With ``inset`` > 0 the normal is zero for points that do not project onto
+    their face at least that far inside its edges: a point just past a board's
+    front edge is nearest the front face whether the board is really there or
+    6 mm further back, so it tells nothing about which.
+    """
+    best = np.full(len(points), np.inf)
+    box_of = np.zeros(len(points), dtype=int)
+    normal = np.zeros((len(points), 3))
+    rows = np.arange(len(points))
+    for k, box in enumerate(model.boxes):
+        local = (points - box.position) @ box.rotation
+        gap = np.abs(local) - np.asarray(box.size)
+        outside = np.linalg.norm(np.maximum(gap, 0.0), axis=1)
+        d = np.where(gap.max(axis=1) > 0.0, outside, gap.max(axis=1))
+        closer = np.abs(d) < np.abs(best)
+        axis = gap.argmax(axis=1)
+        n = np.zeros((len(points), 3))
+        n[rows, axis] = np.sign(local[rows, axis])
+        if inset > 0.0:
+            across = gap.copy()
+            across[rows, axis] = -np.inf
+            n[across.max(axis=1) > -inset] = 0.0
+        n = n @ box.rotation.T @ model.R_base_shelf
+        best = np.where(closer, d, best)
+        box_of = np.where(closer, k, box_of)
+        normal[closer] = n[closer]
+    return best, box_of, normal
+
+
+_FACE_WORDS = {(0, 1): "right face", (0, -1): "left face", (1, 1): "back face",
+               (1, -1): "front face", (2, 1): "top", (2, -1): "underside"}
+_WALL_WORDS = {("left_wall", "right face"): "inner face", ("left_wall", "left face"): "outer face",
+               ("right_wall", "left face"): "inner face", ("right_wall", "right face"): "outer face"}
+
+
+def _face_table(model: ShelfModel, points: np.ndarray, capture: float) -> dict:
+    """Per face: how many points lie on it, and their median signed offset."""
+    d, box_of, n = _faces(model, points)
+    near = np.abs(d) <= capture
+    axis = np.abs(n).argmax(axis=1)
+    sign = np.sign(n[np.arange(len(n)), axis]).astype(int)
+    out = {}
+    for k, box in enumerate(model.boxes):
+        for (ax, sg), word in _FACE_WORDS.items():
+            on = near & (box_of == k) & (axis == ax) & (sign == sg)
+            if on.sum():
+                word = _WALL_WORDS.get((box.name, word), word)
+                out[f"{box.name} {word}"] = (int(on.sum()), float(np.median(d[on])))
+    return out
+
+
+def _implied_tape(model: ShelfModel) -> dict:
+    """M1-M4 as this model places the shelf relative to the touched slot marks, mm."""
+    a = model.config["anchors"]
+    width = model.width
+    local = lambda p: (np.array([*p[:2], 0.0]) - model.origin) @ model.R_base_shelf  # noqa: E731
+    L, R = local(a["left_slot"]), local(a["right_slot"])
+    return {"M1": L[0] * 1000.0, "M2": (width - R[0]) * 1000.0,
+            "M3": L[1] * 1000.0, "M4": R[1] * 1000.0}
+
+
+def fit_to_cloud(config: dict, points: np.ndarray) -> dict:
+    """Measure the shelf's x/y placement and yaw against the observed cloud.
+
+    The shelf's dimensions come from the tape and its heights from touching, and
+    both are trusted. Its **placement** in x/y and its yaw rest on the four tape
+    readings from the slot marks (M1-M4), the hardest to hold square. The camera
+    sees the shelf's faces directly, so this finds the rigid correction -- a yaw
+    about the front edge's midpoint and a shift in the floor plane, never a
+    height -- that puts the model's faces on the observed points: robust least
+    squares (Cauchy, scale :data:`FIT_NOISE`) of each point's distance to the
+    nearest face, over the points within :data:`FIT_CAPTURE` of the model, then
+    again within half of it.
+
+    A direction is fitted only if the cloud constrains it (the board tops say
+    nothing about x/y): the shift along the front edge needs
+    :data:`FIT_MIN_FACE_POINTS` on faces square to it (the panels' sides), the
+    shift into the shelf as many on front faces (board edges, the apron, the
+    panels' front edges), and the yaw front faces spread over
+    :data:`FIT_MIN_YAW_SPAN`. The rest stay at the tape's value.
+
+    What would make the result wrong: the robot or an object against a panel
+    within the capture distance (use an empty shelf, arm out of view); a
+    calibration error, which moves the cloud and so the shelf with it (the
+    calibration was validated to ~5 mm on these boards, CALIBRATION.md).
+
+    Args:
+        config: The ``shelf:`` block (any ``cloud_fit`` in it is ignored: the fit
+            is made from the tape and touched placement, so it is absolute, not
+            incremental).
+        points: The observed scene, base frame, robot removed.
+
+    Returns:
+        A report: ``cloud_fit`` (the block to store in ``shelf.yaml``, or
+        ``None`` if refused), ``refused``, which directions were fitted, the
+        per-face offsets before and after, and M1-M4 as the fit implies them.
+    """
+    from scipy.optimize import least_squares
+
+    c = dict(config.get("shelf", config))
+    previous = c.pop("cloud_fit", None)
+    model = ShelfModel.from_config({"shelf": c})
+    pts = np.atleast_2d(np.asarray(points, dtype=float))
+    table = float(model.config["bottom"])
+    pts = pts[pts[:, 2] > table + TABLE_BAND]
+    pts = pts[model.in_roi(pts, FIT_CAPTURE, above_support=0.0)]
+    local = (pts - model.origin) @ model.R_base_shelf
+    pivot = np.array([model.width / 2.0, 0.0])
+
+    def moved(theta):
+        """Points in the frame of the model moved by theta = (along, into, yaw):
+        moving the model by T is moving the points by T^-1."""
+        a, b, yaw = theta
+        q = local.copy()
+        c_, s_ = np.cos(-yaw), np.sin(-yaw)
+        xy = q[:, :2] - pivot - np.array([a, b])
+        q[:, :2] = pivot + xy @ np.array([[c_, -s_], [s_, c_]]).T
+        return model.origin + q @ model.R_base_shelf.T
+
+    d0, _, n0 = _faces(model, pts, inset=FIT_NOISE)
+    on = np.abs(d0) <= FIT_CAPTURE
+    axis = np.where(np.abs(n0).max(axis=1) > 0.5, np.abs(n0).argmax(axis=1), -1)
+    side_pts = int((on & (axis == 0)).sum())
+    front = on & (axis == 1)
+    front_pts = int(front.sum())
+    span = float(np.ptp(local[front, 0])) if front.any() else 0.0
+    free = np.array([side_pts >= FIT_MIN_FACE_POINTS, front_pts >= FIT_MIN_FACE_POINTS,
+                     front_pts >= FIT_MIN_FACE_POINTS and span >= FIT_MIN_YAW_SPAN])
+    report = {"points_in_region": int(len(pts)), "points_on_model": int(on.sum()),
+              "side_face_points": side_pts, "front_face_points": front_pts,
+              "front_span_mm": span * 1000.0,
+              "fitted": {"along_front": bool(free[0]), "into_shelf": bool(free[1]),
+                         "yaw": bool(free[2])},
+              "previous_cloud_fit": previous, "faces_before": _face_table(model, pts, FIT_CAPTURE),
+              "implied_tape_before_mm": _implied_tape(model)}
+    theta = np.zeros(3)
+    if free.any():
+        for capture in (FIT_CAPTURE, FIT_CAPTURE / 2.0):
+            d, _, _ = _faces(model, moved(theta))
+            use = np.abs(d) <= capture
+            if use.sum() < FIT_MIN_FACE_POINTS:
+                break
+
+            def residual(v, use=use):
+                full = theta.copy()
+                full[free] = v
+                q = moved(full)[use]
+                return _faces(model, q)[0]
+
+            sol = least_squares(residual, theta[free], loss="cauchy", f_scale=FIT_NOISE,
+                                x_scale=np.array([0.01, 0.01, 0.01])[free], diff_step=1e-3)
+            theta[free] = sol.x
+    fit = {"shift_along_front_mm": round(float(theta[0]) * 1000.0, 1),
+           "shift_into_shelf_mm": round(float(theta[1]) * 1000.0, 1),
+           "yaw_deg": round(float(np.degrees(theta[2])), 2)}
+    shift = float(np.hypot(theta[0], theta[1]))
+    fitted = ShelfModel.from_config({"shelf": {**c, "cloud_fit": fit}})
+    for key, m in (("median_abs_before_mm", model), ("median_abs_after_mm", fitted)):
+        d = np.abs(_faces(m, pts)[0])
+        near = d <= FIT_CAPTURE / 2.0
+        report[key] = float(np.median(d[near]) * 1000.0) if near.any() else None
+    refused = None
+    after = report["median_abs_after_mm"]
+    if shift > FIT_MAX_SHIFT or abs(np.degrees(theta[2])) > FIT_MAX_YAW_DEG:
+        refused = (f"correction of {shift * 1000:.0f} mm / {np.degrees(theta[2]):+.1f} deg is beyond "
+                   f"any tape error ({FIT_MAX_SHIFT * 1000:.0f} mm / {FIT_MAX_YAW_DEG} deg): check "
+                   "the calibration, the arm or an object against a panel, and the tape keys")
+    elif not free.any():
+        refused = "the cloud does not constrain the shelf's placement (too few points on its faces)"
+    elif after is None or after > FIT_MAX_MEDIAN * 1000.0:
+        refused = (f"the fitted model still sits {after} mm (median) from the shelf's points, more "
+                   f"than {FIT_MAX_MEDIAN * 1000:.0f} mm: it does not match what the camera sees")
+    report.update({"refused": refused, "cloud_fit": None if refused else fit, "fit": fit,
+                   "faces_after": _face_table(fitted, pts, FIT_CAPTURE),
+                   "implied_tape_after_mm": _implied_tape(fitted)})
+    return report
+
+
+def describe_fit(report: dict) -> str:
+    """The report of :func:`fit_to_cloud` as lines a person can check."""
+    f, lines = report["fit"], []
+    lines.append(f"points: {report['points_in_region']} in the shelf region, "
+                 f"{report['points_on_model']} within {FIT_CAPTURE * 1000:.0f} mm of the model "
+                 f"({report['side_face_points']} on side faces, {report['front_face_points']} on "
+                 f"front faces spanning {report['front_span_mm']:.0f} mm)")
+    fixed = [k for k, v in report["fitted"].items() if not v]
+    lines.append(f"correction: {f['shift_along_front_mm']:+.1f} mm along the front edge, "
+                 f"{f['shift_into_shelf_mm']:+.1f} mm into the shelf, {f['yaw_deg']:+.2f} deg"
+                 + (f"  (not fitted, kept at the tape's: {', '.join(fixed)})" if fixed else ""))
+    lines.append(f"median |distance| of the shelf's points to the model: "
+                 f"{report['median_abs_before_mm']:.1f} mm -> {report['median_abs_after_mm']:.1f} mm")
+    lines.append("M1-M4 (tape as used -> as the cloud places the shelf), mm:")
+    for k in ("M1", "M2", "M3", "M4"):
+        lines.append(f"  {k}: {report['implied_tape_before_mm'][k]:6.1f} -> "
+                     f"{report['implied_tape_after_mm'][k]:6.1f}")
+    lines.append("faces seen (points, median signed offset mm, + = cloud outside the panel): "
+                 "before -> after")
+    before, after = report["faces_before"], report["faces_after"]
+    for face in sorted(set(before) | set(after), key=lambda k: -before.get(k, (0, 0))[0])[:15]:
+        b, a = before.get(face, (0, float("nan"))), after.get(face, (0, float("nan")))
+        if max(b[0], a[0]) >= 30:
+            lines.append(f"  {face:28s} {b[0]:6d} {b[1] * 1000:+6.1f}  ->  {a[0]:6d} "
+                         f"{a[1] * 1000:+6.1f}")
+    lines.append("REFUSED: " + report["refused"] if report["refused"] else
+                 "store as shelf.cloud_fit in config/shelf.yaml: " + str(report["cloud_fit"]))
+    return "\n".join(lines)
