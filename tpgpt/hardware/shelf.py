@@ -99,6 +99,109 @@ SELF_FILTER_MARGIN = 0.01
 EXPLAINED_DISTANCE = 0.015
 
 
+#: The tape measurements ``resolve_tape`` needs, in millimetres, keyed as in
+#: ``docs/hardware/shelf_measurements.html`` (M1..M14).
+TAPE_KEYS = {
+    "M1": "slot_left_to_left_panel",
+    "M2": "slot_right_to_right_panel",
+    "M3": "slot_left_to_front_edge",
+    "M4": "slot_right_to_front_edge",
+    "M5": "inner_width",
+    "M6": "left_panel_thickness",
+    "M7": "right_panel_thickness",
+    "M8": "panel_height",
+    "M9": "panel_depth",
+    "M10": "panel_front_ahead_of_boards",
+    "M11": "board_depth",
+    "M12": "topmost_above_top_board",
+    "M13": "board_thickness",
+    "M14": "apron_height",
+}
+
+#: Width by the slots and by the tape must agree to this, metres, or the anchoring
+#: is wrong (a slot mark re-found in the wrong place, or a misread tape).
+TAPE_WIDTH_TOLERANCE = 0.006
+
+
+def resolve_tape(c: dict) -> dict:
+    """The shelf's geometry from tape measurements anchored to touched points.
+
+    The robot cannot touch the side panels' tops or the topmost board squarely,
+    so the shelf's own dimensions come from a tape (``tape_mm``, relative to the
+    shelf) and the shelf is placed in the base frame by the points already
+    touched (``anchors``: the two slot marks on the top board and the board
+    heights, ``CALIBRATION.md``). The slot marks are also measured *to* by tape
+    (M1-M4), which ties the two together:
+
+    * the front edge is found by stepping back from each slot mark, square to
+      the slot line, by M3 / M4, then the two ends by M1 / M2 along it;
+    * the width that gives is checked against the tape's own inner width (M5).
+
+    Returns the config with the builder's keys filled in, and ``derived``
+    holding the checks. Raises if the two widths disagree by more than
+    :data:`TAPE_WIDTH_TOLERANCE`.
+    """
+    c = dict(c)
+    t = {k: float(v) / 1000.0 for k, v in c["tape_mm"].items() if v is not None}
+    missing = [f"{m} ({key})" for m, key in TAPE_KEYS.items()
+               if key not in t and m not in ("M10", "M14")]
+    if missing:
+        raise ValueError(f"shelf tape measurements missing: {', '.join(missing)}")
+    a = c["anchors"]
+    L = np.asarray(a["left_slot"], dtype=float)[:2]
+    R = np.asarray(a["right_slot"], dtype=float)[:2]
+    s = (R - L) / np.linalg.norm(R - L)
+    y = np.array([-s[1], s[0]])                     # z x slot line: into the shelf
+    if float(y @ ((L + R) / 2.0)) <= 0.0:
+        raise ValueError("anchors: left_slot/right_slot are swapped (left = the robot's left "
+                         "as it faces the shelf's open front)")
+    front_l = L - y * t["slot_left_to_front_edge"]
+    front_r = R - y * t["slot_right_to_front_edge"]
+    x = (front_r - front_l) / np.linalg.norm(front_r - front_l)
+    corner_l = front_l - x * t["slot_left_to_left_panel"]
+    corner_r = front_r + x * t["slot_right_to_right_panel"]
+    width_slots = float(np.linalg.norm(corner_r - corner_l))
+    mismatch = width_slots - t["inner_width"]
+    if abs(mismatch) > TAPE_WIDTH_TOLERANCE:
+        raise ValueError(
+            f"shelf tape: the width from the slot marks (M1 + slot spacing + M2 = "
+            f"{width_slots * 1000:.0f} mm) disagrees with the inner width M5 "
+            f"({t['inner_width'] * 1000:.0f} mm) by {mismatch * 1000:+.0f} mm; re-check M1, M2, "
+            "M5 and that the slot marks were re-found where they were touched")
+    table = float(a["table"])
+    top_board = float(a["top_board_top"])
+    thick = t["board_thickness"]
+    c.update({
+        "front_left": corner_l.tolist(),
+        "front_right": corner_r.tolist(),
+        "depth": t["board_depth"],
+        "bottom": table,
+        "top": table + t["panel_height"],
+        "wall_thickness_left": t["left_panel_thickness"],
+        "wall_thickness_right": t["right_panel_thickness"],
+        "back_thickness": 0.0,
+        "side_front": t.get("panel_front_ahead_of_boards", 0.0),
+        "side_depth": t["panel_depth"],
+        "boards": [
+            {"name": "bottom_board", "top": float(a["bottom_board_top"]), "thickness": thick},
+            {"name": "top_board", "top": top_board, "thickness": thick},
+            {"name": "topmost_board", "top": top_board + t["topmost_above_top_board"],
+             "thickness": thick},
+        ],
+    })
+    apron = t.get("apron_height", 0.0)
+    if apron > 0.0:
+        # A front panel under the bottom board, between the sides; its thickness
+        # is not measured, so it is taken as the boards'.
+        c.setdefault("extra_boxes", [])
+        c["extra_boxes"] = list(c["extra_boxes"]) + [{
+            "name": "apron", "lo": [0.0, 0.0, table], "hi": [width_slots, thick, table + apron]}]
+    c["derived"] = {"width_from_slots_mm": width_slots * 1000.0,
+                    "width_mismatch_mm": mismatch * 1000.0,
+                    "front_edge_yaw_deg": float(np.degrees(np.arctan2(x[1], x[0])))}
+    return c
+
+
 def _box(name: str, lo, hi, R_base_shelf: np.ndarray, origin: np.ndarray):
     """An :class:`Obstacle` box spanning ``lo..hi`` in the shelf frame."""
     from tpgpt.perception.obstacles import Obstacle
@@ -142,6 +245,10 @@ class ShelfModel:
         ``extra_boxes`` entry.
         """
         c = dict(config.get("shelf", config))
+        # An all-empty tape block (not yet measured) leaves the estimate in use; a
+        # partly filled one is resolved, and names what is missing.
+        if any(v is not None for v in (c.get("tape_mm") or {}).values()):
+            c = resolve_tape(c)
         left = np.asarray(c["front_left"], dtype=float)[:2]
         right = np.asarray(c["front_right"], dtype=float)[:2]
         width = float(np.linalg.norm(right - left))
@@ -162,21 +269,31 @@ class ShelfModel:
         R = np.column_stack([x, y, z])
         depth = float(c["depth"])
         wall = float(c.get("wall_thickness", 0.018))
+        wall_l = float(c.get("wall_thickness_left", wall))
+        wall_r = float(c.get("wall_thickness_right", wall))
         back = float(c.get("back_thickness", 0.0))
+        # The side panels may stand proud of the boards' front edge (side_front > 0)
+        # and be deeper or shallower than the boards (side_depth).
+        side_front = float(c.get("side_front", 0.0))
+        side_depth = float(c.get("side_depth", depth + back))
+        side_lo, side_hi = -side_front, -side_front + side_depth
 
         boxes, supports = [], []
-        if wall > 0:
-            boxes.append(_box("left_wall", (-wall, 0.0, bottom), (0.0, depth + back, top), R, origin))
-            boxes.append(_box("right_wall", (width, 0.0, bottom), (width + wall, depth + back, top),
+        if wall_l > 0:
+            boxes.append(_box("left_wall", (-wall_l, side_lo, bottom), (0.0, side_hi, top),
+                              R, origin))
+        if wall_r > 0:
+            boxes.append(_box("right_wall", (width, side_lo, bottom), (width + wall_r, side_hi, top),
                               R, origin))
         if back > 0:
-            boxes.append(_box("back_panel", (-wall, depth, bottom), (width + wall, depth + back, top),
-                              R, origin))
+            boxes.append(_box("back_panel", (-wall_l, depth, bottom),
+                              (width + wall_r, depth + back, top), R, origin))
         for board in c.get("boards", []):
             name = str(board["name"])
             surface = float(board["top"])
             thickness = float(board.get("thickness", 0.018))
-            boxes.append(_box(name, (0.0, 0.0, surface - thickness), (width, depth, surface),
+            board_depth = float(board.get("depth", depth))
+            boxes.append(_box(name, (0.0, 0.0, surface - thickness), (width, board_depth, surface),
                               R, origin))
             if board.get("support", True):
                 supports.append(name)
@@ -432,4 +549,4 @@ class ShelfWorld:
                 "cloud_report": self.cloud_report}
 
 
-__all__ = ["REACH_RADIUS", "TABLE_BAND", "ROI_ABOVE_SUPPORT", "ROI_MARGIN", "ShelfModel", "ShelfWorld", "box_surface", "robot_mask"]
+__all__ = ["TAPE_KEYS", "resolve_tape", "REACH_RADIUS", "TABLE_BAND", "ROI_ABOVE_SUPPORT", "ROI_MARGIN", "ShelfModel", "ShelfWorld", "box_surface", "robot_mask"]

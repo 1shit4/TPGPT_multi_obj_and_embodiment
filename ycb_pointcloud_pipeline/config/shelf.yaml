@@ -15,6 +15,36 @@
 shelf:
   measured: false
 
+  # ---- The measured shelf (fill this, then set measured: true) --------------------------------
+  # The shelf has no back and three boards (bottom, top, topmost). Its own dimensions come from a
+  # tape, keyed M1..M14 as marked on the diagram docs/hardware/shelf_measurements.html. The shelf is
+  # placed in the robot frame by the points touched on 2026-09-21 (CALIBRATION.md), below. While
+  # every tape_mm value is null, the ESTIMATE further down is used. Once any is filled, all the
+  # required ones must be, and the estimate keys are ignored.
+  anchors:
+    left_slot: [0.6842, -0.2774]     # touched: top shelf, left slot
+    right_slot: [0.4636, -0.3529]    # touched: top shelf, right slot
+    bottom_board_top: 0.0768         # touched
+    top_board_top: 0.3213            # touched
+    table: -0.0136                   # touched
+  tape_mm:
+    slot_left_to_left_panel: null    # M1
+    slot_right_to_right_panel: null  # M2
+    slot_left_to_front_edge: null    # M3
+    slot_right_to_front_edge: null   # M4
+    inner_width: null                # M5  (check: M1 + 233 + M2, within 6 mm)
+    left_panel_thickness: null       # M6
+    right_panel_thickness: null      # M7
+    panel_height: null               # M8  table -> top edge of the side panels
+    panel_depth: null                # M9
+    panel_front_ahead_of_boards: null  # M10 (0 if flush; negative if the boards stick out)
+    board_depth: null                # M11
+    topmost_above_top_board: null    # M12 top board's upper surface -> topmost board's upper surface
+    board_thickness: null            # M13
+    apron_height: null               # M14 (0 if there is no front panel under the bottom board)
+
+  # ---- ESTIMATE, used until tape_mm is filled ----------------------------------------------------
+
   front_left:  [0.7619, -0.0923]     # ESTIMATE: front edge of a board, at the LEFT wall's inner face
   front_right: [0.2888, -0.2542]     # ESTIMATE: front edge of a board, at the RIGHT wall's inner face
   depth: 0.30                        # ESTIMATE: front edge to the back panel's inner face
@@ -23,13 +53,13 @@ shelf:
                                      # (an open-top two-tier shelf: CALIBRATION.md has the bottom board
                                      # 'recessed under the top shelf'). Raise it if the walls stand higher.
   wall_thickness: 0.018              # ESTIMATE: side walls
-  back_thickness: 0.005              # ESTIMATE: back panel; 0 = open back
+  back_thickness: 0.0                # the shelf has no back (user, 2026-09-22)
 
   boards:                            # `top` = height of the board's upper surface
     - {name: bottom_board, top: 0.0768, thickness: 0.018, support: true}   # top measured; thickness ESTIMATE
     - {name: top_board,    top: 0.3213, thickness: 0.018, support: true}   # top measured; thickness ESTIMATE
-    # A roof, if the shelf has one above the top board:
-    # - {name: roof, top: <height>, thickness: 0.018, support: false}
+    # The topmost board exists but its height is not known until M12 is measured: until then it
+    # is absent from this estimate, so plans onto the top board are not checked against it.
 
   # Anything else solid on or around the shelf, as boxes: lo/hi corners in the shelf frame
   # (frame: shelf) or the base frame (frame: base).
