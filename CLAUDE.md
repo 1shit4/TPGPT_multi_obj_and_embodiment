@@ -167,8 +167,13 @@ The planner's support height is: its `support_height` parameter, else the calibr
   the board heights and yaw are touched. Width, depth, walls and top are guesses, with no roof
   assumed. A wrong guess causes false collisions or missed ones. How to measure:
   `docs/hardware/SHELF_AND_PATH_CHECK.md`.
-- **`grasp_offset` (planner node default [−35, 0, −25] mm) predates the recalibration** and now
-  pushes grasps 10–20 mm into the table (measured on the trial 0005 apple). Audit item A5, open.
+- **`grasp_offset` (planner node default [−35, 0, −25] mm) predates the recalibration**: a fixed
+  base-frame shift applied to every grasp, probably absorbing the old calibration's error. Measure it
+  on fresh captures (plan with it and with 0) before trusting it. Audit item A5, open.
+- **Nothing from before the 2026-09-21 camera/shelf move is evidence** (user, 2026-09-22): not the X6
+  trials in `outputs/hardware/hw_2026_09_x6/`, their clouds or plans, nor the 2026-09-15 banana
+  demo (its object cloud went through the old calibration). Start from fresh captures and a fresh
+  demonstration. The only exception is the FK fixture, which is robot-only.
 - **X6 trials override the selection defaults** from the frozen `method:` block (`max_plans: 12`,
   `fallback_top_down: true`) via `x6_trial.py`. Don't be surprised; it waits for the X6 rework.
 - **`auto_plan:=true` re-plans every second** after a refusal (each cloud arrival starts a plan
@@ -187,6 +192,8 @@ The planner's support height is: its `support_height` parameter, else the calibr
 - `docs/hardware/commands.md` — how to launch the robot, pipeline, teaching, planning and execution.
 - `docs/hardware/FAITHFULNESS_AUDIT.md` — every place the hardware implementation differs from the
   simulation's, with file:line on both sides, severity, fix order and status.
+- `docs/hardware/FRESH_START.md` — what counts as evidence after the move (nothing before it), and
+  the staged test order: sensing, a new demo, planning dry runs, table grasps, then the shelf.
 - `docs/hardware/SHELF_AND_PATH_CHECK.md` — the shelf model, the scene cloud, the whole-path check
   and grasp selection: which side's method was kept and why, how to measure and check the shelf,
   parameters, and what was verified.
@@ -207,7 +214,10 @@ The planner's support height is: its `support_height` parameter, else the calibr
   possibly four slots) later — do not edit it unprompted.
 - **Done 2026-09-21 (audit A1, A2, A3, A6, C3):** the scene cloud, the shelf model, FR3
   kinematics, the whole-path check, the sim's selection rule and funnel stages, and the executor's
-  infeasible-pose fallback. Tested offline and in a ROS dry run; **not yet run on the robot.**
+  infeasible-pose fallback. Tested offline and in a ROS dry run; **not yet run on the robot, nor on
+  any capture from the new setup.**
+- **Fresh start agreed 2026-09-22:** a new demonstration in the new setup; the old runs and demo are
+  not used. The staged test order is in `docs/hardware/FRESH_START.md`.
 - Open, in the user's order: measure the shelf (`shelf.yaml`); decide `grasp_offset` (A5); then add
   grippers; then the executor-default deviations (C1, C2, C4–C7), A4, A7, and B1/B2 (whether the
   paper claims transported stiffness on hardware).

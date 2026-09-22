@@ -52,8 +52,9 @@ the installed copy.
 `CALIBRATION.md`). Width, depth, walls, back and top are **estimates** (`measured: false`). Every
 plan says so in its notes and in `metadata['shelf_is_estimate']`. Until you measure them, the check
 may report a collision at an estimated wall that isn't there, or miss one that is. The estimate
-also assumes **no roof** above the top board (an open-top two-tier shelf). A guessed roof at 0.60 m
-blocked three saved plans that had executed fine on the robot.
+also assumes **no roof** above the top board (an open-top two-tier shelf, from `CALIBRATION.md`'s
+"recessed under the top shelf"). A roof that isn't there would block every top-board placement,
+so it is left out until it is seen or touched.
 
 ### Measuring it
 
@@ -116,17 +117,14 @@ node defaults. That file is left for the X6 rework.
 - **Tests:** 106 hardware tests pass (`tests/unit/test_{fr3,shelf,path_check,grasp_selection,
   hardware}.py`), including FK against 40 at-rest samples of the real arm. The ROS package's tests
   pass, apart from the two known stale-X6-config failures.
-- **Saved X6 plans against the (estimated) shelf:** trials 0001, 0003 and 0005, which executed on
-  the robot, pass. Trial 0006 (the cracker box, which *aborted during motion* on the robot) fails on
-  kinematics with 55 % of its path reachable. Those plans were made for the old shelf position, so
-  this is indicative only.
-- **Offline ROS dry run** (ROS domain 88, the trial 0005 apple cloud, a synthetic scene cloud, fake
-  `/joint_states`, the real GraspGen-X server): the whole chain runs. On the same inputs offline,
-  with `grasp_offset` 0, the path check rejected rank 1 (its finger pad clips the apple on the way
-  in, the sim's approach rule) and chose rank 2: fully clear, 100 % reachable, 1.1 s for the whole
-  selection. **With the node's current `grasp_offset` of [−35, 0, −25] mm, candidates put the hand
-  10–20 mm into the table** (rejected by the A4 plane gate), and the ROS dry run found nothing
-  executable. That offset predates the recalibration. Revisit it (audit A5) before running.
-- **Not run on the robot.** Not verified yet: robot self-removal from a real scene cloud, the
-  measured shelf, the executor's fallback on real hardware, and the path-check timing on a real
-  cluttered shelf.
+- **Offline ROS dry run** (ROS domain 88, synthetic inputs, fake `/joint_states`, the real
+  GraspGen-X server): the whole chain runs. That is, the scene cloud is cropped to the shelf, the
+  funnel stages and the path check run, and every rejection is named. Checks of the saved X6 plans
+  and object clouds were also run, but those were captured with the **previous camera and shelf
+  setup** and are **not evidence** for this one (user, 2026-09-22). Anything about grasp success,
+  the shelf or `grasp_offset` has to be measured afresh.
+- **Not run on the robot, and not yet on a single capture from the new setup.** Not verified yet:
+  the whole pipeline on fresh camera data, robot self-removal from a real scene cloud, the measured
+  shelf, the executor's fallback on real hardware, and the path-check timing on a real shelf.
+- **Still valid from before:** the FK fixture (`tests/data/fr3_still_samples.npz`). It holds joint
+  angles against `/current_pose`, which neither the camera nor the shelf enters.

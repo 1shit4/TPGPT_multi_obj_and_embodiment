@@ -21,7 +21,7 @@ some runs. **L** is a small numerical mismatch.
 | item | status |
 |---|---|
 | A1, A2, A3, A6, C3 | **Addressed 2026-09-21** (commits `f5f1e77`..`a647573`). Details, and where the robot deliberately keeps a different answer, are in `SHELF_AND_PATH_CHECK.md`. The kept differences: the shelf model plus the cloud on the shelf instead of a cloud-only scene; the least-bad fallback only for kinematics-only failures; the top-down grasp opt-in; the hardware jaw, refine, table and duplicate checks kept hard; per-candidate release poses in the place zone; a 25 mm centre margin on the cloud's box centre. |
-| A5 | **Open, and now measured to be harmful.** On the trial 0005 apple, the node's `grasp_offset` of [−35, 0, −25] mm puts candidates' hands 10–20 mm into the table, and no grasp was executable. With 0, rank 2 was chosen, clear along its whole path. The offset predates the recalibration. |
+| A5 | **Open.** `grasp_offset` ([−35, 0, −25] mm, planner default) is a fixed base-frame shift, the same for every object, set before the recalibration, probably to absorb the old calibration's error. Whether it helps or hurts must be measured on fresh captures from the new setup: plan the same scene with it and with 0, no motion. |
 | A4, A7, B1, B2, C1, C2, C4–C7 | Open. |
 | X6 | `x6_experiment.yaml`'s frozen `method:` still sets `max_plans: 12` and `fallback_top_down: true`, which override the new defaults in X6 trials. It is left for the X6 rework. |
 
@@ -39,8 +39,9 @@ some runs. **L** is a small numerical mismatch.
 | **A6. Missing funnel stages** | visibility (`MAX_BACKWARD_DEG` 100), on-target (4 cm), place-zone corridor (with `carry_rotation`), centred on the CoM (15 mm). | None of these. | M |
 | **A7. Parameters and algorithms that differ** | duplicates 20 mm / 20°. `by_jaw_width` at the grasp height, `JAW_MARGIN` 5 mm. | duplicates 10 mm / 15°. `hand.check_jaws` (a pad-box test), `JAW_MARGIN` **0** (`hand.py:166`). | L |
 
-A1 and A3 together are why the hardware rejects so heavily and in the wrong places. Trials 0001, 0002
-and 0006 executed ranks 27, 84 and 10, rejected on jaw and plane criteria, never on the shelf.
+A1 and A3 together meant the hardware could reject a grasp only on jaw and plane criteria, never on
+the shelf. (The X6 trials run before the move executed ranks 27, 84 and 10 of 100. They are
+recorded for history only; that setup no longer exists.)
 
 ## B. The source demonstration (the taught X6 banana demo)
 
