@@ -81,11 +81,23 @@ MAX_RESTS = 12
 #: model than ``MAX_MEDIAN`` (median), if fewer than ``MIN_EXPLAINED`` of them
 #: are within ``EXPLAINED_DISTANCE``, or if less than ``MIN_SEEN`` of the model's
 #: camera-facing surface has a camera point within ``SEEN_DISTANCE``.
-MAX_MEDIAN = 0.004
+#:
+#: **Set from measurements, not from synthetic noise.** On simulated views
+#: (3-5 mm noise) a correct fit reads about 3 mm, 0.93-0.99 explained and
+#: 0.81-1.00 seen. The first real object (a YCB banana, 2026-09-22) read
+#: **5.0 mm, 0.78, 0.82**, with the fitted scan sitting on its silhouette in
+#: the camera image: the camera's depth of the object's own surface disagrees
+#: with the scan resting on the touched table by about 5 mm, which no pose
+#: fixes. The wrong object, measured on every pair of these four scans, is
+#: caught by the fractions rather than the median: its best case (a mug's scan
+#: on an apple) reads 3.9 mm but only 0.50 seen, and the next (an apple's scan
+#: on a can) 0.62 explained. So the median is generous and the two fractions do
+#: the rejecting.
+MAX_MEDIAN = 0.007
 EXPLAINED_DISTANCE = 0.008
-MIN_EXPLAINED = 0.80
+MIN_EXPLAINED = 0.75
 SEEN_DISTANCE = 0.010
-MIN_SEEN = 0.50
+MIN_SEEN = 0.70
 
 
 @dataclass
@@ -184,6 +196,7 @@ class ObjectFit:
     seen: float
     dz_mm: float
     observed_points: int
+    dropped_below_table: int = 0
     full_cloud: np.ndarray | None = None
 
     def summary(self) -> dict:
@@ -192,7 +205,8 @@ class ObjectFit:
                 "position": np.round(self.position, 4).tolist(),
                 "median_mm": round(self.median_mm, 2), "explained": round(self.explained, 3),
                 "seen": round(self.seen, 3), "dz_mm": round(self.dz_mm, 1),
-                "observed_points": self.observed_points}
+                "observed_points": self.observed_points,
+                "dropped_below_table": self.dropped_below_table}
 
 
 def fit_object(model: ObjectModel, observed: np.ndarray, support_height: float,
@@ -207,6 +221,11 @@ def fit_object(model: ObjectModel, observed: np.ndarray, support_height: float,
     from scipy.spatial import cKDTree
 
     obs = np.atleast_2d(np.asarray(observed, dtype=float))
+    # Points below the table are the mask's edge landing on the table beyond the
+    # object, plus depth noise. The object cannot be there, and they drag the fit
+    # down (16 of 1393 on the first real banana).
+    below = obs[:, 2] < float(support_height) - 0.002
+    obs = obs[~below]
     camera = np.asarray(camera, dtype=float)
     tree_obs = cKDTree(obs)
     pts, normals = model.sample(FIT_POINTS, seed)
@@ -289,7 +308,7 @@ def fit_object(model: ObjectModel, observed: np.ndarray, support_height: float,
                      position=position, rest_index=k,
                      heading_deg=float(np.degrees(heading) % 360.0), median_mm=median * 1000.0,
                      explained=explained, seen=seen, dz_mm=dz * 1000.0,
-                     observed_points=int(len(obs)), full_cloud=full @ R.T + position)
+                     observed_points=int(len(obs)), dropped_below_table=int(below.sum()), full_cloud=full @ R.T + position)
 
 
 # ------------------------------------------------------------------ geometry

@@ -26,5 +26,6 @@ target_objects:
   # - mustard_bottle
   # - spam
   # - red cup
-  # - red mug
+  - name: mug
+    prompt: red mug               # YCB 025_mug is dark red; "mug" alone also matches cups
   - tomato_soup_can
