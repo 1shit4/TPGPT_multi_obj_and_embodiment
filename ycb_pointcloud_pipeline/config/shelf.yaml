@@ -1,65 +1,46 @@
 # The shelf, as the planner's collision model (tpgpt.hardware.shelf.ShelfModel).
 #
-# Base frame, metres. Measure by touching with the closed Franka Hand and ~/calib_tools/touch_point.py,
-# which already adds the 9.5 mm fingertip-face offset (docs/hardware/CALIBRATION.md). Procedure and
-# what each number is: docs/hardware/SHELF_AND_PATH_CHECK.md.
+# Base frame, metres, except tape_mm (millimetres, relative to the shelf). What each key is:
+# docs/hardware/SHELF_AND_PATH_CHECK.md; the tape points M1..M14: docs/hardware/shelf_measurements.html.
 #
 # Shelf frame: +x along the front edge from front_left to front_right, +y INTO the shelf, +z up.
 # "left" is the end on the robot's left as it faces the shelf's open front -- the same side as the
 # "left slot" in CALIBRATION.md. The builder refuses a swapped pair.
 #
-# STATUS 2026-09-21: only the board heights and the shelf's yaw are measured (the four slot points of
-# CALIBRATION.md). Everything marked ESTIMATE is a guess placed symmetrically about those slots:
-# inner width 0.50, depth 0.30, slots at mid-depth, no roof. Until they are measured the check can report a
-# collision that is not there, or miss one at a wall. `measured: false` is written into every plan.
+# STATUS 2026-09-22: every dimension measured. Heights and the two slot marks were touched by the
+# robot (2026-09-21, ~1 mm); the rest is tape (2026-09-22, the user). M1-M4 (slot mark -> panel,
+# slot mark -> front edge) were hard to hold square and are the least certain: they place the shelf
+# in x/y and set its yaw. The slot-derived width (M1 + 233 + M2 = 576 mm) agrees with the inner
+# width M5 (580 mm) to -3.8 mm.
 shelf:
-  measured: false
+  measured: true
 
-  # ---- The measured shelf (fill this, then set measured: true) --------------------------------
+  # ---- The measured shelf ------------------------------------------------------------------
   # The shelf has no back and three boards (bottom, top, topmost). Its own dimensions come from a
   # tape, keyed M1..M14 as marked on the diagram docs/hardware/shelf_measurements.html. The shelf is
-  # placed in the robot frame by the points touched on 2026-09-21 (CALIBRATION.md), below. While
-  # every tape_mm value is null, the ESTIMATE further down is used. Once any is filled, all the
-  # required ones must be, and the estimate keys are ignored.
+  # placed in the robot frame by the points touched on 2026-09-21 (CALIBRATION.md), below.
+  # (The pre-tape estimate that stood here is in git history, commit 7d57a00.)
   anchors:
     left_slot: [0.6842, -0.2774]     # touched: top shelf, left slot
     right_slot: [0.4636, -0.3529]    # touched: top shelf, right slot
     bottom_board_top: 0.0768         # touched
     top_board_top: 0.3213            # touched
     table: -0.0136                   # touched
-  tape_mm:
-    slot_left_to_left_panel: null    # M1
-    slot_right_to_right_panel: null  # M2
-    slot_left_to_front_edge: null    # M3
-    slot_right_to_front_edge: null   # M4
-    inner_width: null                # M5  (check: M1 + 233 + M2, within 6 mm)
-    left_panel_thickness: null       # M6
-    right_panel_thickness: null      # M7
-    panel_height: null               # M8  table -> top edge of the side panels
-    panel_depth: null                # M9
-    panel_front_ahead_of_boards: null  # M10 (0 if flush; negative if the boards stick out)
-    board_depth: null                # M11
-    topmost_above_top_board: null    # M12 top board's upper surface -> topmost board's upper surface
-    board_thickness: null            # M13
-    apron_height: null               # M14 (0 if there is no front panel under the bottom board)
-
-  # ---- ESTIMATE, used until tape_mm is filled ----------------------------------------------------
-
-  front_left:  [0.7619, -0.0923]     # ESTIMATE: front edge of a board, at the LEFT wall's inner face
-  front_right: [0.2888, -0.2542]     # ESTIMATE: front edge of a board, at the RIGHT wall's inner face
-  depth: 0.30                        # ESTIMATE: front edge to the back panel's inner face
-  bottom: -0.0136                    # the table (touched); the shelf stands on it
-  top: 0.3213                        # ESTIMATE: top of the side walls. Taken as the top board's surface
-                                     # (an open-top two-tier shelf: CALIBRATION.md has the bottom board
-                                     # 'recessed under the top shelf'). Raise it if the walls stand higher.
-  wall_thickness: 0.018              # ESTIMATE: side walls
-  back_thickness: 0.0                # the shelf has no back (user, 2026-09-22)
-
-  boards:                            # `top` = height of the board's upper surface
-    - {name: bottom_board, top: 0.0768, thickness: 0.018, support: true}   # top measured; thickness ESTIMATE
-    - {name: top_board,    top: 0.3213, thickness: 0.018, support: true}   # top measured; thickness ESTIMATE
-    # The topmost board exists but its height is not known until M12 is measured: until then it
-    # is absent from this estimate, so plans onto the top board are not checked against it.
+  tape_mm:                             # 2026-09-22
+    slot_left_to_left_panel: 201       # M1  (hard to hold square)
+    slot_right_to_right_panel: 142     # M2  (hard to hold square)
+    slot_left_to_front_edge: 90        # M3  (hard to hold square)
+    slot_right_to_front_edge: 92       # M4  (hard to hold square)
+    inner_width: 580                   # M5  check: M1 + 233 + M2 = 576, within 6 mm
+    left_panel_thickness: 18           # M6
+    right_panel_thickness: 18          # M7
+    panel_height: 902                  # M8  table -> top edge of the side panels
+    panel_depth: 242                   # M9
+    panel_front_ahead_of_boards: 0     # M10 flush
+    board_depth: 242                   # M11
+    topmost_above_top_board: 489       # M12 top board's upper surface -> topmost board's upper surface
+    board_thickness: 18                # M13
+    apron_height: 72                   # M14 check: 72 + 18 = 90 vs touched bottom board - table = 90.4
 
   # Anything else solid on or around the shelf, as boxes: lo/hi corners in the shelf frame
   # (frame: shelf) or the base frame (frame: base).
