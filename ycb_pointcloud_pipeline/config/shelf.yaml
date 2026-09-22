@@ -11,7 +11,9 @@
 # robot (2026-09-21, ~1 mm); the rest is tape (2026-09-22, the user). M1-M4 (slot mark -> panel,
 # slot mark -> front edge) were hard to hold square and are the least certain: they place the shelf
 # in x/y and set its yaw. The slot-derived width (M1 + 233 + M2 = 576 mm) agrees with the inner
-# width M5 (580 mm) to -3.8 mm.
+# width M5 (580 mm) to -3.8 mm. The slot marks were touched again the same day (within 4 mm), and
+# the cloud disagreement at the panels was traced to the camera (~10 mm sideways at the shelf), so
+# there is deliberately no cloud_fit here (docs/hardware/SHELF_AND_PATH_CHECK.md, "First live run").
 shelf:
   measured: true
 

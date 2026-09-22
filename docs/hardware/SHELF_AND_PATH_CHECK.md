@@ -154,9 +154,39 @@ So the cloud puts both panels towards the left, and the far one more. That fits 
 - the camera is off horizontally at the shelf. A yaw error of about 1° grows with range: the
   left panel is about 0.8 m from the camera, the right about 1.4 m.
 
-The calibration validated heights, not horizontal positions this far out. **Unresolved:** it takes
-a check that separates the two (clicking the touched slot marks in the cloud, or a robot touch on
-a panel) before anything is stored.
+The calibration validated heights, not horizontal positions this far out.
+
+**Settled the same evening: the camera is the main cause, and the tape stands.** Both slot marks
+were touched again and clicked in the cloud (`~/calib_tools/shelf_points.py`,
+`~/tpgpt_calibration/shelf_points_20260922_221426.yaml`). Offsets in mm, as (along the front,
+into the shelf, height):
+
+| | left mark | right mark |
+|---|---|---|
+| new touch minus the 2026-09-21 touch | −4.2, −1.0, +0.4 | −2.4, −2.7, −0.9 |
+| click minus touch | **−11.3**, −19.5, +7.5 | **−10.2**, −9.8, −1.3 |
+
+What this shows:
+- The marks were found again within about 4 mm, so the anchors hold.
+- The camera places both marks **about 10 mm to the left along the front edge**. That explains the
+  left panel's 11 mm completely.
+- For the right panel, 10 mm of its 25 mm is explained. Take 10 mm off the cloud's reading of where
+  the top board's surface ends (560–570) and it gives 570–580, against the tape's 580. So the
+  width is right. The rest of that panel's 25 mm comes from its inner face, which the camera sees
+  poorly (9.6 mm RMS about a fitted plane, and the plane turned 6°).
+- The "into" and height parts of the clicks are not used. A click lands on the mark's *colour*,
+  which carries any colour-to-depth registration error, and a single point is noisy. The
+  geometric front face of the top board, which has no such error, reads +3.8 mm.
+
+**Decision: no `cloud_fit`.** The robot moves in true coordinates, so the shelf must be where the
+robot touched it, not where the camera sees it. The shelf is placed from the tape plus the touches.
+`shelf_fit` stays as a check. It would be worth re-running only after the calibration improves at
+the shelf.
+
+**Consequence for everything else:** the camera is about 10 mm off sideways at the shelf, so object
+clouds there are too. Recorded as an open calibration issue (`CALIBRATION.md`), and it bears on A5
+(`grasp_offset`). An optional robot touch on the right panel's inner face would settle that
+panel's remaining ≤ 10 mm.
 
 ### Checking it
 

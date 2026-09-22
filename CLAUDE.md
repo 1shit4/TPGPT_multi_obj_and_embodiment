@@ -172,14 +172,17 @@ The planner's support height is: its `support_height` parameter, else the calibr
 - **`free_drive` "pose went stale"** means its own callback received nothing for `max_pose_age`
   (0.5 s) — subscriber starvation, while `/current_pose` itself holds 250 Hz. Intermittent.
   `-p max_pose_age:=2.0` works around it; that is a safety parameter, so it is the user's call.
-- **The shelf is measured (2026-09-22), but its x/y placement and yaw wait for `shelf_fit`.** The
-  shelf has no back and three boards (bottom, top, topmost). Heights and two slot marks were
-  touched; everything else is from a tape (M1–M14, `docs/hardware/shelf_measurements.html`,
-  private artifact https://claude.ai/artifact/FgicphG5cmo9hvRnoutXpp). M1–M4 (slot mark to panel
-  and to front edge) were hard to hold square and place the shelf, so `shelf_fit` corrects the
-  placement from the camera's cloud. It writes a `cloud_fit:` block, pasted by hand into
-  `shelf.yaml`; until then the shelf may be misplaced by up to about 10 mm.
-  `SHELF_AND_PATH_CHECK.md`, "Grounding the placement in the cloud".
+- **The shelf is measured (2026-09-22) and placed from the tape plus robot touches; no
+  `cloud_fit`.** The shelf has no back and three boards (bottom, top, topmost). Heights and two
+  slot marks were touched; everything else is from a tape (M1–M14,
+  `docs/hardware/shelf_measurements.html`, private artifact
+  https://claude.ai/artifact/FgicphG5cmo9hvRnoutXpp). `shelf_fit` (a fit of the model to the cloud)
+  disagreed with the tape at the side panels. Touching and clicking the slot marks showed the
+  **camera** is about 10 mm off sideways at the shelf, and the tape is right. The robot needs the
+  true shelf, so `shelf_fit` is a check only. `SHELF_AND_PATH_CHECK.md`, "First live run".
+- **The camera is about 10 mm off sideways at the shelf** (`CALIBRATION.md`, open). This applies
+  to object clouds there too: expect grasps near the shelf to be off by that much until the
+  calibration is refit with correspondences on the shelf.
 - **`grasp_offset` (planner node default [−35, 0, −25] mm) predates the recalibration**: a fixed
   base-frame shift applied to every grasp, probably absorbing the old calibration's error. Measure it
   on fresh captures (plan with it and with 0) before trusting it. Audit item A5, open.
@@ -232,8 +235,9 @@ The planner's support height is: its `support_height` parameter, else the calibr
   any capture from the new setup.**
 - **Fresh start agreed 2026-09-22:** a new demonstration in the new setup; the old runs and demo are
   not used. The staged test order is in `docs/hardware/FRESH_START.md`.
-- **Shelf measured by tape 2026-09-22**; its placement is to be grounded with `shelf_fit` on the
-  live cloud (not yet run).
-- Open, in the user's order: run `shelf_fit` and store its `cloud_fit`; decide `grasp_offset` (A5); then add
+- **Shelf measured by tape 2026-09-22** and confirmed by touching again. The camera was found about 10 mm
+  off sideways at the shelf (open).
+- Open, in the user's order: decide whether to refit the calibration with shelf correspondences;
+  decide `grasp_offset` (A5); then add
   grippers; then the executor-default deviations (C1, C2, C4–C7), A4, A7, and B1/B2 (whether the
   paper claims transported stiffness on hardware).

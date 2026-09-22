@@ -51,6 +51,13 @@ shelf height there is 29 mm too high).
 The bottom shelf is poorly seen by this camera (grazing angle, recessed under the top shelf): plane
 fits there carry 5-17 deg of spurious tilt. Trust the touched height, not the cloud.
 
+**Open (2026-09-22): the camera is about 10 mm off sideways at the shelf.** The two slot marks,
+touched and then clicked in the cloud, came out −11.3 and −10.2 mm along the shelf's front edge
+(towards its left panel). The side panels in the cloud agree (`SHELF_AND_PATH_CHECK.md`, "First
+live run"). The table and board heights were validated; horizontal positions this far out were
+not. Correspondences on the shelf (both slot marks, both boards) would be the data for a refit.
+Until then, object clouds near the shelf carry this error.
+
 ## How to recalibrate
 
 Needs the robot container, the camera (Terminal 1), `calibration_check_node` (Terminal 2), RViz
