@@ -85,6 +85,7 @@ All in the home directory, so they survive reboots.
 | `~/calibration.rviz` | Fixed Frame `base`, scene cloud as RGB8 flat squares (RGB8 is needed to see stickers), RobotModel off (its meshes live in the container) |
 | `~/calib_tools/touch_point.py` | Live readout of the fingertip-face position and hand tilt, for measuring by touch |
 | `~/calib_tools/click_measure.py` | Click a point in RViz; fits the local plane and reports its height |
+| `~/calib_tools/shelf_points.py` | Touches (Enter) and RViz clicks, printed in the shelf model's axes (along the front / into / up); pairs click and touch by label to give the camera's error at the shelf. tpgpt venv. |
 | `~/calib_tools/validate.py`, `final_fit.py` | Score candidate extrinsics against the real table plane |
 | `~/calib_tools/ripple.py` | Depth noise check: temporal noise should be under 0.5 mm with the filters on |
 
