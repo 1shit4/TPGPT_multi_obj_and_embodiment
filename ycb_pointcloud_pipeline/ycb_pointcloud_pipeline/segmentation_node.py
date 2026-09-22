@@ -106,6 +106,14 @@ class YCBSegmentationNode(Node):
         # erosion is skipped for any mask it would leave under `mask_min_pixels`.
         self.declare_parameter('mask_erosion', 1)
         self.declare_parameter('mask_min_pixels', 60)
+        # Flying pixels: at a silhouette a pixel's depth interpolates between the object
+        # and the background behind it, so it lands on the ray between them. Measured
+        # 2026-09-23: an upright YCB can (68 mm across) fused to a 116 mm blob with a
+        # 60 mm comet tail streaming away from the camera; a flat banana, whose silhouette
+        # has a small depth step, showed none. Such pixels sit on a steep depth ramp, so
+        # pixels whose neighbouring depths change faster than this are dropped. On a good
+        # frame the 99th percentile of the gradient over an object is about 8 mm/px.
+        self.declare_parameter('depth_gradient_max_mm_px', 8.0)   # 0 disables
         self.declare_parameter('publish_scene_cloud', True)
         self.declare_parameter('scene_cloud_stride', 4)   # every 4th pixel: ~25k points at 848x480
         # Intrinsics used for deprojection: config/camera_calibration.yaml
@@ -223,6 +231,13 @@ class YCBSegmentationNode(Node):
         with self._lock:
             self._latest = (color_msg, depth_msg)
 
+    def _depth_gradient(self, depth):
+        """Per-pixel depth change, mm per pixel, ignoring invalid depth."""
+        d = np.where(depth > 0, depth.astype(np.float32) / float(self.depth_scale), np.nan)
+        gx = np.abs(np.gradient(d, axis=1))
+        gy = np.abs(np.gradient(d, axis=0))
+        return np.fmax(np.nan_to_num(gx, nan=0.0), np.nan_to_num(gy, nan=0.0)) * 1000.0
+
     def _eroded(self, mask, label):
         """The mask without its boundary pixels, whose depth is part background."""
         p = lambda n: self.get_parameter(n).value  # noqa: E731
@@ -287,9 +302,21 @@ class YCBSegmentationNode(Node):
                 self.scene_pub.publish(points_to_ros2_pointcloud2(
                     scene, scene_colors, color_msg.header.frame_id, color_msg.header.stamp))
 
+        limit = float(p('depth_gradient_max_mm_px'))
+        steep = self._depth_gradient(depth) > limit if limit > 0 else None
         published = []
         for det in detections:
             det['mask'] = self._eroded(det['mask'], det['label'])
+            if steep is not None:
+                kept = det['mask'] & ~steep
+                if int(kept.sum()) >= int(p('mask_min_pixels')):
+                    det['flying_pixels'] = int(det['mask'].sum() - kept.sum())
+                    det['mask'] = kept
+                else:
+                    self.get_logger().warn(
+                        f"{det['label']}: the depth-gradient filter would leave "
+                        f'{int(kept.sum())} pixels; keeping the eroded mask',
+                        throttle_duration_sec=10.0)
             points, colors = mask_to_pointcloud(rgb, depth, det['mask'], self.intrinsics,
                                                 depth_scale=self.depth_scale,
                                                 depth_trunc=self.depth_trunc)

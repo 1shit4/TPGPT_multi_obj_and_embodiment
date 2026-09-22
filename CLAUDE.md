@@ -195,6 +195,16 @@ The planner's support height is: its `support_height` parameter, else the calibr
   the best-scoring band: horizontal grasps around an upright can), and `check_visibility` is
   **`auto`** -- on only when the object's scan was not fitted, since a fitted scan has no unseen
   side, and this camera faces the robot so the filter otherwise removes the robot-side approaches.
+- **Flying pixels at a silhouette.** A pixel on an object's outline takes its depth partly from
+  the background, so it lands on the ray between the two: an upright YCB can (68 mm) fused to a
+  116 mm blob with a 60 mm tail streaming away from the camera, which broke its scan fit and most
+  of its grasps. `segmentation_node` drops pixels whose depth changes faster than
+  `depth_gradient_max_mm_px` (default 8; a good frame reads about 8 mm/px at the 99th percentile).
+  Flat objects (a banana) show none of this; tall ones do.
+- **The arm removes 30 mm of itself from the cloud** (`shelf.SELF_FILTER_MARGIN`), not 10. The
+  cable, the status ring and the shoulder connector are not in the link meshes, so they survived as
+  obstacles and then link1 swept through them, refusing the move onto the path (`approach_in`).
+  Measured: 140 such points at 10 mm, 3 at 30 mm, out of 14 000.
 - **Object clouds are only as good as the mask.** `segmentation_node` erodes each mask by
   `mask_erosion` (default 1 px, the sim's value; audit A9). Without it the boundary pixels take
   their depth partly from the background and fly towards the camera: a 68 mm YCB can fused to

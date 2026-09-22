@@ -93,10 +93,26 @@ SURFACE_SPACING = 0.01
 #: obstacle, metres (three planner voxels plus depth noise).
 TARGET_EXCLUSION = 0.015
 
-#: Growth of every robot piece when removing the robot from the cloud, metres:
-#: a surface point sits *on* the body, and depth is noisy
-#: (``perception.obstacles.self_filtered``'s margin, doubled for a real sensor).
-SELF_FILTER_MARGIN = 0.01
+#: Growth of every robot piece when removing the robot from the cloud, metres.
+#:
+#: A surface point sits *on* the body and depth is noisy, and the arm carries
+#: things the link meshes do not have: the cable along the base, the status
+#: ring, the connector at the shoulder. Measured 2026-09-23 on this bench, by
+#: counting the points that link0-2 would sweep through over the whole range of
+#: joint 1 (they are what refuses the move onto a path, "approach_in"):
+#:
+#: ======  ======================  ==========================
+#: margin  points swept by link0-2  extra points removed
+#: ======  ======================  ==========================
+#: 10 mm   140                      -
+#: 20 mm    31                     300
+#: 30 mm     3                     420
+#: 40 mm     0                     490
+#: ======  ======================  ==========================
+#:
+#: 30 mm, out of 14 000 obstacle points. The cost is that an object within
+#: 30 mm of the arm's surface at capture time is erased with it.
+SELF_FILTER_MARGIN = 0.03
 
 #: Observed shelf points within this of the model's surface count as explained
 #: by it, metres. The calibration's own accuracy is +/-5 mm.
