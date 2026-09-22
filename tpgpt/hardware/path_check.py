@@ -13,10 +13,10 @@ What carries over unchanged, because it is the method rather than the simulator:
   tests it. ``reachable_fraction`` is over the tested waypoints.
 * **the phases and what each allows.** ``approach`` (before the close):
   nothing may touch, except the fingers meeting the target within
-  ``grasp_window`` waypoints of the close. ``carry``: the robot touches
-  nothing; the carried object touches nothing *beside* it. ``place`` (the last
-  ``place_window`` waypoints of the carry): the object may meet a surface from
-  below. ``retreat``: the robot touches nothing.
+  ``grasp_window`` waypoints of the close. ``carry`` and ``place`` (the last
+  ``place_window`` waypoints of the carry): the robot touches nothing; the
+  carried object may only rest on the top face of a support board or the
+  table. ``retreat``: the robot touches nothing.
 * **the carried object travels with the hand** from the close onwards, as the
   target's own cloud rigidly attached to the grasp.
 * the thresholds: IK tolerance ``REACH_TOLERANCE`` (15 mm), cloud contact radius
@@ -24,13 +24,20 @@ What carries over unchanged, because it is the method rather than the simulator:
 
 What is new, and why:
 
-* **Two kinds of obstacle.** The shelf model is exact geometry, so it is
+* **Exact geometry where it exists.** The shelf model and the table plane are
   treated as ``path_feasibility`` treats MuJoCo's geometry -- penetration
-  deeper than ``CONTACT_DEPTH_TOLERANCE`` (1 mm) is a fault, tested both ways
-  (model surface samples inside a robot piece, and robot vertices inside a
-  panel), since a thin board can pass through a link with no vertex inside it.
-  The observed cloud inside the shelf's region is treated exactly as the
-  simulation treats its scene cloud.
+  deeper than ``CONTACT_DEPTH_TOLERANCE`` (1 mm) is a fault. The shelf is
+  tested both ways (model surface samples inside a robot piece, robot vertices
+  inside a panel), since a thin board can pass through a link with no vertex in
+  it. The camera's points on the table and the shelf are removed
+  (``ShelfWorld``); the rest are tested as the simulation tests its cloud.
+* **Where the carried object may rest is decided by faces, not directions.**
+  The simulation's cloud rule calls a contact "support" when it lies within 60
+  degrees of straight down from the object's centre, which misreads the bottom
+  corners of a wide flat object as side hits. With exact geometry the question
+  is answerable directly: resting is allowed only on the top face of a support
+  board or of the table, up to the contact radius; everything else, including
+  any contact with the remaining seen points, is a fault.
 * **The arm against itself.** The simulation's check skips robot-robot contacts.
   On the robot a folded arm is as real a collision as the shelf, so every pair
   of robot pieces is tested -- exactly, as convex bodies (:func:`penetration`) --
@@ -168,6 +175,12 @@ def _robot_faults(pieces, world, phase: str, depth_tolerance: float,
                   check_self: bool = True) -> dict:
     """Robot pieces against the shelf model, the observed cloud and themselves."""
     faults: dict = _self_faults(pieces, phase, depth_tolerance) if check_self else {}
+    table = getattr(world, "table_height", None)
+    if table is not None:
+        for piece in pieces:
+            if float(piece.vertices[:, 2].min()) < table - depth_tolerance:
+                key = f"{phase}: {piece.name} in the table"
+                faults[key] = faults.get(key, 0) + 1
     model = world.model
     if model is not None:
         surface, owner = world.surface()
@@ -195,7 +208,7 @@ def _robot_faults(pieces, world, phase: str, depth_tolerance: float,
                 continue
             inside = piece.contains(world.cloud[np.asarray(near, dtype=int)])
             if inside.any():
-                key = f"{phase}: {piece.name} in the shelf cloud"
+                key = f"{phase}: {piece.name} in the seen points"
                 faults[key] = faults.get(key, 0) + int(inside.sum())
     return faults
 
@@ -219,7 +232,6 @@ def path_feasibility(
     contact_radius: float = CLOUD_CONTACT_RADIUS,
     grasp_window: int = GRASP_CONTACT_WINDOW,
     place_window: int = PLACE_WINDOW,
-    support_normal=(0.0, 0.0, 1.0),
     stop_early: bool = False,
     min_reachable_fraction: float | None = MIN_REACHABLE_FRACTION,
     check_self: bool = True,
@@ -260,8 +272,6 @@ def path_feasibility(
     offset = np.asarray(end_effector.tool_offset, dtype=float)
     held = np.atleast_2d(np.asarray(object_points, dtype=float)) if len(
         np.asarray(object_points)) else np.zeros((0, 3))
-    normal = np.asarray(support_normal, dtype=float)
-    normal = normal / np.linalg.norm(normal)
     cloud_tree = world.tree("cloud")
     place_from = max(int(release_index) - int(place_window), int(grasp_index))
 
@@ -301,6 +311,11 @@ def path_feasibility(
             for key, count in _robot_faults(pieces, world, "approach_in", depth_tolerance,
                                             check_self).items():
                 bad[key] = bad.get(key, 0) + count
+            # The object to be picked is an obstacle on the way onto the path.
+            for piece in pieces:
+                if len(held) and piece.contains(held).any():
+                    key = f"approach_in: {piece.name} in the target's cloud"
+                    bad[key] = bad.get(key, 0) + 1
         approach_in = {"steps": int(n), "unreachable": int(unreached), "faults": bad}
         if bad:
             faults.update(bad)
@@ -350,29 +365,30 @@ def path_feasibility(
                     key = f"approach: {piece.name} in the target's cloud"
                     hits[key] = hits.get(key, 0) + 1
 
-        # --- the object it is carrying, against the shelf ---------------------------
+        # --- the object it is carrying, against everything else ---------------
+        # Exact faces, not directions, so the object's rotation does not matter:
+        # it may rest on the TOP face of a support board or of the table (at most
+        # the contact radius into it); anything else it enters is a fault, and so
+        # is any contact with the remaining seen points (other objects).
         if local is not None and phase in ("carry", "place"):
             world_obj = positions[k] + local @ rotations[k].T
             if world.model is not None and world.model.near(world_obj, 0.0):
-                depth, names = world.model.penetration(world_obj)
-                # From below is a surface, from the side is a collision -- with a
-                # model the difference is the depth: resting on a board puts the
-                # cloud's lowest points at most the contact radius into it.
-                deep = depth > contact_radius
-                for panel in {names[i] for i in np.flatnonzero(deep)}:
+                for panel, count in world.model.object_faults(
+                        world_obj, rest=contact_radius, tolerance=depth_tolerance).items():
                     key = f"{phase}: the carried object in shelf {panel}"
-                    hits[key] = hits.get(key, 0) + int(np.sum(deep))
+                    hits[key] = hits.get(key, 0) + count
+            table = getattr(world, "table_height", None)
+            if table is not None:
+                sunk = int(np.sum(world_obj[:, 2] < table - contact_radius))
+                if sunk:
+                    key = f"{phase}: the carried object in the table"
+                    hits[key] = hits.get(key, 0) + sunk
             if cloud_tree is not None:
                 near = cloud_tree.query_ball_point(world_obj, contact_radius)
                 touched = {int(i) for group in near for i in group}
                 if touched:
-                    centre = world_obj.mean(axis=0)
-                    lateral = [i for i in touched
-                               if (world.cloud[i] - centre) @ normal
-                               > -0.5 * float(np.linalg.norm(world.cloud[i] - centre) + 1e-12)]
-                    if lateral:
-                        key = f"{phase}: the carried object hits something sideways"
-                        hits[key] = hits.get(key, 0) + len(lateral)
+                    key = f"{phase}: the carried object touches seen points"
+                    hits[key] = hits.get(key, 0) + len(touched)
         if hits:
             for key, count in hits.items():
                 faults[key] = faults.get(key, 0) + count

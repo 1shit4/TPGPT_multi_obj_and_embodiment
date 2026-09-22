@@ -194,3 +194,38 @@ def test_missing_tape_readings_are_named():
     del taped["shelf"]["tape_mm"]["panel_height"]
     with pytest.raises(ValueError, match="M8"):
         ShelfModel.from_config(taped)
+
+
+# ------------------------------------------------ where a carried object may rest
+def test_resting_is_allowed_only_on_a_support_boards_top_face(shelf):
+    high = next(b for b in shelf.boxes if b.name == "high")      # top face at z = 0.35
+    on_top = np.array([[0.55, 0.0, 0.347]])                       # 3 mm into the top face
+    sunk = np.array([[0.55, 0.0, 0.343]])                         # 7 mm into it
+    underside = np.array([[0.55, 0.0, 0.3315]])                   # 1.5 mm up into its underside
+    wall = np.array([[0.55, 0.252, 0.30]])                        # 2 mm into the left wall
+    assert shelf.object_faults(on_top, rest=0.005, tolerance=0.001) == {}
+    assert shelf.object_faults(sunk, rest=0.005, tolerance=0.001) == {"high": 1}
+    assert shelf.object_faults(underside, rest=0.005, tolerance=0.001) == {"high": 1}
+    assert shelf.object_faults(wall, rest=0.005, tolerance=0.001) == {"left_wall": 1}
+    assert high.name in shelf.supports
+
+
+def test_a_wide_flat_object_set_down_is_not_a_side_hit(shelf):
+    """The simulation's 60-degree cone reads this box's bottom corners as side
+    contacts (corner 150 mm out, 25 mm down from the centre: 80 deg off vertical).
+    By faces, all of it rests on the board's top."""
+    g = np.mgrid[0.40:0.701:0.01, -0.10:0.101:0.01].reshape(2, -1).T
+    bottom = np.column_stack([g, np.full(len(g), 0.348)])        # 2 mm into the high board
+    assert shelf.object_faults(bottom, rest=0.005, tolerance=0.001) == {}
+
+
+def test_the_camera_points_on_the_table_and_shelf_are_removed(shelf):
+    high = next(b for b in shelf.boxes if b.name == "high")
+    on_board = high.position + np.array([[x, y, 0.012] for x in (-0.1, 0.1) for y in (-0.1, 0.1)])
+    box_on_board = np.array([[0.55, 0.0, z] for z in (0.40, 0.45, 0.50)])
+    table = np.array([[0.3, 0.3, 0.004], [0.2, -0.3, -0.006]])
+    world = ShelfWorld.build(shelf, np.vstack([on_board, box_on_board, table]),
+                             robot_q=HOME_Q, fr3=default_model(), support_height=0.0)
+    r = world.cloud_report
+    assert r["removed_as_shelf"] == 4 and r["removed_as_table"] == 2
+    assert len(world.cloud) == 3 and world.table_height == 0.0

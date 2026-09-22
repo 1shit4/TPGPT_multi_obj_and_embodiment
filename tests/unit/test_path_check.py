@@ -103,9 +103,13 @@ def test_the_observed_cloud_on_the_shelf_is_an_obstacle():
                       for dy in np.arange(-0.06, 0.061, 0.01)
                       for z in np.arange(0.11, 0.23, 0.01)])
     world = ShelfWorld.build(shelf, scene_points=thing)
-    assert len(world.cloud) == len(thing)
+    # Its bottom layer, within 15 mm of the board it stands on, is taken as the
+    # board (the model covers it); the rest of it stays an obstacle.
+    bottom = thing[:, 2] <= 0.10 + 0.015
+    assert world.cloud_report["removed_as_shelf"] == int(bottom.sum())
+    assert len(world.cloud) == int((~bottom).sum())
     r = _check(positions, rotations, world)
-    assert any("in the shelf cloud" in k for k in r["faults"])
+    assert any("in the seen points" in k for k in r["faults"])
 
 
 def test_the_move_onto_the_path_is_checked_from_the_measured_joints():
@@ -177,3 +181,39 @@ def test_joint_neighbours_are_not_faults():
     assert pc._joined("fr3_link3", "fr3_link4") and pc._joined("fr3_link7", "hand_body")
     assert pc._joined("hand_body", "hand_left_pad")
     assert not pc._joined("fr3_link0", "fr3_link5") and not pc._joined("fr3_link5", "hand_body")
+
+
+# --------------------------------------------------------- the table, exactly
+def test_the_arm_going_below_the_table_is_a_collision():
+    positions, rotations = _path([0.45, 0.0, 0.30], [0.45, 0.0, 0.05])
+    world = ShelfWorld.build(None, support_height=0.12)             # a table at 12 cm
+    r = _check(positions, rotations, world, grasp=59, release=59)
+    assert any("in the table" in k for k in r["faults"])
+
+
+def test_the_carried_object_may_rest_on_the_table_but_not_be_pushed_into_it():
+    positions, rotations = _path([0.45, 0.0, 0.20], [0.45, 0.0, 0.30])
+    g = np.mgrid[-0.02:0.021:0.01, -0.02:0.021:0.01, 0.0:0.041:0.01].reshape(3, -1).T
+    cube = positions[5] + np.array([0.0, 0.0, -0.10]) + g            # bottom at z = 0.10
+    resting = _check(positions, rotations, ShelfWorld.build(None, support_height=0.103),
+                     grasp=5, release=59, object_points=cube)
+    assert not any("carried object" in k for k in resting["faults"])
+    pushed = _check(positions, rotations, ShelfWorld.build(None, support_height=0.12),
+                    grasp=5, release=59, object_points=cube)
+    assert any("carried object in the table" in k for k in pushed["faults"])
+
+
+def test_the_move_onto_the_path_must_not_go_through_the_object_to_be_picked():
+    from tpgpt.hardware.fr3 import default_model
+
+    positions, rotations = _path([0.45, 0.0, 0.40], [0.45, 0.0, 0.32])
+    start = default_model().solve_ik(np.array([0.45, 0.0, 0.10]), DOWN, seed=HOME_Q,
+                                     max_iterations=400)
+    assert start.reachable
+    # The object stands between the arm's start (TCP at 10 cm) and the path (above 32 cm).
+    obj = np.array([[0.45 + dx, dy, z] for dx in (-0.04, 0.0, 0.04) for dy in (-0.06, 0.0, 0.06)
+                    for z in np.arange(0.20, 0.26, 0.01)])
+    r = _check(positions, rotations, ShelfWorld.build(None), grasp=40, release=50,
+               object_points=obj, start_q=start.qpos)
+    assert r["first_violation"] == -1
+    assert any("approach_in" in k and "target's cloud" in k for k in r["faults"])

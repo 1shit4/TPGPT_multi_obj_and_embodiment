@@ -34,10 +34,14 @@ cloud, and the arm would collide with its own image, so the cloud is then kept
 only inside the shelf's region of interest (its box plus a margin), and the
 report says so (``scope``).
 
-The table is not in this world: it is the support plane the planner already
-checks against (``planner._hand_clearance``, the ``hits_support`` stage), so
-cloud points within :data:`TABLE_BAND` above it are removed -- otherwise its
-depth noise would put table points inside the fingers of every low grasp.
+**Exact geometry replaces the camera wherever it exists** (user, 2026-09-22):
+the table is an exact plane at the touched table height (``table_height``), and
+the shelf is its model. Camera points on either are removed -- points within
+:data:`TABLE_BAND` above the table, and points within :data:`EXPLAINED_DISTANCE`
+of a shelf panel -- because they duplicate the exact geometry and would only
+add its depth noise (+/-5 mm) as false contacts. What remains in the cloud is
+everything else: other objects, and anything the model gets wrong -- a panel
+mis-measured by more than 15 mm keeps its real points as obstacles.
 
 The inside-test machinery is the simulation's: shelf panels are
 :class:`tpgpt.perception.obstacles.Obstacle` boxes with its exact signed
@@ -365,6 +369,33 @@ class ShelfModel:
             owner.append(np.full(len(s), k))
         return np.vstack(pts), np.concatenate(owner)
 
+    def object_faults(self, points: np.ndarray, rest: float, tolerance: float) -> dict:
+        """Where a carried object's points go into the shelf, and whether that is allowed.
+
+        Resting is allowed only on the **top face of a support board**: a point
+        inside a support board no deeper than ``rest`` below its top face. Every
+        other intrusion deeper than ``tolerance`` -- into a side panel, a board's
+        underside or front edge, or a board top deeper than ``rest`` -- is a
+        fault. Exact faces, so it does not depend on how the object is turned.
+
+        Returns ``{panel name: number of offending points}``.
+        """
+        p = np.atleast_2d(np.asarray(points, dtype=float))
+        faults: dict = {}
+        for box in self.boxes:
+            local = (p - box.position) @ box.rotation
+            half = np.asarray(box.size, dtype=float)
+            depth = box.penetration(p)
+            inside = depth > tolerance
+            if not inside.any():
+                continue
+            if box.name in self.supports:
+                resting = local[:, 2] >= half[2] - float(rest)
+                inside &= ~resting
+            if inside.any():
+                faults[box.name] = int(inside.sum())
+        return faults
+
     def explained(self, points: np.ndarray, distance: float = EXPLAINED_DISTANCE) -> np.ndarray:
         """Which observed points lie within ``distance`` of the model's surface."""
         depth, _ = self.penetration(points)
@@ -447,6 +478,8 @@ class ShelfWorld:
     model: ShelfModel | None
     cloud: np.ndarray = field(default_factory=lambda: np.zeros((0, 3)))
     cloud_report: dict = field(default_factory=dict)
+    #: The table's top surface, an exact horizontal plane (``None``: no table).
+    table_height: float | None = None
     _surface: tuple | None = None
     _trees: dict = field(default_factory=dict)
 
@@ -509,14 +542,17 @@ class ShelfWorld:
                 report["removed_as_robot"] = None
                 report["robot_not_removed"] = "no joint angles at capture time"
             if model is not None and len(pts):
-                on_shelf = pts[model.in_roi(pts, margin, above_support)]
-                report["obstacle_points_on_shelf"] = int(len(on_shelf))
-                if len(on_shelf):
-                    explained = model.explained(on_shelf)
-                    report["explained_by_model"] = float(explained.mean())
-                    report["unexplained_points"] = int((~explained).sum())
+                on_shelf = model.in_roi(pts, margin, above_support)
+                explained = model.explained(pts)
+                if on_shelf.any():
+                    report["explained_by_model"] = float(explained[on_shelf].mean())
+                    report["unexplained_points"] = int((on_shelf & ~explained).sum())
+                # The shelf is the model's job: its own points are removed.
+                report["removed_as_shelf"] = int(explained.sum())
+                pts = pts[~explained]
         report["obstacle_points"] = int(len(pts))
-        return cls(model=model, cloud=pts, cloud_report=report)
+        return cls(model=model, cloud=pts, cloud_report=report,
+                   table_height=None if support_height is None else float(support_height))
 
     # ------------------------------------------------------------ cached pieces
     def surface(self) -> tuple[np.ndarray, np.ndarray]:
@@ -536,6 +572,9 @@ class ShelfWorld:
 
     def near(self, points: np.ndarray, reach: float) -> bool:
         """Cheap prune: could anything in ``points`` (plus ``reach``) touch this world?"""
+        if self.table_height is not None and \
+                float(np.min(np.atleast_2d(points)[:, 2])) <= self.table_height + reach:
+            return True
         if self.model is not None and self.model.near(points, reach):
             return True
         tree = self.tree("cloud")
@@ -546,7 +585,7 @@ class ShelfWorld:
 
     def to_dict(self) -> dict:
         return {"model": self.model.to_dict() if self.model is not None else None,
-                "cloud_report": self.cloud_report}
+                "table_height": self.table_height, "cloud_report": self.cloud_report}
 
 
 __all__ = ["TAPE_KEYS", "resolve_tape", "REACH_RADIUS", "TABLE_BAND", "ROI_ABOVE_SUPPORT", "ROI_MARGIN", "ShelfModel", "ShelfWorld", "box_surface", "robot_mask"]
