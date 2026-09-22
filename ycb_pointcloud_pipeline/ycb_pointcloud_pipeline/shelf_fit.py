@@ -10,6 +10,7 @@ shelf.yaml: copy the printed `cloud_fit:` block under `shelf:` there, rebuild, r
 Before running: the shelf EMPTY, the arm out of the camera's view (it is removed from the cloud
 too, but a hand resting against a panel would be read as the panel), segmentation_node running.
 
+    source ~/venvs/tpgpt/bin/activate      # it imports tpgpt
     ros2 run --prefix python3 ycb_pointcloud_pipeline shelf_fit
     # with the robot off (the robot then cannot be removed -- keep it out of view):
     ros2 run --prefix python3 ycb_pointcloud_pipeline shelf_fit --ros-args -p allow_missing_joint_states:=true

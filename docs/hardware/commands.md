@@ -37,6 +37,9 @@ ros2 run --prefix python3 ycb_pointcloud_pipeline tpgpt_pick_place --ros-args \
   arrive, saved to `~/tpgpt_plans/<object>_<time>/`, and handed to the executor.
 - `dry_run` defaults to `true` (nothing moves, no `yes` prompt); `dry_run:=false` moves the robot.
 - On a failed plan, a `no` at the prompt, or an abort before the arm moved, it asks `Re-plan? [y/N]`.
+- `ycb_pipeline.launch.py` starts its own camera unless `launch_camera:=false`. With the camera
+  already running in another terminal, two drivers fight over the D435: `xioctl(VIDIOC_S_FMT)
+  failed, errno=16 ... Device or resource busy`.
 - Every `-p` reaches both nodes; `workspace_min` / `workspace_max` change both.
 - The planner checks every candidate's whole path against the shelf (`config/shelf.yaml`, rebuild
   after editing) and the scene cloud on it, and needs `/joint_states` (robot container up). In RViz:
@@ -44,7 +47,8 @@ ros2 run --prefix python3 ycb_pointcloud_pipeline tpgpt_pick_place --ros-args \
   `explained_by_model` (close to 1 for an empty, correctly modelled shelf).
   See `docs/hardware/SHELF_AND_PATH_CHECK.md`.
 - **Grounding the shelf's placement** (once per shelf move; shelf empty, arm out of view,
-  segmentation running): `ros2 run --prefix python3 ycb_pointcloud_pipeline shelf_fit`. It prints a
+  segmentation running), in the tpgpt venv (`source ~/venvs/tpgpt/bin/activate`, else
+  `ModuleNotFoundError: No module named 'tpgpt'`): `ros2 run --prefix python3 ycb_pointcloud_pipeline shelf_fit`. It prints a
   `cloud_fit:` block to paste under `shelf:` in `config/shelf.yaml` (then rebuild). See
   "Grounding the placement in the cloud" in `SHELF_AND_PATH_CHECK.md`.
 
