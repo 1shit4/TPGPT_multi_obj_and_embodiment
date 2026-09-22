@@ -190,6 +190,11 @@ The planner's support height is: its `support_height` parameter, else the calibr
 - **The camera is about 10 mm off sideways at the shelf** (`CALIBRATION.md`, open). This applies
   to object clouds there too: expect grasps near the shelf to be off by that much until the
   calibration is refit with correspondences on the shelf.
+- **Two selection parameters differ from the sim on purpose** (audit A10): the approach cap is
+  **90 deg**, not 85 (the hardware checks the hand against the table separately, and 85 threw away
+  the best-scoring band: horizontal grasps around an upright can), and `check_visibility` is
+  **`auto`** -- on only when the object's scan was not fitted, since a fitted scan has no unseen
+  side, and this camera faces the robot so the filter otherwise removes the robot-side approaches.
 - **Object clouds are only as good as the mask.** `segmentation_node` erodes each mask by
   `mask_erosion` (default 1 px, the sim's value; audit A9). Without it the boundary pixels take
   their depth partly from the background and fly towards the camera: a 68 mm YCB can fused to

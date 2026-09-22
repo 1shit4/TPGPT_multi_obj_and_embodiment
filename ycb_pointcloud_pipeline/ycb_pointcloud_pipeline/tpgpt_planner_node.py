@@ -135,7 +135,18 @@ class TpgptPlannerNode(Node):
         d('graspgen_topk', 100)
         d('graspgen_timeout', 30.0)               # s
         d('graspgen_autostart', True)             # start scripts/run_graspgenx_server.sh if unreachable
-        d('grasp_max_tilt_deg', 85.0)             # approach vs straight down; lower = more top-down
+        # Approach vs straight down; past 90 the hand rises through the table. The sim caps
+        # at 85 (filters.SUPPORT_APPROACH_MAX_DEG) because its fingers hang below the TCP and
+        # it has no other table check; the hardware checks the hand's lowest point against the
+        # table separately (hits_support, 3 mm), so the cap can sit on the geometric bound.
+        # Measured on a YCB can, 2026-09-23: 15 of 100 candidates fall in 85-90 deg and they
+        # include the best-scoring one (0.871) -- horizontal grasps around an upright can.
+        d('grasp_max_tilt_deg', 90.0)
+        # Visibility (approaches from the side nothing saw): 'auto' applies it only when the
+        # object's scan was NOT fitted, since a fitted scan has no unseen side. 'true'/'false'
+        # force it. On this bench the camera faces the robot, so the filter otherwise removes
+        # the robot-side approaches.
+        d('check_visibility', 'auto')
         d('grasp_max_plans', 100)                 # candidates planned, best score first (sim: 100)
         d('grasp_min_path_clearance', -0.002)     # m, hand vs table/destination along the path
         d('grasp_fallback_top_down', False)       # the simulation has no scripted fallback
@@ -422,6 +433,7 @@ class TpgptPlannerNode(Node):
             kinematic_criterion=str(p('kinematic_criterion')),
             allow_kinematic_fallback=bool(p('allow_kinematic_fallback')),
             max_centre_offset=float(p('max_centre_offset')),
+            check_visibility=self._check_visibility(),
         )
         info['settings'] = settings
         from tpgpt.hardware.grasp_selection import PathContext, ScreenContext
@@ -506,7 +518,7 @@ class TpgptPlannerNode(Node):
             'graspgen': {n: self.get_parameter(n).value for n in (
                 'graspgen_gripper', 'graspgen_planner', 'graspgen_num_grasps', 'graspgen_topk',
                 'grasp_max_tilt_deg', 'grasp_max_plans', 'grasp_min_path_clearance',
-                'grasp_offset')},
+                'grasp_offset', 'check_visibility')},
             'parameters': {n: self.get_parameter(n).value for n in (
                 'workspace_min', 'workspace_max', 'voxel_size', 'destination',
                 'destination_height', 'support_height', 'grasp_depth_below_top',
@@ -550,6 +562,21 @@ class TpgptPlannerNode(Node):
         log.info(text)
         self._publish_plan(result, selection)
         return True, text
+
+    def _check_visibility(self):
+        """Whether to apply the visibility filter for this plan (see the parameter)."""
+        value = str(self.get_parameter('check_visibility').value).lower()
+        if value in ('true', '1', 'yes'):
+            return True
+        if value in ('false', '0', 'no'):
+            return False
+        if value != 'auto':
+            raise ValueError(f"check_visibility must be auto, true or false, not {value!r}")
+        fitted = self.object_fit is not None and self.object_fit.accepted
+        if fitted:
+            self.get_logger().info('visibility filter off: the object cloud is the fitted scan, '
+                                   'which has no unseen side')
+        return not fitted
 
     def _full_object_cloud(self, observed):
         """The fitted YCB scan (tpgpt.hardware.object_model), or the camera cloud.
