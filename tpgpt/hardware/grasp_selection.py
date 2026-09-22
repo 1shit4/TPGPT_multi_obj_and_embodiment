@@ -34,8 +34,10 @@ real arm. Three steps:
 3. **Choose** (:func:`select_and_plan`), ``_choose_grasp``'s rule: walk the
    survivors in score order (up to ``max_plans``, 100 as in simulation), plan
    each through :func:`tpgpt.hardware.planner.plan`, and take the **first whose
-   whole transported path is admissible** -- no collision at any waypoint and
-   at least 60 % of it within the arm's reach
+   whole transported path is admissible** -- no collision at any waypoint, and
+   (``kinematic_criterion="strict"``, the default) every waypoint reachable in
+   position with the pick and place reachable with their orientation, or
+   (``"sim"``) at least 60 % of it within the arm's reach
    (:func:`tpgpt.hardware.path_check.path_feasibility`). Ranking is the
    discriminator score and nothing else.
 
@@ -121,12 +123,17 @@ class SelectionSettings:
     max_centre_offset: float = 0.025
     #: The whole-path check (``tpgpt.hardware.path_check``).
     check_path: bool = True
+    #: ``"strict"``: every waypoint reachable in position, the pick and place
+    #: reachable with their orientation (user's choice, 2026-09-22). ``"sim"``:
+    #: ``min_reachable_fraction`` of the waypoints reachable as planned.
+    kinematic_criterion: str = "strict"
     min_reachable_fraction: float = 0.60
     path_stride: int = 4
     #: With nothing admissible, execute the best candidate that failed on
     #: kinematics alone (the simulation's least-bad rule, restricted to the ones
-    #: that do not collide).
-    allow_kinematic_fallback: bool = True
+    #: that do not collide). Off: under the strict criterion it would execute a
+    #: plan the criterion refused.
+    allow_kinematic_fallback: bool = False
 
 
 @dataclass
@@ -589,10 +596,15 @@ def _path_verdict(result: Plan, candidate: Candidate, s: SelectionSettings,
     t0 = time.perf_counter()
     check = check_plan(result, world, pc.end_effector or FRANKA_HAND, start_q=pc.start_q,
                        start_tcp=pc.start_tcp, stop_early=True, stride=s.path_stride,
-                       min_reachable_fraction=s.min_reachable_fraction)
+                       min_reachable_fraction=s.min_reachable_fraction,
+                       criterion=s.kinematic_criterion)
     reason = verdict(check, s.min_reachable_fraction)
     candidate.path_check = {
+        "criterion": check["criterion"],
         "reachable_fraction": check["reachable_fraction"],
+        "orientation_relaxed": check["orientation_relaxed"],
+        "relaxed_in_pick_or_place": check["relaxed_in_pick_or_place"],
+        "skipped": check["skipped"],
         "unreachable": check["unreachable"],
         "tested": check["tested"],
         "violations": check["violations"],

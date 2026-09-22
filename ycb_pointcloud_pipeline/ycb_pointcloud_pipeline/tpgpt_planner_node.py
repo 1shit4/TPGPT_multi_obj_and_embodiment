@@ -152,8 +152,11 @@ class TpgptPlannerNode(Node):
         d('allow_missing_joint_states', False)
         d('joint_states_max_age', 1.0)            # s
         d('check_path', True)
-        d('min_reachable_fraction', 0.60)         # pipeline.MIN_REACHABLE_FRACTION
-        d('allow_kinematic_fallback', True)       # never a colliding candidate
+        # strict: every waypoint reachable in position, pick and place with their orientation;
+        # sim: min_reachable_fraction of the waypoints reachable as planned (the simulation's).
+        d('kinematic_criterion', 'strict')
+        d('min_reachable_fraction', 0.60)         # pipeline.MIN_REACHABLE_FRACTION (sim only)
+        d('allow_kinematic_fallback', False)      # never a colliding candidate; off under strict
         d('max_centre_offset', 0.025)             # by_centre_offset on a one-sided cloud
         d('output_dir', os.path.expanduser('~/tpgpt_plans'))
         d('auto_plan', False)                     # plan as soon as n_frames arrived
@@ -397,6 +400,7 @@ class TpgptPlannerNode(Node):
                           tuple(float(v) for v in p('grasp_offset'))),
             check_path=bool(p('check_path')),
             min_reachable_fraction=float(p('min_reachable_fraction')),
+            kinematic_criterion=str(p('kinematic_criterion')),
             allow_kinematic_fallback=bool(p('allow_kinematic_fallback')),
             max_centre_offset=float(p('max_centre_offset')),
         )

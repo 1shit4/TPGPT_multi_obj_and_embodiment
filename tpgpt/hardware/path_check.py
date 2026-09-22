@@ -60,7 +60,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from tpgpt.hardware.fr3 import TCP_LINK, FR3, default_model
+from tpgpt.hardware.fr3 import HOME_Q, TCP_LINK, FR3, default_model
 
 #: ``tpgpt.grasp.filters`` constants, restated so this module does not import
 #: robosuite; ``tests/unit/test_path_check.py`` asserts they stay equal.
@@ -213,6 +213,31 @@ def _robot_faults(pieces, world, phase: str, depth_tolerance: float,
     return faults
 
 
+#: The object's base, the face it stood on at the pick: its cloud points within
+#: this of its lowest point, metres. The face that must be the one set down.
+BASE_BAND = 0.010
+#: A support surface is the pick or the destination support when its top lies
+#: within this of the object's lowest point / the destination height, metres.
+SUPPORT_MATCH = 0.02
+#: IK retries before a waypoint is called unreachable: more iterations, then a
+#: few starting postures near the previous answer (never a jump to another
+#: configuration branch, which the impedance controller could not follow).
+RETRY_ITERATIONS = 400
+RETRY_SEEDS = 3
+RETRY_PERTURBATION = 0.10       # rad, per joint
+MAX_JOINT_JUMP = 0.50           # rad: a retry further than this from the previous answer is refused
+
+
+def _is_finger(name: str) -> bool:
+    """Pieces allowed to touch the object at the pick, the place and early in the retreat.
+
+    The Franka Hand's finger boxes. A hand described by one envelope (the
+    Inspire hand) cannot tell its fingers from its palm, and its side grasp holds
+    the object inside that envelope, so the envelope counts as fingers.
+    """
+    return name.startswith("hand_") and name != "hand_body"
+
+
 def path_feasibility(
     positions: np.ndarray,
     rotations: np.ndarray,
@@ -235,36 +260,61 @@ def path_feasibility(
     stop_early: bool = False,
     min_reachable_fraction: float | None = MIN_REACHABLE_FRACTION,
     check_self: bool = True,
+    destination_height: float | None = None,
+    criterion: str = "strict",
 ) -> dict:
     """Solve and check a transported path, waypoint by waypoint.
 
-    Args:
-        positions: ``(m, 3)`` grasp-point positions of the plan (``Plan.labels``).
-        rotations: ``(m, 3, 3)`` controller-frame orientations of the plan.
-        gripper: ``(m,)`` gripper labels, ``> 0`` closed.
-        end_effector: The hand on the flange (``tpgpt.hardware.end_effector``).
-        world: The :class:`~tpgpt.hardware.shelf.ShelfWorld`.
-        object_points: The target's cloud at the pick; carried from the close on.
-        closed_width: Jaw opening while holding (the plan's width between pads).
-        start_q: Measured joint angles now. Given, the line from the current TCP
-            (``start_tcp``, else ``FK(start_q)``) to the path's first pose is
-            checked first and seeds the path. ``None`` seeds from home and
-            skips it, which the result says.
-        stop_early: Return at the first fault, or once more waypoints are
-            unreachable than ``min_reachable_fraction`` allows -- for
-            *selecting*; leave it off to *diagnose*, where the whole tally is
-            the point.
+    **Stages** (from the gripper schedule; ``g`` the close, ``r`` the release):
+
+    ``approach`` (before ``g - grasp_window``)
+        Nothing may touch anything; the object to be picked is an obstacle.
+    ``pick`` (``g - grasp_window`` .. ``g``)
+        The fingers may touch the object; the rest of the robot may not.
+    ``carry`` (after ``g``, before ``r - place_window``)
+        The object may rest on the surface it was picked from **until it first
+        clears it**, never again. Otherwise it touches nothing, and no arm link
+        touches it.
+    ``place`` (``r - place_window`` .. ``r``)
+        The object may touch the destination surface -- the top face of the
+        destination board, or the table -- with its **base** only (the points
+        it stood on at the pick), at most ``contact_radius`` deep. Any other
+        contact, or a non-base point touching, is a fault.
+    ``retreat`` (after ``r``)
+        The placed object stays where it was set down and is an obstacle. The
+        fingers may touch it **until they first clear it**; the rest of the
+        robot never.
+
+    In every stage the robot touches neither the table, the shelf, the seen
+    points, nor itself (``_robot_faults``).
+
+    **Reachability** (``criterion``):
+
+    ``"strict"`` (default)
+        Every tested waypoint, and every step of the move onto the path, must be
+        reachable in position. The orientation may be given up (the executor
+        relaxes it; checked at that posture) in transit only; in the pick and
+        place stages it must be reached. IK is retried (:data:`RETRY_ITERATIONS`,
+        :data:`RETRY_SEEDS` near the previous answer) before anything is called
+        unreachable.
+    ``"sim"``
+        The simulation's rule: at least ``min_reachable_fraction`` of the tested
+        waypoints reachable as planned; the rest are checked where the executor
+        will put the arm (relaxed orientation, or the straight line it steers
+        along past positions it cannot reach).
 
     Returns:
-        ``tested``, ``unreachable``, ``reachable_fraction``, ``violations``,
-        ``violation_fraction``, ``first_violation`` (waypoint index; ``-1`` for
-        the approach-in line), ``faults`` keyed ``"<phase>: <what>"``, and
-        ``approach_in`` (``None`` when not checked).
+        ``tested``, ``unreachable`` (not reachable as planned), ``reachable_fraction``,
+        ``orientation_relaxed``, ``relaxed_in_pick_or_place``, ``skipped``
+        (position out of reach), ``steered_unreachable``, ``violations``,
+        ``violation_fraction``, ``first_violation`` (``-1``: the move onto the
+        path), ``faults``, ``approach_in``, ``criterion``, ``first_kinematic``
+        and ``decided_early``.
     """
-    from scipy.spatial import cKDTree
-
     from tpgpt.hardware.hand import MAX_OPENING
 
+    if criterion not in ("strict", "sim"):
+        raise ValueError(f"criterion must be 'strict' or 'sim', not {criterion!r}")
     fr3 = fr3 or default_model()
     positions = np.atleast_2d(np.asarray(positions, dtype=float))
     rotations = np.asarray(rotations, dtype=float).reshape(-1, 3, 3)
@@ -272,153 +322,191 @@ def path_feasibility(
     offset = np.asarray(end_effector.tool_offset, dtype=float)
     held = np.atleast_2d(np.asarray(object_points, dtype=float)) if len(
         np.asarray(object_points)) else np.zeros((0, 3))
+    g, r = int(grasp_index), int(release_index)
+    pick_from = g - int(grasp_window)
+    place_from = max(r - int(place_window), g + 1)
     cloud_tree = world.tree("cloud")
-    place_from = max(int(release_index) - int(place_window), int(grasp_index))
+    table = getattr(world, "table_height", None)
+    model = world.model
 
-    local = None
+    local = base = None
     if len(held):
-        p0 = positions[int(grasp_index)]
-        R0 = rotations[int(grasp_index)]
-        local = (held - p0) @ R0
+        local = (held - positions[g]) @ rotations[g]
+        base = held[:, 2] <= float(held[:, 2].min()) + BASE_BAND
+    # Which surface the object is picked from, and which it is set down on.
+    pick_support = _support_at(model, table, float(held[:, 2].min()) if len(held) else None)
+    place_support = _support_at(model, table, destination_height)
 
     faults: dict = {}
-    violations, first = 0, None
+    counts = {"relaxed": 0, "relaxed_windows": 0, "skipped": 0, "gap": 0}
+    violations, first, first_kin = 0, None, None
 
-    def tcp_target(k):
-        return positions[k] - rotations[k] @ offset, rotations[k]
+    def stage_of(k):
+        if k < pick_from:
+            return "approach"
+        if k <= g:
+            return "pick"
+        if k < place_from:
+            return "carry"
+        return "place" if k <= r else "retreat"
+
+    def add(hits, key, n=1):
+        hits[key] = hits.get(key, 0) + int(n)
+
+    def solve(target_p, target_R, seed, k):
+        """IK with the retries the strict criterion allows."""
+        result = fr3.solve_ik(target_p, target_R, seed=seed, position_tolerance=tolerance)
+        if result.reachable or criterion != "strict":
+            return result
+        base_q = np.asarray(HOME_Q if seed is None else seed, dtype=float)
+        rng = np.random.default_rng(int(k) + 1)
+        for attempt in range(RETRY_SEEDS + 1):
+            start = base_q if attempt == 0 else np.clip(
+                base_q + rng.uniform(-RETRY_PERTURBATION, RETRY_PERTURBATION, 7),
+                fr3.lower, fr3.upper)
+            retry = fr3.solve_ik(target_p, target_R, seed=start, max_iterations=RETRY_ITERATIONS,
+                                 position_tolerance=tolerance)
+            if retry.reachable and (seed is None or np.max(np.abs(retry.qpos - base_q))
+                                    <= MAX_JOINT_JUMP):
+                return retry
+        return result
+
+    def actual_pose(q):
+        T = fr3.tcp(q)
+        return T[:3, 3] + T[:3, :3] @ offset, T[:3, :3]
 
     # --- the move onto the path -----------------------------------------------
-    seed = None
-    approach_in = None
+    seed, approach_in = None, None
     if start_q is not None:
         seed = np.asarray(start_q, dtype=float).reshape(7)
         p_now = (np.asarray(start_tcp, dtype=float).reshape(3) if start_tcp is not None
                  else fr3.tcp(seed)[:3, 3])
-        p_goal, R_goal = tcp_target(0)
+        p_goal = positions[0] - rotations[0] @ offset
         n = max(int(np.ceil(np.linalg.norm(p_goal - p_now) / APPROACH_IN_STEP)), 1)
         R_now = fr3.tcp(seed)[:3, :3]
         from tpgpt.hardware.frames import slerp_rotation
 
         bad, unreached = {}, 0
         for s in np.linspace(0.0, 1.0, n + 1)[1:]:
-            result = fr3.solve_ik(p_now + s * (p_goal - p_now), slerp_rotation(R_now, R_goal, s),
-                                  seed=seed, position_tolerance=tolerance)
+            R_s = slerp_rotation(R_now, rotations[0], s)
+            result = solve(p_now + s * (p_goal - p_now), R_s, seed, -1)
             if not result.reachable:
-                unreached += 1
-                continue
+                position_only = solve(p_now + s * (p_goal - p_now), None, seed, -1)
+                if not position_only.reachable:
+                    unreached += 1
+                    continue
+                result = position_only
             seed = result.qpos
             pieces, _ = robot_pieces(fr3, seed, end_effector, MAX_OPENING)
             for key, count in _robot_faults(pieces, world, "approach_in", depth_tolerance,
                                             check_self).items():
-                bad[key] = bad.get(key, 0) + count
-            # The object to be picked is an obstacle on the way onto the path.
+                add(bad, key, count)
             for piece in pieces:
                 if len(held) and piece.contains(held).any():
-                    key = f"approach_in: {piece.name} in the target's cloud"
-                    bad[key] = bad.get(key, 0) + 1
+                    add(bad, f"approach_in: {piece.name} in the object to be picked")
         approach_in = {"steps": int(n), "unreachable": int(unreached), "faults": bad}
         if bad:
             faults.update(bad)
             violations, first = 1, -1
-            if stop_early:
-                return _result(1, 0, violations, first, faults, approach_in)
+        if unreached and criterion == "strict":
+            first_kin = -1
+        if stop_early and (bad or first_kin is not None):
+            return _result(1, 0, violations, first, faults, approach_in, criterion=criterion,
+                           first_kinematic=first_kin, **counts)
 
     # --- the path -----------------------------------------------------------------
     indices = np.arange(0, len(positions), max(int(stride), 1))
-    # Selecting, a candidate is also decided once so many waypoints are
-    # unreachable that the fraction cannot reach the admission threshold -- the
-    # verdict is then fixed, and each failed solve costs 120 iterations.
     max_unreachable = (int(np.floor((1.0 - float(min_reachable_fraction)) * len(indices)))
                        if min_reachable_fraction is not None else len(indices))
     tested, unreachable = 0, 0
-    relaxed, skipped, gap_unreached = 0, 0, 0
-    last_good = None                       # (grasp point, TCP rotation) of the last posture
-    offset_ee = offset
+    lifted = pick_support is None        # nothing to lift off from
+    fingers_cleared = False
+    placed = None                        # the object where it was set down
+    last_good, last_good_q = None, None
 
-    def phase_of(k):
-        ph = ("approach" if k < grasp_index else "carry" if k <= release_index else "retreat")
-        return "place" if ph == "carry" and k >= place_from else ph
-
-    def check_posture(k, q, phase, point, R_ee):
-        """Every rule of this phase, with the robot at ``q`` and the grasp point
-        at ``point`` / ``R_ee`` (used to carry the object)."""
+    def check_posture(k, q, stage, point, R_ee, tag=""):
+        nonlocal lifted, fingers_cleared
+        hits: dict = {}
         opening = closed_width if gripper[k] > 0 else MAX_OPENING
         pieces, _ = robot_pieces(fr3, q, end_effector, opening)
-        hits = _robot_faults(pieces, world, phase, depth_tolerance, check_self)
+        label = stage + tag
+        for key, count in _robot_faults(pieces, world, label, depth_tolerance, check_self).items():
+            add(hits, key, count)
 
-        # --- the robot against the object it has not picked up yet -----------
-        # Outside the grasp window only, as in the simulation: within it the jaws
-        # are closing on the target, and the jaw check at the grasp pose
-        # (``hand.check_jaws``) has already judged the palm and fingers there.
-        if len(held) and phase == "approach" and abs(int(k) - int(grasp_index)) > int(grasp_window):
+        if len(held) and stage in ("approach", "pick"):
+            # The object stands where it is; only the fingers, and only at the pick.
             for piece in pieces:
-                if piece.contains(held).any():
-                    key = f"approach: {piece.name} in the target's cloud"
-                    hits[key] = hits.get(key, 0) + 1
+                if (stage == "approach" or not _is_finger(piece.name)) and \
+                        piece.contains(held).any():
+                    add(hits, f"{label}: {piece.name} in the object")
 
-        # --- the object it is carrying, against everything else ---------------
-        # Exact faces, not directions, so the object's rotation does not matter:
-        # it may rest on the TOP face of a support board or of the table (at most
-        # the contact radius into it); anything else it enters is a fault, and so
-        # is any contact with the remaining seen points (other objects).
-        if local is not None and phase in ("carry", "place"):
-            world_obj = point + local @ R_ee.T
-            if world.model is not None and world.model.near(world_obj, 0.0):
-                for panel, count in world.model.object_faults(
-                        world_obj, rest=contact_radius, tolerance=depth_tolerance).items():
-                    key = f"{phase}: the carried object in shelf {panel}"
-                    hits[key] = hits.get(key, 0) + count
-            table = getattr(world, "table_height", None)
-            if table is not None:
-                sunk = int(np.sum(world_obj[:, 2] < table - contact_radius))
-                if sunk:
-                    key = f"{phase}: the carried object in the table"
-                    hits[key] = hits.get(key, 0) + sunk
-            if cloud_tree is not None:
-                near = cloud_tree.query_ball_point(world_obj, contact_radius)
-                touched = {int(i) for group in near for i in group}
-                if touched:
-                    key = f"{phase}: the carried object touches seen points"
-                    hits[key] = hits.get(key, 0) + len(touched)
+        if local is not None and stage in ("carry", "place"):
+            obj = point + local @ R_ee.T
+            for piece in pieces:
+                if piece.name.startswith("fr3_link") and piece.contains(obj).any():
+                    add(hits, f"{label}: {piece.name} in the carried object")
+            contact = _object_contacts(obj, base, world, model, table, depth_tolerance,
+                                       contact_radius)
+            if not lifted and _clear_of(obj, pick_support, model, table, contact_radius):
+                lifted = True
+            allowed = set()
+            if not lifted:
+                allowed.add(("rest", pick_support))           # still standing on its support
+            if stage == "place":
+                allowed.add(("base_rest", place_support))     # being set down, on its base
+            for kind, where, n in contact:
+                ok = ((kind in ("rest", "base_rest") and ("rest", where) in allowed)
+                      or (kind == "base_rest" and ("base_rest", where) in allowed))
+                if not ok:
+                    add(hits, f"{label}: the carried object {_describe(kind, where)}", n)
+
+        if stage == "retreat" and placed is not None:
+            touching = [p for p in pieces if p.contains(placed).any()]
+            fingers_touch = [p for p in touching if _is_finger(p.name)]
+            if not fingers_touch:
+                fingers_cleared = True
+            for piece in touching:
+                if not _is_finger(piece.name) or fingers_cleared:
+                    add(hits, f"{label}: {piece.name} in the placed object")
         return hits
 
-    def actual_pose(q):
-        """Grasp point and controller-frame rotation where the arm really is."""
-        T = fr3.tcp(q)
-        return T[:3, 3] + T[:3, :3] @ offset_ee, T[:3, :3]
-
-    stop = False
     for k in indices:
         tested += 1
-        target_p, target_R = tcp_target(k)
-        phase = phase_of(k)
-        result = fr3.solve_ik(target_p, target_R, seed=seed, position_tolerance=tolerance)
+        stage = stage_of(int(k))
+        if stage == "retreat" and placed is None and local is not None:
+            placed = positions[r] + local @ rotations[r].T
+        target_p = positions[k] - rotations[k] @ offset
+        result = solve(target_p, rotations[k], seed, k)
         kind = "full"
         if not result.reachable:
             unreachable += 1
-            if stop_early and unreachable > max_unreachable:
-                # Report the fraction as if the rest were reachable: still below
-                # the threshold, which is all a selection needs to know.
-                return _result(len(indices), unreachable, violations, first, faults, approach_in,
-                               decided_early=True, relaxed=relaxed, skipped=skipped,
-                               gap_unreached=gap_unreached)
-            # What the executor will do here (its infeasible-pose fallback): give
-            # up the orientation if the position alone is reachable ...
-            position_only = fr3.solve_ik(target_p, None, seed=seed, position_tolerance=tolerance)
+            position_only = solve(target_p, None, seed, k)
             if position_only.reachable:
                 result, kind = position_only, "relaxed"
-                relaxed += 1
+                counts["relaxed"] += 1
+                if stage in ("pick", "place"):
+                    counts["relaxed_windows"] += 1
+                    if criterion == "strict" and first_kin is None:
+                        first_kin = int(k)
             else:
-                # ... else steer straight on to the next pose it can reach.
-                skipped += 1
+                counts["skipped"] += 1
+                if criterion == "strict" and first_kin is None:
+                    first_kin = int(k)
+            if stop_early and (first_kin is not None or (
+                    criterion == "sim" and unreachable > max_unreachable)):
+                return _result(len(indices) if criterion == "sim" else tested, unreachable,
+                               violations, first, faults, approach_in, decided_early=True,
+                               criterion=criterion, first_kinematic=first_kin, **counts)
+            if kind != "relaxed":
                 continue
 
         hits: dict = {}
-        if last_good is not None and last_good[2] < k - int(stride):
-            # A skipped stretch ended here: check the straight line the arm was
-            # steered along, from the last posture reached to this one.
-            p0, _, _ = last_good
-            p1 = target_p + target_R @ offset
+        if criterion == "sim" and last_good is not None and last_good[2] < k - int(stride):
+            # The simulation's rule lets the arm skip out-of-reach stretches: check
+            # the straight line the executor steers along, from the last posture
+            # reached to this one.
+            p0 = last_good[0]
+            p1 = positions[k]
             n = max(int(np.ceil(np.linalg.norm(p1 - p0) / APPROACH_IN_STEP)), 1)
             q_line = last_good_q
             for s_ in np.linspace(0.0, 1.0, n + 1)[1:-1]:
@@ -426,49 +514,133 @@ def path_feasibility(
                 step = fr3.solve_ik(point - actual_pose(q_line)[1] @ offset, None, seed=q_line,
                                     position_tolerance=tolerance)
                 if not step.reachable:
-                    gap_unreached += 1
+                    counts["gap"] += 1
                     continue
                 q_line = step.qpos
                 gp, gR = actual_pose(q_line)
-                for key, count in check_posture(k, q_line, phase, gp, gR).items():
-                    key = key.replace(f"{phase}:", f"{phase} (steered):", 1)
-                    hits[key] = hits.get(key, 0) + count
+                for key, count in check_posture(k, q_line, stage, gp, gR, " (steered)").items():
+                    add(hits, key, count)
         seed = result.qpos
         if kind == "full":
             point, R_ee = positions[k], rotations[k]          # as the simulation carries it
         else:
             point, R_ee = actual_pose(seed)                    # the wrist is where IK put it
-        for key, count in check_posture(k, seed, phase, point, R_ee).items():
-            key = key if kind == "full" else key.replace(f"{phase}:", f"{phase} (relaxed):", 1)
-            hits[key] = hits.get(key, 0) + count
-        last_good = (point, R_ee, int(k))
-        last_good_q = seed
+        for key, count in check_posture(k, seed, stage, point, R_ee,
+                                        "" if kind == "full" else " (relaxed)").items():
+            add(hits, key, count)
+        last_good, last_good_q = (point, R_ee, int(k)), seed
         if hits:
             for key, count in hits.items():
-                faults[key] = faults.get(key, 0) + count
+                add(faults, key, count)
             violations += 1
             first = int(k) if first is None else first
             if stop_early:
                 break
     return _result(tested, unreachable, violations, first, faults, approach_in,
-                   relaxed=relaxed, skipped=skipped, gap_unreached=gap_unreached)
+                   criterion=criterion, first_kinematic=first_kin, **counts)
+
+
+def _support_at(model, table, height):
+    """The support surface whose top is at ``height``: ``"table"``, a board's name, or None."""
+    if height is None:
+        return None
+    if table is not None and abs(float(height) - float(table)) <= SUPPORT_MATCH:
+        return "table"
+    if model is not None:
+        for box in model.boxes:
+            if box.name in model.supports and abs(
+                    float(box.position[2] + box.size[2]) - float(height)) <= SUPPORT_MATCH:
+                return box.name
+    return None
+
+
+def _object_contacts(obj, base, world, model, table, depth_tolerance, contact_radius):
+    """Every contact of the carried object with the world, classified.
+
+    Returns ``[(kind, where, count)]``: ``kind`` is ``"base_rest"`` (base
+    points on a support's top face, at most ``contact_radius`` into it),
+    ``"rest"`` (other points there), ``"deep"`` (into a support deeper than
+    that), ``"into"`` (into a non-support face: a side panel, a board's
+    underside or edge) or ``"seen"`` (within ``contact_radius`` of a seen
+    point).
+    """
+    out = []
+    if table is not None:
+        touching = obj[:, 2] < float(table) + depth_tolerance
+        if touching.any():
+            deep = obj[:, 2] < float(table) - contact_radius
+            on_top = touching & ~deep
+            if (on_top & base).any():
+                out.append(("base_rest", "table", int((on_top & base).sum())))
+            if (on_top & ~base).any():
+                out.append(("rest", "table", int((on_top & ~base).sum())))
+            if deep.any():
+                out.append(("deep", "table", int(deep.sum())))
+    if model is not None and model.near(obj, 0.0):
+        for box in model.boxes:
+            inside = box.penetration(obj) > depth_tolerance
+            if not inside.any():
+                continue
+            if box.name in model.supports:
+                z_local = (obj - box.position) @ box.rotation[:, 2]
+                top = z_local >= float(box.size[2]) - contact_radius
+                on_top = inside & top
+                if (on_top & base).any():
+                    out.append(("base_rest", box.name, int((on_top & base).sum())))
+                if (on_top & ~base).any():
+                    out.append(("rest", box.name, int((on_top & ~base).sum())))
+                if (inside & ~top).any():
+                    out.append(("deep", box.name, int((inside & ~top).sum())))
+            else:
+                out.append(("into", box.name, int(inside.sum())))
+    tree = world.tree("cloud")
+    if tree is not None:
+        near = tree.query_ball_point(obj, contact_radius)
+        touched = {int(i) for group in near for i in group}
+        if touched:
+            out.append(("seen", "seen points", len(touched)))
+    return out
+
+
+def _clear_of(obj, support, model, table, contact_radius) -> bool:
+    """Whether the carried object has lifted off ``support``."""
+    if support == "table":
+        return float(obj[:, 2].min()) > float(table) + contact_radius
+    box = next((b for b in model.boxes if b.name == support), None) if model is not None else None
+    if box is None:
+        return True
+    return float(obj[:, 2].min()) > float(box.position[2] + box.size[2]) + contact_radius
+
+
+def _describe(kind: str, where: str) -> str:
+    return {
+        "base_rest": f"touches {where}",
+        "rest": f"touches {where} with a face other than its base",
+        "deep": f"pressed into {where}",
+        "into": f"in shelf {where}",
+        "seen": "touches seen points",
+    }[kind]
 
 
 def _result(tested, unreachable, violations, first, faults, approach_in,
-            decided_early: bool = False, relaxed: int = 0, skipped: int = 0,
-            gap_unreached: int = 0) -> dict:
+            decided_early: bool = False, relaxed: int = 0, relaxed_windows: int = 0,
+            skipped: int = 0, gap: int = 0, criterion: str = "strict",
+            first_kinematic: int | None = None) -> dict:
     return {
+        "criterion": criterion,
         "decided_early": bool(decided_early),
-        # Of the waypoints not reachable as planned: how many the executor will
-        # hold with the orientation relaxed (checked at that posture), how many
-        # it will skip past (the straight line it steers along is checked), and
-        # how many points on those lines the arm could not reach at all.
-        "orientation_relaxed": int(relaxed),
-        "skipped": int(skipped),
-        "steered_unreachable": int(gap_unreached),
         "tested": int(tested),
         "unreachable": int(unreachable),
         "reachable_fraction": float(1.0 - unreachable / tested) if tested else 0.0,
+        # Of the waypoints not reachable as planned: held with the orientation
+        # relaxed (checked at that posture), how many of those fell in the pick
+        # or place stage, position out of reach, and unreachable points on the
+        # lines steered past them (criterion "sim" only).
+        "orientation_relaxed": int(relaxed),
+        "relaxed_in_pick_or_place": int(relaxed_windows),
+        "skipped": int(skipped),
+        "steered_unreachable": int(gap),
+        "first_kinematic": first_kinematic,
         "violations": int(violations),
         "violation_fraction": float(violations / tested) if tested else 0.0,
         "first_violation": None if first is None else int(first),
@@ -481,6 +653,7 @@ def check_plan(plan, world, end_effector, start_q=None, start_tcp=None, fr3: FR3
                stop_early: bool = False, **kwargs) -> dict:
     """:func:`path_feasibility` on a :class:`tpgpt.hardware.planner.Plan`."""
     m = plan.metrics
+    kwargs.setdefault("destination_height", float(plan.destination_height))
     return path_feasibility(
         plan.labels.positions, plan.labels.orientations, plan.labels.gripper, end_effector,
         world, plan.target_points, int(m["grasp_index"]), int(m["release_index"]),
@@ -489,18 +662,37 @@ def check_plan(plan, world, end_effector, start_q=None, start_tcp=None, fr3: FR3
 
 
 def verdict(check: dict, min_reachable_fraction: float = MIN_REACHABLE_FRACTION) -> str | None:
-    """``pipeline._choose_grasp``'s admission rule: ``None`` if admissible, else why not."""
+    """Whether a checked path is admissible: ``None`` if so, else why not.
+
+    A collision anywhere rejects it. Then reachability, by ``check["criterion"]``:
+    ``"strict"`` needs every waypoint (and the move onto the path) reachable in
+    position and the pick and place stages reachable with their orientation;
+    ``"sim"`` needs ``min_reachable_fraction`` of the waypoints reachable as
+    planned (``pipeline._choose_grasp``'s rule).
+    """
     if check["violations"]:
         faults = ", ".join(f"{k} x{v}" for k, v in list(check["faults"].items())[:3])
         where = ("on the way onto the path" if check["first_violation"] == -1
                  else f"first at waypoint {check['first_violation']}")
         return f"collision: {where} ({faults})"
+    if check.get("criterion", "sim") == "strict":
+        onto = (check.get("approach_in") or {}).get("unreachable", 0)
+        if onto:
+            return f"kinematics: {onto} points of the move onto the path are out of reach"
+        if check.get("skipped"):
+            return (f"kinematics: {check['skipped']} waypoints out of reach in position (first at "
+                    f"waypoint {check.get('first_kinematic')})")
+        if check.get("relaxed_in_pick_or_place"):
+            return (f"kinematics: the orientation cannot be held at {check['relaxed_in_pick_or_place']}"
+                    f" waypoints of the pick or place (first at waypoint "
+                    f"{check.get('first_kinematic')})")
+        return None
     if check["reachable_fraction"] < min_reachable_fraction:
         return (f"kinematics: the arm holds {check['reachable_fraction'] * 100:.0f} % of the "
                 f"tested waypoints (need {min_reachable_fraction * 100:.0f} %)")
     return None
 
 
-__all__ = ["penetration", "CLOUD_CONTACT_RADIUS", "CONTACT_DEPTH_TOLERANCE", "GRASP_CONTACT_WINDOW",
+__all__ = ["BASE_BAND", "penetration", "CLOUD_CONTACT_RADIUS", "CONTACT_DEPTH_TOLERANCE", "GRASP_CONTACT_WINDOW",
            "MIN_REACHABLE_FRACTION", "PLACE_WINDOW", "REACH_TOLERANCE", "STRIDE",
            "check_plan", "path_feasibility", "robot_pieces", "verdict"]

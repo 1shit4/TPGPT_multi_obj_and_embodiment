@@ -197,26 +197,32 @@ def test_missing_tape_readings_are_named():
 
 
 # ------------------------------------------------ where a carried object may rest
-def test_resting_is_allowed_only_on_a_support_boards_top_face(shelf):
-    high = next(b for b in shelf.boxes if b.name == "high")      # top face at z = 0.35
-    on_top = np.array([[0.55, 0.0, 0.347]])                       # 3 mm into the top face
-    sunk = np.array([[0.55, 0.0, 0.343]])                         # 7 mm into it
-    underside = np.array([[0.55, 0.0, 0.3315]])                   # 1.5 mm up into its underside
-    wall = np.array([[0.55, 0.252, 0.30]])                        # 2 mm into the left wall
-    assert shelf.object_faults(on_top, rest=0.005, tolerance=0.001) == {}
-    assert shelf.object_faults(sunk, rest=0.005, tolerance=0.001) == {"high": 1}
-    assert shelf.object_faults(underside, rest=0.005, tolerance=0.001) == {"high": 1}
-    assert shelf.object_faults(wall, rest=0.005, tolerance=0.001) == {"left_wall": 1}
-    assert high.name in shelf.supports
+def _kinds(shelf, points, base=None):
+    from tpgpt.hardware.path_check import _object_contacts
+
+    base = np.ones(len(points), dtype=bool) if base is None else base
+    return {(k, w) for k, w, _ in _object_contacts(np.atleast_2d(points), base,
+                                                    ShelfWorld.build(shelf), shelf, None,
+                                                    0.001, 0.005)}
 
 
-def test_a_wide_flat_object_set_down_is_not_a_side_hit(shelf):
+def test_contacts_are_classified_by_the_face_they_go_through(shelf):
+    """The path check's rule (tpgpt.hardware.path_check._object_contacts): the
+    top face of a support board is where an object may rest; anything else is
+    'deep' (through a board) or 'into' (a panel that is not a support)."""
+    assert _kinds(shelf, [[0.55, 0.0, 0.347]]) == {("base_rest", "high")}      # 3 mm into the top
+    assert _kinds(shelf, [[0.55, 0.0, 0.343]]) == {("deep", "high")}           # 7 mm into it
+    assert _kinds(shelf, [[0.55, 0.0, 0.3315]]) == {("deep", "high")}          # up into its underside
+    assert _kinds(shelf, [[0.55, 0.252, 0.30]]) == {("into", "left_wall")}     # 2 mm into a side
+
+
+def test_a_wide_flat_object_set_down_rests_on_its_base(shelf):
     """The simulation's 60-degree cone reads this box's bottom corners as side
     contacts (corner 150 mm out, 25 mm down from the centre: 80 deg off vertical).
     By faces, all of it rests on the board's top."""
     g = np.mgrid[0.40:0.701:0.01, -0.10:0.101:0.01].reshape(2, -1).T
     bottom = np.column_stack([g, np.full(len(g), 0.348)])        # 2 mm into the high board
-    assert shelf.object_faults(bottom, rest=0.005, tolerance=0.001) == {}
+    assert _kinds(shelf, bottom) == {("base_rest", "high")}
 
 
 def test_the_camera_points_on_the_table_and_shelf_are_removed(shelf):

@@ -369,33 +369,6 @@ class ShelfModel:
             owner.append(np.full(len(s), k))
         return np.vstack(pts), np.concatenate(owner)
 
-    def object_faults(self, points: np.ndarray, rest: float, tolerance: float) -> dict:
-        """Where a carried object's points go into the shelf, and whether that is allowed.
-
-        Resting is allowed only on the **top face of a support board**: a point
-        inside a support board no deeper than ``rest`` below its top face. Every
-        other intrusion deeper than ``tolerance`` -- into a side panel, a board's
-        underside or front edge, or a board top deeper than ``rest`` -- is a
-        fault. Exact faces, so it does not depend on how the object is turned.
-
-        Returns ``{panel name: number of offending points}``.
-        """
-        p = np.atleast_2d(np.asarray(points, dtype=float))
-        faults: dict = {}
-        for box in self.boxes:
-            local = (p - box.position) @ box.rotation
-            half = np.asarray(box.size, dtype=float)
-            depth = box.penetration(p)
-            inside = depth > tolerance
-            if not inside.any():
-                continue
-            if box.name in self.supports:
-                resting = local[:, 2] >= half[2] - float(rest)
-                inside &= ~resting
-            if inside.any():
-                faults[box.name] = int(inside.sum())
-        return faults
-
     def explained(self, points: np.ndarray, distance: float = EXPLAINED_DISTANCE) -> np.ndarray:
         """Which observed points lie within ``distance`` of the model's surface."""
         depth, _ = self.penetration(points)

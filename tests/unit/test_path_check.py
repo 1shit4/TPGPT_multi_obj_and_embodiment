@@ -65,33 +65,68 @@ def test_a_path_through_a_board_is_a_collision_named_by_panel():
 
 def test_a_path_out_of_reach_is_a_kinematic_failure():
     positions, rotations = _path([1.2, 0.0, 0.3], [1.3, 0.0, 0.3])
-    r = _check(positions, rotations, ShelfWorld.build(None))
-    assert r["reachable_fraction"] < pc.MIN_REACHABLE_FRACTION
-    assert pc.verdict(r).startswith("kinematics")
+    sim = _check(positions, rotations, ShelfWorld.build(None), criterion="sim")
+    assert sim["reachable_fraction"] < pc.MIN_REACHABLE_FRACTION
+    assert pc.verdict(sim).startswith("kinematics")
+    strict = _check(positions, rotations, ShelfWorld.build(None), stop_early=True)
+    assert strict["first_kinematic"] == 0 and pc.verdict(strict).startswith("kinematics")
 
 
 def test_stop_early_decides_the_same_way():
     positions, rotations = _path([1.2, 0.0, 0.3], [1.3, 0.0, 0.3])
     world = ShelfWorld.build(None)
-    full, early = _check(positions, rotations, world), _check(positions, rotations, world,
-                                                              stop_early=True)
+    full = _check(positions, rotations, world, criterion="sim")
+    early = _check(positions, rotations, world, stop_early=True, criterion="sim")
     assert pc.verdict(full).split(":")[0] == pc.verdict(early).split(":")[0] == "kinematics"
     assert early["decided_early"]
 
 
-def test_the_carried_object_may_rest_on_a_board_but_not_sink_into_it():
-    board = _shelf(0.20)
+def _cube_set_down(depth_into_board: float):
+    """A 4 cm cube held below the TCP, lowered onto a board at 0.20 so that its
+    base ends ``depth_into_board`` inside the board's top face."""
     positions, rotations = _path([0.45, 0.0, 0.40], [0.45, 0.0, 0.30])
-    # A 4 cm cube held 5 cm below the TCP: its bottom ends 1 mm above the board.
     g = np.mgrid[-0.02:0.021:0.01, -0.02:0.021:0.01, -0.02:0.021:0.01].reshape(3, -1).T
     grasp = 5
-    below = positions[grasp] + np.array([0.0, 0.0, -0.079]) + g
-    resting = _check(positions, rotations, ShelfWorld.build(board), grasp=grasp, release=59,
-                     object_points=below)
-    assert not any("carried object" in k for k in resting["faults"])
-    sunk = _check(positions, rotations, ShelfWorld.build(board), grasp=grasp, release=59,
-                  object_points=below + [0.0, 0.0, -0.02])
-    assert any("carried object in shelf board" in k for k in sunk["faults"])
+    # Rigid with the hand and the hand does not turn, so the cube keeps its
+    # offset from the TCP: choose it so the base ends at 0.20 - depth.
+    dz = (0.20 - depth_into_board + 0.02) - positions[-1][2]
+    cube = positions[grasp] + g + [0.0, 0.0, dz]
+    return positions, rotations, grasp, cube
+
+
+@pytest.mark.parametrize("depth, destination, expect", [
+    (0.003, 0.20, None),                          # its base, 3 mm into the destination board
+    (0.003, 0.35, "touches board"),               # the same contact, but not the destination
+    (0.019, 0.20, "pressed into board"),          # 19 mm in: pushed through it
+])
+def test_the_object_is_set_down_only_on_its_base_on_the_destination(depth, destination, expect):
+    positions, rotations, grasp, cube = _cube_set_down(depth)
+    r = _check(positions, rotations, ShelfWorld.build(_shelf(0.20)), grasp=grasp, release=59,
+               object_points=cube, destination_height=destination)
+    carried = [k for k in r["faults"] if "carried object" in k]
+    if expect is None:
+        assert carried == []
+    else:
+        assert any(expect in k for k in carried), carried
+
+
+def test_an_object_turned_onto_its_side_is_not_set_down_on_its_base():
+    """Which points may touch is decided by the object's own base face (the points
+    it stood on at the pick), wherever the carry has turned it -- not by a cone
+    around the vertical."""
+    board = _shelf(0.20)
+    g = np.mgrid[-0.02:0.021:0.01, -0.02:0.021:0.01, -0.02:0.021:0.01].reshape(3, -1).T
+    base = g[:, 2] <= g[:, 2].min() + pc.BASE_BAND
+    world = ShelfWorld.build(board)
+    upright = g + [0.45, 0.0, 0.20 + 0.02 - 0.003]
+    kinds = {k for k, _, _ in pc._object_contacts(upright, base, world, board, None, 0.001, 0.005)}
+    assert kinds == {"base_rest"}
+    Rx = np.array([[1.0, 0.0, 0.0], [0.0, 0.0, -1.0], [0.0, 1.0, 0.0]])   # onto its side
+    on_side = g @ Rx.T + [0.45, 0.0, 0.20 + 0.02 - 0.003]
+    kinds = {k for k, _, _ in pc._object_contacts(on_side, base, world, board, None, 0.001, 0.005)}
+    # The base now stands vertical; its bottom edge still touches, but so does a
+    # face that is not the base -- which is the fault.
+    assert "rest" in kinds
 
 
 def test_the_observed_cloud_on_the_shelf_is_an_obstacle():
@@ -200,7 +235,7 @@ def test_the_carried_object_may_rest_on_the_table_but_not_be_pushed_into_it():
     assert not any("carried object" in k for k in resting["faults"])
     pushed = _check(positions, rotations, ShelfWorld.build(None, support_height=0.12),
                     grasp=5, release=59, object_points=cube)
-    assert any("carried object in the table" in k for k in pushed["faults"])
+    assert any("carried object pressed into table" in k for k in pushed["faults"])
 
 
 def test_the_move_onto_the_path_must_not_go_through_the_object_to_be_picked():
@@ -216,7 +251,7 @@ def test_the_move_onto_the_path_must_not_go_through_the_object_to_be_picked():
     r = _check(positions, rotations, ShelfWorld.build(None), grasp=40, release=50,
                object_points=obj, start_q=start.qpos)
     assert r["first_violation"] == -1
-    assert any("approach_in" in k and "target's cloud" in k for k in r["faults"])
+    assert any("approach_in" in k and "object to be picked" in k for k in r["faults"])
 
 
 # ------------------------------------ where the arm cannot hold the planned pose
@@ -241,7 +276,8 @@ def test_a_stretch_out_of_reach_is_checked_along_the_line_the_executor_steers():
     b = np.linspace([0.45, 0.10, 0.30], [0.45, 0.10, 0.30], 30)
     positions = np.vstack([a, out, b])
     rotations = np.repeat(DOWN[None], len(positions), axis=0)
-    clear = _check(positions, rotations, ShelfWorld.build(None), grasp=55, release=58)
+    clear = _check(positions, rotations, ShelfWorld.build(None), grasp=55, release=58,
+                   criterion="sim")
     assert clear["skipped"] > 0 and clear["violations"] == 0
     # A thin wall standing between y = -0.10 and y = +0.10, where the arm is
     # steered straight across once the out-of-reach stretch is skipped.
@@ -249,5 +285,67 @@ def test_a_stretch_out_of_reach_is_checked_along_the_line_the_executor_steers():
         "measured": True, "front_left": [0.30, 0.01], "front_right": [0.60, 0.01],
         "depth": 0.01, "bottom": 0.0, "top": 0.40, "wall_thickness": 0.0,
         "boards": [{"name": "wall", "top": 0.40, "thickness": 0.40, "support": False}]}})
-    r = _check(positions, rotations, ShelfWorld.build(wall), grasp=55, release=58)
+    r = _check(positions, rotations, ShelfWorld.build(wall), grasp=55, release=58,
+               criterion="sim")
     assert any("(steered)" in k for k in r["faults"])
+    # The strict criterion does not skip: a position out of reach rejects the path.
+    strict = _check(positions, rotations, ShelfWorld.build(None), grasp=55, release=58,
+                    stop_early=True)
+    assert pc.verdict(strict).startswith("kinematics") and "position" in pc.verdict(strict)
+
+
+# ------------------------------------------------------------ the stage rules
+def _cube(centre, half=0.02, step=0.01):
+    g = np.mgrid[-half:half + 1e-9:step, -half:half + 1e-9:step, -half:half + 1e-9:step]
+    return np.asarray(centre) + g.reshape(3, -1).T
+
+
+def test_the_object_may_touch_the_table_only_until_it_lifts_off_or_as_its_destination():
+    up = np.linspace([0.45, 0.0, 0.20], [0.45, 0.0, 0.30], 30)
+    down = np.linspace([0.45, 0.0, 0.30], [0.45, 0.0, 0.20], 30)
+    positions = np.vstack([up, down])
+    rotations = np.repeat(DOWN[None], len(positions), axis=0)
+    cube = _cube([0.45, 0.0, 0.12])                   # base at 0.10, 3 mm into a table at 0.103
+    world = ShelfWorld.build(None, support_height=0.103)
+    # Lifted, carried, and brought back down onto the table it is NOT meant for.
+    back = _check(positions, rotations, world, grasp=0, release=59, object_points=cube,
+                  destination_height=0.30)
+    assert any("carried object touches table" in k for k in back["faults"])
+    # The same motion when the table IS the destination: set down on its base.
+    placed = _check(positions, rotations, world, grasp=0, release=59, object_points=cube,
+                    destination_height=0.103)
+    assert not [k for k in placed["faults"] if "carried object" in k]
+
+
+def test_at_the_pick_the_fingers_may_touch_the_object_and_the_palm_may_not():
+    positions, rotations = _path([0.45, 0.0, 0.30], [0.45, 0.0, 0.30], n=30)   # hand holds still
+    fr3 = __import__("tpgpt.hardware.fr3", fromlist=["default_model"]).default_model()
+    # A slab across the closing axis, level with the pads: the closed fingers press on it.
+    slab = np.array([[0.45 + dx, dy, 0.30 - 0.008] for dx in (-0.005, 0.0, 0.005)
+                     for dy in np.arange(-0.05, 0.051, 0.004)])
+    r = _check(positions, rotations, ShelfWorld.build(None), grasp=20, release=29,
+               object_points=slab)
+    assert not any(k.startswith("pick:") for k in r["faults"])     # fingers at the pick: fine
+    # Something reaching up into the palm at the pick is a fault.
+    palm = np.array([[0.45, 0.0, 0.30 + z] for z in np.arange(0.07, 0.12, 0.005)])
+    r = _check(positions, rotations, ShelfWorld.build(None), grasp=20, release=29,
+               object_points=np.vstack([slab, palm]))
+    assert any(k.startswith("pick:") and "hand_body" in k for k in r["faults"])
+
+
+def test_in_the_retreat_the_fingers_may_not_go_back_into_the_placed_object():
+    hold = np.linspace([0.45, 0.0, 0.30], [0.45, 0.0, 0.30], 20)
+    rise = np.linspace([0.45, 0.0, 0.30], [0.45, 0.0, 0.40], 12)
+    dive = np.linspace([0.45, 0.0, 0.40], [0.45, 0.0, 0.25], 16)    # back down, into it
+    positions = np.vstack([hold, rise, dive])
+    rotations = np.repeat(DOWN[None], len(positions), axis=0)
+    # A block 100 mm across the closing axis, just below the fingertips at the
+    # release: wider than the open fingers (80 mm), so going back down hits it.
+    cube = np.array([[0.45 + dx, dy, z] for dx in (-0.02, 0.0, 0.02)
+                     for dy in np.arange(-0.05, 0.051, 0.01) for z in np.arange(0.24, 0.281, 0.01)])
+    clean = _check(positions[:32], rotations[:32], ShelfWorld.build(None), grasp=2, release=19,
+                   object_points=cube)
+    assert not any("placed object" in k for k in clean["faults"])
+    r = _check(positions, rotations, ShelfWorld.build(None), grasp=2, release=19,
+               object_points=cube)
+    assert any("retreat" in k and "placed object" in k for k in r["faults"])

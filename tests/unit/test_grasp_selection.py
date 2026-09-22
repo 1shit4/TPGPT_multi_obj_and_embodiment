@@ -325,7 +325,8 @@ class TestWholePath:
         far = (1.10, 0.25, 0.15)
         poses, scores = self._poses()
         sel = select_and_plan(bundle, self._scene(far), poses, scores,
-                              SelectionSettings(max_aim_grasp=1.0, min_path_clearance=-1.0))
+                              SelectionSettings(max_aim_grasp=1.0, min_path_clearance=-1.0,
+                                                allow_kinematic_fallback=True))
         assert sel.fell_back and sel.chosen.path_check["verdict"].startswith("kinematics")
         with pytest.raises(PlanningError):
             select_and_plan(bundle, self._scene(far), poses, scores,
