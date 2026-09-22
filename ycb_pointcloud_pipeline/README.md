@@ -180,7 +180,7 @@ aborts and holds the current pose. CRISP also clips the pose error to 0.1 m / 0.
 
 The full guide -- frames, the calibration file, how to verify the point cloud pose,
 how to teach the demonstration, what each check measures, and what was validated -- is
-[`TPGPT_multi_obj_and_embodiment/docs/hardware_integration.md`](../TPGPT_multi_obj_and_embodiment/docs/hardware_integration.md).
+[`docs/hardware/hardware_integration.md`](../docs/hardware/hardware_integration.md).
 Short version:
 
 ```

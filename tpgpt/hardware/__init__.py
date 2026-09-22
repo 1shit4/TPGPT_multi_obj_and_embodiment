@@ -22,5 +22,5 @@ The split mirrors ``tpgpt.experiments.pipeline.run``:
   ``fr3_hand_tcp`` rotation.
 
 The ROS 2 nodes that use these live in the ``ycb_pointcloud_pipeline`` package.
-See ``docs/hardware_integration.md``.
+See ``docs/hardware/hardware_integration.md``.
 """

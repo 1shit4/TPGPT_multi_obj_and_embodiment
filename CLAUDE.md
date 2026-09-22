@@ -203,7 +203,8 @@ The planner's support height is: its `support_height` parameter, else the calibr
   brief and its rules (one demonstration, no per-hand tuning, never force a grasp rank, clean tree).
 - `x6_experiment/RUNNING_THE_EXPERIMENT.md` — operating the X6 harness.
 - `ycb_pointcloud_pipeline/INSPIRE_HAND.md` — the Inspire RH56 hand: mounting, side grasp, caveats.
-- `docs/hardware_integration.md` — frames and the hardware bridge.
+- `docs/hardware/hardware_integration.md` — the operating manual of the bridge: frames, verifying the
+  cloud, **teaching a demonstration (keys, order, refusals)**, planning, execution.
 - `docs/sim/dynamics_execution.md` — why the executor's law and gates are what they are.
 - `docs/sim/SIM_CLAUDE.md` — the simulation's own guide (reference, not instructions).
 

@@ -6,7 +6,7 @@
 # are deprojected with the colour intrinsics). Every millimetre of error here
 # lands directly on the grasp: the transportation map interpolates keypoints
 # built from these clouds exactly. VERIFY before execution -- see
-# docs/hardware_integration.md, "Verifying the point cloud pose".
+# docs/hardware/hardware_integration.md, "Verifying the point cloud pose".
 camera_calibration:
   base_frame: base
 

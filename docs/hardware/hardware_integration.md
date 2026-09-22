@@ -8,18 +8,15 @@ the arm goes is the **same TPGPT code** the MuJoCo experiments use. The only new
 arithmetic is a change of coordinate frame and a conversion to the hand's own axes.
 Nothing under `tpgpt/sim`, `tpgpt/experiments` or the existing tests was modified.
 
-**Status, stated plainly.** Steps §1–§4 have been worked through on the lab
-setup: `camera_calibration.yaml` holds the lab calibration received 2026-09-11
-(base -> `camera_color_optical_frame`, intrinsics at 848x480, table 6 mm below the
-base) and was checked against the live camera with the §4 checks. Those values are
-treated as correct and are not changed by anything below. The executor still
-refuses plans made with anything marked `is_placeholder: true`.
-
-The **taught demonstration** (§5) is new. It was run offline: the conversion on a
-synthetic 1 kHz recording, the ROS node end to end against a fake pose stream and
-fake camera, and its controller switching on the CRISP stack on **fake
-hardware**. **The policy executor and the teaching controller have not yet moved a
-real robot.**
+**Status, stated plainly (2026-09-22).** The camera and the shelf were moved and
+recalibrated on 2026-09-21. The current values and the measured shelf points are in
+`CALIBRATION.md`, and **nothing recorded on the setup before that counts as
+evidence** (`FRESH_START.md`). Since 2026-09-21 the planner also sees the shelf and
+checks every candidate's whole path on the real arm's kinematics
+(`SHELF_AND_PATH_CHECK.md`). This document is the operating manual for the rest: the
+frames, verifying the cloud, teaching, planning and execution. The validation it
+reports (§5.8, §8) is synthetic or on fake hardware, as each row says. The executor
+still refuses plans made with anything marked `is_placeholder: true`.
 
 ---
 
@@ -35,9 +32,10 @@ RealSense colour + aligned depth
        └─ camera_calibration.yaml (base -> camera_link)  +  realsense TF (camera_link -> optical)
             └─ tpgpt_planner_node  ->  object cloud in `base`
                  ├─ grasp               tpgpt.hardware.grasp_selection.select_and_plan
-                 │                        GraspGen-X candidates (ZMQ server) -> screened with tpgpt.hardware.hand
-                 │                        -> planned best score first, first passing plan wins
-                 │                        (fallback: planner.default_grasp, scripted top-down)
+                 │                        GraspGen-X candidates (ZMQ server) -> screened (hand + the sim's funnel)
+                 │                        -> planned best score first; the first whose WHOLE path clears the
+                 │                           shelf and is >= 60 % reachable wins (tpgpt.hardware.path_check)
+                 │                        shelf world: config/shelf.yaml + /ycb_scene_cloud, /joint_states
                  ├─ keypoints           tpgpt.sim.keypoints.scene_keypoints   (grasp-pose cube, FINDINGS §8p)
                  ├─ transportation map  tpgpt.transport.maps.TransportMap     (Sec. III-D/E, App. A)
                  └─ transported labels  tpgpt.transport.labels.transport_labels  -> saved plan
@@ -100,7 +98,7 @@ lie along the object's narrow side, blue (z) down.
 **With THOR's `run.sh cameras`** the frames are `ground_cam_link` and
 `ground_cam_color_optical_frame` and the topics start with `/ground_cam`. Set
 `child_frame` and `camera_link_to_optical.child_frame` in the YAML to match, and
-pass `camera_ns:=/ground_cam` to the verify launch.
+the topic parameters of `segmentation_node` and `calibration_check_node`.
 
 ---
 
@@ -111,13 +109,10 @@ calibration, checked on the live camera with §4, and are **not** placeholders a
 more; the `is_placeholder` mechanism is kept for anyone starting from a fresh file.
 
 * **`base_to_camera`** — `translation` in metres plus a rotation as a quaternion
-  `[x, y, z, w]` or roll/pitch/yaw. **Current values (2026-09-11):** translation
-  (1.1945, 0.0531, 0.8330) m, quaternion (0.6607, 0.6692, −0.2385, −0.2423). They
-  are to the **optical** frame. Its viewing axis (−0.640, 0.001, −0.769) meets the
-  table at (0.50, 0.05), and the base origin projects to pixel (405, 71). Read as
-  `camera_link` (x forward) the camera would look sideways at nothing, so
-  `child_frame: camera_color_optical_frame`. Anything marked
-  `is_placeholder: true` makes every node warn and the executor refuse.
+  `[x, y, z, w]` or roll/pitch/yaw, to the **optical** frame
+  (`child_frame: camera_color_optical_frame`). **Current values and how they were
+  obtained: `CALIBRATION.md`.** Anything marked `is_placeholder: true` makes every
+  node warn and the executor refuse.
 * **`intrinsics`** — focal lengths and principal point in pixels for the colour
   stream (this unit's factory values at 848×480). With `source: camera_info`
   (recommended) the live `camera_info` is used and these are only compared
@@ -126,9 +121,9 @@ more; the `is_placeholder` mechanism is kept for anyone starting from a fresh fi
   the resolution they were calibrated for. With `source: yaml` the segmentation
   node deprojects with them. It refuses to deproject images of a different size.
 * **`verification.expected_table_height`** — the table surface's z in `base`,
-  measured independently; currently **−0.006 m**. The planner also uses it as the
-  support height when `support_height` is not given. Destinations on the table
-  should therefore be given at z = −0.006. The easy way: touch the table with the closed
+  measured independently; currently **−0.0136 m** (`CALIBRATION.md`). The planner
+  also uses it as the support height when `support_height` is not given.
+  Destinations on the table should therefore be given at z = −0.0136. The easy way: touch the table with the closed
   fingertips and read `/current_pose` z. When set, the table-plane check becomes
   pass/fail.
 
@@ -333,7 +328,7 @@ How each field is made (`tpgpt/hardware/teach.py`):
 | `time_belief`, `time_rate` | `linspace(0, 1, M)` and `1 / (dt·(M−1))`, from the step index; the message stamps are discarded after resampling (`docs/sim/SIM_CLAUDE.md` rule 5) |
 | `placement.points` | the `capture_scene` cloud |
 | `placement.grasp` | TCP position and grasp-convention axes at the first held label |
-| `support_height` | `expected_table_height` from the calibration YAML (−0.006 m), unless given as a parameter |
+| `support_height` | `expected_table_height` from the calibration YAML (−0.0136 m), unless given as a parameter |
 | `destination`, `destination_height` | the object moved by the taught carry (§5.4) |
 
 ### 5.4 Where the object was put, without seeing it
@@ -357,7 +352,7 @@ between the measured and the predicted placed centroids, and both lowest points.
 
 TPGPT's labels are the **commanded attractor** (the point the impedance spring
 pulls toward), not the measured pose. An impedance arm lags a moving attractor by
-`K⁻¹·D·v` (`docs/sim/SIM_CLAUDE.md`, §2.7 of `ROBOTICS_NOTES.md`). A hand-guided demonstration has
+`K⁻¹·D·v` (`docs/sim/SIM_CLAUDE.md`, §2.7 of `docs/sim/ROBOTICS_NOTES.md`). A hand-guided demonstration has
 no attractor, only the path the hand took. This version deliberately uses that
 measured path as the attractor, with one **static** stiffness and damping taken
 from the controller that will execute it: `cartesian_impedance_controller` runs
@@ -365,7 +360,7 @@ from the controller that will execute it: `cartesian_impedance_controller` runs
 `use_transported_stiffness:=false` uses exactly that controller. So the arm will
 run **behind the taught path** by `D/K · v = 40/400 · v`:
 
-| taught speed | lag at `speed_scale` 1.0 | at 0.5 (executor default) |
+| taught speed | lag at `speed_scale` 1.0 | at 0.5 (X6; the node default is 0.35) |
 |---|---|---|
 | 5 cm/s | 5 mm | 2.5 mm |
 | 10 cm/s | 10 mm | 5 mm |
@@ -564,49 +559,25 @@ of the hand body, hand fully open because that is how it arrives):
 Only the cloud **between the pads** decides the width. That region is the pad
 face (17.5 mm across, 18.5 mm along the approach) swept over the 80 mm opening.
 
-**3. Plan and verify**, best score first, up to `grasp_max_plans` (12). Each
-candidate is passed to `plan()` as `TargetScene.grasp`. The first plan that
-passes is kept: `min det(J)` ≥ `min_determinant`, aim at the grasp ≤ 10 mm,
-orientation error at the grasp ≤ 15°, and the hand's lowest box corner along
-the whole transported path no more than 2 mm below the table (up to the grasp)
-or the destination surface (from the release on). This step is needed because
-transport degrades with the rotation between the demonstrated grasp and the
-candidate (`min det(J)` 0.94-0.99 at 3-19°, 0.33-0.79 at 74-135°, folding past
-~145°: `grasp.filters.by_demonstration_consistency`). Ranking is by the
-discriminator score only; the demonstration enters as this feasibility gate.
+**3. Plan and verify.** Since 2026-09-21 this is the simulation's rule, and it is
+described in full in `SHELF_AND_PATH_CHECK.md`. In brief: the sim's own funnel stages
+(visibility, on target, collision with the shelf, place zone, centred) join the
+checks above. Survivors are then planned best score first, up to `grasp_max_plans`
+(100). The first whose **whole transported path** the real arm can fly is kept:
+no collision with the shelf model or the observed cloud at any waypoint, at least
+60 % of it reachable by IK, and the move onto the path is checked from the measured
+joints. The earlier gates still apply: `min det(J)` ≥ `min_determinant`, aim
+≤ 10 mm, orientation ≤ 15°, and hand clearance above the table and destination
+planes (audit item A4). With nothing admissible, only a candidate that failed on
+reach alone may run (`allow_kinematic_fallback`), never one that collides. The
+scripted top-down grasp is opt-in (`grasp_fallback_top_down`, default false) and
+passes the same checks. Every candidate and verdict is saved to
+`<plan>/grasp_candidates.json`; `plan.json` records the stage tallies, the path
+check and the shelf world.
 
-If nothing passes, or the server is down and cannot be started, the scripted
-top-down grasp is tried with the same checks and the plan is logged as a
-fallback (`grasp_fallback_top_down:=false` refuses instead with
-`no_executable_grasp` and the tally of rejections). Every candidate, its
-verdict and its measurements are saved to `<plan>/grasp_candidates.json`; the
-plan's `plan.json` gains `grasp_source`, `jaw_verdict`, `jaw_engagement_m`,
-`object_width_closing_m` (now **between the pads**, which is also the executor's
-Grasp goal width), `object_extent_closing_m` (the whole cloud),
-`grasp_tilt_deg`, `hand_clearance_pick_m` and `hand_clearance_place_m`.
-
-**Measured (2026-09-14, no robot motion).** How each number was obtained:
-
-* *Real banana cloud* (`~/tpgpt_plans/banana_20260914_172813`, 1777 points) with
-  the taught demo `banana_20260914_161657`: three GraspGen-X calls chose grasps
-  tilted 9°, 23° and 23° with `min det(J)` 0.48, 0.48 and 0.83. The scripted
-  top-down plan on the same cloud has 0.51. Aim 0.0 mm and orientation error
-  ≤ 0.2° in every case. About 40% of candidates were `from_below` and 45%
-  `hits_support`, which is the table the generator cannot see.
-* *Cup, one camera view*: a hollow cup (84 mm across, 3 mm wall, 100 mm tall)
-  rendered through a depth buffer from the calibrated camera pose, voxelised at
-  3 mm. The scripted top-down grasp is refused, `object_too_wide` (80 mm between
-  the pads). GraspGen-X plus screening chose a grasp on the wall in 4 of 5
-  calls, closing on 7-15 mm while the cup spans 105-129 mm across the same axis.
-  The fifth was a diagonal pinch of the rim, 22 mm. `min det(J)` 0.22-0.81.
-  Through the ROS node with the server stopped first, the node started the
-  server (6 s), planned in 1.8 s and chose a 49° wall grasp, 15 mm between the
-  pads, `min det(J)` 0.42.
-
-What would make this wrong: a real cup's rim may be seen with fewer points than
-the render (glossy or dark plastic loses depth). Then rim grasps read `empty` or
-`shallow` and the planner falls back. None of these grasps has been executed on
-the robot yet. Check the chosen outline in RViz before `dry_run:=false`.
+Measurements of this step made before 2026-09-21 (real clouds on the old camera
+setup) have been removed. They are not evidence for the current setup
+(`FRESH_START.md`).
 
 ---
 
@@ -679,9 +650,11 @@ pose outside the workspace box; approach tracking error over 80 mm; the
   order. On the analytic arm it is **bit-for-bit identical** to
   `rollout_impedance`, with and without a load
   (`test_it_is_the_simulated_loop_bit_for_bit`, `test_it_matches_under_load_too`).
-* **No infeasible-pose fallback.** Its two tiers ask MuJoCo's `solve_ik` whether
-  a pose exists for the arm, and there is no simulator here. A pose the arm
-  cannot hold shows up as a shut gate and then a stall, and the run stops.
+* **The infeasible-pose fallback runs on the FR3 model.** Its two tiers (relax
+  the orientation, or steer to the next reachable label) ask
+  `tpgpt.hardware.fr3.FR3.solve_ik`, seeded from the measured `/joint_states`, in
+  place of MuJoCo's `solve_ik`. Without fresh joint angles it stays off for that
+  step, and the completion log counts how often.
 * **`speed_scale`** slows the whole task uniformly. Velocities, the speed clamp
   and the phase clock are all scaled, so the gate's expected lag
   (`‖K⁻¹D‖·v`) matches the speed actually commanded. At 1.0 it is the
@@ -738,9 +711,9 @@ only store the message.
   `gripper_mode:=none` first.
 * First real runs: `gripper_mode:=none`, `speed_scale` 0.3–0.5, no object; then
   an object; stiffness option last.
-* `workspace_min/max` in the executor and planner are generic; set them to the
-  real table and any obstacles. There is no collision checking against the scene
-  on hardware (`path_feasibility_observed` needs the simulator's robot model).
+* `workspace_min/max` in the executor and planner are generic boxes. Collision with
+  the shelf and the observed scene is now checked along the whole path
+  (`SHELF_AND_PATH_CHECK.md`); the shelf model still needs measuring.
 * The one-sided-cloud grasp bias (§6).
 * A demonstration closer to the real task should widen the range of destinations
   the map supports (§6 table). Teaching one is now possible (§5). Whether it does is
