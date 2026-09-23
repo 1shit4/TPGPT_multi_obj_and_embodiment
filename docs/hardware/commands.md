@@ -33,6 +33,10 @@ restart the node.
 
 ## 2. Bring-up
 
+The three things that must be running before anything else, and that stay up for the whole session:
+the **robot container**, the **camera**, and **segmentation**. Nothing here is specific to teaching,
+planning or executing — those come later and each brings its own viewer.
+
 One terminal each. The camera and segmentation are separate so the camera can warm up (and stay up)
 while segmentation restarts.
 
@@ -49,9 +53,6 @@ ros2 launch realsense2_camera rs_launch.py \
 # T3  segmentation (NOT its own camera)
 source ~/venvs/ycb/bin/activate
 ros2 launch ycb_pointcloud_pipeline ycb_pipeline.launch.py launch_camera:=false
-
-# T4  RViz
-rviz2 -d ~/thor_ws/install/ycb_pointcloud_pipeline/share/ycb_pointcloud_pipeline/rviz/tpgpt.rviz
 ```
 - **`launch_camera:=false` matters.** The pipeline launch starts its own camera otherwise, and two
   drivers fight over the D435: `xioctl(VIDIOC_S_FMT) failed, errno=16 ... Device or resource busy`.
@@ -79,13 +80,15 @@ bottom board reaches both).
 Camera and segmentation must be running; the object must be detected.
 
 ```bash
-# T5  teaching node + its RViz
+# T4  teaching node. It starts its OWN RViz on tpgpt.rviz (rviz:=false to suppress it)
 source ~/venvs/tpgpt/bin/activate
 ros2 launch ycb_pointcloud_pipeline tpgpt_teach.launch.py object_name:=banana
 
-# T6  the keys (a launched node has no keyboard, so they live here)
+# T5  the keys (a launched node has no keyboard, so they live here)
 ros2 run ycb_pointcloud_pipeline tpgpt_teach_keyboard
 ```
+In that RViz you watch the captured object cloud, the magenta trail of the recording, and the
+placement it derives (`/tpgpt/teach/*`).
 
 | key | when | what it does |
 |---|---|---|
@@ -153,7 +156,11 @@ ros2 service call /tpgpt_planner_node/plan std_srvs/srv/Trigger
 | `grasp from graspgenx: ...` | the chosen grasp, and the tally of what removed the rest |
 | `Plan saved to ~/tpgpt_plans/<object>_<time>` | plus `min det(J)` (> 0.1), aim errors, hand clearance at pick and place |
 
-**What to look at in RViz** (fixed frame `base`):
+**What to look at in RViz** (fixed frame `base`), in its own terminal — skip it if the teaching
+launch already opened one on the same config:
+```bash
+rviz2 -d ~/thor_ws/install/ycb_pointcloud_pipeline/share/ycb_pointcloud_pipeline/rviz/tpgpt.rviz
+```
 
 | display | shows |
 |---|---|
@@ -233,7 +240,13 @@ ros2 run --prefix python3 ycb_pointcloud_pipeline tpgpt_pick_place --ros-args \
 ```
 `gripper_mode`: `franka_grasp` (default) | `gripper_command` | `inspire` | `none`. `none` runs the
 motion without touching the gripper, which is the safer first move on a new plan.
-Type `yes` at the prompt. **Hand on the e-stop.** Inspect the plan in RViz before confirming.
+Type `yes` at the prompt. **Hand on the e-stop.** Inspect the plan in RViz before confirming — the
+same view as §4:
+```bash
+rviz2 -d ~/thor_ws/install/ycb_pointcloud_pipeline/share/ycb_pointcloud_pipeline/rviz/tpgpt.rviz
+```
+During the run it adds the executor's own displays: the commanded pose, the dry-run simulated pose,
+and `/current_pose` (the live arm). In a dry run the first two move and the third does not.
 
 An existing plan, without re-planning:
 ```bash
@@ -343,7 +356,8 @@ bash ~/calib_preflight.sh    # EVERY line must read OK before you touch anything
 `calib_preflight.sh` exists because the two ways to waste a whole session are invisible while you
 work: `probe_offset` sitting at zero, and the node running code older than the last build.
 
-**5. RViz** (terminal 3):
+**5. RViz** (terminal 3) — a **different config** from the planning one, laid out for clicking
+stickers:
 ```bash
 rviz2 -d ~/calibration.rviz
 ```
