@@ -62,6 +62,15 @@ def canonical_cloud(object_name: str, points: int | None = None, seed: int = SAM
     return cloud
 
 
+def cached(object_name: str, gripper: str = "franka_panda", size: int = DEFAULT_SIZE,
+           planner: str = "diffusion", cache_dir=None) -> bool:
+    """Whether this library is already on disk -- i.e. whether the server is needed."""
+    from tpgpt.grasp.cache import cache_key, load
+
+    key = cache_key(canonical_cloud(object_name), gripper, size=int(size), planner=planner)
+    return load(key, Path(cache_dir or DEFAULT_CACHE_DIR)) is not None
+
+
 def library(object_name: str, gripper: str = "franka_panda", size: int = DEFAULT_SIZE,
             host: str = "127.0.0.1", port: int = 5556, planner: str = "diffusion",
             timeout_ms: int = 300000, cache_dir=None, rebuild: bool = False):
@@ -101,4 +110,5 @@ def placed(poses: np.ndarray, rotation: np.ndarray, position: np.ndarray) -> np.
     return T @ np.asarray(poses, dtype=float).reshape(-1, 4, 4)
 
 
-__all__ = ["DEFAULT_CACHE_DIR", "DEFAULT_SIZE", "canonical_cloud", "library", "placed"]
+__all__ = ["DEFAULT_CACHE_DIR", "DEFAULT_SIZE", "cached", "canonical_cloud", "library",
+           "placed"]

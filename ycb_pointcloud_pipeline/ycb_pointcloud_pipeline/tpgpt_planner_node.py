@@ -155,6 +155,11 @@ class TpgptPlannerNode(Node):
         # grasp is. Measured live on a banana 2026-09-23: with 100 candidates three calls
         # gave 16, 0 and 0 admissible (planning failed twice); with 400 they gave 5, 38
         # and 38, and all three planned, at ranks 16, 1 and 1, in 271, 22 and 15 s.
+        # The object's fixed library instead of a fresh draw, when the scan fit was
+        # accepted (tpgpt.hardware.grasp_library): the same grasps every run, so a
+        # difference between two runs is a difference in the task.
+        d('grasp_library', True)
+        d('grasp_library_size', 2000)
         d('graspgen_num_grasps', 400)
         d('graspgen_topk', 200)
         d('graspgen_timeout', 30.0)               # s
@@ -246,6 +251,7 @@ class TpgptPlannerNode(Node):
         self.object_models = {}    # name -> tpgpt.hardware.object_model.ObjectModel
         self.object_fit = None
         self.object_cloud_source = None
+        self.grasp_origin = None            # 'library (...)' or 'graspgenx (...)', for the record
         self.shelf_model = None
         shelf_path = p('shelf_config')
         if shelf_path:
@@ -557,6 +563,7 @@ class TpgptPlannerNode(Node):
             'source_bundle_dir': p('source_bundle_dir'),
             'planning_seconds': time.monotonic() - t0,
             'grasp_source': selection.source,
+            'grasp_candidates_from': self.grasp_origin,
             'grasp_score': selection.chosen.score,
             'grasp_candidates': len(selection.candidates),
             'grasp_rejections': selection.rejection_counts(),
@@ -760,6 +767,10 @@ class TpgptPlannerNode(Node):
             raise ValueError(f"grasp_source must be graspgenx or top_down, not {p('grasp_source')!r}")
         from tpgpt.grasp.client import GraspGenUnavailable
         from tpgpt.hardware.grasp_selection import request_candidates
+        if p('grasp_library') and self.object_fit is not None and self.object_fit.accepted:
+            poses, scores = self._library_candidates()
+            if poses is not None:
+                return poses, scores, None
         problem = self._ensure_graspgen_server()
         if problem:
             self.get_logger().error(f'GraspGen-X unavailable: {problem}')
@@ -774,9 +785,47 @@ class TpgptPlannerNode(Node):
         except GraspGenUnavailable as exc:
             self.get_logger().error(f'GraspGen-X unavailable: {exc}')
             return None, None, f'GraspGen-X unavailable: {exc}'
+        self.grasp_origin = f'graspgenx (fresh draw of {len(poses)})'
         self.get_logger().info(f'GraspGen-X: {len(poses)} candidates for {len(points)} points in '
                                f'{time.monotonic() - t:.2f} s')
         return poses, scores, None if len(poses) else 'GraspGen-X returned no grasps'
+
+    def _library_candidates(self):
+        """The object's fixed library, carried onto the fitted scan, or (None, None).
+
+        The library is asked for once per (object, gripper, size) and kept on
+        disk, so the server is only needed the first time an object is planned.
+        A failure here is not fatal: the caller falls back to a live draw.
+        """
+        p = lambda n: self.get_parameter(n).value  # noqa: E731
+        log = self.get_logger()
+        fit = self.object_fit
+        size, gripper = int(p('grasp_library_size')), p('graspgen_gripper')
+        try:
+            from tpgpt.hardware.grasp_library import cached, library, placed
+            on_disk = cached(fit.name, gripper=gripper, size=size, planner=p('graspgen_planner'))
+            if not on_disk:
+                problem = self._ensure_graspgen_server()
+                if problem:
+                    log.warn(f'no grasp library for {fit.name} and GraspGen-X is unavailable '
+                             f'({problem}): falling back to a live draw')
+                    return None, None
+                log.info(f'building the {fit.name} grasp library ({size} grasps, {gripper}); '
+                         'this happens once')
+            t = time.monotonic()
+            poses, scores = library(fit.name, gripper=gripper, size=size,
+                                    host=p('graspgen_host'), port=int(p('graspgen_port')),
+                                    planner=p('graspgen_planner'),
+                                    timeout_ms=max(int(float(p('graspgen_timeout')) * 1000),
+                                                   300000))
+            poses = placed(poses, fit.rotation, fit.position)
+        except Exception as exc:                       # a library must never lose a plan
+            log.warn(f'grasp library unusable ({exc}): falling back to a live draw')
+            return None, None
+        self.grasp_origin = f'library ({len(poses)}, {"cached" if on_disk else "built"})'
+        log.info(f'Grasp library: {len(poses)} grasps for {fit.name} '
+                 f'({"from disk" if on_disk else "built"}) in {time.monotonic() - t:.2f} s')
+        return poses, scores
 
     def _ensure_graspgen_server(self):
         """None if the server answers (starting it first if allowed), else why not."""
