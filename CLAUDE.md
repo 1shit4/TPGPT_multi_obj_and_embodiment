@@ -195,6 +195,15 @@ The planner's support height is: its `support_height` parameter, else the calibr
   the best-scoring band: horizontal grasps around an upright can), and `check_visibility` is
   **`auto`** -- on only when the object's scan was not fitted, since a fitted scan has no unseen
   side, and this camera faces the robot so the filter otherwise removes the robot-side approaches.
+- **The executor's workspace box is OFF by default** (`workspace_check`, user 2026-09-23). It was a
+  blunt guard from before the path check existed and it refused poses the arm reaches perfectly
+  well (a transported demonstration start near the base, a retreat at the box ceiling). What it
+  covered is now covered by `path_check`: every waypoint and the move onto the path, for
+  reachability, self-collision, the table, the shelf model and the seen points. `workspace_check:=true`
+  brings it back, and the planner's `executor_workspace_check` mirrors it at selection.
+- **Other executor guards still apply**, and they are not the box: `max_start_distance` (0.6 m
+  from the plan's first label -- park the arm nearer, or raise it for a dry-run preview),
+  `max_tracking_error`, the stall watchdog and `max_policy_seconds`.
 - **A plan that leaves the executor's workspace box is now refused at selection**
   (`SelectionSettings.workspace_min/max`, fed from the planner's own parameters). It used to be
   found only by the executor, which aborted the whole run instead of taking the next grasp

@@ -140,6 +140,14 @@ class TpgptExecutorNode(Node):
         d('stiffness_max_translational', 900.0)
         d('stiffness_max_rotational', 60.0)
         # Safety
+        # A box the commanded TCP may not leave. **Off by default since 2026-09-23** (the user's
+        # call): it is a blunt guard from before the path check existed, and it refused poses the
+        # arm reaches perfectly well -- the transported start of a demonstration lands near the
+        # base, and the retreat ends at the box's ceiling. What it used to cover is now covered
+        # by tpgpt.hardware.path_check, which tests every waypoint and the move onto the path for
+        # reachability, self-collision, the table, the shelf model and the seen points. Set
+        # workspace_check:=true to bring it back; the box itself is unchanged.
+        d('workspace_check', False)
         d('workspace_min', [0.15, -0.6, -0.25])     # base frame box for commanded TCP, m
         d('workspace_max', [0.85, 0.6, 0.7])
         d('max_start_distance', 0.6)                # m, current TCP to plan start
@@ -400,6 +408,8 @@ class TpgptExecutorNode(Node):
                                     'target.')
 
     def check_workspace(self, position, what):
+        if not self.p('workspace_check'):
+            return
         lo, hi = np.asarray(self.p('workspace_min')), np.asarray(self.p('workspace_max'))
         if np.any(position < lo) or np.any(position > hi):
             raise AbortRun(f'{what} {np.round(position, 3).tolist()} is outside the workspace box '

@@ -113,6 +113,8 @@ class TpgptPlannerNode(Node):
         # at the first step. Keep these equal to the executor's, which are NOT the crop above:
         # the crop stops at z 0.5 because objects stand on a table, while a carried object rises
         # to 0.55 m in the taught demonstration.
+        # Only used when the executor's own box is on (workspace_check, off by default).
+        d('executor_workspace_check', False)
         d('executor_workspace_min', [0.15, -0.6, -0.25])
         d('executor_workspace_max', [0.85, 0.6, 0.7])
         d('voxel_size', 0.003)
@@ -485,8 +487,10 @@ class TpgptPlannerNode(Node):
             check_visibility=self._check_visibility(),
             check_centred=bool(p('check_centred')),
             # The executor refuses to leave this box, so a path that does is no use.
-            workspace_min=tuple(float(v) for v in p('executor_workspace_min')),
-            workspace_max=tuple(float(v) for v in p('executor_workspace_max')),
+            workspace_min=(tuple(float(v) for v in p('executor_workspace_min'))
+                           if p('executor_workspace_check') else None),
+            workspace_max=(tuple(float(v) for v in p('executor_workspace_max'))
+                           if p('executor_workspace_check') else None),
         )
         info['settings'] = settings
         from tpgpt.hardware.grasp_selection import PathContext, ScreenContext
@@ -573,7 +577,8 @@ class TpgptPlannerNode(Node):
                 'grasp_max_tilt_deg', 'grasp_max_plans', 'grasp_min_path_clearance',
                 'grasp_offset', 'check_visibility', 'check_centred')},
             'parameters': {n: self.get_parameter(n).value for n in (
-                'object_model_retries', 'destination_name', 'workspace_min', 'workspace_max', 'executor_workspace_min',
+                'object_model_retries', 'destination_name', 'executor_workspace_check',
+                'workspace_min', 'workspace_max', 'executor_workspace_min',
                 'executor_workspace_max', 'voxel_size', 'destination',
                 'destination_height', 'support_height', 'grasp_depth_below_top',
                 'min_determinant', 'n_frames')},
