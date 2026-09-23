@@ -103,7 +103,8 @@ of the installed calibration. If you start the GraspGen-X server for a test, sto
 Known failures, not regressions: `test_x6.py` × 2 (`x6_experiment.yaml` lists 6 objects where the
 grid expects 5); TPGPT × 7, all gripper-registry tests, because the local GraspGen-X checkout lacks
 4 descriptions (`jaco_3f`, `schunk_svh`, `ability_hand`, `fourier_hand`) and `robosuite_models` is
-not installed. The two hands on the robot (`franka_panda`, `inspire_hand`) are unaffected.
+not installed, plus `test_graspgen.py::TestServer::test_reports_its_loaded_grippers` whenever the
+GraspGen-X server is not running (8 in all, 904 passing, 2026-09-24). The two hands on the robot (`franka_panda`, `inspire_hand`) are unaffected.
 
 ## Architecture
 
