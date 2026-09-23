@@ -224,6 +224,14 @@ The planner's support height is: its `support_height` parameter, else the calibr
   `docker cp docker-thor-robot:/opt/docker_thor/install/franka_description ~/thor_ws/install/`,
   then re-source. Without it RViz spams "Could not load resource
   [package://franka_description/meshes/...]" and draws no robot; nothing else is affected.
+- **The planner's `workspace_min/max` is a CLOUD CROP, not the executor's limit.** Its z stops at
+  0.5 m because objects stand on a table; the executor's box reaches 0.7 m and a carried object
+  rises to 0.55 m. The path criterion uses `executor_workspace_min/max` (kept equal to the
+  executor's). Feeding it the crop refused 21-23 candidates per run as `outside_workspace`.
+- **The demonstration's own start and end sit at the edges of that box**: its transported start
+  lands near x = 0.134 (box starts at 0.15) and its retreat ends at z = 0.70 (box ends at 0.70),
+  so a few candidates are refused for that alone. Teach with the hand starting and ending in front
+  of the robot, or raise the executor's box (a safety parameter, so it is the user's call).
 - **`grasp_offset` is zero (A5, decided 2026-09-23).** It used to be [−35, 0, −25] mm, set before
   the recalibration. It is applied *after* the jaw and table checks and *before* the planner, so it
   moved the hand 43 mm off the object and the planner then refused the grasp it had just accepted

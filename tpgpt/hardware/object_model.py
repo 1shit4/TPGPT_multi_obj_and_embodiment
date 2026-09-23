@@ -106,11 +106,22 @@ MAX_RESTS = 12
 #: on an apple) reads 3.9 mm but only 0.50 seen, and the next (an apple's scan
 #: on a can) 0.62 explained. So the median is generous and the fractions do the
 #: rejecting.
+#:
+#: **``SEEN_DISTANCE`` and ``MAX_IN_FRONT`` are an error budget, not a preference.**
+#: On simulated views a correct fit puts *nothing* in front (0.00). On this
+#: bench it cannot: the camera reads a surface about 5 mm out
+#: (``CALIBRATION.md``), and two independent estimators of the same can's axis
+#: -- this fit and a circle fitted to its side wall -- disagree by 7.6 mm, with
+#: the fit's own cost preferring its answer. So a ray tolerance below about
+#: 15 mm measures the camera, not the pose. Measured on the captures of
+#: 2026-09-23 at a 15 mm tolerance: correct fits read 0.04 (banana), 0.05
+#: (apple) and 0.13 (can), while a mug fitted into a tilted resting pose read
+#: 0.49 and the synthetic wrong-object pairs a median of 0.24. Hence 0.25.
 MAX_MEDIAN = 0.007
 EXPLAINED_DISTANCE = 0.008
 MIN_EXPLAINED = 0.75
-SEEN_DISTANCE = 0.010
-MAX_IN_FRONT = 0.15
+SEEN_DISTANCE = 0.015
+MAX_IN_FRONT = 0.25
 
 
 @dataclass
@@ -356,17 +367,30 @@ def _free_space(model_visible: np.ndarray, observed: np.ndarray, camera: np.ndar
         return (np.round(np.arctan2(u @ right, u @ fwd) / step).astype(np.int64) * 1_000_003
                 + np.round(np.arctan2(u @ up, u @ fwd) / step).astype(np.int64))
 
+    # Nearest camera reading in each ray bin, then over a 3 x 3 block of bins.
+    #
+    # The block matters: one bin is 1.7 mm across at 0.8 m, and on a surface seen
+    # edge-on (a can's or a mug's wall) a lateral millimetre is centimetres of
+    # depth, so a single-bin comparison called correctly fitted cylinders "in
+    # front" (17-30% on the first live runs) while reading 1-6% on the rounder
+    # apple and banana. A model point is in front only when every camera reading
+    # around it is clearly further away.
     k_m, k_o = key(u_m), key(u_o)
-    # Nearest camera reading in each ray bin.
     order = np.argsort(k_o)
     k_sorted, r_sorted = k_o[order], r_o[order]
     edges = np.flatnonzero(np.r_[True, k_sorted[1:] != k_sorted[:-1]])
     bins = k_sorted[edges]
-    nearest = np.minimum.reduceat(r_sorted, edges)
-    idx = np.searchsorted(bins, k_m)
-    idx = np.clip(idx, 0, len(bins) - 1)
-    has = bins[idx] == k_m
-    delta = r_m - nearest[idx]                     # < 0: the model is in front
+    nearest_in_bin = np.minimum.reduceat(r_sorted, edges)
+    best = np.full(len(k_m), np.inf)
+    has = np.zeros(len(k_m), dtype=bool)
+    for du in (-1, 0, 1):
+        for dv in (-1, 0, 1):
+            probe = k_m + du * 1_000_003 + dv
+            idx = np.clip(np.searchsorted(bins, probe), 0, len(bins) - 1)
+            hit = bins[idx] == probe
+            has |= hit
+            best = np.where(hit, np.minimum(best, nearest_in_bin[idx]), best)
+    delta = r_m - np.where(has, best, r_m)         # < 0: the model is in front
     seen = float((has & (np.abs(delta) <= tolerance)).mean())
     in_front = float((has & (delta < -tolerance)).mean())
     return seen, in_front

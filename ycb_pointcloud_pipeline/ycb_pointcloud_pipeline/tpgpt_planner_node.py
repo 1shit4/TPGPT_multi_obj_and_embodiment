@@ -106,8 +106,15 @@ class TpgptPlannerNode(Node):
         d('cloud_topic', '')                      # '' -> /ycb_pointclouds/<object_name>
         d('n_frames', 3)                          # clouds fused per plan
         d('max_cloud_age', 10.0)                  # s; older clouds are discarded
-        d('workspace_min', [0.15, -0.6, -0.25])   # base frame crop, m
+        d('workspace_min', [0.15, -0.6, -0.25])   # base frame crop of the OBJECT CLOUD, m
         d('workspace_max', [0.85, 0.6, 0.5])
+        # The box the EXECUTOR refuses to leave (its own workspace_min/max). A path that leaves
+        # it is rejected at selection, so the next candidate is tried instead of the run aborting
+        # at the first step. Keep these equal to the executor's, which are NOT the crop above:
+        # the crop stops at z 0.5 because objects stand on a table, while a carried object rises
+        # to 0.55 m in the taught demonstration.
+        d('executor_workspace_min', [0.15, -0.6, -0.25])
+        d('executor_workspace_max', [0.85, 0.6, 0.7])
         d('voxel_size', 0.003)
         d('outlier_radius', 0.012)
         d('outlier_min_neighbors', 4)
@@ -441,8 +448,8 @@ class TpgptPlannerNode(Node):
             max_centre_offset=float(p('max_centre_offset')),
             check_visibility=self._check_visibility(),
             # The executor refuses to leave this box, so a path that does is no use.
-            workspace_min=tuple(float(v) for v in p('workspace_min')),
-            workspace_max=tuple(float(v) for v in p('workspace_max')),
+            workspace_min=tuple(float(v) for v in p('executor_workspace_min')),
+            workspace_max=tuple(float(v) for v in p('executor_workspace_max')),
         )
         info['settings'] = settings
         from tpgpt.hardware.grasp_selection import PathContext, ScreenContext
@@ -529,7 +536,8 @@ class TpgptPlannerNode(Node):
                 'grasp_max_tilt_deg', 'grasp_max_plans', 'grasp_min_path_clearance',
                 'grasp_offset', 'check_visibility')},
             'parameters': {n: self.get_parameter(n).value for n in (
-                'workspace_min', 'workspace_max', 'voxel_size', 'destination',
+                'workspace_min', 'workspace_max', 'executor_workspace_min',
+                'executor_workspace_max', 'voxel_size', 'destination',
                 'destination_height', 'support_height', 'grasp_depth_below_top',
                 'min_determinant', 'n_frames')},
         })
