@@ -150,7 +150,13 @@ class TpgptPlannerNode(Node):
         d('grasp_max_plans', 100)                 # candidates planned, best score first (sim: 100)
         d('grasp_min_path_clearance', -0.002)     # m, hand vs table/destination along the path
         d('grasp_fallback_top_down', False)       # the simulation has no scripted fallback
-        d('grasp_offset', [-0.035, 0.0, -0.025])     # m, base frame, added to every planned grasp TCP
+        # A fixed base-frame shift added to every planned grasp TCP. It was [-35, 0, -25] mm,
+        # set before the 2026-09-21 recalibration. Measured 2026-09-23 (audit A5): it moves the
+        # hand 43 mm off the object between the jaw check and the planner, so an obviously good
+        # top-down grasp of a YCB can, which passes with no offset (min det 0.61, 61 mm
+        # clearance), is refused as 'object_too_wide: the cloud measures 4 mm between the pads'.
+        # It caused most plan_refused rejections on every object. Zero unless measured again.
+        d('grasp_offset', [0.0, 0.0, 0.0])           # m, base frame
         d('grasp_markers_max', 60)                # candidates drawn in RViz
         d('min_determinant', 0.1)
         # The shelf and the whole-path check (tpgpt.hardware.shelf / path_check)

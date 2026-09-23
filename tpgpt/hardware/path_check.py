@@ -21,6 +21,9 @@ What carries over unchanged, because it is the method rather than the simulator:
   target's own cloud rigidly attached to the grasp.
 * the thresholds: IK tolerance ``REACH_TOLERANCE`` (15 mm), cloud contact radius
   ``CLOUD_CONTACT_RADIUS`` (5 mm), the grasp window (3), the place window (12).
+* **measured points get the same slack as everything else**: a robot piece is in
+  the cloud only when at least :data:`MIN_CLOUD_CONTACT_POINTS` points are
+  :data:`CLOUD_CONTACT_SLACK` inside it.
 
 What is new, and why:
 
@@ -67,6 +70,22 @@ from tpgpt.hardware.fr3 import HOME_Q, TCP_LINK, FR3, default_model
 REACH_TOLERANCE = 0.015
 CONTACT_DEPTH_TOLERANCE = 0.001
 CLOUD_CONTACT_RADIUS = 0.005
+
+#: How far a *measured* point must be inside a robot piece before it counts as
+#: a collision, metres, and how many such points are needed.
+#:
+#: Every other contact test here has a tolerance -- 1 mm into exact geometry,
+#: 5 mm for an object resting on a surface -- while the robot-against-cloud
+#: test had none: one point a tenth of a millimetre inside a piece was a
+#: collision. The points it tests are measured, so they carry the camera's
+#: error (5-10 mm at the shelf) and, for a carried object, the scan fit's
+#: (3-5 mm). ``tpgpt.hardware.hand`` already ignores fewer than three points
+#: for the same reason ("so a single stray depth pixel does not veto a grasp").
+#: Measured case: an obvious top-down grasp of a YCB can was refused because,
+#: 114 mm above the board and sliding sideways away, a finger pad clipped four
+#: points of the can's top rim by 1-2 mm.
+CLOUD_CONTACT_SLACK = 0.002
+MIN_CLOUD_CONTACT_POINTS = 3
 GRASP_CONTACT_WINDOW = 3
 #: ``path_feasibility_observed``'s default.
 PLACE_WINDOW = 12
@@ -84,7 +103,7 @@ class _Piece:
     """One posed robot piece: an inside test in world coordinates and its vertices."""
 
     name: str
-    contains: object          # callable(points (n, 3)) -> (n,) bool
+    contains: object          # callable(points (n, 3), shrink=0.0) -> (n,) bool
     vertices: np.ndarray      # (v, 3) world
     centre: np.ndarray
     radius: float
@@ -100,7 +119,7 @@ def robot_pieces(fr3: FR3, q, end_effector, opening: float) -> tuple[list[_Piece
     for hull, T in fr3.posed_hulls(poses=poses):
         pieces.append(_Piece(
             name=hull.name,
-            contains=lambda p, h=hull, T=T: h.contains(p, T),
+            contains=lambda p, shrink=0.0, h=hull, T=T: h.contains(p, T, tolerance=shrink),
             vertices=hull.world_vertices(T),
             centre=T[:3, 3].copy(),
             radius=hull.radius,
@@ -113,12 +132,25 @@ def robot_pieces(fr3: FR3, q, end_effector, opening: float) -> tuple[list[_Piece
         centre = corners.mean(axis=0)
         pieces.append(_Piece(
             name=f"hand_{box.name}",
-            contains=lambda p, b=box: b.contains((np.atleast_2d(p) - p_g) @ R_g),
+            contains=lambda p, shrink=0.0, b=box: b.contains((np.atleast_2d(p) - p_g) @ R_g,
+                                                             margin=-shrink),
             vertices=corners,
             centre=centre,
             radius=float(np.linalg.norm(corners - centre, axis=1).max()),
         ))
     return pieces, T
+
+
+def _touches(piece: "_Piece", points: np.ndarray) -> int:
+    """How many measured points are inside ``piece`` deeper than the slack.
+
+    Returns 0 unless at least :data:`MIN_CLOUD_CONTACT_POINTS` are, so a stray
+    depth pixel or a millimetre of fit error is not a collision.
+    """
+    if points is None or not len(points):
+        return 0
+    n = int(piece.contains(points, CLOUD_CONTACT_SLACK).sum())
+    return n if n >= MIN_CLOUD_CONTACT_POINTS else 0
 
 
 def penetration(A: np.ndarray, B: np.ndarray) -> float:
@@ -206,10 +238,10 @@ def _robot_faults(pieces, world, phase: str, depth_tolerance: float,
             near = tree.query_ball_point(piece.centre, piece.radius + 1e-6)
             if not near:
                 continue
-            inside = piece.contains(world.cloud[np.asarray(near, dtype=int)])
-            if inside.any():
+            n = _touches(piece, world.cloud[np.asarray(near, dtype=int)])
+            if n:
                 key = f"{phase}: {piece.name} in the seen points"
-                faults[key] = faults.get(key, 0) + int(inside.sum())
+                faults[key] = faults.get(key, 0) + n
     return faults
 
 
@@ -407,7 +439,7 @@ def path_feasibility(
                                             check_self).items():
                 add(bad, key, count)
             for piece in pieces:
-                if len(held) and piece.contains(held).any():
+                if _touches(piece, held):
                     add(bad, f"approach_in: {piece.name} in the object to be picked")
         approach_in = {"steps": int(n), "unreachable": int(unreached), "faults": bad}
         if bad:
@@ -441,14 +473,13 @@ def path_feasibility(
         if len(held) and stage in ("approach", "pick"):
             # The object stands where it is; only the fingers, and only at the pick.
             for piece in pieces:
-                if (stage == "approach" or not _is_finger(piece.name)) and \
-                        piece.contains(held).any():
+                if (stage == "approach" or not _is_finger(piece.name)) and _touches(piece, held):
                     add(hits, f"{label}: {piece.name} in the object")
 
         if local is not None and stage in ("carry", "place"):
             obj = point + local @ R_ee.T
             for piece in pieces:
-                if piece.name.startswith("fr3_link") and piece.contains(obj).any():
+                if piece.name.startswith("fr3_link") and _touches(piece, obj):
                     add(hits, f"{label}: {piece.name} in the carried object")
             contact = _object_contacts(obj, base, world, model, table, depth_tolerance,
                                        contact_radius)
@@ -466,7 +497,7 @@ def path_feasibility(
                     add(hits, f"{label}: the carried object {_describe(kind, where)}", n)
 
         if stage == "retreat" and placed is not None:
-            touching = [p for p in pieces if p.contains(placed).any()]
+            touching = [p for p in pieces if _touches(p, placed)]
             fingers_touch = [p for p in touching if _is_finger(p.name)]
             if not fingers_touch:
                 fingers_cleared = True
@@ -699,6 +730,7 @@ def verdict(check: dict, min_reachable_fraction: float = MIN_REACHABLE_FRACTION)
     return None
 
 
-__all__ = ["BASE_BAND", "penetration", "CLOUD_CONTACT_RADIUS", "CONTACT_DEPTH_TOLERANCE", "GRASP_CONTACT_WINDOW",
+__all__ = ["BASE_BAND", "penetration", "CLOUD_CONTACT_RADIUS", "CLOUD_CONTACT_SLACK",
+           "MIN_CLOUD_CONTACT_POINTS", "CONTACT_DEPTH_TOLERANCE", "GRASP_CONTACT_WINDOW",
            "MIN_REACHABLE_FRACTION", "PLACE_WINDOW", "REACH_TOLERANCE", "STRIDE",
            "check_plan", "path_feasibility", "robot_pieces", "verdict"]

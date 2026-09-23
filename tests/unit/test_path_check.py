@@ -134,13 +134,15 @@ def test_the_observed_cloud_on_the_shelf_is_an_obstacle():
     positions, rotations = _path([0.45, 0.0, 0.45], [0.45, 0.0, 0.20])
     # Something standing on the board, 12 cm tall and 12 cm across the closing
     # axis, right under the path -- too wide to pass between the open fingers.
-    thing = np.array([[0.45 + dx, dy, z] for dx in (-0.02, 0.0, 0.02)
-                      for dy in np.arange(-0.06, 0.061, 0.01)
-                      for z in np.arange(0.11, 0.23, 0.01)])
+    # Sampled every 5 mm, as the planner's own cloud is (3 mm voxels): a contact
+    # needs MIN_CLOUD_CONTACT_POINTS points CLOUD_CONTACT_SLACK inside a piece.
+    thing = np.array([[0.45 + dx, dy, z] for dx in np.arange(-0.02, 0.021, 0.005)
+                      for dy in np.arange(-0.06, 0.061, 0.005)
+                      for z in np.arange(0.11, 0.23, 0.005)])
     world = ShelfWorld.build(shelf, scene_points=thing)
     # Its bottom layer, within 15 mm of the board it stands on, is taken as the
     # board (the model covers it); the rest of it stays an obstacle.
-    bottom = thing[:, 2] <= 0.10 + 0.015
+    bottom = shelf.explained(thing)          # the model's own 15 mm rule, not a hand copy of it
     assert world.cloud_report["removed_as_shelf"] == int(bottom.sum())
     assert len(world.cloud) == int((~bottom).sum())
     r = _check(positions, rotations, world)
@@ -341,8 +343,9 @@ def test_in_the_retreat_the_fingers_may_not_go_back_into_the_placed_object():
     rotations = np.repeat(DOWN[None], len(positions), axis=0)
     # A block 100 mm across the closing axis, just below the fingertips at the
     # release: wider than the open fingers (80 mm), so going back down hits it.
-    cube = np.array([[0.45 + dx, dy, z] for dx in (-0.02, 0.0, 0.02)
-                     for dy in np.arange(-0.05, 0.051, 0.01) for z in np.arange(0.24, 0.281, 0.01)])
+    cube = np.array([[0.45 + dx, dy, z] for dx in np.arange(-0.02, 0.021, 0.005)
+                     for dy in np.arange(-0.05, 0.051, 0.005)
+                     for z in np.arange(0.24, 0.281, 0.005)])
     clean = _check(positions[:32], rotations[:32], ShelfWorld.build(None), grasp=2, release=19,
                    object_points=cube)
     assert not any("placed object" in k for k in clean["faults"])

@@ -224,9 +224,15 @@ The planner's support height is: its `support_height` parameter, else the calibr
   `docker cp docker-thor-robot:/opt/docker_thor/install/franka_description ~/thor_ws/install/`,
   then re-source. Without it RViz spams "Could not load resource
   [package://franka_description/meshes/...]" and draws no robot; nothing else is affected.
-- **`grasp_offset` (planner node default [−35, 0, −25] mm) predates the recalibration**: a fixed
-  base-frame shift applied to every grasp, probably absorbing the old calibration's error. Measure it
-  on fresh captures (plan with it and with 0) before trusting it. Audit item A5, open.
+- **`grasp_offset` is zero (A5, decided 2026-09-23).** It used to be [−35, 0, −25] mm, set before
+  the recalibration. It is applied *after* the jaw and table checks and *before* the planner, so it
+  moved the hand 43 mm off the object and the planner then refused the grasp it had just accepted
+  (`object_too_wide: the cloud measures 4 mm between the pads`). It caused most `plan_refused`
+  rejections on every object. With it zero, all four objects plan.
+- **Contact with *measured* points needs 3 points and 2 mm** (`path_check.CLOUD_CONTACT_SLACK`).
+  Every other contact test had a tolerance (1 mm into exact geometry, 5 mm for resting); the
+  robot-against-cloud test had none, so a finger pad clipping four points of a can's rim by 1–2 mm,
+  114 mm above the board and moving away, refused an otherwise perfect plan.
 - **Nothing from before the 2026-09-21 camera/shelf move is evidence** (user, 2026-09-22): not the X6
   trials in `outputs/hardware/hw_2026_09_x6/`, their clouds or plans, nor the 2026-09-15 banana
   demo (its object cloud went through the old calibration). Start from fresh captures and a fresh

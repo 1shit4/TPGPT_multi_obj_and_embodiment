@@ -58,6 +58,31 @@ live run"). The table and board heights were validated; horizontal positions thi
 not. Correspondences on the shelf (both slot marks, both boards) would be the data for a refit.
 Until then, object clouds near the shelf carry this error.
 
+## Let the camera warm up first (measured 2026-09-23)
+
+**The D435's depth drifts by about 10 mm during the first ~15 minutes after the driver starts.**
+That is larger than the calibration's own accuracy, so a cold camera will make a good calibration
+look broken. Measured on the table, against its touched height, from a cold start:
+
+| elapsed | table error | top shelf error |
+|---|---|---|
+| 0.1 min | -8.1 mm | -2.7 mm |
+| 5.8 min | -4.0 mm | -1.2 mm |
+| 11.6 min | -1.1 mm | +0.9 mm |
+| 17.4 min | +1.0 mm | +1.6 mm |
+| 26.1 min | +2.2 mm | +2.2 mm |
+
+It settles after roughly 15-17 minutes, and warm the calibration reads **+1.5 to +2 mm** on both
+surfaces -- better than the +/-5 mm quoted above, which was measured without controlling for this.
+
+**Wait ~15 minutes after starting the camera before calibrating, measuring, or running trials.**
+`~/calib_tools/warmup_drift.py` samples the table and top shelf every ~3 minutes if you need to
+confirm it has settled.
+
+A corollary for diagnosing: a *uniform* shift of every surface is thermal or the camera; the shelf
+having moved would change the shelf's height **relative to the table**, which a global drift leaves
+untouched. Check the relative number before concluding anything has been bumped.
+
 ## How to recalibrate
 
 Needs the robot container, the camera (Terminal 1), `calibration_check_node` (Terminal 2), RViz
