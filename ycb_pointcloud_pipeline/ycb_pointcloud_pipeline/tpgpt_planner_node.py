@@ -154,6 +154,12 @@ class TpgptPlannerNode(Node):
         # force it. On this bench the camera faces the robot, so the filter otherwise removes
         # the robot-side approaches.
         d('check_visibility', 'auto')
+        # The sim's 'centred' stage drops grasps more than max_centre_offset from the cloud's
+        # box centre, which guards against the moment a heavy object exerts on an off-centre
+        # grip. Off here (user, 2026-09-23): these objects are light (apple 68 g, banana 66 g,
+        # mug 118 g, soup can 349 g), so the moment is not what limits them, and the stage was
+        # removing 10-23 of 100 candidates per run.
+        d('check_centred', False)
         d('grasp_max_plans', 100)                 # candidates planned, best score first (sim: 100)
         d('grasp_min_path_clearance', -0.002)     # m, hand vs table/destination along the path
         d('grasp_fallback_top_down', False)       # the simulation has no scripted fallback
@@ -447,6 +453,7 @@ class TpgptPlannerNode(Node):
             allow_kinematic_fallback=bool(p('allow_kinematic_fallback')),
             max_centre_offset=float(p('max_centre_offset')),
             check_visibility=self._check_visibility(),
+            check_centred=bool(p('check_centred')),
             # The executor refuses to leave this box, so a path that does is no use.
             workspace_min=tuple(float(v) for v in p('executor_workspace_min')),
             workspace_max=tuple(float(v) for v in p('executor_workspace_max')),
@@ -534,7 +541,7 @@ class TpgptPlannerNode(Node):
             'graspgen': {n: self.get_parameter(n).value for n in (
                 'graspgen_gripper', 'graspgen_planner', 'graspgen_num_grasps', 'graspgen_topk',
                 'grasp_max_tilt_deg', 'grasp_max_plans', 'grasp_min_path_clearance',
-                'grasp_offset', 'check_visibility')},
+                'grasp_offset', 'check_visibility', 'check_centred')},
             'parameters': {n: self.get_parameter(n).value for n in (
                 'workspace_min', 'workspace_max', 'executor_workspace_min',
                 'executor_workspace_max', 'voxel_size', 'destination',

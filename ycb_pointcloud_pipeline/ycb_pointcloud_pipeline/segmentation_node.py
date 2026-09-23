@@ -291,10 +291,19 @@ class YCBSegmentationNode(Node):
         self.cycle += 1
 
         p = lambda n: self.get_parameter(n).value  # noqa: E731
+        limit = float(p('depth_gradient_max_mm_px'))
+        steep = self._depth_gradient(depth) > limit if limit > 0 else None
         if p('publish_scene_cloud'):
             stride = max(int(p('scene_cloud_stride')), 1)
             every = np.zeros(depth.shape[:2], dtype=bool)
             every[::stride, ::stride] = True
+            if steep is not None:
+                # The scene cloud carries the same flying pixels as the object masks, and
+                # they land beside every object: measured 2026-09-23, 29 of them within
+                # 30 mm of a can (18-53 mm from the can's own points, so the target
+                # exclusion does not reach them), which the carried can then "touched"
+                # three waypoints after the lift.
+                every &= ~steep
             # Unfiltered: the 5 mm density filter would strip a cloud this sparse.
             # The planner filters its shelf crop at a matching radius.
             scene, scene_colors = mask_to_pointcloud(rgb, depth, every, self.intrinsics,
@@ -305,8 +314,6 @@ class YCBSegmentationNode(Node):
                 self.scene_pub.publish(points_to_ros2_pointcloud2(
                     scene, scene_colors, color_msg.header.frame_id, color_msg.header.stamp))
 
-        limit = float(p('depth_gradient_max_mm_px'))
-        steep = self._depth_gradient(depth) > limit if limit > 0 else None
         published = []
         for det in detections:
             det['mask'] = self._eroded(det['mask'], det['label'])

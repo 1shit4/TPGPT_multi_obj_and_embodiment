@@ -31,7 +31,17 @@ measured two ways:
   Both use a z-buffer -- the nearest model point along each ray from the
   camera, binned at the depth camera's own pixel -- rather than a normal test,
   because a mug's far wall faces the camera and is hidden behind its near
-  wall.
+  wall. The comparison is made only where it means something: away from the
+  model's own silhouettes and rims, and on surface facing the camera within
+  :data:`MAX_INCIDENCE_DEG`.
+
+  **A thin-walled concave object may never pass**, and the YCB mug does not:
+  its correct fit (3.8 mm from a circle fitted to its wall, and a better
+  median and explained fraction than any placement made by hand) still reads
+  0.42, because rays through its opening meet its own inner and outer walls a
+  few millimetres apart. Refusing such a fit costs little -- the planner falls
+  back to the camera cloud and still plans -- while accepting a wrong one is
+  expensive, so the test stays strict.
 
 A fit that fails any threshold is **refused** and the planner falls back to
 the camera cloud, saying so in the plan.
@@ -109,7 +119,8 @@ MAX_RESTS = 12
 #:
 #: **``SEEN_DISTANCE`` and ``MAX_IN_FRONT`` are an error budget, not a preference.**
 #: On simulated views a correct fit puts *nothing* in front (0.00). On this
-#: bench it cannot: the camera reads a surface about 5 mm out
+#: bench it cannot, even where the comparison is well conditioned (see
+#: :data:`MAX_INCIDENCE_DEG`): the camera reads a surface about 5 mm out
 #: (``CALIBRATION.md``), and two independent estimators of the same can's axis
 #: -- this fit and a circle fitted to its side wall -- disagree by 7.6 mm, with
 #: the fit's own cost preferring its answer. So a ray tolerance below about
@@ -117,6 +128,15 @@ MAX_RESTS = 12
 #: 2026-09-23 at a 15 mm tolerance: correct fits read 0.04 (banana), 0.05
 #: (apple) and 0.13 (can), while a mug fitted into a tilted resting pose read
 #: 0.49 and the synthetic wrong-object pairs a median of 0.24. Hence 0.25.
+#:
+#: **What actually catches a bad fit is the pair (median, explained), and the
+#: failure that matters is a wrong pose of the right scan** -- the object's name
+#: comes from segmentation, so fitting the wrong scan is not a real case.
+#: Measured on the day's four captures: displacing a correct fit by 10 mm takes
+#: the median from 4.5-4.9 to 5.3-7.3 mm and the explained fraction from
+#: 0.76-0.84 to 0.55-0.74, which is refused on every object, while ``in_front``
+#: barely moves (0.00-0.03 to 0.01-0.05). So ``in_front`` is the weak member of
+#: the three and is kept only as a guard against a scan standing in open space.
 MAX_MEDIAN = 0.007
 EXPLAINED_DISTANCE = 0.008
 MIN_EXPLAINED = 0.75
@@ -314,7 +334,7 @@ def fit_object(model: ObjectModel, observed: np.ndarray, support_height: float,
     d_face = tree_obs.query(world[facing])[0] if facing.any() else np.zeros(0)
     median = float(np.median(d_obs))
     explained = float((d_obs <= EXPLAINED_DISTANCE).mean())
-    seen, in_front = _free_space(world[facing], obs, camera)
+    seen, in_front = _free_space(world[facing], nrm[facing], obs, camera)
     # Set it down where the real object is: on the touched support.
     resting_z = support_height - body[:, 2].min()
     dz = float(t[2] - resting_z)
@@ -338,8 +358,19 @@ def fit_object(model: ObjectModel, observed: np.ndarray, support_height: float,
                      observed_points=int(len(obs)), dropped_below_table=int(below.sum()), full_cloud=full @ R.T + position)
 
 
-def _free_space(model_visible: np.ndarray, observed: np.ndarray, camera: np.ndarray,
-                bin_deg: float = VISIBILITY_BIN_DEG, tolerance: float = SEEN_DISTANCE):
+#: Where the free-space test is trustworthy. A model point seen edge-on, or one
+#: sitting on the model's own silhouette or a rim, tells nothing: a millimetre of
+#: lateral error there changes which surface is nearest by centimetres. Measured
+#: 2026-09-23 on the day's captures: dropping those took a correctly fitted can
+#: from 0.11 to 0.07 and an apple from 0.17 to 0.05, while a wrong scan stayed
+#: at 0.14-0.83.
+MAX_INCIDENCE_DEG = 60.0
+MAX_EDGE_JUMP = 0.010
+
+
+def _free_space(model_visible: np.ndarray, normals_visible: np.ndarray, observed: np.ndarray,
+                camera: np.ndarray, bin_deg: float = VISIBILITY_BIN_DEG,
+                tolerance: float = SEEN_DISTANCE):
     """How much of the model's visible surface the camera measured, and how much
     of it stands in front of that measurement.
 
@@ -376,6 +407,13 @@ def _free_space(model_visible: np.ndarray, observed: np.ndarray, camera: np.ndar
     # apple and banana. A model point is in front only when every camera reading
     # around it is clearly further away.
     k_m, k_o = key(u_m), key(u_o)
+    # The model's own depth spread around each point: large at a silhouette or a rim.
+    om = np.argsort(k_m)
+    kms, rms = k_m[om], r_m[om]
+    em = np.flatnonzero(np.r_[True, kms[1:] != kms[:-1]])
+    mbins, mnear = kms[em], np.minimum.reduceat(rms, em)
+    incidence = np.degrees(np.arccos(np.clip(-(u_m * normals_visible).sum(axis=1), -1.0, 1.0)))
+    spread = np.zeros(len(k_m))
     order = np.argsort(k_o)
     k_sorted, r_sorted = k_o[order], r_o[order]
     edges = np.flatnonzero(np.r_[True, k_sorted[1:] != k_sorted[:-1]])
@@ -390,6 +428,10 @@ def _free_space(model_visible: np.ndarray, observed: np.ndarray, camera: np.ndar
             hit = bins[idx] == probe
             has |= hit
             best = np.where(hit, np.minimum(best, nearest_in_bin[idx]), best)
+            j = np.clip(np.searchsorted(mbins, probe), 0, len(mbins) - 1)
+            mine = mbins[j] == probe
+            spread = np.where(mine, np.maximum(spread, np.abs(r_m - mnear[j])), spread)
+    has &= (incidence <= MAX_INCIDENCE_DEG) & (spread <= MAX_EDGE_JUMP)
     delta = r_m - np.where(has, best, r_m)         # < 0: the model is in front
     seen = float((has & (np.abs(delta) <= tolerance)).mean())
     in_front = float((has & (delta < -tolerance)).mean())
