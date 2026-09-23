@@ -211,6 +211,14 @@ The planner's support height is: its `support_height` parameter, else the calibr
 - **`refine_grasp` may also lift the hand**, not only push it deeper, when the generator's pose
   puts the fingertips through the table. On a 37 mm banana that accounted for 44 of 100
   candidates, several failing by a millimetre.
+- **The exact geometry absorbs its own camera points at the error the camera actually has**: the
+  table band is **25 mm** (its noise spans 7 mm typically, 24 mm at worst on the glossy sheet) and
+  the shelf's explained distance is **30 mm** (its points sit 17-32 mm from the model because the
+  camera is ~10 mm off there). At the old 15 mm both left phantom obstacles hanging in front of
+  the surfaces -- 50 beside a banana, 1400 in front of the boards -- and those were what refused
+  otherwise good plans ("the hand meets the shelf", "the carried object touches seen points" by
+  one to five points). Cost: an object flatter than 25 mm on the table, or within 30 mm of a shelf
+  panel, is not seen as an obstacle. Shrink both once the calibration is refit.
 - **The support is inferred, not assumed to be the table** (`support_height` NaN): the highest
   shelf board whose top is at or just under the object's lowest points, else the table
   (`support_match`, 30 mm). A banana standing on the bottom board used to fit 94 mm off, because

@@ -56,12 +56,20 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
-#: Scene points below ``support + TABLE_BAND`` are the table, metres. The cloud's
-#: table reads 4.9 mm from the touched height with a 0.61 deg tilt
-#: (CALIBRATION.md), about 4 mm across 0.4 m, so table points lie within about
-#: 10 mm of the plane over the reach. Cost: anything flatter than 15 mm lying on
-#: the table is not an obstacle.
-TABLE_BAND = 0.015
+#: Scene points below ``support + TABLE_BAND`` are the table, metres. The table
+#: is exact (touched), so its camera points are duplicates and only their error
+#: survives.
+#:
+#: **25 mm, from the measured noise, not from the plane.** The cloud's table
+#: reads 4.9 mm from the touched height and tilts 0.61 deg (CALIBRATION.md), and
+#: its noise over a 5 cm patch spans 7 mm typically and 24 mm at worst -- the
+#: bench's white sheet is glossy. At 15 mm, 50 points survived within 120 mm of
+#: a banana lying on that sheet, hanging 15-20 mm above the table, and they
+#: refused 22 of 200 grasps as "the hand meets the shelf". At 25 mm, 3 survive.
+#:
+#: Cost: anything flatter than 25 mm lying on the table is not an obstacle. The
+#: objects here are 37 mm (banana) to 102 mm (can) tall.
+TABLE_BAND = 0.025
 
 #: Points further than this from the shoulder (joint 2, 0.333 m above the base)
 #: cannot be touched: the FR3 reaches 0.855 m to the wrist, plus the hand.
@@ -115,8 +123,22 @@ TARGET_EXCLUSION = 0.015
 SELF_FILTER_MARGIN = 0.03
 
 #: Observed shelf points within this of the model's surface count as explained
-#: by it, metres. The calibration's own accuracy is +/-5 mm.
-EXPLAINED_DISTANCE = 0.015
+#: by it -- the model is measured (tape plus robot touches) and exact, so its
+#: own points in the camera are duplicates, and only their error survives.
+#:
+#: **30 mm, from the camera's measured error at the shelf, not from the
+#: model's.** The camera puts the shelf about 10 mm sideways from where the
+#: robot touched it (`CALIBRATION.md`), and its points sit 17-32 mm from the
+#: model (quartiles, 2026-09-23). At 15 mm about 1400 of them survived as
+#: obstacles hanging in front of the boards, and they were what refused every
+#: otherwise good plan onto a board: the carried object "touches seen points"
+#: by one to five points while arriving.
+#:
+#: The cost, and it is the reason this is not larger: anything real standing on
+#: a board within 30 mm of a panel is absorbed with it, so an object flatter
+#: than 30 mm on a board is invisible to the check. The objects here are 37 mm
+#: (banana) to 102 mm (can) tall. Shrink it once the calibration is refit.
+EXPLAINED_DISTANCE = 0.030
 
 
 #: The tape measurements ``resolve_tape`` needs, in millimetres, keyed as in
