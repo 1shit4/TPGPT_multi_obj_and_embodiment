@@ -223,6 +223,12 @@ The planner's support height is: its `support_height` parameter, else the calibr
   shelf board whose top is at or just under the object's lowest points, else the table
   (`support_match`, 30 mm). A banana standing on the bottom board used to fit 94 mm off, because
   the planner put it on the table.
+- **The place clearance used to be an infinite plane, and it refused every upper-shelf grasp**
+  (fixed 2026-09-24, audit A14). `_verify`'s `path_hits_surface` measured the hand's lowest point
+  over the whole retreat against the destination's height; the taught retreat comes back down in
+  front of the shelf, 215-314 mm from the slot and 35-53 mm "below" the board, over open floor.
+  It now measures only while the hand is over the destination (its footprint plus 50 mm). Upper
+  slots went from 0 of 25 admissible to 5-11 on every object and capture tried.
 - **The demonstration decides which destinations are reachable, not the filters.** The placed
   orientation is a yaw about the table (audit A12), so the hand's tilt at the release is the tilt
   at the pick. The 01:57 demonstration (lowering onto the top board from above) cannot reach the
@@ -239,7 +245,24 @@ The planner's support height is: its `support_height` parameter, else the calibr
 - **GraspGen-X is a diffusion sampler: each call returns a different set**, so how many you ask
   for decides whether planning succeeds at all, not just how good the best grasp is. Measured live
   on a banana: 100 candidates gave 16, 0 and 0 admissible (two failures); 400 gave 5, 38 and 38,
-  all three planning, in 271, 22 and 15 s. Defaults are now 400 sampled / 200 kept / 200 planned.
+  all three planning, in 271, 22 and 15 s. **Since 2026-09-24 the draw is gone**: when the scan fit
+  is accepted the planner uses the object's **fixed grasp library** -- 2000 grasps asked for once
+  in the scan's own frame, kept in `outputs/hardware/grasp_library/`, carried into the scene by the
+  fit (`grasp_library:=true`, `tpgpt/hardware/grasp_library.py`, audit A13). A refused fit, or no
+  server on a cold cache, falls back to the live draw. `docs/hardware/GRASP_LIBRARY.md`.
+- **What a destination admits is now measurable offline** (`tpgpt/hardware/coverage.py`): of an
+  object's 2000 grasps, how many survive each stage and how many have an executable path, on a
+  capture the planner recorded, with no camera and no robot. Use it before another evening at the
+  robot. Results so far in `GRASP_LIBRARY.md`; raw in `outputs/hardware/coverage_fixed/`.
+- **Beyond about 45 deg of grasp tilt the transport map folds.** Measured over 286 planned
+  candidates on five objects: 1 fold in 155 below 45 deg, 74 in 131 above it (det(J) changes sign
+  -- the sim's own rule, det -0.34 to -0.58). The **tomato soup can plans nowhere** because the
+  hand can only grip it around its barrel: 57 of 60 of its grasps are past 60 deg. The likely
+  mechanism is A12 (the placed orientation is a yaw). Selection does not know about tilt; it walks
+  the generator's score order.
+- **A lying pudding box is not graspable by this hand** (138 x 128 x 39 mm: both horizontal
+  dimensions beat the 80 mm opening, and a pinch across 39 mm has the fingertips at the table).
+  Of 2000 grasps none survives the jaw check. Standing on its end it reaches three slots.
 - **Destinations have names**: `destination_name:=top_left|top_right|bottom_left|bottom_right`,
   resolved from the touched slot marks (`config/shelf.yaml`, `slots:`, `shelf.slots()`).
 - **The object clouds vary a lot between frames.** Two captures of the same motionless banana,
@@ -309,6 +332,9 @@ The planner's support height is: its `support_height` parameter, else the calibr
   simulation's, with file:line on both sides, severity, fix order and status.
 - `docs/hardware/FRESH_START.md` — what counts as evidence after the move (nothing before it), and
   the staged test order: sensing, a new demo, planning dry runs, table grasps, then the shelf.
+- `docs/hardware/GRASP_LIBRARY.md` — the fixed per-object grasp library (why the draw had to go,
+  how it is cached and used) and coverage: what each shelf slot admits, measured, and the four
+  things that measurement exposed.
 - `docs/hardware/SHELF_AND_PATH_CHECK.md` — the shelf model, the scene cloud, the whole-path check
   and grasp selection: which side's method was kept and why, how to measure and check the shelf,
   parameters, and what was verified.
