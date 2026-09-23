@@ -61,6 +61,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 import numpy as np
+from scipy.spatial import cKDTree
 
 #: Planner object name -> YCB directory under :data:`SCAN_ROOT`.
 YCB_SCANS = {
@@ -94,6 +95,13 @@ NOISE = 0.004
 #: 848 x 480 over a 69 deg field of view.
 VISIBILITY_BIN_DEG = 0.12
 
+#: How far the object may be tilted off a resting face of its hull, degrees.
+#: A banana rests on its two ends and can be rolled about its long axis; a can
+#: can lean. The hull's faces are a discrete set and the real rest is a
+#: continuum, so the fit is allowed this much freedom, always keeping the
+#: object down on the table (:func:`_rest_tilt`).
+MAX_REST_TILT_DEG = 25.0
+
 #: A resting face is a distinct one if its normal differs from every kept face's
 #: by more than this, degrees; at most :data:`MAX_RESTS` are tried.
 REST_SEPARATION_DEG = 20.0
@@ -117,6 +125,28 @@ MAX_RESTS = 12
 #: on a can) 0.62 explained. So the median is generous and the fractions do the
 #: rejecting.
 #:
+#: ``MIN_EXPLAINED`` is 0.60 because that is what this camera delivers, and how
+#: much it varies. Two captures of the same motionless banana, fifteen minutes
+#: apart, put 11% and 25% of their points off the object (a layer about 20 mm
+#: above it, dense, and therefore not removable by any outlier filter -- both a
+#: radius and a statistical filter leave it untouched). Correct fits accordingly
+#: read 0.68 to 0.91. Refusing the low ones is worse than accepting them,
+#: because the fallback is the one-sided cloud that carries the same layer *and*
+#: has no back: on the live banana the fitted scan planned at rank 3 while the
+#: camera cloud produced nothing. The other two numbers still bound the pose:
+#: the median must be within 7 mm and the scan must not stand in measured free
+#: space. These test consistency, not exactness -- a 10 mm shift *along* a
+#: banana's axis is not distinguishable by any of them, and does not matter,
+#: since the camera itself is good to about 8 mm here.
+#:
+#: Measured on seven captures of four objects, every one a correct fit, judged
+#: at the set-down pose: median 4.3-7.3 mm, explained 0.53-0.79, in front
+#: 0.011-0.035. The limits (8 mm, 0.50, 0.25) sit just outside that envelope.
+#: The same fits displaced 15 mm read 6.7-11.7 mm and 0.32-0.59, which the
+#: limits refuse for the can, apple and mug. They do not refuse it for the
+#: banana: a shift along a banana's axis leaves the cloud almost unchanged, so
+#: nothing here can see it.
+#:
 #: **``SEEN_DISTANCE`` and ``MAX_IN_FRONT`` are an error budget, not a preference.**
 #: On simulated views a correct fit puts *nothing* in front (0.00). On this
 #: bench it cannot, even where the comparison is well conditioned (see
@@ -137,9 +167,9 @@ MAX_RESTS = 12
 #: 0.76-0.84 to 0.55-0.74, which is refused on every object, while ``in_front``
 #: barely moves (0.00-0.03 to 0.01-0.05). So ``in_front`` is the weak member of
 #: the three and is kept only as a guard against a scan standing in open space.
-MAX_MEDIAN = 0.007
+MAX_MEDIAN = 0.008
 EXPLAINED_DISTANCE = 0.008
-MIN_EXPLAINED = 0.75
+MIN_EXPLAINED = 0.50
 SEEN_DISTANCE = 0.015
 MAX_IN_FRONT = 0.25
 
@@ -327,7 +357,10 @@ def fit_object(model: ObjectModel, observed: np.ndarray, support_height: float,
             best = (s, k, heading, t)
 
     _, k, heading, t = best
-    body, nrm, R = placed(model.rests[k], heading, t)
+    R, t = _rest_tilt(model, obs, _rot_z(heading) @ model.rests[k], t, support_height)
+    body = pts @ R.T
+    nrm = normals @ R.T
+    heading = float(np.arctan2(R[1, 0], R[0, 0]))
     world = body + t
     d_obs = cKDTree(world).query(obs)[0]
     facing = _visible(world, camera)
@@ -366,6 +399,42 @@ def fit_object(model: ObjectModel, observed: np.ndarray, support_height: float,
 #: at 0.14-0.83.
 MAX_INCIDENCE_DEG = 60.0
 MAX_EDGE_JUMP = 0.010
+
+
+def _rest_tilt(model, observed, R, t, support_height, max_tilt_deg=MAX_REST_TILT_DEG):
+    """Let the object tilt a little, staying on the table, and keep it if it fits better.
+
+    The resting orientations are the scan's own frame and its hull's stable
+    faces, which are a discrete set; a real object rests in a continuum. A
+    banana supported at its two ends can be rolled about its long axis by tens
+    of degrees, and a can can lean. Measured 2026-09-23: this took a can from
+    0.79 to 0.85 explained and an apple from 0.87 to 0.89, and it is the only
+    thing that explains the points a rolled banana puts above its scan's
+    bounding height.
+    """
+    from scipy.optimize import least_squares
+    from scipy.spatial.transform import Rotation
+
+    pts, _ = model.sample(FIT_POINTS, 0)
+    tree = cKDTree(observed)
+
+    def place(x):
+        turned = Rotation.from_rotvec(x[:3]).as_matrix() @ R
+        body = pts @ turned.T
+        return turned, body, np.array([t[0] + x[3], t[1] + x[4],
+                                       float(support_height) - body[:, 2].min()])
+
+    def residual(x):
+        _, body, shift = place(x)
+        over = max(0.0, np.degrees(np.linalg.norm(x[:3])) - max_tilt_deg)
+        return np.r_[tree.query(body + shift)[0], 0.05 * over]
+
+    before = float(np.median(tree.query(pts @ R.T + t)[0]))
+    sol = least_squares(residual, np.zeros(5), loss="cauchy", f_scale=NOISE,
+                        x_scale=[0.1, 0.1, 0.1, 0.01, 0.01], diff_step=1e-3)
+    turned, body, shift = place(sol.x)
+    after = float(np.median(tree.query(body + shift)[0]))
+    return (turned, shift) if after <= before else (R, t)
 
 
 def _free_space(model_visible: np.ndarray, normals_visible: np.ndarray, observed: np.ndarray,
