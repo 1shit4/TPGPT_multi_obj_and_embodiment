@@ -129,7 +129,9 @@ class TpgptPlannerNode(Node):
         d('object_model_retries', 2)
         d('object_model_retry_wait', 4.0)         # s to wait for new clouds between attempts
         # Scene description, base frame. NaN = estimate from the cloud.
-        d('support_height', NAN)                  # NaN -> verification.expected_table_height
+        d('support_height', NAN)                  # NaN -> the table, or a shelf board the object stands on
+        d('support_match', 0.030)                 # m: how far above a surface the object's lowest
+                                                  # points may sit for it to count as standing there
         d('destination', [0.55, 0.25, 0.0])       # where to put the object (x, y used)
         # A named slot from config/shelf.yaml (top_left, top_right, bottom_left, bottom_right),
         # which resolves to the touched slot mark on that board. It overrides `destination`.
@@ -364,7 +366,8 @@ class TpgptPlannerNode(Node):
             fr3=default_model(), end_effector=self.end_effector,
             margin=float(scene_cfg.get('roi_margin', ROI_MARGIN)),
             above_support=float(scene_cfg.get('roi_above_support', ROI_ABOVE_SUPPORT)),
-            scope=str(scene_cfg.get('scope', 'visible')), support_height=self._support_height())
+            scope=str(scene_cfg.get('scope', 'visible')),
+            support_height=self._support_height(target_points))
         if len(world.cloud) > int(p('scene_outlier_min_neighbors')):
             before = len(world.cloud)
             world.cloud = cc.radius_outlier_filter(world.cloud, float(p('scene_outlier_radius')),
@@ -453,7 +456,7 @@ class TpgptPlannerNode(Node):
             points=points,
             destination=destination,
             destination_height=float(dest_h) if _finite(dest_h) else float(destination[2]),
-            support_height=self._support_height(),
+            support_height=self._support_height(points),
         )
         t0 = time.monotonic()
         side = not self.end_effector.is_parallel_jaw
@@ -687,7 +690,7 @@ class TpgptPlannerNode(Node):
             log.warn(f'No YCB scan for {name!r} (known: {sorted(YCB_SCANS)}): planning on the '
                      'camera cloud')
             return observed
-        support = self._support_height()
+        support = self._support_height(observed)
         T_cam = self.calib.T_base_optical(self.calib.cal.optical_frame)
         if support is None or T_cam is None:
             self.object_cloud_source = 'camera (no support height or camera pose to fit with)'
@@ -810,13 +813,36 @@ class TpgptPlannerNode(Node):
             time.sleep(1.0)
         return 'server started but does not answer (see ~/.ros/graspgenx_server.log)'
 
-    def _support_height(self):
-        """Explicit parameter, else the calibration's measured table height, else None
-        (estimated from the object's cloud, which truncation biases a few mm high)."""
+    def _support_height(self, points=None):
+        """What the object is standing on: the table, or a shelf board it sits on.
+
+        An explicit ``support_height`` wins. Otherwise the candidates are the
+        touched table height and the top face of every shelf board, and the one
+        chosen is the highest that lies at or just below the object's own lowest
+        points (within ``support_match``). A reshelving experiment picks objects
+        off boards as well as off the table, and assuming the table puts the
+        object's base tens of centimetres below where it is: measured
+        2026-09-23, a banana standing on the bottom board fitted 94 mm off.
+        """
         value = self.get_parameter('support_height').value
         if _finite(value):
             return float(value)
-        return self.calib.cal.expected_table_height
+        table = self.calib.cal.expected_table_height
+        if points is None or not len(points) or self.shelf_model is None or table is None:
+            return table
+        low = float(np.percentile(np.asarray(points)[:, 2], 1.0))
+        match = float(self.get_parameter('support_match').value)
+        best = table
+        for box in self.shelf_model.boxes:
+            if box.name not in self.shelf_model.supports:
+                continue
+            top = float(box.position[2] + box.size[2])
+            if top > best and top <= low + match:
+                best = top
+        if best != table:
+            self.get_logger().info(f'the object stands on a shelf board at z {best:+.4f} m, not '
+                                   f'the table at {table:+.4f} m (its lowest points are {low:+.4f})')
+        return best
 
     # ------------------------------------------------------------------ rviz
     def _publish_cloud_only(self, points):

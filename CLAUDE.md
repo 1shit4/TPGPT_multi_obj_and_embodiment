@@ -202,6 +202,16 @@ The planner's support height is: its `support_height` parameter, else the calibr
 - **`refine_grasp` may also lift the hand**, not only push it deeper, when the generator's pose
   puts the fingertips through the table. On a 37 mm banana that accounted for 44 of 100
   candidates, several failing by a millimetre.
+- **The support is inferred, not assumed to be the table** (`support_height` NaN): the highest
+  shelf board whose top is at or just under the object's lowest points, else the table
+  (`support_match`, 30 mm). A banana standing on the bottom board used to fit 94 mm off, because
+  the planner put it on the table.
+- **The demonstration decides which destinations are reachable, not the filters.** The placed
+  orientation is a yaw about the table (audit A12), so the hand's tilt at the release is the tilt
+  at the pick. The 01:57 demonstration (lowering onto the top board from above) cannot reach the
+  bottom board -- every candidate hit `shelf top_board` while carrying. The 18:20 demonstration
+  (sliding in under the bottom board) reaches **both**: bottom 0.969 / min det 0.86, top 0.962 and
+  0.936 / min det 0.89 and 0.81, live, 2026-09-23. Prefer the harder demonstration.
 - **A refused scan fit is retried on fresh camera frames** (`object_model_retries`, 2), because
   the same object can fit on one frame and not the next. The best attempt is kept; if none is
   accepted the planner falls back to the camera cloud, as before.
