@@ -67,6 +67,11 @@ from tpgpt.utils.rotations import rotation_geodesic
 KEYPOINT_BOX = "grasp_cube"
 KEYPOINT_ORIENTATION = "grasp"
 
+#: How far past the object's own footprint the destination surface is taken to
+#: reach, when judging whether the hand dips into it: half the Franka Hand's
+#: width across the pads. Beyond it the hand is off the board (`_hand_clearance`).
+PLACE_FOOTPRINT_MARGIN = 0.05
+
 #: Below this many points an object is too thinly seen to describe
 #: (``pipeline.MIN_CLOUD_POINTS``).
 MIN_CLOUD_POINTS = 40
@@ -327,9 +332,14 @@ def plan(
         grasp_orientations[release_index], place_grasp.rotation
     )[0]))
     path = transported.positions
+    # The destination surface reaches as far as the object being set down on it,
+    # plus the hand around it; beyond that the hand is past the board (docstring).
+    horizontal = np.linalg.norm(points[:, :2] - np.median(points[:, :2], axis=0), axis=1).max()
     clearance_pick, clearance_place = _hand_clearance(
         transported, grasp_index, release_index, width, support_height,
         float(target.destination_height), ee,
+        destination_xy=target.destination[:2],
+        footprint_radius=float(horizontal) + PLACE_FOOTPRINT_MARGIN,
     )
     metrics = {
         "n_cloud_points": int(len(points)),
@@ -401,14 +411,29 @@ def plan(
 def _hand_clearance(labels: PolicyLabels, grasp_index: int, release_index: int,
                     closed_width: float, support_height: float,
                     destination_height: float,
-                    end_effector: EndEffector | None = None) -> tuple[float, float]:
-    """Lowest corner of the hand along the path, above the surface under it.
+                    end_effector: EndEffector | None = None,
+                    destination_xy: np.ndarray | None = None,
+                    footprint_radius: float | None = None) -> tuple[float, float]:
+    """Lowest corner of the hand along the path, above the surface **under it**.
 
     Labels up to the grasp are measured against the support, labels from the
     release on against the destination surface. A Franka Hand is open where the
     labels are open and closed to the measured jaw width where they are closed;
     an Inspire hand is its fixed envelope box. Negative means the hand dips
     below that surface.
+
+    The support is a table and effectively unbounded, so the pick side is every
+    label up to the grasp. **The destination surface is not**: it is a shelf
+    board, and once the retreat has carried the hand off it there is nothing
+    underneath to hit. Measuring the whole retreat against an infinite plane at
+    the destination's height refused every candidate for the upper boards --
+    25 of 25 on each of four banana captures, 2026-09-24 -- because the taught
+    retreat comes back down in *front* of the shelf, 215-314 mm away from the
+    slot, 35-53 mm below the board it had just placed on. The exact path check
+    passed those same plans (`path_check`, which knows where the boards end).
+    So the place side is measured only while the hand is within
+    ``footprint_radius`` of ``destination_xy``: where the surface really is.
+    Without those two arguments the old, unbounded behaviour is kept.
     """
     ee = end_effector or FRANKA_HAND
     rotations = ee.grasp_from_ee(labels.orientations)
@@ -418,8 +443,15 @@ def _hand_clearance(labels: PolicyLabels, grasp_index: int, release_index: int,
                                    closed_width if labels.gripper[k] > 0 else MAX_OPENING)
                    for k in indices)
 
+    place_labels = range(release_index, len(labels.positions))
+    if destination_xy is not None and footprint_radius is not None:
+        over = [k for k in place_labels
+                if np.linalg.norm(labels.positions[k][:2] - np.asarray(destination_xy)[:2])
+                <= float(footprint_radius)]
+        # The release itself is always over the destination, whatever the radius.
+        place_labels = over or [release_index]
     pick = lowest(range(0, grasp_index + 1)) - support_height
-    place = lowest(range(release_index, len(labels.positions))) - destination_height
+    place = lowest(place_labels) - destination_height
     return float(pick), float(place)
 
 

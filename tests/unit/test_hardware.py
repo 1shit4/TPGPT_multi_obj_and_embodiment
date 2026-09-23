@@ -35,6 +35,7 @@ from tpgpt.hardware.planner import (
     Plan,
     PlanningError,
     TargetScene,
+    _hand_clearance,
     default_grasp,
     plan,
 )
@@ -484,3 +485,51 @@ class TestInfeasibleFallback:
         assert s.infeasible_fallback == defaults["infeasible_fallback"].default
         assert s.feasibility_stride == defaults["feasibility_stride"].default
         assert s.feasibility_tolerance == defaults["feasibility_tolerance"].default
+
+
+# ------------------------------------------------- the hand against a surface
+class TestHandClearance:
+    """The destination is a shelf board, not a plane that reaches to the horizon.
+
+    Measured 2026-09-24: with the 23:01 banana demonstration the taught retreat
+    comes back down *in front of* the shelf -- 215 to 314 mm from the slot, 35 to
+    53 mm below the board it had just placed on -- and judging that against an
+    infinite plane at the board's height refused all 25 planned candidates for
+    each upper slot, on each of four captures, while the exact path check passed
+    them.
+    """
+
+    DEST = np.array([0.65, 0.15, 0.30])
+
+    def labels(self, retreat):
+        """Descend, grasp, place at the destination, then retreat as given."""
+        positions = np.array([[0.65, 0.15, 0.45], [0.65, 0.15, 0.35],
+                              [*self.DEST[:2], 0.33], *retreat])
+        n = len(positions)
+        down = np.array([[1.0, 0.0, 0.0], [0.0, -1.0, 0.0], [0.0, 0.0, -1.0]]).T
+        return PolicyLabels(
+            positions=positions, velocities=np.zeros_like(positions),
+            orientations=np.tile(down, (n, 1, 1)), stiffness=np.tile(K_FREE, (n, 1, 1)),
+            damping=np.tile(D_FREE, (n, 1, 1)), gripper=np.full(n, -1.0),
+            time_belief=np.linspace(0, 1, n), time_rate=np.full(n, 1.0))
+
+    def clearance(self, retreat, **kw):
+        labels = self.labels(retreat)
+        return _hand_clearance(labels, 1, 2, 0.04, -0.01, float(self.DEST[2]), **kw)[1]
+
+    def test_a_retreat_that_dips_far_from_the_slot_is_not_the_destination(self):
+        away = [[0.65, 0.15, 0.40], [0.64, 0.40, 0.36], [0.62, 0.45, 0.25]]  # 300 mm away, low
+        assert self.clearance(away) < -0.04, "unbounded, the plane refuses it"
+        bounded = self.clearance(away, destination_xy=self.DEST[:2], footprint_radius=0.15)
+        assert bounded > 0.0, "bounded to the board, there is nothing under the hand to hit"
+
+    def test_a_hand_driven_into_the_board_is_still_refused(self):
+        into = [[*self.DEST[:2], 0.26], [0.66, 0.16, 0.24]]        # straight down, over the slot
+        assert self.clearance(into, destination_xy=self.DEST[:2], footprint_radius=0.15) < 0.0
+
+    def test_the_release_is_measured_whatever_the_radius(self):
+        away = [[0.20, -0.40, 0.10]]
+        assert self.clearance(away, destination_xy=self.DEST[:2],
+                              footprint_radius=0.001) == pytest.approx(
+            self.clearance([[*self.DEST[:2], 0.33]], destination_xy=self.DEST[:2],
+                           footprint_radius=0.5), abs=1e-9)
