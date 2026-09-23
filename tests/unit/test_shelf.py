@@ -207,6 +207,18 @@ def test_m5_is_the_width_and_the_slot_readings_disagreement_is_split():
     assert model.config["derived"]["width_mismatch_mm"] == pytest.approx(4.0, abs=1e-6)
 
 
+def test_named_slots_resolve_to_the_touched_marks_on_each_board():
+    cfg = {"shelf": {**REAL, "slots": {
+        "top_left": {"xy": "left_slot", "board": "top_board"},
+        "bottom_right": {"xy": "right_slot", "board": "bottom_board"}}}}
+    from tpgpt.hardware.shelf import slots
+    got = slots(cfg)
+    assert got["top_left"] == (0.6842, -0.2774, 0.3213)          # the touched mark and board
+    assert got["bottom_right"] == (0.4636, -0.3529, 0.0768)
+    with pytest.raises(KeyError):
+        slots({"shelf": {**REAL, "slots": {"x": {"xy": "nope", "board": "top_board"}}}})
+
+
 # ------------------------------------------------ the placement, from the cloud
 def test_a_cloud_fit_moves_the_front_edge_rigidly_and_never_its_height():
     left, right = np.array([0.8, -0.1]), np.array([0.3, -0.3])

@@ -44,6 +44,15 @@ shelf:
     board_thickness: 18                # M13
     apron_height: 72                   # M14 check: 72 + 18 = 90 vs touched bottom board - table = 90.4
 
+  # The four places an object is put, by name: the two slot marks the robot touched
+  # (CALIBRATION.md) on each of the two boards it can reach. `tpgpt_planner_node`'s
+  # destination_name takes one of these instead of destination: [x, y, z].
+  slots:
+    top_left:     {xy: left_slot,  board: top_board}
+    top_right:    {xy: right_slot, board: top_board}
+    bottom_left:  {xy: left_slot,  board: bottom_board}
+    bottom_right: {xy: right_slot, board: bottom_board}
+
   # Anything else solid on or around the shelf, as boxes: lo/hi corners in the shelf frame
   # (frame: shelf) or the base frame (frame: base).
   extra_boxes: []

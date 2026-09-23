@@ -60,7 +60,7 @@ def _surface_gap(model, R, t, fit):
 
 @pytest.mark.parametrize("name,rest,heading", [
     ("banana", 0, 0.7), ("banana", 1, 2.3), ("apple", 0, 1.1), ("mug", 0, 2.0),
-    ("tomato_soup_can", 0, 0.4)])
+    ("tomato_soup_can", 0, 0.4), ("pudding_box", 0, 1.3), ("foam_brick", 0, 2.7)])
 def test_the_scan_lands_on_the_object(name, rest, heading):
     model = ObjectModel.load(name)
     R, t = _placed(model, rest, heading, (0.52, 0.18))

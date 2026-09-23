@@ -46,6 +46,11 @@ ros2 run --prefix python3 ycb_pointcloud_pipeline tpgpt_pick_place --ros-args \
   "Shelf model" and "Shelf cloud (obstacles)". The log line `Shelf world: {...}` gives
   `explained_by_model` (close to 1 for an empty, correctly modelled shelf).
   See `docs/hardware/SHELF_AND_PATH_CHECK.md`.
+- **Destinations by name**: `-p destination_name:=top_left` (or `top_right`, `bottom_left`,
+  `bottom_right`) instead of `-p destination:="[x, y, z]"`. Each resolves to the slot mark the
+  robot touched on that board (`config/shelf.yaml`, `slots:`).
+- **Detected objects** (`config/target_objects.yaml`): banana, apple, tomato_soup_can,
+  pudding_box, foam_brick. Each has a YCB scan, so the planner fits the scan to the camera cloud.
 - **Grounding the shelf's placement** (once per shelf move; shelf empty, arm out of view,
   segmentation running), in the tpgpt venv (`source ~/venvs/tpgpt/bin/activate`, else
   `ModuleNotFoundError: No module named 'tpgpt'`): `ros2 run --prefix python3 ycb_pointcloud_pipeline shelf_fit`. It prints a

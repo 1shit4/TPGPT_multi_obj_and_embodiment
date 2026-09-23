@@ -69,6 +69,8 @@ YCB_SCANS = {
     "apple": "013_apple",
     "mug": "025_mug",
     "tomato_soup_can": "005_tomato_soup_can",
+    "pudding_box": "008_pudding_box",       # Jell-O chocolate pudding, 138 x 89 x 39 mm
+    "foam_brick": "061_foam_brick",         # 78 x 53 x 51 mm
 }
 
 #: The simulation's download location (``tpgpt.sim.ycb.YCB_ROOT``), resolved

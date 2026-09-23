@@ -202,6 +202,16 @@ The planner's support height is: its `support_height` parameter, else the calibr
 - **`refine_grasp` may also lift the hand**, not only push it deeper, when the generator's pose
   puts the fingertips through the table. On a 37 mm banana that accounted for 44 of 100
   candidates, several failing by a millimetre.
+- **GraspGen-X is a diffusion sampler: each call returns a different set**, so how many you ask
+  for decides whether planning succeeds at all, not just how good the best grasp is. Measured live
+  on a banana: 100 candidates gave 16, 0 and 0 admissible (two failures); 400 gave 5, 38 and 38,
+  all three planning, in 271, 22 and 15 s. Defaults are now 400 sampled / 200 kept / 200 planned.
+- **Destinations have names**: `destination_name:=top_left|top_right|bottom_left|bottom_right`,
+  resolved from the touched slot marks (`config/shelf.yaml`, `slots:`, `shelf.slots()`).
+- **The object clouds vary a lot between frames.** Two captures of the same motionless banana,
+  minutes apart, put 11% and 25% of their points in a dense layer ~20 mm above it (specular; no
+  outlier filter removes it). The scan fit tolerates it: its thresholds come from seven real
+  captures, judged at the set-down pose (`tpgpt/hardware/object_model.py`).
 - **Flying pixels at a silhouette.** A pixel on an object's outline takes its depth partly from
   the background, so it lands on the ray between the two: an upright YCB can (68 mm) fused to a
   116 mm blob with a 60 mm tail streaming away from the camera, which broke its scan fit and most

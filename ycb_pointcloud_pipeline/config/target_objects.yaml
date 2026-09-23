@@ -26,6 +26,10 @@ target_objects:
   # - mustard_bottle
   # - spam
   # - red cup
-  - name: mug
-    prompt: red mug               # YCB 025_mug is dark red; "mug" alone also matches cups
+  # - name: mug                 # taken away 2026-09-23; while listed it matched a cup behind the
+  #   prompt: red mug            # robot at 0.75, whose cloud then failed the workspace crop
+  - name: pudding_box
+    prompt: brown chocolate pudding box
+  - name: foam_brick
+    prompt: red foam brick
   - tomato_soup_can

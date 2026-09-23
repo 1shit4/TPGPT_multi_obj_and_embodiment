@@ -179,6 +179,29 @@ FIT_MAX_MEDIAN = 0.006
 FIT_FACE_TOLERANCE = 0.003
 
 
+def slots(config: dict) -> dict:
+    """The named places to put an object, as ``name -> (x, y, z)`` in the base frame.
+
+    Each is one of the touched slot marks (``anchors``) on one of the boards, so
+    the name resolves to measured geometry rather than to typed-in numbers.
+    """
+    c = dict(config.get("shelf", config))
+    anchors = c.get("anchors") or {}
+    heights = {"top_board": anchors.get("top_board_top"),
+               "bottom_board": anchors.get("bottom_board_top"),
+               "table": anchors.get("table")}
+    for board in c.get("boards", []):
+        heights.setdefault(str(board["name"]), float(board["top"]))
+    out = {}
+    for name, spec in (c.get("slots") or {}).items():
+        xy, board = anchors.get(spec["xy"]), heights.get(spec["board"])
+        if xy is None or board is None:
+            raise KeyError(f"slot {name!r}: anchors has no {spec['xy']!r} or no height for "
+                           f"{spec['board']!r}")
+        out[str(name)] = (float(xy[0]), float(xy[1]), float(board))
+    return out
+
+
 def resolve_tape(c: dict) -> dict:
     """The shelf's geometry from tape measurements anchored to touched points.
 

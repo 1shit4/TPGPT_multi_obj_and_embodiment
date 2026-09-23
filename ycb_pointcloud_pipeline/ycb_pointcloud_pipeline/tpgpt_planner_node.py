@@ -126,6 +126,9 @@ class TpgptPlannerNode(Node):
         # Scene description, base frame. NaN = estimate from the cloud.
         d('support_height', NAN)                  # NaN -> verification.expected_table_height
         d('destination', [0.55, 0.25, 0.0])       # where to put the object (x, y used)
+        # A named slot from config/shelf.yaml (top_left, top_right, bottom_left, bottom_right),
+        # which resolves to the touched slot mark on that board. It overrides `destination`.
+        d('destination_name', '')
         d('destination_height', NAN)              # surface height there; NaN -> destination z
         d('grasp_depth_below_top', 0.03)          # top-down fallback grasp only
         # Grasp selection
@@ -138,8 +141,13 @@ class TpgptPlannerNode(Node):
         d('graspgen_port', 5556)
         d('graspgen_gripper', 'franka_panda')     # GraspGen-X model of the Franka Hand
         d('graspgen_planner', 'diffusion')        # diffusion | graspmoe
-        d('graspgen_num_grasps', 200)
-        d('graspgen_topk', 100)
+        # GraspGen-X is a diffusion sampler: every call returns a different set, so the
+        # number asked for decides how reliable planning is, not just how good the best
+        # grasp is. Measured live on a banana 2026-09-23: with 100 candidates three calls
+        # gave 16, 0 and 0 admissible (planning failed twice); with 400 they gave 5, 38
+        # and 38, and all three planned, at ranks 16, 1 and 1, in 271, 22 and 15 s.
+        d('graspgen_num_grasps', 400)
+        d('graspgen_topk', 200)
         d('graspgen_timeout', 30.0)               # s
         d('graspgen_autostart', True)             # start scripts/run_graspgenx_server.sh if unreachable
         # Approach vs straight down; past 90 the hand rises through the table. The sim caps
@@ -422,6 +430,21 @@ class TpgptPlannerNode(Node):
         info['object_model'] = None if self.object_fit is None else self.object_fit.summary()
         destination = np.asarray(p('destination'), dtype=float)
         dest_h = p('destination_height')
+        if p('destination_name'):
+            from tpgpt.hardware.shelf import slots
+            try:
+                named = slots(self.shelf_raw)[p('destination_name')]
+            except KeyError:
+                known = sorted(slots(self.shelf_raw)) if self.shelf_raw else []
+                msg = (f"destination_name {p('destination_name')!r} is not a slot in "
+                       f"{p('shelf_config')}; known: {known}")
+                log.error(msg)
+                info['error'] = msg
+                return False, msg
+            destination = np.asarray(named, dtype=float)
+            dest_h = float(named[2])
+            log.info(f"destination {p('destination_name')}: "
+                     f"{np.round(destination, 4).tolist()} (from the touched slot marks)")
         scene = TargetScene(
             points=points,
             destination=destination,
@@ -543,7 +566,7 @@ class TpgptPlannerNode(Node):
                 'grasp_max_tilt_deg', 'grasp_max_plans', 'grasp_min_path_clearance',
                 'grasp_offset', 'check_visibility', 'check_centred')},
             'parameters': {n: self.get_parameter(n).value for n in (
-                'workspace_min', 'workspace_max', 'executor_workspace_min',
+                'destination_name', 'workspace_min', 'workspace_max', 'executor_workspace_min',
                 'executor_workspace_max', 'voxel_size', 'destination',
                 'destination_height', 'support_height', 'grasp_depth_below_top',
                 'min_determinant', 'n_frames')},
