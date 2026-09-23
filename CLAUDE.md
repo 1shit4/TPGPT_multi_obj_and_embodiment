@@ -202,6 +202,13 @@ The planner's support height is: its `support_height` parameter, else the calibr
 - **`refine_grasp` may also lift the hand**, not only push it deeper, when the generator's pose
   puts the fingertips through the table. On a 37 mm banana that accounted for 44 of 100
   candidates, several failing by a millimetre.
+- **A refused scan fit is retried on fresh camera frames** (`object_model_retries`, 2), because
+  the same object can fit on one frame and not the next. The best attempt is kept; if none is
+  accepted the planner falls back to the camera cloud, as before.
+- **A dry run really executes the policy**, against a first-order impedance model of the arm
+  (`tpgpt_executor_node.simulate`), in real time, publishing `/tpgpt/executor/simulated_pose`.
+  So a dry run takes as long as the real motion (116 s for the taught demonstration at
+  `speed_scale` 0.35) and can hit `max_policy_seconds`, which is why that default is now 300 s.
 - **GraspGen-X is a diffusion sampler: each call returns a different set**, so how many you ask
   for decides whether planning succeeds at all, not just how good the best grasp is. Measured live
   on a banana: 100 candidates gave 16, 0 and 0 admissible (two failures); 400 gave 5, 38 and 38,

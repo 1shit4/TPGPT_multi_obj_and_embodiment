@@ -124,7 +124,11 @@ class TpgptExecutorNode(Node):
         # between 60 and 15 on 64 of 427 steps of a dry run.
         d('transit_rotational_scale', -1.0)
         d('tool_offset', [0.0, 0.0, 0.0])          # m, controller frame, ADDED to the plan hand's offset
-        d('max_policy_seconds', 120.0)
+        # The policy's own length is 810 labels / 20 Hz / speed_scale = 116 s for the taught
+        # demonstration at 0.35, so 120 s aborted a dry run that was running normally, and any
+        # stall handling pushed it over. It is a runaway guard, not a schedule: keep it well
+        # above the plan's expected duration, which the executor prints before it starts.
+        d('max_policy_seconds', 300.0)
         # What to do when the execution watchdog declares the arm stuck (the lag gate
         # held the phase for its whole patience). 'continue': warn, switch the lag gate
         # and its clamp off for the rest of the run, so the task clock runs at the

@@ -123,6 +123,11 @@ class TpgptPlannerNode(Node):
         # simulation's YCB experiment uses the full scan (tpgpt.hardware.object_model).
         # Falls back to the camera cloud when there is no scan or the fit is refused.
         d('object_model', True)
+        # A refused fit is often this camera having a bad moment rather than a wrong pose: the
+        # points off the object vary between 11% and 25% frame to frame. So a refusal is retried
+        # on fresh clouds, and the best attempt is kept.
+        d('object_model_retries', 2)
+        d('object_model_retry_wait', 4.0)         # s to wait for new clouds between attempts
         # Scene description, base frame. NaN = estimate from the cloud.
         d('support_height', NAN)                  # NaN -> verification.expected_table_height
         d('destination', [0.55, 0.25, 0.0])       # where to put the object (x, y used)
@@ -418,8 +423,7 @@ class TpgptPlannerNode(Node):
             log.error(str(exc))
             info['error'] = str(exc)
             return False, str(exc)
-        observed = points
-        points = self._full_object_cloud(observed)
+        observed, points, n_clouds = self._object_cloud_with_retries(points, n_clouds)
         self.observed_pub.publish(xyz_to_pointcloud2(observed, self.base,
                                                      self.get_clock().now().to_msg(),
                                                      (255, 255, 255)))
@@ -566,7 +570,7 @@ class TpgptPlannerNode(Node):
                 'grasp_max_tilt_deg', 'grasp_max_plans', 'grasp_min_path_clearance',
                 'grasp_offset', 'check_visibility', 'check_centred')},
             'parameters': {n: self.get_parameter(n).value for n in (
-                'destination_name', 'workspace_min', 'workspace_max', 'executor_workspace_min',
+                'object_model_retries', 'destination_name', 'workspace_min', 'workspace_max', 'executor_workspace_min',
                 'executor_workspace_max', 'voxel_size', 'destination',
                 'destination_height', 'support_height', 'grasp_depth_below_top',
                 'min_determinant', 'n_frames')},
@@ -624,6 +628,46 @@ class TpgptPlannerNode(Node):
             self.get_logger().info('visibility filter off: the object cloud is the fitted scan, '
                                    'which has no unseen side')
         return not fitted
+
+    def _object_cloud_with_retries(self, observed, n_clouds):
+        """Fit the scan, retrying on fresh camera frames while it is refused.
+
+        Returns ``(observed, planning cloud, clouds fused)``, keeping the attempt
+        whose fit explained the most of its own cloud.
+        """
+        p = lambda n: self.get_parameter(n).value  # noqa: E731
+        best = None
+        for attempt in range(max(int(p('object_model_retries')), 0) + 1):
+            points = self._full_object_cloud(observed)
+            fit = self.object_fit
+            if fit is None or fit.accepted:
+                return observed, points, n_clouds
+            score = fit.explained
+            if best is None or score > best[0]:
+                best = (score, observed, points, n_clouds, fit, self.object_cloud_source)
+            if attempt == int(p('object_model_retries')):
+                break
+            self.get_logger().info(
+                f'object model refused ({fit.reason}); waiting '
+                f"{p('object_model_retry_wait')} s for fresh clouds and trying again "
+                f"({attempt + 1} of {p('object_model_retries')})")
+            with self.lock:
+                seen = len(self.clouds) and self.clouds[-1][0]
+            deadline = time.monotonic() + float(p('object_model_retry_wait'))
+            while time.monotonic() < deadline:
+                time.sleep(0.2)
+                with self.lock:
+                    if len(self.clouds) and self.clouds[-1][0] != seen:
+                        break
+            try:
+                observed, n_clouds = self.fused_cloud()
+            except RuntimeError:
+                break
+        _, observed, points, n_clouds, self.object_fit, self.object_cloud_source = best
+        self.get_logger().warn(
+            f'object model: no attempt was accepted; the best explained '
+            f'{self.object_fit.explained:.0%} of its cloud. Planning on the camera cloud.')
+        return observed, points, n_clouds
 
     def _full_object_cloud(self, observed):
         """The fitted YCB scan (tpgpt.hardware.object_model), or the camera cloud.
