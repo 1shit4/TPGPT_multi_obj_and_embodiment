@@ -100,7 +100,7 @@ Needs the robot container, the camera (Terminal 1), `calibration_check_node` (Te
 4. `/calibration_check_node/solve_extrinsics` writes `~/tpgpt_calibration/extrinsics_fit_*.yaml`,
    which records each pair's raw TCP position and rotation, so a pair can be re-derived offline.
 5. **Judge the result by surfaces, not by fit RMS.** Fit the table and both shelf boards in the cloud
-   and compare with touched heights (`~/calib_tools/validate.py`). A single good table reading
+   and compare with touched heights (`~/calib_tools/check_calibration.py`). A single good table reading
    proves nothing: the first 2026-09-21 fit read -0.5 mm on the table while 9 mm out elsewhere — a
    residual rotation. Pruning outlier pairs lowered fit RMS while making the surfaces *worse*.
 6. If the surfaces disagree in a position-dependent way, refit jointly against the point pairs and
@@ -118,7 +118,9 @@ All in the home directory, so they survive reboots.
 | `~/calib_tools/touch_point.py` | Live readout of the fingertip-face position and hand tilt, for measuring by touch |
 | `~/calib_tools/click_measure.py` | Click a point in RViz; fits the local plane and reports its height |
 | `~/calib_tools/shelf_points.py` | Touches (Enter) and RViz clicks, printed in the shelf model's axes (along the front / into / up); pairs click and touch by label to give the camera's error at the shelf. tpgpt venv. |
-| `~/calib_tools/validate.py`, `final_fit.py` | Score candidate extrinsics against the real table plane |
+| `~/calib_tools/check_calibration.py` | **The health check.** Table and both boards vs their touched anchors, plus shelf-relative-to-table; warns if the camera is cold |
+| `~/calib_tools/warmup_drift.py` | Tracks the table while the camera warms, to confirm it has settled |
+| `~/calib_tools/validate.py`, `final_fit.py` | One-off: score candidate extrinsics from a specific `extrinsics_fit_*.yaml` against the table plane |
 | `~/calib_tools/ripple.py` | Depth noise check: temporal noise should be under 0.5 mm with the filters on |
 
 The heavy temporal smoothing is for calibration only. It is wrong for a live scene where objects and

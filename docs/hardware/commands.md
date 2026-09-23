@@ -240,6 +240,7 @@ ros2 run --prefix python3 ycb_pointcloud_pipeline tpgpt_pick_place --ros-args \
 ```
 `gripper_mode`: `franka_grasp` (default) | `gripper_command` | `inspire` | `none`. `none` runs the
 motion without touching the gripper, which is the safer first move on a new plan.
+
 Type `yes` at the prompt. **Hand on the e-stop.** Inspect the plan in RViz before confirming — the
 same view as §4:
 ```bash
