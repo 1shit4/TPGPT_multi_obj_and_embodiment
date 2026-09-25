@@ -53,8 +53,12 @@ distinguish them:
 | the box scored **0.02** -- the model did not see it | reword the prompt; check lighting, occlusion, the object's pose |
 | the matched phrase fit **two prompts equally** (`"box"` when two prompts contain "box") | make the prompts distinguishable |
 | detected fine, but **no depth in the mask** | a depth problem, not a detection problem: surface, range, `depth_trunc` |
+| found, but **on the same box as another target** | one prompt is landing on the other object; the node keeps the higher score and drops the other |
 
-The first and the last look identical from the outside and have nothing in common.
+The first and the fourth look identical from the outside and have nothing in common. The last one
+is the confusion between similar objects: when two targets' boxes overlap by 70 % or more the node
+has always kept the higher score, because one physical object cannot be two targets -- and the
+other target simply went missing that frame.
 
 ## What the node reports now
 
@@ -67,6 +71,8 @@ pudding_box: best box scored 0.29 as 'pudding box', below its threshold of 0.35 
 foam_brick: not seen at all this frame (nothing above 0.05)
 pudding_box: detected at 0.41 over 3120 pixels, but no depth in the mask (within 2.0 m) -- nothing published
 a box scoring 0.44 matched the phrase 'box', which fits two prompts equally well, ...
+pudding_box: found at 0.52, but on the same box as foam_brick (0.61, overlap 0.83) -- one object
+  under two names, so the lower score was dropped. One of the two prompts is landing on the other object.
 ```
 
 The same per-target report goes into `/ycb_detections/info` (fields `report` and `unmatched`), so

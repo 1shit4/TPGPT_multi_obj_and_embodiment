@@ -215,8 +215,17 @@ class GroundedSAMDetector:
                       key=lambda d: -d["score"])
         kept = []
         for d in dets:
-            if all(_box_iou(d["box"], k["box"]) < 0.7 for k in kept):
+            # Two targets on one box: one physical object was found under two
+            # names, and only the higher score can be right. The loser used to
+            # vanish without a trace -- the very case of one object's prompt landing
+            # on another object -- so it is written into the report.
+            clash = next((k for k in kept if _box_iou(d["box"], k["box"]) >= 0.7), None)
+            if clash is None:
                 kept.append(d)
+            else:
+                self.last_report[d["label"]].update(
+                    lost_to=clash["label"], lost_to_score=clash["score"],
+                    overlap=_box_iou(d["box"], clash["box"]))
         if not kept:
             return []
         if self.sam_model is None:

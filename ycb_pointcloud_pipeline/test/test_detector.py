@@ -234,3 +234,18 @@ def test_iou_is_zero_for_a_missing_box():
     assert iou(None, BRICK) == 0.0
     assert iou(BRICK, BRICK) == pytest.approx(1.0)
     assert iou(BRICK, PUDDING) == 0.0
+
+
+def test_a_target_dropped_for_sharing_a_box_says_which_target_took_it():
+    """One prompt landing on another object: the loser used to vanish silently."""
+    same = (10, 10, 50, 40)
+    found = {'pudding_box': {'label': 'pudding_box', 'score': 0.52, 'box': same,
+                             'phrase': 'brown chocolate pudding box'},
+             'apple': {'label': 'apple', 'score': 0.61, 'box': same, 'phrase': 'apple'}}
+    det = _with_sam(_detector(found=found))
+    dets = det.detect_and_segment(np.zeros((8, 8, 3), np.uint8))
+    assert [d['label'] for d in dets] == ['apple']
+    lost = det.last_report['pudding_box']
+    assert lost['accepted'] is True                 # it cleared its threshold...
+    assert lost['lost_to'] == 'apple'               # ...and lost the box to the apple
+    assert lost['overlap'] == pytest.approx(1.0)

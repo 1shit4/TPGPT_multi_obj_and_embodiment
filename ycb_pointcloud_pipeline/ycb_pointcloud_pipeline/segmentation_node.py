@@ -453,6 +453,13 @@ class YCBSegmentationNode(Node):
                     f"{name}: best box scored {r['score']:.2f} as {r['phrase']!r}, "
                     f"below its threshold of {r['threshold']:.2f} -- not published",
                     throttle_duration_sec=10.0)
+            elif r.get('lost_to'):
+                self.get_logger().warn(
+                    f"{name}: found at {r['score']:.2f}, but on the same box as "
+                    f"{r['lost_to']} ({r['lost_to_score']:.2f}, overlap {r['overlap']:.2f}) -- "
+                    f"one object under two names, so the lower score was dropped. One of the "
+                    f"two prompts is landing on the other object.",
+                    throttle_duration_sec=10.0)
         for u in getattr(self.detector, 'last_unmatched', [])[:2]:
             self.get_logger().warn(
                 f"a box scoring {u['score']:.2f} matched the phrase {u['phrase']!r}, which "
