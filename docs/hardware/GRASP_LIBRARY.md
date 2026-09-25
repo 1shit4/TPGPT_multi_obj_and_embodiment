@@ -182,8 +182,9 @@ hand is within the object's own footprint plus 50 mm of the destination.
 138 x 128 x 39 mm: both horizontal dimensions exceed the hand's 80 mm opening, and a pinch across
 the 39 mm thickness has the fingertips at the table. Of 2000 grasps, 1246 survive `from_below` and
 **none** survives the jaw check (892 `hits_support`, 329 `shallow`, 25 `empty`). Standing on its end
-(112 mm tall, 75-79 mm across, against an 80 mm opening) the same object reaches three slots. Worth
-knowing before the object is put on the bench.
+(112 mm tall, 75-79 mm across, against an 80 mm opening) the same object reaches three slots, so
+**the box is always set down upright** (user, 2026-09-25). Worth knowing before the object is put on
+the bench.
 
 **3. Beyond about 45 degrees of tilt, the transport map folds.** Across 286 planned candidates on
 five objects, by the grasp's tilt from straight down:
@@ -212,7 +213,10 @@ cannot lend its motion to an object that can only be gripped horizontally.
 `the carried object touches seen points`: 73 obstacle points within 130 mm of that slot, 105 to
 229 mm above the bottom board, 30 to 57 mm clear of the shelf model (so not the boards). Either an
 object is in that slot or the camera is worse there than the 30 mm the model already absorbs.
-Check before reading anything else into that column.
+
+**The slot is abandoned** (user, 2026-09-25): it is also the corner furthest from the base, and the
+arm reaches it badly. The destination set is `top_left`, `top_right`, `bottom_left`, and the
+bottom-right column in the tables above is kept only as the record of what was measured.
 
 **Run-to-run variation is now perception, not the sampler.** The four banana captures are minutes
 apart, motionless, yet the fit's heading reads 53.9, 52.2, 47.4 and 47.6 degrees, and the funnel

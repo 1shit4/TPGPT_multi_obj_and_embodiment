@@ -263,9 +263,15 @@ The planner's support height is: its `support_height` parameter, else the calibr
   the generator's score order.
 - **A lying pudding box is not graspable by this hand** (138 x 128 x 39 mm: both horizontal
   dimensions beat the 80 mm opening, and a pinch across 39 mm has the fingertips at the table).
-  Of 2000 grasps none survives the jaw check. Standing on its end it reaches three slots.
+  Of 2000 grasps none survives the jaw check. Standing on its end it reaches three slots, so
+  **the box is always set down upright** (user, 2026-09-25).
 - **Destinations have names**: `destination_name:=top_left|top_right|bottom_left|bottom_right`,
   resolved from the touched slot marks (`config/shelf.yaml`, `slots:`, `shelf.slots()`).
+- **`bottom_right` is abandoned** (user, 2026-09-25). Measured: every object scored 0 admissible of
+  25 there on every capture, the carried object meeting 73 seen points standing in the slot
+  (`GRASP_LIBRARY.md`). The user's reason is the reach -- it is the corner furthest from the base,
+  and the arm gets there badly. Whichever it is, the destination set is now **top_left, top_right,
+  bottom_left**. The slot stays in `shelf.yaml` and stays plannable; it is simply not one we run.
 - **The object clouds vary a lot between frames.** Two captures of the same motionless banana,
   minutes apart, put 11% and 25% of their points in a dense layer ~20 mm above it (specular; no
   outlier filter removes it). The scan fit tolerates it: its thresholds come from seven real
