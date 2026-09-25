@@ -155,11 +155,27 @@ ros2 launch ycb_pointcloud_pipeline ycb_pipeline.launch.py launch_camera:=false 
 
 ## What is measured so far
 
-Nothing yet on this bench: the report and the frame keeping went in on 2026-09-25, before any
-frames had been saved. The file `config/target_objects.yaml` records one earlier observation, from
-when the cracker box was in the list -- the phrase "cracker box" scored below 0.2 where "small red
-box" scored 0.67 -- which is why prompts here describe what a thing **looks like** rather than what
-it is called. Fill this section in once `prompt_bench` has run on saved frames.
+**The pudding box vanished because its score sits on the cutoff** (run of 2026-09-25 14:42, from
+the node's own log, `~/.ros/log/python3_90487_*.log`). Pudding box and foam brick both on the table,
+both correctly identified. Of 605 cycles:
+
+| object | published | score when published | |
+|---|---|---|---|
+| pudding box | 320 (53 %) | 0.35-0.44, median 0.39 | 26 frames at 0.35-0.36 |
+| foam brick | 569 (94 %) | 0.36-0.46, median 0.39 | 2 frames at 0.36 |
+
+Histogram of the pudding box's published scores, 0.01 bins from 0.35: 26, 57, 36, 29, 28, 79, 58,
+6, 1. A distribution that is still full at the cutoff continues below it, and the misses alternate
+with hits frame by frame rather than in long gaps -- noise moving a score across a line, not an
+object leaving view. The old log could only show the frames above 0.35; the misses' own scores
+were not recorded, which is what the report now fixes.
+
+**Fix: `threshold: 0.25` for the pudding box alone** (`config/target_objects.yaml`), leaving 0.35
+for everything else. Chosen, not measured: the misses' scores were not logged, so whether 0.25
+catches all of them is what the next run shows -- any frame still missing it now logs its score.
+
+Earlier, from when the cracker box was listed: the phrase "cracker box" scored below 0.2 where
+"small red box" scored 0.67, which is why prompts here describe what a thing **looks like**.
 
 ## Related
 

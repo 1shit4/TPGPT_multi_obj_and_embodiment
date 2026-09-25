@@ -43,6 +43,12 @@ target_objects:
     prompt: red mug
   - name: pudding_box
     prompt: brown chocolate pudding box
+    # Measured 2026-09-25 14:42, pudding box and foam brick both on the table, correctly
+    # identified: the box was published on 320 of 605 cycles, flickering frame to frame, and
+    # when published it scored 0.35-0.44 (median 0.39, 26 frames at 0.35) -- right on the
+    # shared 0.35 cutoff. 0.25 is for this object only; every miss now logs its score, so the
+    # next run shows whether 0.25 is enough (docs/hardware/SEGMENTATION.md).
+    threshold: 0.25
   - name: foam_brick
     prompt: red foam brick
   # Taken away 2026-09-25: upright it plans into no slot at all. The hand can only grip it

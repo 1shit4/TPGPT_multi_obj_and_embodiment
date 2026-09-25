@@ -308,8 +308,14 @@ The planner's support height is: its `support_height` parameter, else the calibr
   accepts at each target's own threshold, logging every target that did not make it, and
   `/ycb_detections/info` carries the per-target report. `save_frames:=misses` keeps the RGB, the
   depth and the report of every frame that went wrong; `prompt_bench` replays them offline to score
-  candidate wordings and both caption modes. **Reported flaky 2026-09-25: the pudding box**; nothing
-  measured yet, because no frames had been saved when the tooling went in.
+  candidate wordings and both caption modes. **The pudding box vanished (2026-09-25) because
+  its score sits on the cutoff**: published on 320 of 605 cycles, and at 0.35-0.44 (median 0.39)
+  when it was, against the shared 0.35. It has its own `threshold: 0.25` since; the foam brick,
+  94 % at a median 0.39, is close to the same line. **The scan fit cannot tell objects apart**:
+  fitting all six scans to 22 real captures of five objects, wrong scans were accepted on nearly
+  every capture and the best-fitting scan was the wrong object on 13 of 22 (the mug's scan alone
+  was accepted on 18 and fit best on 9 of the 17 non-mug captures). So a broad prompt plus "the fit
+  picks" does not work here; the detector has to get the object right.
 - **A prompt is only as good as its worst frame.** `target_objects.yaml` takes an optional
   per-object `threshold:`, so one object that scores low does not drag the bar down for the others,
   and `caption_mode:=per_object` gives each prompt its own caption (one forward pass each). The
