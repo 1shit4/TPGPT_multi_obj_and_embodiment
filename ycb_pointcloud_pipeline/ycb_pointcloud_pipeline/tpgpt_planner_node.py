@@ -540,7 +540,8 @@ class TpgptPlannerNode(Node):
             info['failed_fallback'] = getattr(exc, 'fallback', None)
             info['failed_stages'] = getattr(exc, 'stages', None)
             log.error(f'Planning refused: {exc}')
-            self._save_refused(exc, observed, points, world)
+            self._save_refused(exc, observed, points, world,
+                               destination=(p('destination_name'), scene.destination))
             self._publish_cloud_only(points)
             self._publish_shelf(world)
             return False, str(exc)
@@ -593,6 +594,11 @@ class TpgptPlannerNode(Node):
         out = os.path.join(p('output_dir'),
                            f"{p('object_name')}_{time.strftime('%Y%m%d_%H%M%S')}")
         result.save(out)
+        # The camera's own cloud and the obstacles, as a refused plan keeps them: a plan
+        # that worked is as much evidence as one that did not, and without these its fit
+        # cannot be re-checked nor its scene re-measured (python -m tpgpt.hardware.coverage).
+        np.savez_compressed(os.path.join(out, 'clouds.npz'), observed=observed,
+                            object_cloud=points, obstacles=world.cloud)
         with open(os.path.join(out, 'grasp_candidates.json'), 'w') as f:
             json.dump({'source': selection.source, 'notes': selection.notes,
                        'chosen_index': selection.chosen.index,
@@ -736,7 +742,7 @@ class TpgptPlannerNode(Node):
                  'camera cloud')
         return observed
 
-    def _save_refused(self, exc, observed, points, world=None):
+    def _save_refused(self, exc, observed, points, world=None, destination=None):
         """A refused plan's candidates and clouds, so the refusal can be diagnosed."""
         p = lambda n: self.get_parameter(n).value  # noqa: E731
         out = os.path.join(p('output_dir'),
@@ -746,6 +752,11 @@ class TpgptPlannerNode(Node):
             cands = getattr(exc, 'candidates', None) or []
             with open(os.path.join(out, 'grasp_candidates.json'), 'w') as f:
                 json.dump({'error': str(exc), 'stages': getattr(exc, 'stages', None),
+                           # Where it was going: without it a run of refusals cannot be
+                           # told apart by slot (2026-09-25, read back from the ROS log).
+                           'destination_name': None if destination is None else destination[0],
+                           'destination': (None if destination is None
+                                           else np.asarray(destination[1]).tolist()),
                            'shelf_world': None if world is None else world.cloud_report,
                            'object_cloud_source': self.object_cloud_source,
                            'object_model': (None if self.object_fit is None

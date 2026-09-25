@@ -90,12 +90,20 @@ PROTOCOL_RESTS = {"mug": (0,), "pudding_box": (2, 4)}
 #: turned the handle to point away from the camera, onto those points, on 50 of
 #: 68 fits, and tilted the upright mug 13 deg.
 OCCLUSION_TOLERANCE = 0.020
-#: Open vessels: the occlusion pass runs for them, and they are fitted without the
-#: rest tilt. Only an open vessel shows the artefact, and only there is either
-#: change measured to help: on the day's captures of the banana, apple and can the
-#: occlusion pass moved validated fits with nothing to say whether for the better,
-#: and on an upright pudding box the tilt search is worth 2.5 mm against 5.5.
+#: Open vessels: the occlusion pass runs for them. Only an open vessel shows the
+#: artefact, and only there is the pass measured to help: on the day's captures of
+#: the banana, apple and can it moved validated fits with nothing to say whether for
+#: the better.
 OPEN_VESSELS = ("mug",)
+#: Objects that rest on a flat face, fitted without the rest tilt: on a flat table
+#: they cannot lean. Measured 2026-09-25 on the planner's own live fits: the foam
+#: brick leaned 19.5 and 19.3 deg on two of three runs (resting on an edge, as it
+#: looked), the upright pudding box 11.7 and 12.0 deg on both of its plans into
+#: bottom_left, and the mug 11-22 deg. The tilt stays for what can really rest
+#: rolled or leaning: the banana (8.8 deg on the same evening), the apple, the can.
+#: (On a synthetic box with no artefacts the tilt search was worth 2.5 mm of fit
+#: against 5.5 -- the live fits are the evidence that counts.)
+FLAT_RESTING = ("mug", "pudding_box", "foam_brick")
 #: The occlusion test is a depth image of the placed scan: :data:`OCCLUSION_POINTS`
 #: on its surface, the nearest per angular bin of :data:`OCCLUSION_BIN_DEG` (1.5 mm
 #: at 1.1 m), each camera point compared with its own bin only. A neighbourhood
@@ -472,10 +480,9 @@ def _fit_once(model: ObjectModel, observed: np.ndarray, support_height: float,
             best = (s, k, heading, t)
 
     _, k, heading, t = best
-    if model.name in OPEN_VESSELS:
-        # A mug stands on its flat base on a flat table: it cannot lean. The tilt
-        # search, there, only fitted the depth artefacts inside the cup -- 11-22
-        # deg on an upright mug whose cloud was a third phantom points.
+    if model.name in FLAT_RESTING:
+        # On a flat face on a flat table the object cannot lean; the tilt search
+        # there only fitted depth artefacts (see FLAT_RESTING).
         R = _rot_z(heading) @ model.rests[k]
     else:
         R, t = _rest_tilt(model, obs, _rot_z(heading) @ model.rests[k], t, support_height)

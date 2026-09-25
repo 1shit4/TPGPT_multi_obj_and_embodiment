@@ -292,6 +292,16 @@ The planner's support height is: its `support_height` parameter, else the calibr
   handle in four known directions (`~/tpgpt_bags/mug_handles`): within 30 deg on 9/14, 13/14,
   20/22 fits when visible, 2/18 when turned away from the camera -- nothing to fit it to.
   Other objects' fits are unchanged. The planner logs how many points it dropped.
+- **Flat-resting objects are fitted without lean** (`object_model.FLAT_RESTING`: mug, pudding
+  box, foam brick; 2026-09-25). The rest-tilt search (up to 25 deg) is for what can really rest
+  rolled or leaning (banana, apple, can); on the planner's live fits it leaned the foam brick 19.5
+  and 19.3 deg (on an edge, as it looked) and the upright pudding box 12 deg on both of its plans
+  into bottom_left. On the day's seven real pudding-box clouds the new fit accepts all seven, on
+  an end and flat; the old one put the box on its long edge on three. Known limit, in a test:
+  with one flat face nearly all the camera sees, the box can sit 15-20 mm off along that face.
+- **Plan records** (2026-09-25): a planned run now keeps `clouds.npz` too (the camera's object
+  cloud and the obstacles), so its fit can be re-checked and its scene re-measured with
+  coverage; a refused run records its `destination_name`/`destination`.
 - **A lying pudding box is not graspable by this hand** (138 x 128 x 39 mm: both horizontal
   dimensions beat the 80 mm opening, and a pinch across 39 mm has the fingertips at the table).
   Of 2000 grasps none survives the jaw check. Standing on its end it reaches three slots, so
