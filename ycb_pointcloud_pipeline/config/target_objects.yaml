@@ -34,10 +34,20 @@ target_objects:
   # - mustard_bottle
   # - spam
   # - red cup
-  # - name: mug                 # taken away 2026-09-23; while listed it matched a cup behind the
-  #   prompt: red mug            # robot at 0.75, whose cloud then failed the workspace crop
+  # Back 2026-09-25, in place of the soup can (measured: docs/hardware/GRASP_LIBRARY.md).
+  # It was taken away on 2026-09-23 because while listed it matched a cup behind the robot at
+  # 0.75, whose cloud then failed the workspace crop -- so either that cup is out of the
+  # camera's view, or this prompt and its threshold are chosen from saved frames with
+  # prompt_bench (docs/hardware/SEGMENTATION.md).
+  - name: mug
+    prompt: red mug
   - name: pudding_box
     prompt: brown chocolate pudding box
   - name: foam_brick
     prompt: red foam brick
-  - tomato_soup_can
+  # Taken away 2026-09-25: upright it plans into no slot at all. The hand can only grip it
+  # around its 68 mm barrel, so 57 of its 60 screened grasps are past 60 degrees of tilt, and
+  # beyond about 45 degrees the transport map folds. The mug above is the same task with a rim
+  # to hold. (Lying down it does plan -- 6 and 4 at the top slots, 0 at bottom_left -- but a
+  # can laid on a shelf board rolls.)
+  # - tomato_soup_can

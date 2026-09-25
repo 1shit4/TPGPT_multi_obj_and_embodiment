@@ -261,6 +261,21 @@ The planner's support height is: its `support_height` parameter, else the calibr
   hand can only grip it around its barrel: 57 of 60 of its grasps are past 60 deg. The likely
   mechanism is A12 (the placed orientation is a yaw). Selection does not know about tilt; it walks
   the generator's score order.
+- **The soup can was replaced by the mug** (user, 2026-09-25; `GRASP_LIBRARY.md`). An upright
+  vessel too wide to grip around needs a **rim**, and the rim must be in the *scan*, because that
+  is what the planner plans against: `005_tomato_soup_can` is modelled sealed (22 sampled points on
+  its top face, 3 in the cavity) however open the real can is, so a finger inside its rim is a
+  finger inside solid material. `025_mug` is modelled open (0 on the top face, 340 in the cavity, a
+  4-5 mm wall), and 1296 of its 2000 grasps are at or under 45 deg against the can's 308. Measured
+  on the same capture: mug 3/14/3 (handle at 0 deg) and 7/4/6 (at 90 deg) admissible of 25 across
+  top_left/top_right/bottom_left, against 0/0/0 for the upright can. The mug's **heading matters**
+  -- the handle decides which side a grasp can come from. A can laid on its side plans too (6/4/0),
+  but it rolls off a board.
+- **The mug matched a cup behind the robot at 0.75** when it was last in `target_objects.yaml`
+  (2026-09-23), and its cloud then failed the workspace crop. It is listed again since 2026-09-25;
+  either that cup is out of the camera's view, or its prompt and threshold are set from saved
+  frames (`SEGMENTATION.md`). Its scan fit has **not** been tried on this bench -- a hollow object
+  with a handle is a harder fit, and a refused fit means no library and the camera's own cloud.
 - **A lying pudding box is not graspable by this hand** (138 x 128 x 39 mm: both horizontal
   dimensions beat the 80 mm opening, and a pinch across 39 mm has the fingertips at the table).
   Of 2000 grasps none survives the jaw check. Standing on its end it reaches three slots, so

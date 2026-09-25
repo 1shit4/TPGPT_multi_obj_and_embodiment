@@ -165,6 +165,14 @@ bottom-left numbers are unaffected by it.)
 | pudding box **upright** (112 mm) | 5 | 8 | 1 | 0 |
 | pudding box **lying flat** (39 mm) | 0 | 0 | 0 | 0 |
 | tomato soup can (upright, 102 mm) | 0 | 0 | 0 | 0 |
+| tomato soup can **lying** (68 mm) | 6 | 4 | 0 | -- |
+| **mug** (upright, 81 mm, handle at 0 deg) | 3 | 14 | 3 | -- |
+| **mug** (upright, handle at 90 deg) | 7 | 4 | 6 | -- |
+
+(The lying can and the mug were measured on 2026-09-25, after `bottom_right` was abandoned, so
+that column is not filled for them. An earlier file named `tomato_soup_can_lying.json` used
+resting pose 1, which for this scan is a *second upright* pose -- rests 0 and 1 both stand the can
+on an end, 102 mm tall; the lying poses are 2 to 11. The row above is rest 2.)
 
 Four things this made visible that a single draw could not:
 
@@ -201,7 +209,8 @@ five objects, by the grasp's tilt from straight down:
 This is the sim's own rule (`consistent_sign`), not the hardware's extra `min_determinant` gate:
 the determinants read -0.34 to -0.58. It is why the **tomato soup can fails everywhere**: 68 mm
 across and 102 mm tall, the only grasps it offers are around its barrel, 57 of 60 of them beyond
-60 degrees, and half of those fold. The banana offers nothing above 45 degrees and never folds.
+60 degrees, and half of those fold. Laid on its side the same can plans into both top slots (6 and
+4), because a barrel lying down is gripped from above -- the tilt, not the can, was the problem. The banana offers nothing above 45 degrees and never folds.
 The plausible mechanism is A12 -- the placed orientation is a yaw about the table, so a
 near-horizontal pick has its keypoint cube rotated nearly into the table plane at the release --
 but that is a hypothesis; what is measured is the table above. Two consequences to weigh, neither
@@ -217,6 +226,39 @@ object is in that slot or the camera is worse there than the 30 mm the model alr
 **The slot is abandoned** (user, 2026-09-25): it is also the corner furthest from the base, and the
 arm reaches it badly. The destination set is `top_left`, `top_right`, `bottom_left`, and the
 bottom-right column in the tables above is kept only as the record of what was measured.
+
+**5. A rim is what makes an upright vessel graspable, and the scan has to have one.** The can was
+replaced by the **mug** on 2026-09-25 (user). Of 2000 grasps, sorted by tilt from straight down
+with the object standing on the table:
+
+| object | 0-15 | 15-30 | 30-45 | 45-60 | 60-75 | 75-90 | at or under 45 deg |
+|---|---|---|---|---|---|---|---|
+| tomato soup can | 176 | 62 | 70 | 77 | 195 | 626 | **308 of 2000** |
+| mug | 476 | 486 | 334 | 188 | 91 | 113 | **1296 of 2000** |
+| banana | 154 | 198 | 150 | 151 | 165 | 234 | 502 of 2000 |
+| apple | 103 | 116 | 91 | 109 | 175 | 394 | 310 of 2000 |
+
+The mug's 25 best-scoring survivors at `top_left` are **all rim grasps** -- 39 to 42 mm from the
+cup's axis, 68 to 74 mm up a rim that stands 81 mm above the table, so the pads sit about 11 mm
+down the wall, just past the 10 mm `MIN_ENGAGEMENT` that stops a grasp pivoting off a rim -- at
+2.5 to 40.6 degrees of tilt, every one inside the fold limit, scoring 0.90 to 0.945. The jaw check
+keeps 1500 of 1688 for the mug against 459 of 1033 for the lying can. And `plan_refused`, the fold,
+drops from 17-18 candidates in 25 for the upright can to 0-4 for the mug: what kills the mug's
+remaining candidates is `collision` with the shelf's side walls, which is geometry, not the map.
+
+**The can's own rim cannot be used, and that is a modelling fact, not a physical one.** The real
+can on the bench has no lid. The scan does: sampling `005_tomato_soup_can` upright puts 22 points
+on the top face inside a 25 mm radius and only 3 anywhere in the interior, and 6-12 mm below the
+rim its radii form one shell, not two. `025_mug` is the opposite -- 0 points on the top face, 340
+in the cavity, and two shells 6-12 mm down (37-40 mm and 40-42.5 mm: a 4-5 mm wall). Since the
+planner plans against the **scan**, a finger reaching down inside the real can's rim is a finger
+inside solid material, and `grasp_collision` refuses it. The mug is the same task -- an upright
+vessel too wide to grip around -- with a rim the model knows about.
+
+**The mug's heading matters more than any other object's**, because it is the handle that decides
+which side of the cup a grasp can approach from: at 0 degrees it scores 3 / 14 / 3 across the three
+slots, at 90 degrees 7 / 4 / 6. Both reach all three; which slot is easy swaps. Worth knowing when
+it is put on the table.
 
 **Run-to-run variation is now perception, not the sampler.** The four banana captures are minutes
 apart, motionless, yet the fit's heading reads 53.9, 52.2, 47.4 and 47.6 degrees, and the funnel
