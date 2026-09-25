@@ -293,6 +293,30 @@ board instead of 60, and transported to taller objects it hits it. Two object-sl
 25 (the planner itself tries up to 100 survivors, and bottom_left has 40-80, so zero of 25 is not
 yet zero). "More clearance" was clearance above the bottom board, paid for under the top one.
 
+**7. Moving the bottom slot toward the shelf's front edge** (2026-09-25, 18:39 demonstration,
+`python -m tpgpt.hardware.coverage --slot-depth`; raw in `outputs/hardware/coverage_depth/`). The
+touched marks sit 90 mm into the 242 mm-deep shelf. Admissible at bottom_left, of those planned
+(the pudding box with the planner's full budget, which at bottom_left is all 41-42 survivors):
+
+| object | 90 mm (the marks) | 75 mm | 65 mm |
+|---|---|---|---|
+| banana | 7/17 | 7/20 | 10/22 |
+| apple | 3/25 | 3/25 | 5/25 |
+| foam brick | 3/13 | 3/13 | 4/15 |
+| pudding box upright | **0/42** | 1/41 | 1/41 |
+| mug, handle 0 deg | 5/25 | 6/25 | 7/25 |
+| mug, handle 90 deg | 3/25 | 4/25 | 4/25 |
+| **total** | 21 | 24 | 31 |
+
+Every object does as well or better closer to the edge, but the pudding box is not rescued: its
+candidates die the same way at every depth (the carried box against the bottom board's edge 15-16,
+the arm or hand against the top board 11, the fold 14). It is 112 mm tall in a 238 mm slot with the
+hand above it, and the banana's carry does not leave that room; the depth does not change it.
+Support limits the move: half the footprint in the worst orientation is banana 99 mm, mug 62,
+foam brick 51, pudding box 48, apple 42 -- at 65 mm the mug fits with its handle pointing out and
+the banana overhangs by at most 34 mm with its middle well on the board. Not applied: the slots
+are still the touched marks.
+
 **Run-to-run variation is now perception, not the sampler.** The four banana captures are minutes
 apart, motionless, yet the fit's heading reads 53.9, 52.2, 47.4 and 47.6 degrees, and the funnel
 moves with it: 1109, 1034, 1052 and 1088 through `from_below`, 431, 375, 315 and 403 through the
