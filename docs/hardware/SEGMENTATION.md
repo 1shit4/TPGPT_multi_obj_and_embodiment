@@ -4,6 +4,35 @@
 `/ycb_pointclouds/<object>`, no plan. Its detector is Grounding DINO (text prompt -> boxes)
 followed by SAM (box -> mask), both from `config/target_objects.yaml`.
 
+## What the detector knows, and what it does not
+
+**Nothing in this pipeline knows what a YCB object looks like.** "YCB" is a catalogue of
+physical objects with 3D scans; it is not a class list any model here was trained on. Grounding
+DINO is an *open-vocabulary* detector: it was trained on ordinary web images paired with
+captions, so it knows words -- "box", "brown", "banana", "foam" -- and finds the image region that
+best matches a sentence. It has never seen the label `008_pudding_box`. **The prompt is the only
+definition of the object the detector has**, which is why it has to describe what the thing
+*looks like* in plain words.
+
+The YCB identity enters *after* detection, and only there: the planner takes the camera cloud
+under the mask and fits the object's own YCB scan to it (`tpgpt/hardware/object_model.py`). That
+fit is what carries the true shape into planning, and it refuses a cloud that does not look like
+the scan. So the detector's job is narrower than "recognise the pudding box": it is **put a mask
+on the right patch of pixels, every frame, and on no other patch**.
+
+That gives the prompt two opposite ways to fail:
+
+* **too narrow** -- a wording the model half-recognises scores 0.3 on one frame and 0.5 on the
+  next, and the object comes and goes. This is the reported pudding-box failure.
+* **too broad** -- a wording like "brown box" scores well every frame, but on this bench two of the
+  five objects are boxes, so it can land on the foam brick instead. A confident mask on the wrong
+  object is worse than a missing one: the planner fits the pudding box's scan to the brick's
+  cloud, and either refuses or plans a grasp on the wrong thing.
+
+**Each object has exactly one prompt** in `target_objects.yaml`. Several wordings appear only when
+*testing*: `prompt_bench` is given a handful of candidates, scores each one on saved frames, and
+one is chosen. The others never go into the config.
+
 The failure this document is about was reported on 2026-09-25: **the pudding box is detected on
 some frames and not on others**, with nothing in between to explain it.
 
@@ -67,12 +96,18 @@ evidence.
 source ~/venvs/ycb/bin/activate
 ros2 run --prefix python3 ycb_pointcloud_pipeline prompt_bench \
     --frames ~/ycb_detection_frames --object pudding_box \
-    --prompts "brown chocolate pudding box" "brown box" "pudding box" "small brown carton"
+    --prompts "brown chocolate pudding box" "chocolate pudding box" "small dark brown box"
 ```
 
-It scores each wording on every saved frame, in both caption modes, and prints the **worst** frame
-per wording. That is the number that decides: a prompt whose floor is 0.45 is robust, a prompt that
-reaches 0.8 on its best frame and 0.1 on its worst is the flakiness you started with.
+It scores each wording on every saved frame, in both caption modes, and reports two things:
+
+* the **worst** frame's score. That is the number that decides robustness: a prompt whose floor is
+  0.45 is robust, one that reaches 0.8 on its best frame and 0.1 on its worst is the flakiness you
+  started with.
+* **CONFUSED**, when that wording's box sits on another target's box (overlap above 0.5) -- e.g.
+  the pudding-box wording finding the foam brick. A wording that is ever confused is not chosen,
+  however well it scores. For this to mean anything the saved frames must have **both boxes in
+  view**; the bench compares boxes, and cannot know which object is which on its own.
 
 ## The two knobs the bench chooses between
 

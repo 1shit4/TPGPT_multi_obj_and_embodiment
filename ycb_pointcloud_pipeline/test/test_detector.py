@@ -184,3 +184,53 @@ def test_load_target_objects_reads_an_optional_threshold(tmp_path):
     targets = load_target_objects(str(path))
     assert targets[0] == {'name': 'banana', 'prompt': 'banana'}
     assert targets[1]['threshold'] == pytest.approx(0.22)
+
+
+# ---------------------------------------------------------------- prompt_bench
+class _Boxes:
+    """A detector that answers every caption with fixed boxes per phrase."""
+
+    def __init__(self, by_prompt):
+        self.by_prompt = by_prompt
+
+    def boxes(self, pil, caption, mapping, size, floor):
+        found = {}
+        for prompt, name in mapping.items():
+            if prompt in self.by_prompt:
+                score, box = self.by_prompt[prompt]
+                found[name] = {'score': score, 'box': box}
+        return found, []
+
+
+BENCH_TARGETS = [{'name': 'pudding_box', 'prompt': 'brown chocolate pudding box'},
+                 {'name': 'foam_brick', 'prompt': 'red foam brick'}]
+FRAME = [('f0', np.zeros((8, 8, 3), np.uint8))]
+BRICK = (10, 10, 50, 40)
+PUDDING = (100, 10, 150, 80)
+
+
+def test_a_broad_prompt_that_lands_on_the_other_box_is_reported_as_confused():
+    from ycb_pointcloud_pipeline.prompt_bench import score_prompt
+    detector = _Boxes({'brown box': (0.81, BRICK), 'red foam brick': (0.66, BRICK)})
+    s, confused, who = score_prompt(detector, FRAME, BENCH_TARGETS, 'pudding_box',
+                                    'brown box', 'joint')
+    assert s[0] == pytest.approx(0.81)      # a high score...
+    assert confused[0]                      # ...on the wrong object
+    assert who == ['foam_brick']
+
+
+def test_a_prompt_on_its_own_object_is_not_confused():
+    from ycb_pointcloud_pipeline.prompt_bench import score_prompt
+    detector = _Boxes({'brown chocolate pudding box': (0.44, PUDDING),
+                       'red foam brick': (0.66, BRICK)})
+    s, confused, _ = score_prompt(detector, FRAME, BENCH_TARGETS, 'pudding_box',
+                                  'brown chocolate pudding box', 'per_object')
+    assert s[0] == pytest.approx(0.44)
+    assert not confused[0]
+
+
+def test_iou_is_zero_for_a_missing_box():
+    from ycb_pointcloud_pipeline.prompt_bench import iou
+    assert iou(None, BRICK) == 0.0
+    assert iou(BRICK, BRICK) == pytest.approx(1.0)
+    assert iou(BRICK, PUDDING) == 0.0
