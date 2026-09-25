@@ -256,6 +256,37 @@ which side of the cup a grasp can approach from: at 0 degrees it scores 3 / 14 /
 slots, at 90 degrees 7 / 4 / 6. Both reach all three; which slot is easy swaps. Worth knowing when
 it is put on the table.
 
+**6. Which demonstration** (2026-09-25). Two new banana demonstrations, 16:35 and 16:52, taught
+to give more clearance, measured against the 09-23 23:01 one on the same capture and objects
+(`python -m tpgpt.hardware.coverage --demo ...`; raw in `outputs/hardware/coverage_demos/`).
+Admissible of 25, top_left / top_right / bottom_left:
+
+| object | 09-23 23:01 | 16:35 | 16:52 |
+|---|---|---|---|
+| banana (23:14 capture) | 11/8/5 | 22/18/2 | 21/20/4 |
+| apple | 9/6/2 | 6/3/2 | 10/8/1 |
+| foam brick | 10/5/3 | 17/16/2 | 18/19/2 |
+| pudding box upright | 5/8/1 | 11/11/1 | 10/8/**0** |
+| mug, handle 0 deg | 3/14/3 | 9/17/**0** | 10/18/**0** |
+| mug, handle 90 deg | 7/4/6 | 20/7/2 | 18/5/1 |
+| **total** (top_left, top_right, bottom_left) | **110** (45, 45, 20) | **166** (85, 72, 9) | **173** (87, 78, 8) |
+
+What changed, from the demonstrations' own geometry (all three place on the bottom board):
+
+| | 23:01 | 16:35 | 16:52 |
+|---|---|---|---|
+| hand tilt at the pick | 40.6 deg | 13.4 deg | 13.4 deg |
+| hand's headroom under the top board inside the slot | 60 mm | 16 mm | 37 mm |
+| candidates lost to the map folding (`plan_refused`) | 54 | 11 | 10 |
+| bottom_left candidates hitting the top board (carry) | 39 | 83 | 54 |
+
+The near-vertical pick is what the new demonstrations gain: the fold, which took 54 candidates, all
+but disappears, and the top slots roughly double. What they lose is **bottom_left**, their own
+destination: they carry the banana higher inside the slot, so the hand rides 16-37 mm under the top
+board instead of 60, and transported to taller objects it hits it. Two object-slots go to zero of
+25 (the planner itself tries up to 100 survivors, and bottom_left has 40-80, so zero of 25 is not
+yet zero). "More clearance" was clearance above the bottom board, paid for under the top one.
+
 **Run-to-run variation is now perception, not the sampler.** The four banana captures are minutes
 apart, motionless, yet the fit's heading reads 53.9, 52.2, 47.4 and 47.6 degrees, and the funnel
 moves with it: 1109, 1034, 1052 and 1088 through `from_below`, 431, 375, 315 and 403 through the

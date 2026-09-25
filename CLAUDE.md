@@ -235,7 +235,13 @@ The planner's support height is: its `support_height` parameter, else the calibr
   at the pick. The 01:57 demonstration (lowering onto the top board from above) cannot reach the
   bottom board -- every candidate hit `shelf top_board` while carrying. The 18:20 demonstration
   (sliding in under the bottom board) reaches **both**: bottom 0.969 / min det 0.86, top 0.962 and
-  0.936 / min det 0.89 and 0.81, live, 2026-09-23. Prefer the harder demonstration.
+  0.936 / min det 0.89 and 0.81, live, 2026-09-23. Prefer the harder demonstration. Measured by
+  coverage on 2026-09-25 (`GRASP_LIBRARY.md`, item 6): the 16:35 and 16:52 demonstrations, picked
+  at 13 deg instead of 41, admit 166 and 173 grasps across six objects and three slots against
+  110 -- the fold all but disappears -- but carry the hand 16-37 mm under the top board inside
+  the bottom slot instead of 60, and lose bottom_left (20 -> 9 and 8). **A pick near vertical
+  and a hand kept low inside the slot** is what the numbers ask for. One demonstration serves
+  every object and slot; choosing one is fine, mixing them per slot is not.
 - **A refused scan fit is retried on fresh camera frames** (`object_model_retries`, 2), because
   the same object can fit on one frame and not the next. The best attempt is kept; if none is
   accepted the planner falls back to the camera cloud, as before.
