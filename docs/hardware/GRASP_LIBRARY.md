@@ -317,6 +317,25 @@ foam brick 51, pudding box 48, apple 42 -- at 65 mm the mug fits with its handle
 the banana overhangs by at most 34 mm with its middle well on the board. Not applied: the slots
 are still the touched marks.
 
+**8. The pudding box on its long side** (2026-09-25; the protocol pose since, `PROTOCOL_RESTS`).
+Every coverage number above for the pudding box is the box **on its end** (112 mm). In live runs
+that evening only the box on its long narrow side (89 mm up) planned into bottom_left. Measured on
+the five live captures with it on its side, re-fitted in that pose, 18:39 demonstration, the
+planner's full budget -- admissible / planned:
+
+| capture | top_left | top_right | bottom_left |
+|---|---|---|---|
+| 21:25 | 28/67 | 30/53 | 1/27 |
+| 21:26 | 32/66 | 33/56 | 2/28 |
+| 21:33 | 32/50 | 31/51 | 0/11 |
+| 21:46 | 31/69 | 29/52 | 1/30 |
+| 21:47 | 31/70 | 33/71 | 3/35 |
+
+The top slots are strong (against 11 of 25 on its end); bottom_left has 1-3 on four of five
+placements and none on one -- workable, not comfortable. What still stops bottom_left is the same
+as on its end, only less often: the arm or hand against the boards, the fingers below the board
+surface at the set-down, the fold. Raw in `outputs/hardware/coverage_side/`.
+
 **Run-to-run variation is now perception, not the sampler.** The four banana captures are minutes
 apart, motionless, yet the fit's heading reads 53.9, 52.2, 47.4 and 47.6 degrees, and the funnel
 moves with it: 1109, 1034, 1052 and 1088 through `from_below`, 431, 375, 315 and 403 through the
