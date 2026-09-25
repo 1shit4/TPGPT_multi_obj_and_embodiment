@@ -81,9 +81,13 @@ def generate_launch_description():
             'target_objects_yaml': LaunchConfiguration('targets'),
             'process_period_sec': ParameterValue(LaunchConfiguration('period'), value_type=float),
             'detector_mode': LaunchConfiguration('detector_mode'),
-            'caption_mode': LaunchConfiguration('caption_mode'),
-            'save_frames': LaunchConfiguration('save_frames'),
-            'save_frames_dir': LaunchConfiguration('save_frames_dir'),
+            # value_type=str: launch passes these through a YAML file, where a bare
+            # 'off' (or 'on', 'yes', 'no') reads as a boolean and the node, which
+            # declared a string, refuses to start.
+            'caption_mode': ParameterValue(LaunchConfiguration('caption_mode'), value_type=str),
+            'save_frames': ParameterValue(LaunchConfiguration('save_frames'), value_type=str),
+            'save_frames_dir': ParameterValue(LaunchConfiguration('save_frames_dir'),
+                                              value_type=str),
         }],
     )
 

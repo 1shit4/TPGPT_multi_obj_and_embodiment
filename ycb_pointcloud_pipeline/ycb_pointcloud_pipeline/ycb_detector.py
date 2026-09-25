@@ -147,6 +147,9 @@ class GroundedSAMDetector:
         self.last_unmatched = []
         log(f"caption mode {caption_mode}, {len(self.captions)} pass(es) per frame: "
             + " | ".join(caption for caption, _ in self.captions))
+        own = {n: v for n, v in self.thresholds.items() if v != float(box_threshold)}
+        log(f"accept threshold {float(box_threshold):.2f}"
+            + (", except " + ", ".join(f"{n} {v:.2f}" for n, v in own.items()) if own else ""))
 
     def _phrase_to_name(self, phrase):
         """Deprecated: use :func:`phrase_to_name`. Kept so callers do not break."""
