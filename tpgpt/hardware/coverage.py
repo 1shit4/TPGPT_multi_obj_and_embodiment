@@ -201,6 +201,10 @@ def main(argv=None):
     ap.add_argument("--heading", type=float, default=0.0, help="yaw about the table, deg (--at)")
     ap.add_argument("--slots", default="all", help="comma-separated slot names, or 'all'")
     ap.add_argument("--budget", type=int, default=25, help="survivors planned per slot")
+    ap.add_argument("--slot-depth", type=float, default=None,
+                    help="move each slot to this depth into the shelf, m from the front edge "
+                         "(the touched marks sit at about 0.09), keeping its position along "
+                         "the shelf and its board; nothing in the config changes")
     ap.add_argument("--size", type=int, default=2000, help="grasp library size")
     ap.add_argument("--config-dir", default=os.path.expanduser(
         "~/thor_ws/install/ycb_pointcloud_pipeline/share/ycb_pointcloud_pipeline/config"),
@@ -247,6 +251,14 @@ def main(argv=None):
     settings = SelectionSettings(max_tilt_deg=90.0, check_centred=False, check_visibility=False,
                                  grasp_offset=(0.0, 0.0, 0.0), kinematic_criterion="strict")
     want = list(slots) if a.slots == "all" else a.slots.split(",")
+    if a.slot_depth is not None:
+        shelf_model = world.model
+        for slot in want:
+            local = (np.asarray(slots[slot], dtype=float) - shelf_model.origin) @ shelf_model.R_base_shelf
+            local[1] = float(a.slot_depth)
+            slots[slot] = tuple(shelf_model.origin + shelf_model.R_base_shelf @ local)
+        print(f"  slots moved to {a.slot_depth:.3f} m into the shelf: "
+              + ", ".join(f"{s} {np.round(slots[s], 3).tolist()}" for s in want))
     print(f"{name}: {how}")
     print(f"  scene {os.path.basename(capture)}: {len(obstacles)} obstacle points, "
           f"table {table:+.4f}")
