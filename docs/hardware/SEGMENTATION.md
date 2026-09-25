@@ -205,6 +205,44 @@ the margin can be checked on the real objects. Verified on synthetic frames thro
 small box in front of a large brown wall: the box published at 0.12 m, the foam brick's prompt on
 the wall refused at 1.54 m -- at 0.41, above its own 0.35). Not yet on the bench.
 
+**Then the prompts were replaced, from labelled frames** (2026-09-25). Six scenes recorded with
+`save_frames:=all`, each with a known set of objects on the table: brick only (28 frames), pudding
+box only (24), both (35), mug only (17), apple only (23), mug and apple (30) --
+`~/ycb_detection_frames/<scene>/`. Looking at them explained the confusions at once: the pudding
+box is a small printed box, mostly **white** with a red logo; the foam brick is **dark brown**; the
+mug and the apple are both **red** and round. The old prompts ("brown chocolate pudding box", "red
+foam brick") had the colours nearly swapped, and "red mug" fits the apple. Frames apple 16-19 have
+no apple on the table (it was being moved) and were counted as empty.
+
+The node's detection was replayed on every frame -- all prompts in one caption, the size check
+on the saved depth, per-object thresholds, the same-box rule -- and reproduced what the node had
+actually published on **157 of 157** frames. Found when present / published when absent:
+
+| prompts | apple | mug | pudding box | brick | absent objects published |
+|---|---|---|---|---|---|
+| old: apple / red mug / brown chocolate pudding box (0.25) / red foam brick | 22/49 | 47/47 | 51/59 | 46/63 | **17** (mug on the apple 13, pudding box on the brick 4) |
+| **new: red apple (0.41) / red cup with a handle (0.50) / small printed box (0.32) / dark brown block (0.26)** | **48/49** | 47/47 | 51/59 | 46/63 | **0** |
+
+Each threshold sits between the object's lowest score when present and its highest when absent:
+apple 0.43 / 0.39, mug 0.56 / 0.45, brick (never scored when absent). The pudding box has no gap
+(0.28 present, 0.31 absent -- on a frame where a hand is placing the brick), so it is set at 0.32.
+Other sets tried, and why not:
+
+* one caption per prompt (`caption_mode:=per_object`): every pudding-box wording scored as high
+  on frames without it (up to 0.66) as with it (10th percentile 0.47). A lone prompt always finds
+  something.
+* "brown block" for the brick found it in 62 of 63 frames -- beside "jello box", which found the
+  pudding box in none. Beside "small printed box" it made the pudding-box prompt land on the brick
+  (26 false pudding boxes), and the threshold that removes them halves the pudding box. **Prompts
+  interact**: change one and re-run the replay.
+* cropping the image to the pick area before detection (objects ~1.8x larger at the model's
+  input) brought the apple to 49/49 and the brick to 63/63 but not the pudding box. Not adopted;
+  the remaining lever if the brick's 73 % is not enough.
+
+What is left: the brick is found in 46 of 63 frames and the pudding box in 51 of 59 -- misses,
+not false detections, mostly the pudding box edge-on and frames with a hand in them. A miss costs
+a planner one cycle; a false detection costs a grasp on the wrong object.
+
 What size does **not** separate: objects of similar size. In the same run the apple's prompt landed
 on the mug (0.40 against the mug's 0.42, the same box); the node kept the mug, which was right,
 but by 0.02. That one is a prompt problem, for `prompt_bench`.

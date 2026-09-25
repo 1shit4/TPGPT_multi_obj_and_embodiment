@@ -324,6 +324,13 @@ The planner's support height is: its `support_height` parameter, else the calibr
   best box is chosen. Published objects log their measured size. A new object needs a `max_size`
   (`test_every_listed_object_has_a_size`). Size does not separate look-alikes of similar size:
   the apple's prompt landed on the mug at 0.40 against 0.42.
+- **The detection prompts were chosen from 157 labelled frames** (2026-09-25,
+  `SEGMENTATION.md`): red apple 0.41 / red cup with a handle 0.50 / small printed box 0.32 /
+  dark brown block 0.26. The old ones had the colours wrong (the pudding box is mostly white, the
+  brick dark brown) and published an absent object on 17 frames; these publish none, and find the
+  apple 48/49 instead of 22/49. Prompts interact through the shared caption -- re-run the replay
+  on `~/ycb_detection_frames` after changing any of them. **Put the mug down opening-up**: it was
+  recorded upside down, and the rim grasps the coverage measured exist only upright.
 - **A prompt is only as good as its worst frame.** `target_objects.yaml` takes an optional
   per-object `threshold:`, so one object that scores low does not drag the bar down for the others,
   and `caption_mode:=per_object` gives each prompt its own caption (one forward pass each). The

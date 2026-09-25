@@ -36,8 +36,19 @@ target_objects:
   - name: banana
     prompt: banana
     max_size: 0.198
+  # Prompts and thresholds below (2026-09-25) were chosen by replaying the node's own detection
+  # on 157 labelled frames -- six scenes, each recorded with a known set of objects on the table
+  # (~/ycb_detection_frames) -- and they describe what the camera SEES: the pudding box is a small
+  # printed (mostly white) box, the foam brick is dark brown, and the mug and the apple are both
+  # red and round. Replayed, the old set published an absent object 17 times (the mug on the
+  # apple 13, the pudding box on the brick 4) and found the apple in 22 of 49 frames; this set
+  # publishes nothing absent and finds apple 48/49, mug 47/47, pudding box 51/59, brick 46/63.
+  # Each threshold sits between that object's lowest score when present and its highest when
+  # absent (docs/hardware/SEGMENTATION.md). Change one prompt and the others' scores change too:
+  # re-run the replay, do not tune by hand.
   - name: apple
-    prompt: apple
+    prompt: red apple
+    threshold: 0.41           # present >= 0.43, absent <= 0.39
     max_size: 0.085
   # - name: cracker_box
   #   prompt: small red box      # "cracker box" scored < 0.2 in the full caption, this 0.67
@@ -51,19 +62,21 @@ target_objects:
   # camera's view, or this prompt and its threshold are chosen from saved frames with
   # prompt_bench (docs/hardware/SEGMENTATION.md).
   - name: mug
-    prompt: red mug
+    prompt: red cup with a handle
+    threshold: 0.50           # present >= 0.56, absent <= 0.45 ("red mug" found the apple at 0.46)
     max_size: 0.125
   - name: pudding_box
-    prompt: brown chocolate pudding box
+    prompt: small printed box   # "brown chocolate pudding box" found the brown foam brick
     # Measured 2026-09-25 14:42, pudding box and foam brick both on the table, correctly
     # identified: the box was published on 320 of 605 cycles, flickering frame to frame, and
     # when published it scored 0.35-0.44 (median 0.39, 26 frames at 0.35) -- right on the
     # shared 0.35 cutoff. 0.25 is for this object only; every miss now logs its score, so the
     # next run shows whether 0.25 is enough (docs/hardware/SEGMENTATION.md).
-    threshold: 0.25
+    threshold: 0.32           # present >= 0.28 (median 0.50), absent <= 0.31 (one frame: a hand placing the brick)
     max_size: 0.142
   - name: foam_brick
-    prompt: red foam brick
+    prompt: dark brown block    # it is not red
+    threshold: 0.26           # never scored on a frame without it
     max_size: 0.102
   # Taken away 2026-09-25: upright it plans into no slot at all. The hand can only grip it
   # around its 68 mm barrel, so 57 of its 60 screened grasps are past 60 degrees of tilt, and
