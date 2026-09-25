@@ -236,6 +236,9 @@ class GroundedSAMDetector:
             for t in self.targets}
         for name, big in self.last_oversized.items():
             self.last_report[name]["oversized"] = big
+        #: The best box per target before any threshold, for replaying thresholds offline.
+        self.last_best = {n: {"score": b["score"], "box": [float(v) for v in b["box"]],
+                              "size_m": b.get("size_m")} for n, b in best.items()}
         self.last_unmatched = sorted(unmatched, key=lambda u: -u["score"])[:5]
 
         # One physical object detected under two names -> keep higher score

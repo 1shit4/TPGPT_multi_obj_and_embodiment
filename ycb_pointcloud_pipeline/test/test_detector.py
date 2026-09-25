@@ -369,3 +369,26 @@ def test_the_replay_counts_misses_and_absent_objects_separately():
     assert stats['mug']['false'] == ['apple/00002']
     assert records[2]['present'] == []
     assert stats['mug']['absent_scores'] == [0.0, 0.46, 0.0]
+
+
+def test_publish_and_sweep_reproduce_the_node_rule_offline():
+    from ycb_pointcloud_pipeline.prompt_bench import publish, score_thresholds, sweep_thresholds
+    brick, box = [10, 10, 50, 40], [100, 10, 150, 80]
+    # the brick's prompt and the pudding box's prompt on the same box: higher wins
+    best = {'foam_brick': {'score': 0.31, 'box': brick}, 'pudding_box': {'score': 0.38, 'box': brick}}
+    assert publish(best, {'foam_brick': 0.26, 'pudding_box': 0.30}) == {'pudding_box'}
+    assert publish(best, {'foam_brick': 0.26, 'pudding_box': 0.40}) == {'foam_brick'}
+    records = [
+        {'scene': 'brick', 'tag': '1', 'present': ['foam_brick'], 'best': best},
+        {'scene': 'box', 'tag': '2', 'present': ['pudding_box'],
+         'best': {'pudding_box': {'score': 0.33, 'box': box}}},
+    ]
+    s = score_thresholds(records, {'foam_brick': 0.26, 'pudding_box': 0.30})
+    assert s['pudding_box'][2] == ['brick/1'] and s['pudding_box'][0] == 1
+    th = sweep_thresholds(records, {'foam_brick': 0.26, 'pudding_box': 0.30},
+                          grid=[0.30, 0.33, 0.35, 0.39, 0.40])
+    s = score_thresholds(records, th)
+    assert not s['pudding_box'][2]                   # no false pudding box ...
+    assert s['foam_brick'][0] == 1                   # ... and the brick found,
+    assert th['pudding_box'] > 0.38                  # at the price of the box at 0.33:
+    assert s['pudding_box'][0] == 0                  # a miss costs less than a false one

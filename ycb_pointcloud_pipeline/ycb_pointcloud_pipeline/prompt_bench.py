@@ -203,8 +203,90 @@ def replay(detector, targets, scenes, box_ok_for, empty=None):
             records.append({'scene': scene, 'tag': tag, 'present': here,
                             'published': sorted(published),
                             'scores': {n: round(detector.last_report[n]['score'], 3)
-                                       for n in names}})
+                                       for n in names},
+                            'best': getattr(detector, 'last_best', {})})
     return records, stats
+
+
+def publish(best, thresholds, overlap=0.7):
+    """What the node publishes from a frame's best boxes, for any thresholds.
+
+    The same rule as :meth:`GroundedSAMDetector.detect_and_segment`: each target's
+    best box if it clears the target's threshold, then, of two targets on one box
+    (overlap at or above ``overlap``), the higher score.
+    """
+    dets = sorted(((n, b) for n, b in best.items() if b['score'] >= thresholds[n]),
+                  key=lambda nb: -nb[1]['score'])
+    kept = []
+    for n, b in dets:
+        if all(iou(b['box'], k['box']) < overlap for _, k in kept):
+            kept.append((n, b))
+    return {n for n, _ in kept}
+
+
+def score_thresholds(records, thresholds):
+    """``(found, present, false)`` per target for ``thresholds`` over replay records."""
+    names = list(thresholds)
+    out = {n: [0, 0, []] for n in names}
+    for r in records:
+        pub = publish(r.get('best') or {}, thresholds)
+        for n in names:
+            if n in r['present']:
+                out[n][1] += 1
+                out[n][0] += n in pub
+            elif n in pub:
+                out[n][2].append(f"{r['scene']}/{r['tag']}")
+    return out
+
+
+def sweep_thresholds(records, thresholds, grid=None, rounds=3):
+    """Per-target thresholds that publish nothing absent and find the most.
+
+    Coordinate search from ``thresholds``: each target's threshold in turn over
+    ``grid``, scored by false detections first (any is worse than any number of
+    misses), then found; ties go to the higher threshold, the safer one. Tuned on
+    the frames it is judged on, so read the margins it reports, not only the
+    counts.
+    """
+    grid = grid or [round(0.20 + 0.01 * i, 2) for i in range(41)]
+    best = dict(thresholds)
+
+    def cost(th):
+        s = score_thresholds(records, th)
+        return (sum(len(v[2]) for v in s.values()), -sum(v[0] for v in s.values()))
+
+    for _ in range(rounds):
+        for n in best:
+            best[n] = min(grid, key=lambda g: (cost({**best, n: g}), -g))
+    return best
+
+
+def sweep_main(argv=None):
+    """Re-score a detection_replay record for other thresholds, with no model.
+
+        ros2 run --prefix python3 ycb_pointcloud_pipeline detection_sweep replay.json
+    """
+    ap = argparse.ArgumentParser(description=sweep_main.__doc__.splitlines()[0])
+    ap.add_argument('replay_json')
+    ap.add_argument('--threshold', action='append', default=[], metavar='NAME=VALUE',
+                    help='score these thresholds instead of searching')
+    args = ap.parse_args(argv)
+    d = json.load(open(os.path.expanduser(args.replay_json)))
+    records, used = d['records'], d.get('thresholds') or {}
+    if not records or 'best' not in records[0]:
+        raise SystemExit('this replay predates the per-box record; run detection_replay again')
+    names = sorted({n for r in records for n in r['scores']})
+    base = {n: float(used.get(n, 0.35)) for n in names}
+    fixed = dict(base)
+    for item in args.threshold:
+        n, v = item.split('=', 1)
+        fixed[n] = float(v)
+    for label, th in (('as recorded', base), ('given' if args.threshold else 'searched',
+                                               fixed if args.threshold else
+                                               sweep_thresholds(records, base))):
+        s = score_thresholds(records, th)
+        print(f"{label:12s} " + "  ".join(f"{n} {th[n]:.2f}: {v[0]}/{v[1]}" + (f" +{len(v[2])} false" if v[2] else '')
+                                        for n, v in s.items() if v[1] or v[2]))
 
 
 def load_scenes(root, labels):
@@ -316,7 +398,7 @@ def replay_main(argv=None):
           "false detection costs a grasp on the wrong object.")
     if args.json:
         with open(os.path.expanduser(args.json), 'w') as f:
-            json.dump({'records': records,
+            json.dump({'records': records, 'thresholds': detector.thresholds,
                        'stats': {n: {k: v for k, v in s.items()} for n, s in stats.items()}},
                       f, indent=1, default=float)
 
