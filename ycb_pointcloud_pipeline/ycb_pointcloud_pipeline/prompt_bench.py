@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import argparse
 import glob
+import json
 import os
 
 import numpy as np
@@ -163,6 +164,161 @@ def main(argv=None):
     print("A prompt is only as good as its worst frame; one good frame proves nothing.")
     print("Check the frames it is confused on before trusting any of this: the bench compares "
           "boxes, it does not know which object is which.")
+
+
+# ---------------------------------------------------------------- the replay
+def replay(detector, targets, scenes, box_ok_for, empty=None):
+    """What the node would publish on every labelled frame, and whether it is right.
+
+    ``scenes`` maps a frame directory's name to ``(frames, present)`` where
+    ``frames`` is ``[(tag, rgb, depth)]``; ``box_ok_for(depth)`` builds the
+    node's size check for one frame. Returns per-frame records and, per target,
+    ``found``/``present`` counts, the frames on which it was published although
+    absent, and its scores when present and when absent (the margin a
+    threshold has to sit in).
+    """
+    from PIL import Image
+
+    empty = empty or {}
+    names = [t['name'] for t in targets]
+    stats = {n: {'found': 0, 'present': 0, 'false': [], 'present_scores': [],
+                 'absent_scores': []} for n in names}
+    records = []
+    for scene, (frames, present) in scenes.items():
+        for tag, rgb, depth in frames:
+            here = [] if tag in empty.get(scene, ()) else list(present)
+            kept = detector.detect_and_segment(rgb, box_ok=box_ok_for(depth), segment=False)
+            published = {d['label'] for d in kept}
+            for n in names:
+                r = detector.last_report.get(n, {})
+                score = r.get('score', 0.0)
+                if n in here:
+                    stats[n]['present'] += 1
+                    stats[n]['found'] += n in published
+                    stats[n]['present_scores'].append(score)
+                else:
+                    stats[n]['absent_scores'].append(score)
+                    if n in published:
+                        stats[n]['false'].append(f'{scene}/{tag}')
+            records.append({'scene': scene, 'tag': tag, 'present': here,
+                            'published': sorted(published),
+                            'scores': {n: round(detector.last_report[n]['score'], 3)
+                                       for n in names}})
+    return records, stats
+
+
+def load_scenes(root, labels):
+    """``{scene: ([(tag, rgb, depth)], present)}`` from ``root/<scene>/*_rgb.png``."""
+    import cv2
+
+    scenes = {}
+    for scene, present in labels['scenes'].items():
+        frames = []
+        for path in sorted(glob.glob(os.path.join(root, scene, '*_rgb.png'))):
+            depth_path = path[:-len('_rgb.png')] + '_depth.npy'
+            bgr = cv2.imread(path)
+            if bgr is None or not os.path.exists(depth_path):
+                continue
+            frames.append((os.path.basename(path)[:5], cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB),
+                           np.load(depth_path)))
+        scenes[scene] = (frames, list(present))
+    return scenes
+
+
+def replay_main(argv=None):
+    """Replay the node's detection on recorded, labelled frames.
+
+    Frames recorded with ``save_frames:=all`` into one directory per scene, and a
+    ``labels.yaml`` beside them saying what was on the table in each::
+
+        scenes:
+          brick_only: [foam_brick]
+          both_mug_apple: [mug, apple]
+        empty:                      # frames with nothing on the table
+          apple: ['00016']
+
+    It runs exactly what the node runs -- the prompts, per-object thresholds and
+    sizes from ``target_objects.yaml``, one caption, the size check on the saved
+    depth, the same-box rule -- and reports, per object, how often it was found
+    when on the table and every frame on which it was published when it was
+    not. ``--prompt name=text`` and ``--threshold name=0.4`` try a change
+    without editing the file; prompts interact through the shared caption, so
+    judge a change on every object, not only the one changed.
+
+        ros2 run --prefix python3 ycb_pointcloud_pipeline detection_replay \\
+            --frames ~/ycb_detection_frames --prompt foam_brick="brown block"
+    """
+    import yaml
+
+    from ycb_pointcloud_pipeline.segmentation_node import (_default_calibration_path,
+                                                           _default_target_objects_path,
+                                                           box_size_m, load_target_objects)
+    from ycb_pointcloud_pipeline.ycb_detector import GroundedSAMDetector
+
+    ap = argparse.ArgumentParser(description=replay_main.__doc__.splitlines()[0])
+    ap.add_argument('--frames', required=True, help='directory holding the scene directories '
+                                                     'and labels.yaml')
+    ap.add_argument('--labels', default=None, help='default: <frames>/labels.yaml')
+    ap.add_argument('--targets-yaml', default=None)
+    ap.add_argument('--prompt', action='append', default=[], metavar='NAME=TEXT')
+    ap.add_argument('--threshold', action='append', default=[], metavar='NAME=VALUE')
+    ap.add_argument('--box-threshold', type=float, default=0.35)
+    ap.add_argument('--size-margin', type=float, default=1.5)
+    ap.add_argument('--caption-mode', default='joint')
+    ap.add_argument('--grounding-model', default='IDEA-Research/grounding-dino-base')
+    ap.add_argument('--json', default=None, help='write every frame\'s record here')
+    args = ap.parse_args(argv)
+
+    root = os.path.expanduser(args.frames)
+    labels = yaml.safe_load(open(args.labels or os.path.join(root, 'labels.yaml')))
+    targets = load_target_objects(args.targets_yaml or _default_target_objects_path())
+    for item in args.prompt:
+        name, text = item.split('=', 1)
+        next(t for t in targets if t['name'] == name)['prompt'] = text
+    for item in args.threshold:
+        name, value = item.split('=', 1)
+        next(t for t in targets if t['name'] == name)['threshold'] = float(value)
+    cal = yaml.safe_load(open(_default_calibration_path()))['camera_calibration']['intrinsics']
+    fx, fy = float(cal['fx']), float(cal['fy'])
+    limits = {t['name']: t['max_size'] * args.size_margin for t in targets if 'max_size' in t}
+
+    def box_ok_for(depth):
+        def ok(name, box):
+            if name not in limits:
+                return True, None
+            size = box_size_m(box, depth, fx, fy)
+            return (size is None or size <= limits[name]), size
+        return ok
+
+    scenes = load_scenes(root, labels)
+    print(f"{sum(len(f) for f, _ in scenes.values())} frames in {len(scenes)} scenes from {root}")
+    detector = GroundedSAMDetector(
+        targets, grounding_model=args.grounding_model, box_threshold=args.box_threshold,
+        caption_mode=args.caption_mode, load_sam=False,
+        thresholds={t['name']: t['threshold'] for t in targets if 'threshold' in t})
+    records, stats = replay(detector, targets, scenes, box_ok_for, labels.get('empty'))
+
+    print(f"\n{'object':12s} {'prompt':26s} {'thr':>5s}  found when present   published when absent")
+    for t in targets:
+        s = stats[t['name']]
+        pres = sorted(x for x in s['present_scores'] if x > 0)
+        absent = max(s['absent_scores'], default=0.0)
+        found = f"{s['found']}/{s['present']}" if s['present'] else '-'
+        print(f"{t['name']:12s} {t['prompt'][:26]:26s} {detector.thresholds[t['name']]:5.2f}  "
+              f"{found:>8s}            {len(s['false']):3d}"
+              + (f"   e.g. {', '.join(s['false'][:3])}" if s['false'] else ''))
+        if s['present']:
+            print(f"{'':12s} scores when present: lowest {pres[0] if pres else 0:.2f}, "
+                  f"median {float(np.median(pres)) if pres else 0:.2f};  highest when absent "
+                  f"{absent:.2f}")
+    total = sum(len(s['false']) for s in stats.values())
+    print(f"\n{total} absent object(s) published in all. A miss costs the planner a cycle; a "
+          "false detection costs a grasp on the wrong object.")
+    if args.json:
+        with open(os.path.expanduser(args.json), 'w') as f:
+            json.dump({'records': records,
+                       'stats': {n: {k: v for k, v in s.items()} for n, s in stats.items()}},
+                      f, indent=1, default=float)
 
 
 if __name__ == '__main__':

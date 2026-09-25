@@ -170,4 +170,107 @@ def describe(report: dict) -> str:
     return "\n".join(lines)
 
 
-__all__ = ["coverage", "describe", "group"]
+def main(argv=None):
+    """Coverage of an object's grasp library against named shelf slots, offline.
+
+    The scene is a capture the planner recorded (``<plan dir>/clouds.npz``: the
+    obstacle cloud and the object's observed points). The object is either the
+    capture's own, with its scan re-fitted to the observed points exactly as
+    the planner does, or -- with ``--object`` and ``--at`` -- any object's scan
+    set down at a chosen spot, resting pose and heading in that scene.
+
+        python -m tpgpt.hardware.coverage \\
+            --capture ~/tpgpt_plans/banana_20260923_231459_refused \\
+            --demo ~/tpgpt_demos/banana_20260923_230159/source_bundle \\
+            --slots top_left,top_right,bottom_left --json out.json
+    """
+    import argparse
+    import json
+    import os
+    import time
+
+    import yaml
+
+    ap = argparse.ArgumentParser(description=main.__doc__.splitlines()[0])
+    ap.add_argument("--capture", required=True, help="a plan directory holding clouds.npz")
+    ap.add_argument("--demo", required=True, help="the demonstration's source_bundle directory")
+    ap.add_argument("--object", default=None, help="object to place (default: the capture's own)")
+    ap.add_argument("--at", nargs=2, type=float, default=None,
+                    help="x y on the table: set the scan down there instead of fitting it")
+    ap.add_argument("--rest", type=int, default=0, help="resting pose index (with --at)")
+    ap.add_argument("--heading", type=float, default=0.0, help="yaw about the table, deg (--at)")
+    ap.add_argument("--slots", default="all", help="comma-separated slot names, or 'all'")
+    ap.add_argument("--budget", type=int, default=25, help="survivors planned per slot")
+    ap.add_argument("--size", type=int, default=2000, help="grasp library size")
+    ap.add_argument("--config-dir", default=os.path.expanduser(
+        "~/thor_ws/install/ycb_pointcloud_pipeline/share/ycb_pointcloud_pipeline/config"),
+        help="where shelf.yaml and camera_calibration.yaml are read (the installed copy, "
+             "which is what the planner reads)")
+    ap.add_argument("--json", default=None, help="write the full reports here")
+    a = ap.parse_args(argv)
+
+    from tpgpt.hardware import shelf as shelf_mod
+    from tpgpt.hardware.end_effector import FRANKA_HAND
+    from tpgpt.hardware.fr3 import HOME_Q
+    from tpgpt.hardware.grasp_selection import SelectionSettings
+    from tpgpt.hardware.object_model import FULL_CLOUD_POINTS, ObjectModel, _rot_z, fit_object
+    from tpgpt.hardware.shelf import ShelfModel, ShelfWorld
+    from tpgpt.hardware.source_bundle import SourceBundle
+
+    cfg = yaml.safe_load(open(os.path.join(a.config_dir, "shelf.yaml")))
+    cal = yaml.safe_load(open(os.path.join(a.config_dir, "camera_calibration.yaml")))
+    table = float(cfg["shelf"]["anchors"]["table"])
+    slots = shelf_mod.slots(cfg)
+    camera = np.array(cal["camera_calibration"]["base_to_camera"]["translation"], dtype=float)
+
+    capture = os.path.expanduser(a.capture)
+    clouds = np.load(os.path.join(capture, "clouds.npz"))
+    observed, obstacles = clouds["observed"], clouds["obstacles"]
+    name = a.object or os.path.basename(capture.rstrip("/")).rsplit("_2026", 1)[0]
+    model = ObjectModel.load(name)
+    points, _ = model.sample(FULL_CLOUD_POINTS, 1)
+    if a.at is None:
+        fit = fit_object(model, observed, table, camera)
+        rotation, position = fit.rotation, fit.position
+        how = (f"fitted to the capture ({fit.explained:.2f} explained, {fit.median_mm:.1f} mm "
+               f"median, accepted={fit.accepted})")
+    else:
+        rotation = _rot_z(np.radians(a.heading)) @ model.rests[a.rest]
+        body = points @ rotation.T
+        position = np.array([a.at[0], a.at[1], table - body[:, 2].min()])
+        how = f"SYNTHETIC: resting pose {a.rest}, heading {a.heading:.0f} deg, at {a.at}"
+
+    world = ShelfWorld(model=ShelfModel.from_config(cfg), cloud=obstacles, table_height=table)
+    source = SourceBundle.load(os.path.expanduser(a.demo))
+    # The planner node's defaults: tilt cap 90 (A10), visibility off for a fitted scan,
+    # centred off, no grasp offset (A5), strict reachability.
+    settings = SelectionSettings(max_tilt_deg=90.0, check_centred=False, check_visibility=False,
+                                 grasp_offset=(0.0, 0.0, 0.0), kinematic_criterion="strict")
+    want = list(slots) if a.slots == "all" else a.slots.split(",")
+    print(f"{name}: {how}")
+    print(f"  scene {os.path.basename(capture)}: {len(obstacles)} obstacle points, "
+          f"table {table:+.4f}")
+    print(f"  demo {a.demo}, library {a.size}, plan budget {a.budget}", flush=True)
+    out = {}
+    for slot in want:
+        xyz = slots[slot]
+        t0 = time.monotonic()
+        report = coverage(name, (rotation, position), world, source, xyz, xyz[2], table, camera,
+                          HOME_Q, FRANKA_HAND, settings=settings, plan_budget=a.budget,
+                          library_size=a.size)
+        print(f"--- {slot} [{xyz[0]:.3f}, {xyz[1]:.3f}, {xyz[2]:.3f}]  "
+              f"({time.monotonic() - t0:.0f} s)")
+        print(describe(report), flush=True)
+        out[slot] = report
+    if a.json:
+        with open(os.path.expanduser(a.json), "w") as f:
+            json.dump({"object": name, "how": how, "capture": capture, "demo": a.demo,
+                       "slots": out}, f, indent=1, default=float)
+        print("wrote", a.json)
+
+
+if __name__ == "__main__":
+    main()
+
+
+__all__ = ["coverage", "describe", "group", "main"]

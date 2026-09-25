@@ -337,3 +337,35 @@ def test_every_listed_object_has_a_size():
     path = os.path.join(os.path.dirname(__file__), '..', 'config', 'target_objects.yaml')
     missing = [t['name'] for t in load(path) if 'max_size' not in t]
     assert not missing, f"no max_size for {missing}"
+
+
+# ------------------------------------------------------------ detection_replay
+class _Replayed:
+    """Stands in for the detector: a fixed answer per frame tag."""
+
+    def __init__(self, answers, names):
+        self.answers, self.names, self.last_report = answers, names, {}
+
+    def detect_and_segment(self, rgb, box_ok=None, segment=True):
+        assert segment is False
+        tag = int(rgb[0, 0, 0])
+        published, scores = self.answers[tag]
+        self.last_report = {n: {'score': scores.get(n, 0.0)} for n in self.names}
+        return [{'label': n} for n in published]
+
+
+def test_the_replay_counts_misses_and_absent_objects_separately():
+    from ycb_pointcloud_pipeline.prompt_bench import replay
+    targets = [{'name': 'apple'}, {'name': 'mug'}]
+    frame = lambda i: np.full((2, 2, 3), i, np.uint8)
+    scenes = {'apple': ([('00001', frame(1), None), ('00002', frame(2), None),
+                         ('00003', frame(3), None)], ['apple'])}
+    answers = {1: (['apple'], {'apple': 0.6}),
+               2: (['mug'], {'apple': 0.3, 'mug': 0.46}),     # the mug's prompt on the apple
+               3: ([], {})}                                     # an empty table, labelled so
+    records, stats = replay(_Replayed(answers, ['apple', 'mug']), targets, scenes,
+                            lambda depth: None, empty={'apple': ['00003']})
+    assert stats['apple']['found'] == 1 and stats['apple']['present'] == 2
+    assert stats['mug']['false'] == ['apple/00002']
+    assert records[2]['present'] == []
+    assert stats['mug']['absent_scores'] == [0.0, 0.46, 0.0]

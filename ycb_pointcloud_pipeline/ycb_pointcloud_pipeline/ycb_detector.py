@@ -199,12 +199,14 @@ class GroundedSAMDetector:
                               "phrase": phrase, "caption": caption, "size_m": size_m}
         return best, unmatched
 
-    def detect_and_segment(self, rgb_image, box_ok=None):
+    def detect_and_segment(self, rgb_image, box_ok=None, segment=True):
         """rgb_image: HxWx3 uint8 (RGB). Returns list of
         {"label", "score", "mask" (HxW bool), "box" (x0, y0, x1, y1)}.
 
         ``box_ok`` -- see :meth:`boxes`: a physical-size test applied to every
-        candidate box before the best per target is chosen.
+        candidate box before the best per target is chosen. ``segment=False``
+        stops before SAM and returns the published boxes without masks: exactly
+        what the node would publish, for replaying recorded frames.
 
         Detection is run at :data:`REPORT_FLOOR` and filtered at each target's own
         threshold afterwards, which accepts exactly what the single threshold used
@@ -252,8 +254,8 @@ class GroundedSAMDetector:
                 self.last_report[d["label"]].update(
                     lost_to=clash["label"], lost_to_score=clash["score"],
                     overlap=_box_iou(d["box"], clash["box"]))
-        if not kept:
-            return []
+        if not kept or not segment:
+            return kept
         if self.sam_model is None:
             raise RuntimeError(
                 "this detector was built with load_sam=False, so it can score boxes "

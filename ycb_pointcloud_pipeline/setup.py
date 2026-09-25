@@ -28,6 +28,7 @@ setup(
         'console_scripts': [
             'segmentation_node = ycb_pointcloud_pipeline.segmentation_node:main',
             'prompt_bench = ycb_pointcloud_pipeline.prompt_bench:main',
+            'detection_replay = ycb_pointcloud_pipeline.prompt_bench:replay_main',
             'joint_target_publisher = ycb_pointcloud_pipeline.joint_target_publisher:main',
             'joint_homing = ycb_pointcloud_pipeline.joint_homing:main',
             'demo_franka = ycb_pointcloud_pipeline.demo_franka:main',
