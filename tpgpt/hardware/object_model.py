@@ -75,11 +75,22 @@ YCB_SCANS = {
 
 #: Resting poses the experiment's protocol allows (user, 2026-09-25): the mug is set
 #: down opening-up (rest 0; rest 2 is the same shape upside down, and from this
-#: camera the two differ only inside the cup), the pudding box stands on either end
-#: (rests 2 and 4, 112 mm tall -- lying flat it cannot be grasped). An object not
-#: listed may rest any way. Indices are into :meth:`ObjectModel._resting_orientations`,
+#: camera the two differ only inside the cup); the pudding box stands on one of its
+#: long narrow sides, 89 mm tall (rests 1 and 3). Lying flat it cannot be grasped at
+#: all, and on its end (112 mm) it planned into bottom_left almost nowhere -- the two
+#: live runs that planned there had it on its side (85 and 91 mm tall in the camera's
+#: cloud), while the fit, then restricted to the end, put it on its end. An object
+#: not listed may rest any way. Indices are into :meth:`ObjectModel._resting_orientations`,
 #: which is deterministic for a given scan; ``test_object_model`` pins them.
-PROTOCOL_RESTS = {"mug": (0,), "pudding_box": (2, 4)}
+PROTOCOL_RESTS = {"mug": (0,), "pudding_box": (1, 3)}
+#: A protocol object whose camera cloud reaches this far above the fitted pose's top
+#: is refused: the fit may only use the protocol poses, so it cannot refuse the
+#: wrong one on its own, and a box stood on its end would be planned as a box on
+#: its side. Measured 2026-09-25 (98th percentile of the cloud against the fitted
+#: top): pudding box on its side -6 to +2 mm, on its end +24 and +28; the upright
+#: mug -24 to +16 (stray points at the rim). Not for other objects: the banana
+#: carries a specular layer ~20 mm above itself.
+MAX_HEIGHT_EXCESS = 0.020
 
 #: Camera points further than this *behind* the fitted surface, along their own
 #: ray, are refused as impossible and the pose is fitted again without them. The
@@ -352,16 +363,29 @@ def fit_object(model: ObjectModel, observed: np.ndarray, support_height: float,
     """
     first = _fit_once(model, observed, support_height, camera, seed)
     if model.name not in OPEN_VESSELS:
-        return first
+        return _check_height(model, np.atleast_2d(np.asarray(observed, dtype=float)), first)
     obs = np.atleast_2d(np.asarray(observed, dtype=float))
     dense, _ = model.sample(OCCLUSION_POINTS, seed + 2)
     placed_scan = dense @ first.rotation.T + first.position
     behind = _occluded(placed_scan, obs, np.asarray(camera, dtype=float))
     if not behind.any() or behind.sum() > 0.5 * len(obs):
-        return first
+        return _check_height(model, obs, first)
     second = _fit_once(model, obs[~behind], support_height, camera, seed)
     second.dropped_occluded = int(behind.sum())
-    return second
+    return _check_height(model, obs, second)
+
+
+def _check_height(model: ObjectModel, observed: np.ndarray, fit: ObjectFit) -> ObjectFit:
+    """Refuse a protocol object whose cloud stands taller than its fitted pose."""
+    if getattr(model, "allowed_rests", None) is None or not fit.accepted or not len(observed):
+        return fit
+    excess = float(np.percentile(observed[:, 2], 98) - fit.full_cloud[:, 2].max())
+    if excess > MAX_HEIGHT_EXCESS:
+        fit.accepted = False
+        fit.reason = (f"the camera's points reach {excess * 1000:.0f} mm above the fitted "
+                      f"{model.name}, which may only rest as the protocol sets it down "
+                      f"(rests {model.allowed_rests}): is it standing another way?")
+    return fit
 
 
 def _occluded(model_world: np.ndarray, observed: np.ndarray, camera: np.ndarray,

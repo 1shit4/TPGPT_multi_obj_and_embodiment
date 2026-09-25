@@ -61,7 +61,7 @@ def _surface_gap(model, R, t, fit):
 
 @pytest.mark.parametrize("name,rest,heading", [
     ("banana", 0, 0.7), ("banana", 1, 2.3), ("apple", 0, 1.1), ("mug", 0, 2.0),
-    ("tomato_soup_can", 0, 0.4), ("pudding_box", 2, 0.3), ("foam_brick", 0, 2.7)])
+    ("tomato_soup_can", 0, 0.4), ("pudding_box", 1, 4.0), ("foam_brick", 0, 2.7)])
 def test_the_scan_lands_on_the_object(name, rest, heading):
     model = ObjectModel.load(name)
     R, t = _placed(model, rest, heading, (0.52, 0.18))
@@ -123,8 +123,8 @@ def test_the_protocol_poses_are_the_ones_the_protocol_means():
     assert top == 0 and bottom > 100              # opening up: nothing across the top
     box = ObjectModel.load("pudding_box")
     pts, _ = box.sample(4096, 1)
-    for k in PROTOCOL_RESTS["pudding_box"]:       # standing on an end
-        assert np.ptp((pts @ np.asarray(box.rests[k]).T)[:, 2]) == pytest.approx(0.112, abs=0.004)
+    for k in PROTOCOL_RESTS["pudding_box"]:       # standing on a long narrow side
+        assert np.ptp((pts @ np.asarray(box.rests[k]).T)[:, 2]) == pytest.approx(0.090, abs=0.004)
 
 
 def test_the_mug_is_only_fitted_upright_and_does_not_lean():
@@ -165,10 +165,26 @@ def test_a_box_seen_almost_face_on_is_placed_flat_but_can_slide_along_that_face(
     unleaned, but its centre can be 15-20 mm off along the face. The rest tilt
     used to hide this by accident; on live clouds it leaned boxes 12-20 deg."""
     box = ObjectModel.load("pudding_box")
-    R, t = _placed(box, 2, 1.3, (0.52, 0.18))
+    R, t = _placed(box, 1, 0.3, (0.52, 0.18))
     fit = fit_object(box, _view(box, R, t), TABLE, CAMERA)
     assert fit.accepted, fit.reason
     assert fit.rest_index in PROTOCOL_RESTS["pudding_box"]
     lean = fit.rotation @ np.asarray(box.rests[fit.rest_index]).T
     assert lean[2, 2] == pytest.approx(1.0, abs=1e-9)          # flat on the table
-    assert np.linalg.norm(fit.position[:2] - t[:2]) < 0.025
+    P, _ = box.sample(4000, 5)                             # the box's centre, not the scan
+    centre = (P @ fit.rotation.T + fit.position).mean(axis=0)   # origin, which a flip moves
+    assert np.linalg.norm(centre - (P @ R.T + t).mean(axis=0)) < 0.025
+
+
+
+def test_a_box_stood_the_wrong_way_is_refused_not_squeezed_into_the_protocol_pose():
+    """On its end (112 mm) the box cannot be fitted as on its side (90 mm) and accepted."""
+    box = ObjectModel.load("pudding_box")
+    on_end = next(k for k, r in enumerate(box.rests)
+                  if np.ptp((box.sample(2000)[0] @ np.asarray(r).T)[:, 2]) > 0.105)
+    R, t = _placed(box, on_end, 0.8, (0.52, 0.18))
+    fit = fit_object(box, _view(box, R, t), TABLE, CAMERA)
+    assert not fit.accepted
+    assert "standing another way" in fit.reason
+    R, t = _placed(box, PROTOCOL_RESTS["pudding_box"][0], 0.8, (0.52, 0.18))
+    assert fit_object(box, _view(box, R, t), TABLE, CAMERA).accepted

@@ -304,8 +304,14 @@ The planner's support height is: its `support_height` parameter, else the calibr
   coverage; a refused run records its `destination_name`/`destination`.
 - **A lying pudding box is not graspable by this hand** (138 x 128 x 39 mm: both horizontal
   dimensions beat the 80 mm opening, and a pinch across 39 mm has the fingertips at the table).
-  Of 2000 grasps none survives the jaw check. Standing on its end it reaches three slots, so
-  **the box is always set down upright** (user, 2026-09-25).
+  Of 2000 grasps none survives the jaw check. **It is set down on one of its long narrow sides,
+  89 mm tall** (user, 2026-09-25, after live runs; `object_model.PROTOCOL_RESTS` 1 and 3). On its
+  end (112 mm) it planned into bottom_left almost nowhere: grasps from above leave no room under
+  the top board, and side grasps put the fingers below the board surface or the arm into it. The
+  two live plans into bottom_left that evening had it on its side (85 and 91 mm tall in the
+  camera's cloud). A box stood another way is refused by the fit (`MAX_HEIGHT_EXCESS`: the cloud
+  reaching >20 mm above the fitted top), not planned as the protocol pose. On its side the brick's
+  prompt can take it for the brick -- detection was tuned on frames with the box on its end.
 - **Destinations have names**: `destination_name:=top_left|top_right|bottom_left|bottom_right`,
   resolved from the touched slot marks (`config/shelf.yaml`, `slots:`, `shelf.slots()`).
 - **`bottom_right` is abandoned** (user, 2026-09-25). Measured: every object scored 0 admissible of
