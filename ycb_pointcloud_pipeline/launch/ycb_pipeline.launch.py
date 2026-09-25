@@ -39,6 +39,14 @@ def generate_launch_description():
                               description='Seconds between detections / point cloud publishes'),
         DeclareLaunchArgument('detector_mode', default_value='grounded_sam',
                               description="'grounded_sam' or 'dummy' (no models, plumbing test)"),
+        DeclareLaunchArgument('caption_mode', default_value='joint',
+                              description="'joint' (one caption, one pass) or 'per_object' "
+                                          "(a caption each, one pass each -- no phrase competes)"),
+        DeclareLaunchArgument('save_frames', default_value='off',
+                              description="'misses' keeps every frame where a target reached no "
+                                          "topic, 'all' keeps all: replay them with prompt_bench"),
+        DeclareLaunchArgument('save_frames_dir',
+                              default_value=os.path.expanduser('~/ycb_detection_frames')),
     ]
 
     camera = IncludeLaunchDescription(
@@ -73,6 +81,9 @@ def generate_launch_description():
             'target_objects_yaml': LaunchConfiguration('targets'),
             'process_period_sec': ParameterValue(LaunchConfiguration('period'), value_type=float),
             'detector_mode': LaunchConfiguration('detector_mode'),
+            'caption_mode': LaunchConfiguration('caption_mode'),
+            'save_frames': LaunchConfiguration('save_frames'),
+            'save_frames_dir': LaunchConfiguration('save_frames_dir'),
         }],
     )
 

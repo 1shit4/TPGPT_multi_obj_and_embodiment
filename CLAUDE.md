@@ -286,6 +286,21 @@ The planner's support height is: its `support_height` parameter, else the calibr
   cable, the status ring and the shoulder connector are not in the link meshes, so they survived as
   obstacles and then link1 swept through them, refusing the move onto the path (`approach_in`).
   Measured: 140 such points at 10 mm, 3 at 30 mm, out of 14 000.
+- **A detection miss now says why** (2026-09-25, `docs/hardware/SEGMENTATION.md`). A target that
+  reached no topic used to leave nothing in the log, so "scored 0.34 against a threshold of 0.35",
+  "never seen at all", "matched a phrase that fits two prompts" and "detected fine but no depth in
+  the mask" all looked the same. `segmentation_node` now detects at a report floor (0.05) and
+  accepts at each target's own threshold, logging every target that did not make it, and
+  `/ycb_detections/info` carries the per-target report. `save_frames:=misses` keeps the RGB, the
+  depth and the report of every frame that went wrong; `prompt_bench` replays them offline to score
+  candidate wordings and both caption modes. **Reported flaky 2026-09-25: the pudding box**; nothing
+  measured yet, because no frames had been saved when the tooling went in.
+- **A prompt is only as good as its worst frame.** `target_objects.yaml` takes an optional
+  per-object `threshold:`, so one object that scores low does not drag the bar down for the others,
+  and `caption_mode:=per_object` gives each prompt its own caption (one forward pass each). The
+  latter removes the competition between phrases -- which is also what suppresses false positives:
+  on a brown rectangle alone, a caption of just "banana." returned a banana at 0.41. Measure with
+  `prompt_bench` before changing either.
 - **Object clouds are only as good as the mask.** `segmentation_node` erodes each mask by
   `mask_erosion` (default 1 px, the sim's value; audit A9). Without it the boundary pixels take
   their depth partly from the background and fly towards the camera: a 68 mm YCB can fused to
@@ -342,6 +357,8 @@ The planner's support height is: its `support_height` parameter, else the calibr
 - `docs/hardware/GRASP_LIBRARY.md` — the fixed per-object grasp library (why the draw had to go,
   how it is cached and used) and coverage: what each shelf slot admits, measured, and the four
   things that measurement exposed.
+- `docs/hardware/SEGMENTATION.md` — the detector: prompts, per-object thresholds, caption modes,
+  and how to find out why an object was detected on one frame and not the next.
 - `docs/hardware/SHELF_AND_PATH_CHECK.md` — the shelf model, the scene cloud, the whole-path check
   and grasp selection: which side's method was kept and why, how to measure and check the shelf,
   parameters, and what was verified.

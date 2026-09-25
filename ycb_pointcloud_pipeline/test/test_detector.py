@@ -1,0 +1,186 @@
+"""The detector's bookkeeping: captions, phrase attribution, thresholds, reports.
+
+None of this needs a model. What it pins down is the part that decides whether an
+object reaches a topic, and -- since 2026-09-25 -- whether a frame that dropped
+one says why.
+"""
+
+import os
+import sys
+
+import numpy as np
+import pytest
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+
+from ycb_pointcloud_pipeline.ycb_detector import (  # noqa: E402
+    GroundedSAMDetector, build_captions, phrase_to_name)
+
+TARGETS = [{'name': 'banana', 'prompt': 'banana'},
+           {'name': 'apple', 'prompt': 'apple'},
+           {'name': 'pudding_box', 'prompt': 'brown chocolate pudding box'}]
+
+
+def test_joint_caption_is_one_pass_with_every_phrase():
+    captions = build_captions(TARGETS, 'joint')
+    assert len(captions) == 1
+    caption, mapping = captions[0]
+    assert caption == 'banana. apple. brown chocolate pudding box.'
+    assert mapping['brown chocolate pudding box'] == 'pudding_box'
+
+
+def test_per_object_caption_is_one_pass_each_and_cannot_cross_attribute():
+    captions = build_captions(TARGETS, 'per_object')
+    assert len(captions) == 3
+    for caption, mapping in captions:
+        assert caption.count('.') == 1
+        assert len(mapping) == 1
+    # A pass for the banana can only ever produce a banana, whatever it matched.
+    _, mapping = captions[0]
+    assert phrase_to_name('brown box', mapping) is None
+
+
+def test_unknown_caption_mode_is_refused():
+    with pytest.raises(ValueError):
+        build_captions(TARGETS, 'one_word_at_a_time')
+
+
+def test_partial_phrases_map_back_to_the_target():
+    mapping = build_captions(TARGETS, 'joint')[0][1]
+    assert phrase_to_name('pudding box', mapping) == 'pudding_box'
+    assert phrase_to_name('brown chocolate pudding box', mapping) == 'pudding_box'
+    assert phrase_to_name('banana', mapping) == 'banana'
+    assert phrase_to_name('spatula', mapping) is None
+
+
+def test_an_ambiguous_phrase_is_not_attributed():
+    targets = [{'name': 'red_box', 'prompt': 'red box'},
+               {'name': 'brown_box', 'prompt': 'brown box'}]
+    mapping = build_captions(targets, 'joint')[0][1]
+    assert phrase_to_name('box', mapping) is None       # equal overlap with both
+
+
+def _detector(thresholds=None, found=None, mode='joint'):
+    """A detector with its models replaced by a fixed set of boxes."""
+    det = GroundedSAMDetector.__new__(GroundedSAMDetector)
+    det.targets = TARGETS
+    det.captions = build_captions(TARGETS, mode)
+    det.thresholds = {t['name']: (thresholds or {}).get(t['name'], 0.35) for t in TARGETS}
+    det.report_floor = 0.05
+    det.text_threshold = 0.25
+    det.boxes = lambda pil, caption, mapping, size, floor: (dict(found or {}), [])
+    return det
+
+
+def test_a_near_miss_is_recorded_rather_than_lost():
+    det = _detector(found={'pudding_box': {'label': 'pudding_box', 'score': 0.29,
+                                           'box': (1, 1, 5, 5), 'phrase': 'pudding box'}})
+    assert det.detect_and_segment(np.zeros((8, 8, 3), np.uint8)) == []
+    report = det.last_report['pudding_box']
+    assert report['accepted'] is False
+    assert report['score'] == pytest.approx(0.29)
+    assert report['phrase'] == 'pudding box'
+    # and the targets that were never seen say so, rather than being absent
+    assert det.last_report['banana'] == {'score': 0.0, 'phrase': None, 'threshold': 0.35,
+                                         'accepted': False}
+
+
+class _Fake(dict):
+    """Enough of torch and SAM to let an accepted box reach a mask."""
+
+    def to(self, _device):
+        return self
+
+    def cpu(self):
+        return self
+
+    def numpy(self):
+        return np.ones((8, 8), dtype=bool)
+
+    def __call__(self, *a, **k):
+        return self
+
+    def __getattr__(self, _name):
+        return self
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+    def __getitem__(self, _key):
+        return self
+
+    def post_process_masks(self, *a, **k):
+        return [[[self]]]
+
+
+def _with_sam(det):
+    det.torch = _Fake()
+    det.sam_processor = _Fake()
+    det.sam_model = _Fake()
+    det.device = 'cpu'
+    return det
+
+
+def test_a_per_object_threshold_admits_what_the_shared_one_refuses():
+    found = {'pudding_box': {'label': 'pudding_box', 'score': 0.29, 'box': (1, 1, 5, 5),
+                             'phrase': 'pudding box'}}
+    assert _detector(found=found).detect_and_segment(np.zeros((8, 8, 3), np.uint8)) == []
+    det = _with_sam(_detector(thresholds={'pudding_box': 0.25}, found=found))
+    dets = det.detect_and_segment(np.zeros((8, 8, 3), np.uint8))
+    assert [d['label'] for d in dets] == ['pudding_box']
+    assert det.last_report['pudding_box']['accepted'] is True
+    assert dets[0]['mask'].all()
+
+
+def test_the_report_floor_lets_the_boxes_call_see_below_every_threshold():
+    seen = {}
+    det = _detector(thresholds={'pudding_box': 0.5})
+    det.boxes = lambda pil, caption, mapping, size, floor: (seen.update(floor=floor) or ({}, []))
+    det.detect_and_segment(np.zeros((8, 8, 3), np.uint8))
+    assert seen['floor'] == 0.05          # the floor, not the lowest threshold
+
+
+def test_boxes_reports_an_unattributable_phrase_but_not_an_empty_one():
+    """A box with no text is the detector proposing a region, not an ambiguity."""
+    det = _detector()
+    del det.boxes                      # this one exercises the real method
+    det.gd_processor = _Fake()
+    det.gd_model = _Fake()
+    det.torch = _Fake()
+    det.device = 'cpu'
+
+    class Res(dict):
+        def __getitem__(self, key):
+            return {'boxes': _Scores([[0, 0, 1, 1], [0, 0, 2, 2]]),
+                    'scores': _Scores([0.44, 0.31]),
+                    'text_labels': ['box', '']}[key]
+
+        def __contains__(self, key):
+            return key == 'text_labels'
+
+    det.gd_processor.post_process_grounded_object_detection = lambda *a, **k: [Res()]
+    targets = [{'name': 'red_box', 'prompt': 'red box'},
+               {'name': 'brown_box', 'prompt': 'brown box'}]
+    caption, mapping = build_captions(targets, 'joint')[0]
+    found, unmatched = det.boxes(None, caption, mapping, (8, 8), 0.05)
+    assert found == {}
+    assert unmatched == [{'phrase': 'box', 'score': pytest.approx(0.44)}]
+
+
+class _Scores(list):
+    def tolist(self):
+        return list(self)
+
+
+def test_load_target_objects_reads_an_optional_threshold(tmp_path):
+    pytest.importorskip('rclpy')
+    from ycb_pointcloud_pipeline.segmentation_node import load_target_objects
+    path = tmp_path / 'targets.yaml'
+    path.write_text("target_objects:\n  - banana\n  - name: pudding_box\n"
+                    "    prompt: brown box\n    threshold: 0.22\n")
+    targets = load_target_objects(str(path))
+    assert targets[0] == {'name': 'banana', 'prompt': 'banana'}
+    assert targets[1]['threshold'] == pytest.approx(0.22)

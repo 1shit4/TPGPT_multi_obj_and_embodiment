@@ -59,19 +59,30 @@ def _default_calibration_path():
 
 
 def load_target_objects(yaml_path):
-    """Entries may be a plain string ("banana") or {name: ..., prompt: ...}.
-    `name` is used for the topic, `prompt` is the text given to Grounding DINO."""
+    """Entries may be a plain string ("banana") or {name, prompt, threshold}.
+
+    `name` is used for the topic, `prompt` is the text given to Grounding DINO,
+    and `threshold` (optional) is that object's own accept score, which
+    overrides the node's `box_threshold` for it alone. One object that scores
+    low should not force the threshold down for every other object.
+    """
     with open(yaml_path, 'r') as f:
         data = yaml.safe_load(f) or {}
     targets = []
     for entry in data.get('target_objects', []):
+        threshold = None
         if isinstance(entry, dict):
             name = str(entry['name']).strip()
             prompt = str(entry.get('prompt', name.replace('_', ' '))).strip()
+            if entry.get('threshold') is not None:
+                threshold = float(entry['threshold'])
         else:
             name = str(entry).strip()
             prompt = name.replace('_', ' ')
-        targets.append({'name': name.lower().replace(' ', '_'), 'prompt': prompt})
+        target = {'name': name.lower().replace(' ', '_'), 'prompt': prompt}
+        if threshold is not None:
+            target['threshold'] = threshold
+        targets.append(target)
     if not targets:
         raise ValueError(f"No target_objects found in {yaml_path}")
     return targets
@@ -91,6 +102,20 @@ class YCBSegmentationNode(Node):
         self.declare_parameter('sam_model', 'facebook/sam-vit-large')
         self.declare_parameter('box_threshold', 0.35)
         self.declare_parameter('text_threshold', 0.25)
+        # 'joint': every prompt in one caption, one forward pass (the original
+        # behaviour). 'per_object': a caption each, one pass each -- slower, and it
+        # removes whatever competition there is between the phrases. Measure with
+        # scripts/prompt_bench.py before choosing.
+        self.declare_parameter('caption_mode', 'joint')
+        # Boxes below the accept threshold are still reported down to here, so a
+        # miss reads as "0.29, threshold 0.35" instead of silence.
+        self.declare_parameter('detection_report_floor', 0.05)
+        # Keep the frames a detection problem happened on: 'misses' writes the RGB,
+        # the depth and the report whenever a listed target reaches no topic, 'all'
+        # writes every frame. A prompt cannot be chosen from memory of what the
+        # scene looked like; prompt_bench replays these frames offline.
+        self.declare_parameter('save_frames', 'off')      # 'off' | 'misses' | 'all'
+        self.declare_parameter('save_frames_dir', os.path.expanduser('~/ycb_detection_frames'))
         self.declare_parameter('depth_scale', 1000.0)  # RealSense: mm -> m
         self.declare_parameter('depth_trunc', 2.0)     # ignore points farther than this (m)
         self.declare_parameter('save_pcd', False)
@@ -149,7 +174,10 @@ class YCBSegmentationNode(Node):
             self.detector = GroundedSAMDetector(
                 self.targets, grounding_model=p('grounding_model'), sam_model=p('sam_model'),
                 box_threshold=p('box_threshold'), text_threshold=p('text_threshold'),
-                logger=self.get_logger())
+                logger=self.get_logger(), caption_mode=p('caption_mode'),
+                thresholds={t['name']: t['threshold'] for t in self.targets
+                            if 'threshold' in t},
+                report_floor=float(p('detection_report_floor')))
         else:
             raise ValueError(f"Unknown detector_mode: {mode!r}")
 
@@ -332,6 +360,13 @@ class YCBSegmentationNode(Node):
                                                 depth_trunc=self.depth_trunc)
             det['n_points'] = points.shape[0]
             if points.shape[0] == 0:
+                # Seen by the detector, but no depth survived the mask: the object
+                # is beyond depth_trunc, or its surface returned nothing. Silent
+                # before, and indistinguishable from not being detected at all.
+                self.get_logger().warn(
+                    f"{det['label']}: detected at {det['score']:.2f} over "
+                    f"{int(det['mask'].sum())} pixels, but no depth in the mask "
+                    f"(within {self.depth_trunc:.1f} m) -- nothing published")
                 continue
             msg = points_to_ros2_pointcloud2(points, colors, color_msg.header.frame_id,
                                              color_msg.header.stamp)
@@ -354,13 +389,75 @@ class YCBSegmentationNode(Node):
             'sam_model': p('sam_model'), 'box_threshold': p('box_threshold'),
             'text_threshold': p('text_threshold'), 'target_objects_yaml': p('target_objects_yaml'),
             'prompts': {t['name']: t['prompt'] for t in self.targets},
+            'caption_mode': p('caption_mode'),
             'detections': [{'label': d['label'], 'score': float(d['score']),
                             'n_points': int(d.get('n_points', 0)),
                             'box': [float(v) for v in d['box']]} for d in detections],
+            # Every target, accepted or not: what the X6 record needs to explain a
+            # frame where an object went missing.
+            'report': getattr(self.detector, 'last_report', {}),
+            'unmatched': getattr(self.detector, 'last_unmatched', []),
         })))
         self.get_logger().info(
             f"[{self.cycle}] inference {dt:.2f} s, published: {published or 'nothing'}")
+        self._report_misses(published)
+        self._save_frame(rgb, depth, published)
         self._publish_debug_image(rgb, detections, color_msg.header)
+
+    def _save_frame(self, rgb, depth, published):
+        """Write this frame to disk when it is one we would want to replay."""
+        p = lambda n: self.get_parameter(n).value  # noqa: E731
+        mode = str(p('save_frames'))
+        if mode not in ('misses', 'all'):
+            return
+        report = getattr(self.detector, 'last_report', {})
+        done = {entry.split('(')[0] for entry in published}
+        missing = [n for n in report if n not in done]
+        if mode == 'misses' and not missing:
+            return
+        import cv2
+        out = os.path.expanduser(str(p('save_frames_dir')))
+        os.makedirs(out, exist_ok=True)
+        tag = f"{self.cycle:05d}_{'miss_' + '_'.join(missing) if missing else 'all_found'}"
+        cv2.imwrite(os.path.join(out, f'{tag}_rgb.png'), cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR))
+        np.save(os.path.join(out, f'{tag}_depth.npy'), np.asarray(depth))
+        with open(os.path.join(out, f'{tag}.json'), 'w') as f:
+            json.dump({'cycle': self.cycle, 'published': published, 'missing': missing,
+                       'report': report, 'caption_mode': p('caption_mode'),
+                       'unmatched': getattr(self.detector, 'last_unmatched', []),
+                       'prompts': {t['name']: t['prompt'] for t in self.targets}}, f, indent=1)
+        self.get_logger().info(f"saved {tag} to {out}", throttle_duration_sec=10.0)
+
+    def _report_misses(self, published):
+        """Say what happened to every target that did not reach a topic.
+
+        A detector that finds an object on one frame and not the next used to
+        leave nothing behind on the frames it missed, so there was no way to tell
+        a near miss (0.34 against a 0.35 threshold: change the threshold or the
+        prompt) from an object the model never saw at all (0.02: change the
+        prompt, or the lighting, or accept that it is occluded).
+        """
+        report = getattr(self.detector, 'last_report', None)
+        if not report:
+            return
+        done = {entry.split('(')[0] for entry in published}
+        for name, r in report.items():
+            if name in done:
+                continue
+            if r['score'] <= 0.0:
+                self.get_logger().warn(
+                    f"{name}: not seen at all this frame (nothing above "
+                    f"{self.detector.report_floor:.2f})", throttle_duration_sec=10.0)
+            elif not r['accepted']:
+                self.get_logger().warn(
+                    f"{name}: best box scored {r['score']:.2f} as {r['phrase']!r}, "
+                    f"below its threshold of {r['threshold']:.2f} -- not published",
+                    throttle_duration_sec=10.0)
+        for u in getattr(self.detector, 'last_unmatched', [])[:2]:
+            self.get_logger().warn(
+                f"a box scoring {u['score']:.2f} matched the phrase {u['phrase']!r}, which "
+                "fits two prompts equally well, so it could not be attributed",
+                throttle_duration_sec=10.0)
 
     def _publish_debug_image(self, rgb, detections, header):
         bgr = cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR)

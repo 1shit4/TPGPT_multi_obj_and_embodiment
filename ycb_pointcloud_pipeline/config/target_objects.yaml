@@ -5,9 +5,17 @@
 #   - a plain string:           - banana            -> topic /ycb_pointclouds/banana
 #   - or name + text prompt:    - name: master_chef_can
 #                                 prompt: blue coffee can
+#                                 threshold: 0.25   # optional, this object only
 # The prompt is what Grounding DINO searches for, so describe what the object
 # LOOKS like -- brand names from the YCB list ("master chef", "jell-o") are
 # often not recognised, visual descriptions are.
+#
+# `threshold` overrides the node's box_threshold (0.35) for that object alone, so
+# one object that scores low does not drag the bar down for the others. Set it
+# from measurement, not from memory: run the node with save_frames:=misses, then
+#   ros2 run --prefix python3 ycb_pointcloud_pipeline prompt_bench \
+#       --frames ~/ycb_detection_frames --object <name> --prompts "..." "..."
+# which replays the saved frames and reports each wording's WORST frame.
 
 target_objects:
   # - name: master_chef_can
