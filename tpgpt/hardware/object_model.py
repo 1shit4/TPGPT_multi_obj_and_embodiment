@@ -73,6 +73,37 @@ YCB_SCANS = {
     "foam_brick": "061_foam_brick",         # 78 x 53 x 51 mm
 }
 
+#: Resting poses the experiment's protocol allows (user, 2026-09-25): the mug is set
+#: down opening-up (rest 0; rest 2 is the same shape upside down, and from this
+#: camera the two differ only inside the cup), the pudding box stands on either end
+#: (rests 2 and 4, 112 mm tall -- lying flat it cannot be grasped). An object not
+#: listed may rest any way. Indices are into :meth:`ObjectModel._resting_orientations`,
+#: which is deterministic for a given scan; ``test_object_model`` pins them.
+PROTOCOL_RESTS = {"mug": (0,), "pudding_box": (2, 4)}
+
+#: Camera points further than this *behind* the fitted surface, along their own
+#: ray, are refused as impossible and the pose is fitted again without them. The
+#: camera cannot see through an opaque object; what reads as if it had is a depth
+#: artefact. Measured 2026-09-25 on a glossy red mug: 15-30 % of its cloud sat
+#: 70-200 mm from its axis, 7-21 mm above the table and ~80 mm beyond the mug
+#: body along the ray -- the infrared pattern bouncing inside the cup -- and the fit
+#: turned the handle to point away from the camera, onto those points, on 50 of
+#: 68 fits, and tilted the upright mug 13 deg.
+OCCLUSION_TOLERANCE = 0.020
+#: Open vessels: the occlusion pass runs for them, and they are fitted without the
+#: rest tilt. Only an open vessel shows the artefact, and only there is either
+#: change measured to help: on the day's captures of the banana, apple and can the
+#: occlusion pass moved validated fits with nothing to say whether for the better,
+#: and on an upright pudding box the tilt search is worth 2.5 mm against 5.5.
+OPEN_VESSELS = ("mug",)
+#: The occlusion test is a depth image of the placed scan: :data:`OCCLUSION_POINTS`
+#: on its surface, the nearest per angular bin of :data:`OCCLUSION_BIN_DEG` (1.5 mm
+#: at 1.1 m), each camera point compared with its own bin only. A neighbourhood
+#: of bins is wrong here: looking into a cup it always contains the rim, so the
+#: cup's real interior reads as "behind" (2105 of 3018 points on the first try).
+OCCLUSION_BIN_DEG = 0.08
+OCCLUSION_POINTS = 40000
+
 #: The simulation's download location (``tpgpt.sim.ycb.YCB_ROOT``), resolved
 #: against the repository rather than the working directory.
 SCAN_ROOT = Path(__file__).resolve().parents[2] / "assets" / "ycb"
@@ -185,6 +216,8 @@ class ObjectModel:
     faces: np.ndarray
     centre_of_mass: np.ndarray
     rests: list = field(default_factory=list)       # (3, 3) rotations, face down on z=0
+    #: Indices into ``rests`` the fit may use; ``None`` = all (:data:`PROTOCOL_RESTS`).
+    allowed_rests: tuple | None = None
 
     @classmethod
     def load(cls, name: str, root: Path | str = SCAN_ROOT) -> "ObjectModel":
@@ -201,6 +234,7 @@ class ObjectModel:
         model = cls(name=name, vertices=vertices, faces=faces,
                     centre_of_mass=_volume_centroid(vertices, faces))
         model.rests = model._resting_orientations()
+        model.allowed_rests = PROTOCOL_RESTS.get(name)
         return model
 
     def sample(self, count: int, seed: int = 0) -> tuple[np.ndarray, np.ndarray]:
@@ -275,6 +309,8 @@ class ObjectFit:
     observed_points: int
     dropped_below_table: int = 0
     full_cloud: np.ndarray | None = None
+    #: Camera points refused as lying behind the fitted surface (:data:`OCCLUSION_TOLERANCE`).
+    dropped_occluded: int = 0
 
     def summary(self) -> dict:
         return {"object": self.name, "accepted": self.accepted, "reason": self.reason,
@@ -284,12 +320,86 @@ class ObjectFit:
                 "seen": round(self.seen, 3), "in_front": round(self.in_front, 3),
                 "dz_mm": round(self.dz_mm, 1),
                 "observed_points": self.observed_points,
-                "dropped_below_table": self.dropped_below_table}
+                "dropped_below_table": self.dropped_below_table,
+                "dropped_occluded": self.dropped_occluded}
 
 
 def fit_object(model: ObjectModel, observed: np.ndarray, support_height: float,
                camera, seed: int = 0) -> ObjectFit:
     """Fit ``model`` to the camera's ``observed`` points (base frame).
+
+    For the objects in :data:`OPEN_VESSELS`, fitted twice: once on every
+    point, then again without the points that lie
+    behind that first fit's surface along their own camera ray
+    (:data:`OCCLUSION_TOLERANCE`). A camera cannot see through an opaque object,
+    so such a point is a depth artefact -- on a glossy cup, a large share of the
+    cloud -- and left in, it drags the pose (see the constant). The second fit's
+    ``dropped_occluded`` says how many were refused. Only the resting poses in
+    ``model.allowed_rests`` are tried (:data:`PROTOCOL_RESTS`).
+
+    ``camera`` is the camera's position (base frame), for the facing test.
+    Returns the fit with ``full_cloud`` (:data:`FULL_CLOUD_POINTS` points on the
+    scan, set down on ``support_height``) whether or not it was accepted, so the
+    caller can show a refused fit.
+    """
+    first = _fit_once(model, observed, support_height, camera, seed)
+    if model.name not in OPEN_VESSELS:
+        return first
+    obs = np.atleast_2d(np.asarray(observed, dtype=float))
+    dense, _ = model.sample(OCCLUSION_POINTS, seed + 2)
+    placed_scan = dense @ first.rotation.T + first.position
+    behind = _occluded(placed_scan, obs, np.asarray(camera, dtype=float))
+    if not behind.any() or behind.sum() > 0.5 * len(obs):
+        return first
+    second = _fit_once(model, obs[~behind], support_height, camera, seed)
+    second.dropped_occluded = int(behind.sum())
+    return second
+
+
+def _occluded(model_world: np.ndarray, observed: np.ndarray, camera: np.ndarray,
+              bin_deg: float = OCCLUSION_BIN_DEG,
+              tolerance: float = OCCLUSION_TOLERANCE) -> np.ndarray:
+    """Which ``observed`` points lie more than ``tolerance`` behind ``model_world``.
+
+    Per ray bin, the nearest model point is the surface the camera would have hit
+    first -- a depth image of the placed scan. An observation further along the
+    same ray than that, by more than ``tolerance``, was hidden by the object.
+    Bins with no model point say nothing: the point is kept.
+    """
+    if not len(model_world) or not len(observed):
+        return np.zeros(len(observed), dtype=bool)
+
+    def rays(p):
+        d = p - camera
+        r = np.linalg.norm(d, axis=1)
+        return d / np.maximum(r, 1e-9)[:, None], r
+
+    u_m, r_m = rays(model_world)
+    u_o, r_o = rays(observed)
+    fwd = u_m.mean(axis=0)
+    fwd /= np.linalg.norm(fwd)
+    right = np.cross(fwd, [0.0, 0.0, 1.0])
+    right /= max(np.linalg.norm(right), 1e-9)
+    up = np.cross(right, fwd)
+    step = np.radians(bin_deg)
+
+    def key(u):
+        return (np.round(np.arctan2(u @ right, u @ fwd) / step).astype(np.int64) * 1_000_003
+                + np.round(np.arctan2(u @ up, u @ fwd) / step).astype(np.int64))
+
+    k_m, k_o = key(u_m), key(u_o)
+    order = np.argsort(k_m)
+    ks, rs = k_m[order], r_m[order]
+    edges = np.flatnonzero(np.r_[True, ks[1:] != ks[:-1]])
+    bins, nearest = ks[edges], np.minimum.reduceat(rs, edges)
+    idx = np.clip(np.searchsorted(bins, k_o), 0, len(bins) - 1)
+    front = np.where(bins[idx] == k_o, nearest[idx], np.inf)
+    return r_o > front + tolerance
+
+
+def _fit_once(model: ObjectModel, observed: np.ndarray, support_height: float,
+              camera, seed: int = 0) -> ObjectFit:
+    """One fit of ``model`` to ``observed`` (see :func:`fit_object`).
 
     ``camera`` is the camera's position (base frame), for the facing test.
     Returns the fit with ``full_cloud`` (:data:`FULL_CLOUD_POINTS` points on the
@@ -324,7 +434,10 @@ def fit_object(model: ObjectModel, observed: np.ndarray, support_height: float,
 
     # ---- coarse: every resting orientation x heading, centred on the cloud ----
     starts = []
+    allowed = getattr(model, "allowed_rests", None)
     for k, rest in enumerate(model.rests):
+        if allowed is not None and k not in allowed:
+            continue
         for heading in np.linspace(0.0, 2 * np.pi, HEADINGS, endpoint=False):
             body, nrm, _ = placed(rest, heading, None)
             t = centre_obs - np.median(body, axis=0)
@@ -359,7 +472,13 @@ def fit_object(model: ObjectModel, observed: np.ndarray, support_height: float,
             best = (s, k, heading, t)
 
     _, k, heading, t = best
-    R, t = _rest_tilt(model, obs, _rot_z(heading) @ model.rests[k], t, support_height)
+    if model.name in OPEN_VESSELS:
+        # A mug stands on its flat base on a flat table: it cannot lean. The tilt
+        # search, there, only fitted the depth artefacts inside the cup -- 11-22
+        # deg on an upright mug whose cloud was a third phantom points.
+        R = _rot_z(heading) @ model.rests[k]
+    else:
+        R, t = _rest_tilt(model, obs, _rot_z(heading) @ model.rests[k], t, support_height)
     body = pts @ R.T
     nrm = normals @ R.T
     heading = float(np.arctan2(R[1, 0], R[0, 0]))

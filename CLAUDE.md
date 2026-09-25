@@ -241,7 +241,10 @@ The planner's support height is: its `support_height` parameter, else the calibr
   110 -- the fold all but disappears -- but carry the hand 16-37 mm under the top board inside
   the bottom slot instead of 60, and lose bottom_left (20 -> 9 and 8). **A pick near vertical
   and a hand kept low inside the slot** is what the numbers ask for. One demonstration serves
-  every object and slot; choosing one is fine, mixing them per slot is not.
+  every object and slot; choosing one is fine, mixing them per slot is not. **The 18:39
+  demonstration is the best measured** (192 admissible; 91/80/21 at top_left/top_right/
+  bottom_left, against 45/45/20 for 23:01), with the cleanest carry (the banana turned 1.9 deg in
+  the hand).
 - **A refused scan fit is retried on fresh camera frames** (`object_model_retries`, 2), because
   the same object can fit on one frame and not the next. The best attempt is kept; if none is
   accepted the planner falls back to the camera cloud, as before.
@@ -278,11 +281,17 @@ The planner's support height is: its `support_height` parameter, else the calibr
   top_left/top_right/bottom_left, against 0/0/0 for the upright can. The mug's **heading matters**
   -- the handle decides which side a grasp can come from. A can laid on its side plans too (6/4/0),
   but it rolls off a board.
-- **The mug matched a cup behind the robot at 0.75** when it was last in `target_objects.yaml`
-  (2026-09-23), and its cloud then failed the workspace crop. It is listed again since 2026-09-25;
-  either that cup is out of the camera's view, or its prompt and threshold are set from saved
-  frames (`SEGMENTATION.md`). Its scan fit has **not** been tried on this bench -- a hollow object
-  with a handle is a harder fit, and a refused fit means no library and the camera's own cloud.
+- **The mug is set down opening-up with its handle visible to the camera** (user, 2026-09-25).
+  Both are the fit's needs, measured: (1) from this camera an upright and an upside-down mug differ
+  only inside the cup, and the fit chose upside-down on 15 of 20 live frames, so the fit only tries
+  the protocol poses (`object_model.PROTOCOL_RESTS`: mug 0; pudding box 2 or 4, on an end);
+  (2) the D435's infrared bounces inside the glossy cup and puts 15-30 % of the mug's cloud ~80 mm
+  too far, behind the mug near the table, and the fit turned the handle onto those points (and
+  leaned the mug 13 deg). For the mug (`OPEN_VESSELS`) the fit now has no rest tilt and is run a
+  second time without the points >20 mm behind the first fit along their ray. Recorded with the
+  handle in four known directions (`~/tpgpt_bags/mug_handles`): within 30 deg on 9/14, 13/14,
+  20/22 fits when visible, 2/18 when turned away from the camera -- nothing to fit it to.
+  Other objects' fits are unchanged. The planner logs how many points it dropped.
 - **A lying pudding box is not graspable by this hand** (138 x 128 x 39 mm: both horizontal
   dimensions beat the 80 mm opening, and a pinch across 39 mm has the fingertips at the table).
   Of 2000 grasps none survives the jaw check. Standing on its end it reaches three slots, so

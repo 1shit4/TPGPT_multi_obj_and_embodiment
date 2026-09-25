@@ -722,7 +722,10 @@ class TpgptPlannerNode(Node):
         detail = (f"rest {s['rest_index']}, heading {s['heading_deg']:.0f} deg, camera points "
                   f"{s['median_mm']:.1f} mm from the scan (median), {s['explained']:.0%} within "
                   f"8 mm, {s['seen']:.0%} of the camera-facing scan seen, fitted height "
-                  f"{s['dz_mm']:+.1f} mm off the table; {time.monotonic() - t:.1f} s")
+                  f"{s['dz_mm']:+.1f} mm off the table"
+                  + (f", {s['dropped_occluded']} points behind the scan dropped as depth artefacts"
+                     if s.get('dropped_occluded') else '')
+                  + f"; {time.monotonic() - t:.1f} s")
         if fit.accepted:
             self.object_cloud_source = 'ycb scan (fitted)'
             log.info(f'Object model: {name} scan fitted ({detail}); planning on its '

@@ -261,15 +261,21 @@ to give more clearance, measured against the 09-23 23:01 one on the same capture
 (`python -m tpgpt.hardware.coverage --demo ...`; raw in `outputs/hardware/coverage_demos/`).
 Admissible of 25, top_left / top_right / bottom_left:
 
-| object | 09-23 23:01 | 16:35 | 16:52 |
-|---|---|---|---|
-| banana (23:14 capture) | 11/8/5 | 22/18/2 | 21/20/4 |
-| apple | 9/6/2 | 6/3/2 | 10/8/1 |
-| foam brick | 10/5/3 | 17/16/2 | 18/19/2 |
-| pudding box upright | 5/8/1 | 11/11/1 | 10/8/**0** |
-| mug, handle 0 deg | 3/14/3 | 9/17/**0** | 10/18/**0** |
-| mug, handle 90 deg | 7/4/6 | 20/7/2 | 18/5/1 |
-| **total** (top_left, top_right, bottom_left) | **110** (45, 45, 20) | **166** (85, 72, 9) | **173** (87, 78, 8) |
+| object | 09-23 23:01 | 16:35 | 16:52 | 18:33 | 18:39 |
+|---|---|---|---|---|---|
+| banana (23:14 capture) | 11/8/5 | 22/18/2 | 21/20/4 | 15/17/3 | 22/14/7 |
+| apple | 9/6/2 | 6/3/2 | 10/8/1 | 8/3/4 | 9/10/3 |
+| foam brick | 10/5/3 | 17/16/2 | 18/19/2 | 16/21/3 | 17/22/3 |
+| pudding box upright | 5/8/1 | 11/11/1 | 10/8/**0** | 3/7/**0** | 11/11/**0** |
+| mug, handle 0 deg | 3/14/3 | 9/17/**0** | 10/18/**0** | 5/15/3 | 9/17/5 |
+| mug, handle 90 deg | 7/4/6 | 20/7/2 | 18/5/1 | 17/2/2 | 23/6/3 |
+| **total** (top_left, top_right, bottom_left) | **110** (45, 45, 20) | **166** (85, 72, 9) | **173** (87, 78, 8) | **144** (64, 65, 15) | **192** (91, 80, 21) |
+
+The 18:33 and 18:39 demonstrations used a different strategy (picked at 23 and 26 deg; 18:33 with
+73 mm of headroom under the top board, 18:39 with 45 mm, 136 mm from the left wall and the banana
+turned only 1.9 deg in the hand). **18:39 is the best measured**: the most admissible, bottom_left
+back to the 23:01 level, and the top slots still doubled. The fold returns somewhat at the
+intermediate tilt (`plan_refused` 46 and 51, against 10-11 at 13 deg and 54 at 41).
 
 What changed, from the demonstrations' own geometry (all three place on the bottom board):
 
