@@ -289,6 +289,28 @@ box's worst absent score is 0.395 against 0.40, the apple's 0.464 against 0.47, 
 frames they are judged on. Expect an occasional false detection on new frames; record them
 (`save_frames:=misses`), add the scene to `labels.yaml`, and re-run the replay.
 
+**Third session: the pudding box on its long side** (2026-09-25 evening; the protocol pose since).
+Live, the brick's prompt took the box for four minutes at a stretch. Recorded as `pudding_side`
+(112 frames) and `pudding_side_brick` (86), plus `mug_2` and `both_apple_mug_2`: 535 frames in 14
+scenes. On its side the box shows a silver-white top over one of two big faces -- the red JELL-O
+logo (found), or a brown chocolate-pudding picture ("brown cube" took it) -- and end-on only a
+narrow red-brown end (nothing matched "white and red box"). `detection_replay` now records each
+frame's best boxes, so `detection_sweep` re-scores any thresholds offline in seconds; each option
+below has thresholds searched for no false detection first, then the most found:
+
+| pudding box / brick wording | box on its side, alone | beside the brick | brick, all scenes | false |
+|---|---|---|---|---|
+| white and red box / brown cube (re-cut) | 77/112 | 50/86 | 202/266 | 0 |
+| white and red box / brown cube with holes | -- | -- | 238/266 | 1 |
+| white and brown box / brown cube with holes | 97/112 | 46/86 | 224/266 | 1 |
+| **silver and brown box / brown cube with holes** | **94/112** | 51/86 | **255/266** | 1 |
+
+The last is in `target_objects.yaml` (pudding box 0.25, brick 0.29, apple 0.48, mug 0.54; the
+banana, in no recording, stays at 0.35). The one false detection is a mug at 0.67 on the
+operator's arm reaching in. Margins are thin: the brick's prompt reaches 0.29 on the pudding box
+against its 0.29, the apple's 0.47 against 0.48, the mug's 0.53 against 0.54. What is still weak
+is the box beside the brick (51/86), mostly end-on.
+
 What size does **not** separate: objects of similar size. In the same run the apple's prompt landed
 on the mug (0.40 against the mug's 0.42, the same box); the node kept the mug, which was right,
 but by 0.02. That one is a prompt problem, for `prompt_bench`.

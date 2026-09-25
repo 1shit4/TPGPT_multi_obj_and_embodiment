@@ -357,9 +357,12 @@ The planner's support height is: its `support_height` parameter, else the calibr
   (`test_every_listed_object_has_a_size`). Size does not separate look-alikes of similar size:
   the apple's prompt landed on the mug at 0.40 against 0.42.
 - **The detection prompts are chosen on labelled frames** (2026-09-25, `SEGMENTATION.md`):
-  red apple 0.47 / red cup with a handle 0.50 / white and red box 0.40 / brown cube 0.26. Over 314
-  frames in ten scenes they publish no absent object and find apple 66/70, mug 45/47, pudding box
-  88/112, brick 179/180. The first prompts had the colours wrong (the pudding box is white with a
+  red apple 0.48 / red cup with a handle 0.54 / silver and brown box 0.25 / brown cube with holes
+  0.29, for the pudding box on its long side. Over 535 frames in 14 scenes: apple 74/78, mug
+  63/70, pudding box on its side 94/112 alone and 51/86 beside the brick, brick 255/266; one false
+  detection (a mug on an arm). `detection_replay` records per-frame boxes and `detection_sweep`
+  re-scores thresholds offline in seconds. Earlier sets: "white and red box" missed the box end-on
+  and let "brown cube" take its brown picture face. The first prompts had the colours wrong (the pudding box is white with a
   red logo, the brick brown); "dark brown block" often produced no box at all (102/180), because
   a box is only named from words that clear Grounding DINO's text_threshold. The pudding box's
   and apple's thresholds sit only just above their worst absent score -- expect the odd false
