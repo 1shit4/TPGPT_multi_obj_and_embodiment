@@ -68,7 +68,7 @@ def _detector(thresholds=None, found=None, mode='joint'):
     det.thresholds = {t['name']: (thresholds or {}).get(t['name'], 0.35) for t in TARGETS}
     det.report_floor = 0.05
     det.text_threshold = 0.25
-    det.boxes = lambda pil, caption, mapping, size, floor: (dict(found or {}), [])
+    det.boxes = lambda pil, caption, mapping, size, floor, box_ok=None: (dict(found or {}), [])
     return det
 
 
@@ -138,7 +138,7 @@ def test_a_per_object_threshold_admits_what_the_shared_one_refuses():
 def test_the_report_floor_lets_the_boxes_call_see_below_every_threshold():
     seen = {}
     det = _detector(thresholds={'pudding_box': 0.5})
-    det.boxes = lambda pil, caption, mapping, size, floor: (seen.update(floor=floor) or ({}, []))
+    det.boxes = lambda pil, caption, mapping, size, floor, box_ok=None: (seen.update(floor=floor) or ({}, []))
     det.detect_and_segment(np.zeros((8, 8, 3), np.uint8))
     assert seen['floor'] == 0.05          # the floor, not the lowest threshold
 
@@ -249,3 +249,91 @@ def test_a_target_dropped_for_sharing_a_box_says_which_target_took_it():
     assert lost['accepted'] is True                 # it cleared its threshold...
     assert lost['lost_to'] == 'apple'               # ...and lost the box to the apple
     assert lost['overlap'] == pytest.approx(1.0)
+
+
+# ------------------------------------------------------------------ size gate
+class _Res(dict):
+    """A Grounding DINO result: boxes, scores and their phrases."""
+
+    def __init__(self, boxes, scores, labels):
+        super().__init__()
+        self.b, self.s, self.l = boxes, scores, labels
+
+    def __getitem__(self, key):
+        return {'boxes': _Scores(self.b), 'scores': _Scores(self.s), 'text_labels': self.l}[key]
+
+    def __contains__(self, key):
+        return key == 'text_labels'
+
+
+def _real_boxes(result):
+    det = _detector()
+    del det.boxes
+    det.gd_processor, det.gd_model, det.torch, det.device = _Fake(), _Fake(), _Fake(), 'cpu'
+    det.gd_processor.post_process_grounded_object_detection = lambda *a, **k: [result]
+    return det
+
+
+SHELF = (100, 50, 700, 450)        # 600 x 400 px
+BOX = (300, 200, 360, 260)         # 60 x 60 px
+
+
+def test_a_box_too_big_for_the_object_loses_to_a_real_one_that_scored_lower():
+    """The shelf scored 0.40 and the real pudding box 0.33 on the same frame (2026-09-25)."""
+    det = _real_boxes(_Res([list(SHELF), list(BOX)], [0.40, 0.33],
+                           ['brown chocolate pudding box', 'brown chocolate pudding box']))
+    sizes = {SHELF: 0.62, BOX: 0.09}
+    det.last_oversized = {}
+    found, _ = det.boxes(None, *build_captions(TARGETS, 'joint')[0], (480, 848), 0.05,
+                         box_ok=lambda name, box: (sizes[box] <= 0.21, sizes[box]))
+    assert found['pudding_box']['box'] == BOX
+    assert found['pudding_box']['score'] == pytest.approx(0.33)
+    assert det.last_oversized['pudding_box']['size_m'] == pytest.approx(0.62)
+
+
+def test_with_the_object_absent_the_oversized_box_is_reported_not_published():
+    det = _real_boxes(_Res([list(SHELF)], [0.40], ['brown chocolate pudding box']))
+    det.thresholds['pudding_box'] = 0.25
+    out = det.detect_and_segment(np.zeros((8, 8, 3), np.uint8),
+                                 box_ok=lambda name, box: (False, 0.62))
+    assert out == []
+    r = det.last_report['pudding_box']
+    assert r['score'] == 0.0 and not r['accepted']
+    assert r['oversized'] == {'score': pytest.approx(0.40), 'size_m': 0.62,
+                              'phrase': 'brown chocolate pudding box'}
+
+
+def _node_module():
+    pytest.importorskip('rclpy')
+    from ycb_pointcloud_pipeline import segmentation_node
+    return segmentation_node
+
+
+def test_box_size_is_the_larger_side_at_the_depth_inside_it():
+    box_size_m = _node_module().box_size_m
+    depth = np.zeros((480, 848), np.uint16)
+    depth[200:260, 300:360] = 1000                       # 1.0 m, in mm
+    # 60 px at 1 m with fx = 600 px -> 0.10 m
+    assert box_size_m(BOX, depth, 600.0, 600.0) == pytest.approx(0.10)
+    depth[:] = 1200                                      # the whole shelf patch at 1.2 m
+    assert box_size_m(SHELF, depth, 600.0, 600.0) == pytest.approx(1.2)
+
+
+def test_a_box_with_no_depth_has_no_size_and_is_not_refused_for_it():
+    box_size_m = _node_module().box_size_m
+    assert box_size_m(BOX, np.zeros((480, 848), np.uint16), 600.0, 600.0) is None
+
+
+def test_load_target_objects_reads_max_size(tmp_path):
+    load = _node_module().load_target_objects
+    path = tmp_path / 't.yaml'
+    path.write_text("target_objects:\n  - name: pudding_box\n    prompt: x\n    max_size: 0.142\n")
+    assert load(str(path))[0]['max_size'] == pytest.approx(0.142)
+
+
+def test_every_listed_object_has_a_size():
+    """A target without max_size is never size-checked: the shelf could be it."""
+    load = _node_module().load_target_objects
+    path = os.path.join(os.path.dirname(__file__), '..', 'config', 'target_objects.yaml')
+    missing = [t['name'] for t in load(path) if 'max_size' not in t]
+    assert not missing, f"no max_size for {missing}"

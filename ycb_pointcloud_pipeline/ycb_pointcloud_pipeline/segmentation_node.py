@@ -59,33 +59,58 @@ def _default_calibration_path():
 
 
 def load_target_objects(yaml_path):
-    """Entries may be a plain string ("banana") or {name, prompt, threshold}.
+    """Entries may be a plain string ("banana") or {name, prompt, threshold, max_size}.
 
     `name` is used for the topic, `prompt` is the text given to Grounding DINO,
     and `threshold` (optional) is that object's own accept score, which
     overrides the node's `box_threshold` for it alone. One object that scores
     low should not force the threshold down for every other object.
+    `max_size` (optional, m) is the object's largest dimension, from its scan: a
+    box that measures more than `size_margin` times that is not this object.
     """
     with open(yaml_path, 'r') as f:
         data = yaml.safe_load(f) or {}
     targets = []
     for entry in data.get('target_objects', []):
-        threshold = None
+        threshold = max_size = None
         if isinstance(entry, dict):
             name = str(entry['name']).strip()
             prompt = str(entry.get('prompt', name.replace('_', ' '))).strip()
             if entry.get('threshold') is not None:
                 threshold = float(entry['threshold'])
+            if entry.get('max_size') is not None:
+                max_size = float(entry['max_size'])
         else:
             name = str(entry).strip()
             prompt = name.replace('_', ' ')
         target = {'name': name.lower().replace(' ', '_'), 'prompt': prompt}
         if threshold is not None:
             target['threshold'] = threshold
+        if max_size is not None:
+            target['max_size'] = max_size
         targets.append(target)
     if not targets:
         raise ValueError(f"No target_objects found in {yaml_path}")
     return targets
+
+
+def box_size_m(box, depth, fx, fy, depth_scale=1000.0):
+    """Physical size of a detection box, m: its larger side at the depth it shows.
+
+    Depth is the median over the box's central half, where the object is and the
+    background is not. ``None`` when that region has no depth -- then nothing is
+    known about the size, and the caller must not refuse the box for it.
+    """
+    x0, y0, x1, y1 = (float(v) for v in box)
+    w, h = x1 - x0, y1 - y0
+    cx0, cx1 = int(x0 + w / 4), int(np.ceil(x1 - w / 4))
+    cy0, cy1 = int(y0 + h / 4), int(np.ceil(y1 - h / 4))
+    patch = np.asarray(depth)[max(cy0, 0):max(cy1, cy0 + 1), max(cx0, 0):max(cx1, cx0 + 1)]
+    valid = patch[patch > 0]
+    if valid.size == 0:
+        return None
+    z = float(np.median(valid)) / float(depth_scale)
+    return max(w * z / float(fx), h * z / float(fy))
 
 
 class YCBSegmentationNode(Node):
@@ -110,6 +135,12 @@ class YCBSegmentationNode(Node):
         # Boxes below the accept threshold are still reported down to here, so a
         # miss reads as "0.29, threshold 0.35" instead of silence.
         self.declare_parameter('detection_report_floor', 0.05)
+        # A box is refused for a target when it measures more than this times the
+        # target's max_size (target_objects.yaml). 1.5 leaves room for a loose box
+        # and a tilted view; a shelf patch is several times larger than anything
+        # listed. Measured 2026-09-25: the shelf, taken for the pudding box, scored
+        # 0.25-0.40 -- as high as the real box -- over 72 000 pixels against 2 000.
+        self.declare_parameter('size_margin', 1.5)
         # Keep the frames a detection problem happened on: 'misses' writes the RGB,
         # the depth and the report whenever a listed target reaches no topic, 'all'
         # writes every frame. A prompt cannot be chosen from memory of what the
@@ -314,7 +345,7 @@ class YCBSegmentationNode(Node):
             return
 
         t0 = self.get_clock().now()
-        detections = self.detector.detect_and_segment(rgb)
+        detections = self._detect(rgb, depth)
         dt = (self.get_clock().now() - t0).nanoseconds / 1e9
         self.cycle += 1
 
@@ -375,7 +406,9 @@ class YCBSegmentationNode(Node):
                                                  encoding='mono8')
             mask_msg.header = color_msg.header
             self.mask_pubs[det['label']].publish(mask_msg)
-            published.append(f"{det['label']}({points.shape[0]} pts, {det['score']:.2f})")
+            size = det.get('size_m')
+            published.append(f"{det['label']}({points.shape[0]} pts, {det['score']:.2f}"
+                             + (f", {size:.2f} m" if size is not None else "") + ")")
             if self.save_pcd:
                 save_pcd_ascii(os.path.join(self.output_dir,
                                             f"{det['label']}_{self.cycle:05d}.pcd"),
@@ -392,6 +425,7 @@ class YCBSegmentationNode(Node):
             'caption_mode': p('caption_mode'),
             'detections': [{'label': d['label'], 'score': float(d['score']),
                             'n_points': int(d.get('n_points', 0)),
+                            'size_m': d.get('size_m'),
                             'box': [float(v) for v in d['box']]} for d in detections],
             # Every target, accepted or not: what the X6 record needs to explain a
             # frame where an object went missing.
@@ -428,6 +462,29 @@ class YCBSegmentationNode(Node):
                        'prompts': {t['name']: t['prompt'] for t in self.targets}}, f, indent=1)
         self.get_logger().info(f"saved {tag} to {out}", throttle_duration_sec=10.0)
 
+    def _size_limit(self, name):
+        """Largest box, m, that can still be ``name``; ``None`` when it has no max_size."""
+        target = next((t for t in self.targets if t['name'] == name), {})
+        if 'max_size' not in target:
+            return None
+        return float(target['max_size']) * float(self.get_parameter('size_margin').value)
+
+    def _detect(self, rgb, depth):
+        """Detect, refusing any box too big to be the target it matched."""
+        if not any('max_size' in t for t in self.targets) or \
+                not hasattr(self.detector, 'last_oversized'):
+            return self.detector.detect_and_segment(rgb)
+        fx, fy = self.intrinsics.fx, self.intrinsics.fy
+
+        def box_ok(name, box):
+            limit = self._size_limit(name)
+            if limit is None:
+                return True, None
+            size = box_size_m(box, depth, fx, fy, self.depth_scale)
+            return (size is None or size <= limit), size
+
+        return self.detector.detect_and_segment(rgb, box_ok=box_ok)
+
     def _report_misses(self, published):
         """Say what happened to every target that did not reach a topic.
 
@@ -444,10 +501,21 @@ class YCBSegmentationNode(Node):
         for name, r in report.items():
             if name in done:
                 continue
-            if r['score'] <= 0.0:
+            if r['score'] <= 0.0 and not r.get('oversized'):
                 self.get_logger().warn(
                     f"{name}: not seen at all this frame (nothing above "
                     f"{self.detector.report_floor:.2f})", throttle_duration_sec=10.0)
+                continue
+            if r.get('oversized') and (r['score'] <= 0.0 or not r['accepted']):
+                big = r['oversized']
+                self.get_logger().warn(
+                    f"{name}: a box scoring {big['score']:.2f} measured {big['size_m']:.2f} m "
+                    f"across, but {name} is at most {self._size_limit(name):.2f} m -- refused, "
+                    f"its prompt matched something else (a shelf, the table?)",
+                    throttle_duration_sec=10.0)
+                continue
+            if r['score'] <= 0.0:
+                continue
             elif not r['accepted']:
                 self.get_logger().warn(
                     f"{name}: best box scored {r['score']:.2f} as {r['phrase']!r}, "

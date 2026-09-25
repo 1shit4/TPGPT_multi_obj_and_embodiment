@@ -316,6 +316,14 @@ The planner's support height is: its `support_height` parameter, else the calibr
   every capture and the best-fitting scan was the wrong object on 13 of 22 (the mug's scan alone
   was accepted on 18 and fit best on 9 of the 17 non-mug captures). So a broad prompt plus "the fit
   picks" does not work here; the detector has to get the object right.
+- **A box too big to be the object is refused** (2026-09-25). With the pudding box off the table
+  its prompt found the **shelf** -- 72 000-pixel masks against the real box's 2 000, at 0.25-0.40,
+  as high as the real box's own 0.33-0.48, so no cutoff can separate them. Every object in
+  `target_objects.yaml` has `max_size` (its scan's largest dimension), and a candidate box that
+  measures more than `size_margin` (1.5) times that, at the depth inside it, is refused before the
+  best box is chosen. Published objects log their measured size. A new object needs a `max_size`
+  (`test_every_listed_object_has_a_size`). Size does not separate look-alikes of similar size:
+  the apple's prompt landed on the mug at 0.40 against 0.42.
 - **A prompt is only as good as its worst frame.** `target_objects.yaml` takes an optional
   per-object `threshold:`, so one object that scores low does not drag the bar down for the others,
   and `caption_mode:=per_object` gives each prompt its own caption (one forward pass each). The

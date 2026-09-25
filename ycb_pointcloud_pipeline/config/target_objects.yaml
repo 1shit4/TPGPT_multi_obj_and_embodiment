@@ -6,6 +6,7 @@
 #   - or name + text prompt:    - name: master_chef_can
 #                                 prompt: blue coffee can
 #                                 threshold: 0.25   # optional, this object only
+#                                 max_size: 0.142   # optional, m: largest dimension
 # The prompt is what Grounding DINO searches for, so describe what the object
 # LOOKS like -- brand names from the YCB list ("master chef", "jell-o") are
 # often not recognised, visual descriptions are.
@@ -16,6 +17,12 @@
 #   ros2 run --prefix python3 ycb_pointcloud_pipeline prompt_bench \
 #       --frames ~/ycb_detection_frames --object <name> --prompts "..." "..."
 # which replays the saved frames and reports each wording's WORST frame.
+#
+# `max_size` is the object's largest dimension, m -- the diameter of its YCB scan. A box that
+# measures more than size_margin (1.5) times that, at the depth it shows, is refused for that
+# object before the best box is chosen. Measured 2026-09-25: with the pudding box off the table
+# its prompt found the shelf, at 0.25-0.40 -- as high as the real box scores -- over 72 000
+# pixels against 2 000. No threshold separates those; size does, by 35 times.
 
 target_objects:
   # - name: master_chef_can
@@ -26,8 +33,12 @@ target_objects:
   #   prompt: yellow sugar box
   # - name: tomato_soup_can
   #   prompt: red soup can
-  - banana
-  - apple
+  - name: banana
+    prompt: banana
+    max_size: 0.198
+  - name: apple
+    prompt: apple
+    max_size: 0.085
   # - name: cracker_box
   #   prompt: small red box      # "cracker box" scored < 0.2 in the full caption, this 0.67
   # - bleach_cleanser
@@ -41,6 +52,7 @@ target_objects:
   # prompt_bench (docs/hardware/SEGMENTATION.md).
   - name: mug
     prompt: red mug
+    max_size: 0.125
   - name: pudding_box
     prompt: brown chocolate pudding box
     # Measured 2026-09-25 14:42, pudding box and foam brick both on the table, correctly
@@ -49,8 +61,10 @@ target_objects:
     # shared 0.35 cutoff. 0.25 is for this object only; every miss now logs its score, so the
     # next run shows whether 0.25 is enough (docs/hardware/SEGMENTATION.md).
     threshold: 0.25
+    max_size: 0.142
   - name: foam_brick
     prompt: red foam brick
+    max_size: 0.102
   # Taken away 2026-09-25: upright it plans into no slot at all. The hand can only grip it
   # around its 68 mm barrel, so 57 of its 60 screened grasps are past 60 degrees of tilt, and
   # beyond about 45 degrees the transport map folds. The mug above is the same task with a rim

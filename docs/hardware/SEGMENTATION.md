@@ -174,6 +174,41 @@ were not recorded, which is what the report now fixes.
 for everything else. Chosen, not measured: the misses' scores were not logged, so whether 0.25
 catches all of them is what the next run shows -- any frame still missing it now logs its score.
 
+**Then the shelf became the pudding box** (run of 2026-09-25 15:42, `python3_93946_*.log`). With
+the pudding box off the table, its prompt found the shelf on 36 cycles. The masks tell them apart
+at a glance -- the real box 1 500-2 100 points, the shelf 71 500-72 100 -- and the scores cannot:
+
+| what "pudding box" was | points | score |
+|---|---|---|
+| the real box, first placement | ~1 500 | 0.65-0.70 |
+| the real box, moved | ~2 050 | 0.33-0.48 |
+| the shelf | ~72 000 | 0.25-0.40 |
+
+The shelf scored up to 0.40 and the real box as low as 0.33, so no cutoff separates them; even the
+original 0.35 let the shelf through on about ten of those cycles. Lowering the pudding box to 0.25
+made it more frequent, it did not cause it.
+
+**Fix: a size check against the object's scan.** Every object in `target_objects.yaml` carries
+`max_size`, its YCB scan's largest dimension (banana 0.198 m, apple 0.085, mug 0.125, pudding box
+0.142, foam brick 0.102). Every candidate box is measured -- width in pixels times the median depth
+in its central half, over the focal length -- and refused for a target when it is more than
+`size_margin` (1.5) times that target's `max_size`. It happens **before** the best box per target is
+chosen, so with both in view the real box wins even on a frame where the shelf scores higher. The
+refusal is logged:
+
+```
+foam_brick: a box scoring 0.41 measured 1.54 m across, but foam_brick is at most 0.15 m -- refused, ...
+```
+
+and each published object now shows its measured size, `pudding_box(4621 pts, 0.43, 0.12 m)`, so
+the margin can be checked on the real objects. Verified on synthetic frames through the node (a
+small box in front of a large brown wall: the box published at 0.12 m, the foam brick's prompt on
+the wall refused at 1.54 m -- at 0.41, above its own 0.35). Not yet on the bench.
+
+What size does **not** separate: objects of similar size. In the same run the apple's prompt landed
+on the mug (0.40 against the mug's 0.42, the same box); the node kept the mug, which was right,
+but by 0.02. That one is a prompt problem, for `prompt_bench`.
+
 Earlier, from when the cracker box was listed: the phrase "cracker box" scored below 0.2 where
 "small red box" scored 0.67, which is why prompts here describe what a thing **looks like**.
 

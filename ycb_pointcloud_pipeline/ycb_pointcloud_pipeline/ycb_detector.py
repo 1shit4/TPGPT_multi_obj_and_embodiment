@@ -145,6 +145,8 @@ class GroundedSAMDetector:
         #: Boxes whose phrase matched two prompts equally well, so they could not be
         #: attributed. Also silent before.
         self.last_unmatched = []
+        #: Per target, the best-scoring box refused for being too big to be it.
+        self.last_oversized = {}
         log(f"caption mode {caption_mode}, {len(self.captions)} pass(es) per frame: "
             + " | ".join(caption for caption, _ in self.captions))
         own = {n: v for n, v in self.thresholds.items() if v != float(box_threshold)}
@@ -155,8 +157,14 @@ class GroundedSAMDetector:
         """Deprecated: use :func:`phrase_to_name`. Kept so callers do not break."""
         return phrase_to_name(phrase, self.prompt_to_name)
 
-    def boxes(self, pil, caption, mapping, size, floor):
-        """The best box per target name in one caption, at or above ``floor``."""
+    def boxes(self, pil, caption, mapping, size, floor, box_ok=None):
+        """The best box per target name in one caption, at or above ``floor``.
+
+        ``box_ok(name, box) -> (ok, size_m)``, when given, is asked about every
+        candidate before the best is chosen, so an impossible box (the shelf, for
+        a pudding box) can never take the place of a real one that scored lower.
+        Rejections go to :attr:`last_oversized`.
+        """
         torch = self.torch
         best, unmatched = {}, []
         with torch.inference_mode():
@@ -177,14 +185,26 @@ class GroundedSAMDetector:
                 if phrase.strip():
                     unmatched.append({"phrase": phrase, "score": float(score)})
                 continue
+            size_m = None
+            if box_ok is not None:
+                ok, size_m = box_ok(name, tuple(box))
+                if not ok:
+                    worst = self.last_oversized.get(name)
+                    if worst is None or score > worst["score"]:
+                        self.last_oversized[name] = {"score": float(score), "size_m": size_m,
+                                                     "phrase": phrase}
+                    continue
             if name not in best or score > best[name]["score"]:
                 best[name] = {"label": name, "score": float(score), "box": tuple(box),
-                              "phrase": phrase, "caption": caption}
+                              "phrase": phrase, "caption": caption, "size_m": size_m}
         return best, unmatched
 
-    def detect_and_segment(self, rgb_image):
+    def detect_and_segment(self, rgb_image, box_ok=None):
         """rgb_image: HxWx3 uint8 (RGB). Returns list of
         {"label", "score", "mask" (HxW bool), "box" (x0, y0, x1, y1)}.
+
+        ``box_ok`` -- see :meth:`boxes`: a physical-size test applied to every
+        candidate box before the best per target is chosen.
 
         Detection is run at :data:`REPORT_FLOOR` and filtered at each target's own
         threshold afterwards, which accepts exactly what the single threshold used
@@ -198,8 +218,9 @@ class GroundedSAMDetector:
         floor = min([self.report_floor] + list(self.thresholds.values()))
 
         best, unmatched = {}, []
+        self.last_oversized = {}
         for caption, mapping in self.captions:
-            found, missed = self.boxes(pil, caption, mapping, (h, w), floor)
+            found, missed = self.boxes(pil, caption, mapping, (h, w), floor, box_ok=box_ok)
             unmatched.extend(missed)
             for name, d in found.items():
                 if name not in best or d["score"] > best[name]["score"]:
@@ -211,6 +232,8 @@ class GroundedSAMDetector:
                         "accepted": (best.get(t["name"], {}).get("score", 0.0)
                                      >= self.thresholds[t["name"]])}
             for t in self.targets}
+        for name, big in self.last_oversized.items():
+            self.last_report[name]["oversized"] = big
         self.last_unmatched = sorted(unmatched, key=lambda u: -u["score"])[:5]
 
         # One physical object detected under two names -> keep higher score
