@@ -325,11 +325,14 @@ The planner's support height is: its `support_height` parameter, else the calibr
   best box is chosen. Published objects log their measured size. A new object needs a `max_size`
   (`test_every_listed_object_has_a_size`). Size does not separate look-alikes of similar size:
   the apple's prompt landed on the mug at 0.40 against 0.42.
-- **The detection prompts were chosen from 157 labelled frames** (2026-09-25,
-  `SEGMENTATION.md`): red apple 0.41 / red cup with a handle 0.50 / small printed box 0.32 /
-  dark brown block 0.26. The old ones had the colours wrong (the pudding box is mostly white, the
-  brick dark brown) and published an absent object on 17 frames; these publish none, and find the
-  apple 48/49 instead of 22/49. Prompts interact through the shared caption -- re-run
+- **The detection prompts are chosen on labelled frames** (2026-09-25, `SEGMENTATION.md`):
+  red apple 0.47 / red cup with a handle 0.50 / white and red box 0.40 / brown cube 0.26. Over 314
+  frames in ten scenes they publish no absent object and find apple 66/70, mug 45/47, pudding box
+  88/112, brick 179/180. The first prompts had the colours wrong (the pudding box is white with a
+  red logo, the brick brown); "dark brown block" often produced no box at all (102/180), because
+  a box is only named from words that clear Grounding DINO's text_threshold. The pudding box's
+  and apple's thresholds sit only just above their worst absent score -- expect the odd false
+  detection. Prompts interact through the shared caption -- re-run
   `detection_replay --frames ~/ycb_detection_frames` after changing any of them (scene labels in
   `labels.yaml` there). **Put the mug down opening-up**: it was
   recorded upside down, and the rim grasps the coverage measured exist only upright.

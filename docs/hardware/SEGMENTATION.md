@@ -254,6 +254,41 @@ What is left: the brick is found in 46 of 63 frames and the pudding box in 51 of
 not false detections, mostly the pudding box edge-on and frames with a hand in them. A miss costs
 a planner one cycle; a false detection costs a grasp on the wrong object.
 
+**Second session: the brick was not recognised** (2026-09-25, 17:26-17:35; `brick_2`,
+`pudding_2`, `both_brick_pudding_2`, `apple_2` -- 157 more frames, the object on the table in every
+one, checked by eye). "dark brown block" found the brick on 28 of 83 frames of `brick_2`, and on
+23 frames in a row with the brick standing still in plain view it produced **no box at all**:
+Grounding DINO names a box only from words that clear its own `text_threshold` (0.25), and when
+these did not, the box was dropped before its score was considered. Over both sessions it found
+the brick on 102 of 180 frames. The new frames also showed two false apples on the pudding box.
+
+Replayed on all 314 frames (`detection_replay`, every wording with all the others in place):
+
+| brick wording (with "small printed box" 0.32) | brick found | absent objects published |
+|---|---|---|
+| dark brown block | 102/180 | -- |
+| brown block | 66/180 | 101 (pudding box on the brick, 99) |
+| brown foam block | 49/180 | 29 |
+| brown brick | 122/180 | 45 |
+| **brown cube** | **170/180** | 17 (pudding box on the brick 16, apple 1) |
+
+"small printed box" scores 0.37-0.41 on the brick -- higher than "brown cube" scores on it on those
+frames -- so the pudding box's wording had to change too. With "brown cube":
+
+| pudding-box wording | pudding box | brick | apple | mug | absent published |
+|---|---|---|---|---|---|
+| small printed box, threshold 0.42 | 83/112 | 175/180 | 68/70 | 47/47 | 0 |
+| white box / white cardboard box | 0/112 | 179/180 | 67/70 | 47/47 | 6 / 14 |
+| white and red box, 0.32 | 103/112 | 179/180 | 67/70 | 45/47 | 4 (apple 3, pudding box 1) |
+| **white and red box 0.40, apple 0.47** | **88/112** | **179/180** | 66/70 | 45/47 | **0** |
+
+The last is in `target_objects.yaml`. "white box" alone never matches: the red logo is what makes
+the pudding box recognisable -- and the word "red" is also what now pulls the apple's prompt onto
+the mug and the logo (0.43-0.46), hence the apple's 0.47. **These margins are thin**: the pudding
+box's worst absent score is 0.395 against 0.40, the apple's 0.464 against 0.47, both tuned on the
+frames they are judged on. Expect an occasional false detection on new frames; record them
+(`save_frames:=misses`), add the scene to `labels.yaml`, and re-run the replay.
+
 What size does **not** separate: objects of similar size. In the same run the apple's prompt landed
 on the mug (0.40 against the mug's 0.42, the same box); the node kept the mug, which was right,
 but by 0.02. That one is a prompt problem, for `prompt_bench`.
