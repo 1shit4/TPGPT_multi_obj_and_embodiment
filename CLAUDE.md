@@ -251,9 +251,10 @@ The planner's support height is: its `support_height` parameter, else the calibr
   in the scan's own frame, kept in `outputs/hardware/grasp_library/`, carried into the scene by the
   fit (`grasp_library:=true`, `tpgpt/hardware/grasp_library.py`, audit A13). A refused fit, or no
   server on a cold cache, falls back to the live draw. `docs/hardware/GRASP_LIBRARY.md`.
-- **What a destination admits is now measurable offline** (`tpgpt/hardware/coverage.py`): of an
-  object's 2000 grasps, how many survive each stage and how many have an executable path, on a
-  capture the planner recorded, with no camera and no robot. Use it before another evening at the
+- **What a destination admits is now measurable offline** (`python -m tpgpt.hardware.coverage`,
+  any capture, any object, any demonstration via `--demo`): of an object's 2000 grasps, how many
+  survive each stage and how many have an executable path, on a capture the planner recorded, with
+  no camera and no robot. Use it before another evening at the
   robot. Results so far in `GRASP_LIBRARY.md`; raw in `outputs/hardware/coverage_fixed/`.
 - **Beyond about 45 deg of grasp tilt the transport map folds.** Measured over 286 planned
   candidates on five objects: 1 fold in 155 below 45 deg, 74 in 131 above it (det(J) changes sign
@@ -328,8 +329,9 @@ The planner's support height is: its `support_height` parameter, else the calibr
   `SEGMENTATION.md`): red apple 0.41 / red cup with a handle 0.50 / small printed box 0.32 /
   dark brown block 0.26. The old ones had the colours wrong (the pudding box is mostly white, the
   brick dark brown) and published an absent object on 17 frames; these publish none, and find the
-  apple 48/49 instead of 22/49. Prompts interact through the shared caption -- re-run the replay
-  on `~/ycb_detection_frames` after changing any of them. **Put the mug down opening-up**: it was
+  apple 48/49 instead of 22/49. Prompts interact through the shared caption -- re-run
+  `detection_replay --frames ~/ycb_detection_frames` after changing any of them (scene labels in
+  `labels.yaml` there). **Put the mug down opening-up**: it was
   recorded upside down, and the rim grasps the coverage measured exist only upright.
 - **A prompt is only as good as its worst frame.** `target_objects.yaml` takes an optional
   per-object `threshold:`, so one object that scores low does not drag the bar down for the others,
@@ -342,6 +344,9 @@ The planner's support height is: its `support_height` parameter, else the calibr
   their depth partly from the background and fly towards the camera: a 68 mm YCB can fused to
   133 mm wide, which broke the scan fit, the `centred` stage and the jaw check. Restart the node
   after changing it.
+- **The scratchpad in `/tmp` does not survive a reboot** (lost 2026-09-25, with the coverage
+  runner and the detection replay in it). Anything a doc tells the reader to run belongs in the
+  repo; recorded data belongs under `~` (`~/ycb_detection_frames`, `~/tpgpt_plans`).
 - **The FR3's meshes are not a host package.** RViz's RobotModel display needs
   `franka_description`, which lives only in the robot container. It was copied out on 2026-09-22
   into `~/thor_ws/install/franka_description` (118 MB, outside git, and colcon leaves it alone), so

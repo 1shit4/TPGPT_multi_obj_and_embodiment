@@ -216,7 +216,18 @@ no apple on the table (it was being moved) and were counted as empty.
 
 The node's detection was replayed on every frame -- all prompts in one caption, the size check
 on the saved depth, per-object thresholds, the same-box rule -- and reproduced what the node had
-actually published on **157 of 157** frames. Found when present / published when absent:
+actually published on **157 of 157** frames. The replay is `detection_replay`; what was on the
+table in each scene is in `~/ycb_detection_frames/labels.yaml`:
+
+```bash
+source ~/venvs/ycb/bin/activate
+ros2 run --prefix python3 ycb_pointcloud_pipeline detection_replay --frames ~/ycb_detection_frames
+# try a change without editing target_objects.yaml -- and judge it on every object:
+ros2 run --prefix python3 ycb_pointcloud_pipeline detection_replay --frames ~/ycb_detection_frames \
+    --prompt foam_brick="brown block" --threshold foam_brick=0.30
+```
+
+About 5 minutes on the GPU for the 157 frames. Found when present / published when absent:
 
 | prompts | apple | mug | pudding box | brick | absent objects published |
 |---|---|---|---|---|---|

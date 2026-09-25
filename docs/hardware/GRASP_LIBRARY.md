@@ -107,30 +107,26 @@ Read it as a funnel:
   this demonstration, and no number of candidates will change it.
 
 ```bash
-# one capture, all four slots (about 4 minutes per slot: 2000 screened, then 25 path checks)
-~/venvs/tpgpt/bin/python - <<'PY'
-import numpy as np, yaml, os
-from tpgpt.hardware import coverage, shelf
-from tpgpt.hardware.end_effector import FRANKA_HAND
-from tpgpt.hardware.fr3 import HOME_Q
-from tpgpt.hardware.object_model import ObjectModel, fit_object
-from tpgpt.hardware.source_bundle import SourceBundle
-SHARE = os.path.expanduser('~/thor_ws/install/ycb_pointcloud_pipeline/share/ycb_pointcloud_pipeline/config')
-cfg = yaml.safe_load(open(f'{SHARE}/shelf.yaml'))
-cal = yaml.safe_load(open(f'{SHARE}/camera_calibration.yaml'))['camera_calibration']
-camera = np.array(cal['base_to_camera']['translation'])
-table = float(cfg['shelf']['anchors']['table'])
-d = np.load(os.path.expanduser('~/tpgpt_plans/banana_20260923_231556_refused/clouds.npz'))
-fit = fit_object(ObjectModel.load('banana'), d['observed'], table, camera)
-world = shelf.ShelfWorld(model=shelf.ShelfModel.from_config(cfg), cloud=d['obstacles'],
-                         table_height=table)
-source = SourceBundle.load(os.path.expanduser('~/tpgpt_demos/banana_20260923_230159/source_bundle'))
-for name, xyz in shelf.slots(cfg).items():
-    report = coverage.coverage('banana', (fit.rotation, fit.position), world, source, xyz, xyz[2],
-                               table, camera, HOME_Q, FRANKA_HAND, plan_budget=25)
-    print(f'--- {name}'); print(coverage.describe(report))
-PY
+source ~/venvs/tpgpt/bin/activate
+cd ~/thor_ws/src/ycb_point_cloud/TPGPT_multi_obj_and_embodiment
+# the capture's own object, its scan re-fitted to the capture exactly as the planner does
+python -m tpgpt.hardware.coverage \
+    --capture ~/tpgpt_plans/banana_20260923_231459_refused \
+    --demo ~/tpgpt_demos/banana_20260923_230159/source_bundle \
+    --slots top_left,top_right,bottom_left --json banana.json
+# any object's scan set down in that scene: resting pose 0, handle turned 90 deg, at (0.606, 0.161)
+python -m tpgpt.hardware.coverage \
+    --capture ~/tpgpt_plans/banana_20260923_231459_refused \
+    --demo ~/tpgpt_demos/banana_20260923_230159/source_bundle \
+    --object mug --at 0.606 0.161 --rest 0 --heading 90 --slots top_right
 ```
+
+About 4 minutes per slot on an idle machine (2000 screened, then 25 path checks); several run in
+parallel with `OMP_NUM_THREADS=1`. It uses the planner node's selection defaults (tilt cap 90,
+visibility and centred off, no grasp offset, strict reachability) and reads the **installed**
+`shelf.yaml` and `camera_calibration.yaml`, which is what the planner reads (`--config-dir` to
+change). Checked on 2026-09-25 against a result from the week: the mug at 90 deg into top_right
+with the 23:01 demonstration, 4 admissible of 25, first at rank 4, both times.
 
 `coverage()` also takes `cloud=` and `poses=` directly, for a capture whose fit was refused (the
 planner is then on the camera's cloud) or for a set of grasps that did not come from the library.
