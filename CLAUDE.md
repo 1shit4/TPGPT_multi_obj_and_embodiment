@@ -462,7 +462,17 @@ The planner's support height is: its `support_height` parameter, else the calibr
 - `docs/sim/dynamics_execution.md` — why the executor's law and gates are what they are.
 - `docs/sim/SIM_CLAUDE.md` — the simulation's own guide (reference, not instructions).
 
-## Current state (2026-09-21)
+## Current state (2026-09-26)
+
+- **All five objects plan live into all three slots** (2026-09-26, 16:42-17:38; plans in
+  `~/tpgpt_plans/*_20260926_16*`/`_17*`): banana, apple, mug, pudding box (on its long side),
+  foam brick x top_left, top_right, bottom_left -- 15 of 15, each on the 1st-8th grasp planned,
+  17-59 s, min det(J) 0.52-0.93, with the 18:39 demonstration, the arm started from home
+  (`joint_homing`) and the robot filter at 50 mm. The pudding box also planned into bottom_right.
+  **Dry runs only: nothing executed on the robot yet.** That morning, before the filter fix and
+  from a parked pose, the apple took up to 849 s and top_left refused.
+
+## Earlier state (2026-09-21)
 
 - Camera and shelf were moved; **recalibrated and validated** (see `docs/hardware/CALIBRATION.md`).
 - **`x6_experiment/config/x6_experiment.yaml` is stale and not yet updated:** its destinations,
