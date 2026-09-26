@@ -118,9 +118,21 @@ TARGET_EXCLUSION = 0.015
 #: 40 mm     0                     490
 #: ======  ======================  ==========================
 #:
-#: 30 mm, out of 14 000 obstacle points. The cost is that an object within
-#: 30 mm of the arm's surface at capture time is erased with it.
-SELF_FILTER_MARGIN = 0.03
+#: 30 mm, out of 14 000 obstacle points -- with the camera where it was then.
+#:
+#: **50 mm since 2026-09-26**, after the setup was moved and the camera
+#: recalibrated from a new position. From there 4 points of the arm's own elbow
+#: (links 3-4: the cable and connector the meshes lack) sat just outside 30 mm,
+#: 40 cm above the table in the middle of the workspace, and the path check takes
+#: 3 points as a contact: every move onto a path, carry and retreat that swept the
+#: elbow's old place "hit the seen points". Measured on the day's refused apple
+#: capture from the parked pose: 0 of 100 grasps admissible to top_left, 888
+#: contacts in 12 candidates all on those 4 points; a 50 mm margin removes 12-16
+#: more points per capture (those, and the robot's own mounting plate by its base)
+#: and the move-onto-path contacts disappear. The cost: an object within 50 mm of
+#: the arm's surface at capture time is erased with it -- park the arm clear of
+#: the objects.
+SELF_FILTER_MARGIN = 0.05
 
 #: Observed shelf points within this of the model's surface count as explained
 #: by it -- the model is measured (tape plus robot touches) and exact, so its

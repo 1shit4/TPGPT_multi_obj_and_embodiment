@@ -339,10 +339,13 @@ The planner's support height is: its `support_height` parameter, else the calibr
   of its grasps. `segmentation_node` drops pixels whose depth changes faster than
   `depth_gradient_max_mm_px` (default 8; a good frame reads about 8 mm/px at the 99th percentile).
   Flat objects (a banana) show none of this; tall ones do.
-- **The arm removes 30 mm of itself from the cloud** (`shelf.SELF_FILTER_MARGIN`), not 10. The
-  cable, the status ring and the shoulder connector are not in the link meshes, so they survived as
-  obstacles and then link1 swept through them, refusing the move onto the path (`approach_in`).
-  Measured: 140 such points at 10 mm, 3 at 30 mm, out of 14 000.
+- **The arm removes 50 mm of itself from the cloud** (`shelf.SELF_FILTER_MARGIN`; 30 mm until
+  2026-09-26, 10 before that). The cable, the status ring and the connectors are not in the link
+  meshes, so they survive as obstacles and the arm then "hits the seen points" -- of itself. After
+  the camera moved (2026-09-26), 4 points of the elbow sat just outside 30 mm, 40 cm up in the
+  middle of the workspace, and refused every grasp to top_left from where the arm was parked
+  (0 of 100; 888 contacts, all on those 4 points). Park the arm clear of the objects: anything
+  within 50 mm of it at capture time is erased with it.
 - **A detection miss now says why** (2026-09-25, `docs/hardware/SEGMENTATION.md`). A target that
   reached no topic used to leave nothing in the log, so "scored 0.34 against a threshold of 0.35",
   "never seen at all", "matched a phrase that fits two prompts" and "detected fine but no depth in
