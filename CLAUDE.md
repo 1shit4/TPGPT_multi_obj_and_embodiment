@@ -180,6 +180,16 @@ The planner's support height is: its `support_height` parameter, else the calibr
 - **`free_drive` "pose went stale"** means its own callback received nothing for `max_pose_age`
   (0.5 s) — subscriber starvation, while `/current_pose` itself holds 250 Hz. Intermittent.
   `-p max_pose_age:=2.0` works around it; that is a safety parameter, so it is the user's call.
+- **The setup was moved on 2026-09-26** (by someone else): the camera was knocked ~46 mm / 2.9 deg
+  and recalibrated (9 face-flat correspondences plus the table and top-board planes; on a fresh
+  frame table +3.8 mm, top board +2.1 mm), and the shelf re-touched. The shelf came back within
+  4 mm, the table within 1.2 mm (-0.0132), but the **top board is back in its original notch,
+  0.3211 (gap 244 mm, not 256)**, and the bottom board rests at 0.0731. Across the work area the
+  table now reads within +-10 mm of the touched height (a slight roll: -6..-9 mm on the shelf
+  side, +6..+10 mm at the far left), inside the 25 mm table band. Demonstrations are in the
+  robot's frame and stay valid; the executor does not use the camera. **Every coverage number
+  measured before 2026-09-26 had the top board at 0.3310**: bottom_left now has 10 mm less
+  headroom than those numbers assumed.
 - **The shelf is measured (2026-09-22) and placed from the tape plus robot touches; no
   `cloud_fit`.** The shelf has no back and three boards (bottom, top, topmost). Heights and two
   slot marks were touched; everything else is from a tape (M1–M14,

@@ -201,6 +201,10 @@ def main(argv=None):
     ap.add_argument("--heading", type=float, default=0.0, help="yaw about the table, deg (--at)")
     ap.add_argument("--slots", default="all", help="comma-separated slot names, or 'all'")
     ap.add_argument("--budget", type=int, default=25, help="survivors planned per slot")
+    ap.add_argument("--start-q", nargs=7, type=float, default=None,
+                    help="the arm's joint angles when planning starts (default: home). The "
+                         "move from there onto the path is checked too, so where the arm was "
+                         "parked matters; a plan record keeps it as joint_states_at_plan")
     ap.add_argument("--slot-depth", type=float, default=None,
                     help="move each slot to this depth into the shelf, m from the front edge "
                          "(the touched marks sit at about 0.09), keeping its position along "
@@ -267,8 +271,9 @@ def main(argv=None):
     for slot in want:
         xyz = slots[slot]
         t0 = time.monotonic()
+        start = HOME_Q if a.start_q is None else np.asarray(a.start_q, dtype=float)
         report = coverage(name, (rotation, position), world, source, xyz, xyz[2], table, camera,
-                          HOME_Q, FRANKA_HAND, settings=settings, plan_budget=a.budget,
+                          start, FRANKA_HAND, settings=settings, plan_budget=a.budget,
                           library_size=a.size)
         print(f"--- {slot} [{xyz[0]:.3f}, {xyz[1]:.3f}, {xyz[2]:.3f}]  "
               f"({time.monotonic() - t0:.0f} s)")
