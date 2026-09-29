@@ -106,6 +106,11 @@ class TpgptPlannerNode(Node):
         d('cloud_topic', '')                      # '' -> /ycb_pointclouds/<object_name>
         d('n_frames', 3)                          # clouds fused per plan
         d('max_cloud_age', 10.0)                  # s; older clouds are discarded
+        # s to wait, before the first fit, for n_frames clouds younger than max_cloud_age. On
+        # 2026-09-26 most plans fused ONE frame (the object published intermittently, or the
+        # plan started right after the node) and fitted worse: the apple's retry on three
+        # frames read 6.5 mm where its single frame read 8.4 and was refused.
+        d('frames_wait', 12.0)
         d('workspace_min', [0.15, -0.6, -0.25])   # base frame crop of the OBJECT CLOUD, m
         d('workspace_max', [0.85, 0.6, 0.5])
         # The box the EXECUTOR refuses to leave (its own workspace_min/max). A path that leaves
@@ -388,6 +393,29 @@ class TpgptPlannerNode(Node):
                                                    f"{p('scene_max_age')} s")
         return world
 
+    def _recent_clouds(self):
+        max_age = float(self.get_parameter('max_cloud_age').value)
+        now = time.monotonic()
+        with self.lock:
+            return sum(1 for t, _, _ in self.clouds if now - t <= max_age)
+
+    def _wait_for_frames(self):
+        """Wait up to ``frames_wait`` s for ``n_frames`` recent clouds; go on with fewer."""
+        want = int(self.get_parameter('n_frames').value)
+        deadline = time.monotonic() + float(self.get_parameter('frames_wait').value)
+        have = self._recent_clouds()
+        if have >= want:
+            return
+        self.get_logger().info(f'{have} of {want} camera frames so far; waiting up to '
+                               f"{self.get_parameter('frames_wait').value:.0f} s for the rest")
+        while time.monotonic() < deadline:
+            time.sleep(0.2)
+            have = self._recent_clouds()
+            if have >= want:
+                return
+        self.get_logger().warn(f'planning on {have} of {want} camera frames: the object is '
+                               'published intermittently, and the scan fit is weaker on fewer')
+
     def fused_cloud(self):
         p = lambda n: self.get_parameter(n).value  # noqa: E731
         now = time.monotonic()
@@ -428,6 +456,7 @@ class TpgptPlannerNode(Node):
             info['error'] = problem
             return False, problem
         t_start = time.monotonic()
+        self._wait_for_frames()
         try:
             points, n_clouds = self.fused_cloud()
         except RuntimeError as exc:
