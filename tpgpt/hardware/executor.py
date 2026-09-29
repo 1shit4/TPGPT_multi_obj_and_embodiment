@@ -504,6 +504,18 @@ def crisp_stiffness(
     return np.concatenate([translational, rotational])
 
 
+def crisp_accepts_full_stiffness(description: str) -> bool:
+    """Whether CRISP's ``variable_stiffness.topic`` description admits the 12-value message.
+
+    The patched CRISP (``crisp-full-stiffness.patch``, ``docker-thor:local`` since
+    2026-09-29) documents a "12 elements" form there; the stock one only "6 elements"
+    (both read from the images on fake hardware, 2026-09-29). The stock one does not
+    reject a 12-value message, it ignores it and keeps its yaml gains, so this is how
+    the executor finds out before running.
+    """
+    return "12 elements" in (description or "")
+
+
 def crisp_applied_gains(values, tcp_rotation) -> tuple[np.ndarray, np.ndarray]:
     """The translational ``(K, D)`` CRISP applies for a ``target_stiffness`` message, in the base frame.
 

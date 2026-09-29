@@ -145,8 +145,9 @@ class TpgptExecutorNode(Node):
         # diagonal only (6 values, any CRISP; the off-diagonal part is dropped and logged).
         # 'auto': full with use_transported_stiffness, else diagonal -- a fixed stiffness is
         # isotropic, so the diagonal is exact and the message works on either image. The
-        # pre-patch image IGNORES a 12-value message (it keeps its yaml gains): pass
-        # 'diagonal' if you roll the image back.
+        # pre-patch image IGNORES a 12-value message (it keeps its yaml gains), so before
+        # activating anything the executor reads the controller's stiffness-topic description
+        # and refuses to run 'full' against it: pass 'diagonal' after rolling the image back.
         d('stiffness_message', 'auto')              # auto | full | diagonal
         # Safety
         # A box the commanded TCP may not leave. **Off by default since 2026-09-23** (the user's
@@ -308,9 +309,13 @@ class TpgptExecutorNode(Node):
                                container_config_path('tpgpt_variable_stiffness_controller.yaml'))
             except ValueError as exc:
                 raise AbortRun(f'{exc} (stiffness_controller_params_file)')
-        return self.cmc.ensure_loaded(self.controller, self.p('stiffness_controller_type'),
-                                      params_file,
-                                      missing_hint='fr3_crisp.launch.py spawns it inactive')
+        controllers = self.cmc.ensure_loaded(self.controller, self.p('stiffness_controller_type'),
+                                             params_file,
+                                             missing_hint='fr3_crisp.launch.py spawns it inactive')
+        if self.full_stiffness:
+            # before anything is activated: the pre-patch CRISP would silently ignore 12 values
+            self.cmc.require_full_stiffness(self.controller)
+        return controllers
 
     # ------------------------------------------------------------------ gripper
     def setup_gripper(self):

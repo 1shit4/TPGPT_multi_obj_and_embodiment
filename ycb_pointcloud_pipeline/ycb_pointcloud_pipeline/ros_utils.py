@@ -349,6 +349,11 @@ def other_publishers(node, topic):
                if info.node_name != node.get_name())
 
 
+#: The controller parameter whose description says which stiffness messages CRISP takes
+#: (tpgpt.hardware.executor.crisp_accepts_full_stiffness reads it).
+STIFFNESS_TOPIC_PARAMETER = 'variable_stiffness.topic'
+
+
 class ControllerManagerClient:
     """Service client for the robot container's controller_manager.
 
@@ -391,6 +396,35 @@ class ControllerManagerClient:
     def list(self):
         """{name: ControllerState}."""
         return {c.name: c for c in self.call(self.cli_list, self._srv['List'].Request()).controller}
+
+    def parameter_description(self, controller, parameter, timeout=5.0):
+        """The description of a loaded controller's parameter (its node's describe_parameters)."""
+        from rcl_interfaces.srv import DescribeParameters
+        client = self.node.create_client(DescribeParameters,
+                                         f'/{controller.strip("/")}/describe_parameters')
+        try:
+            response = self.call(client, DescribeParameters.Request(names=[parameter]), timeout)
+        finally:
+            self.node.destroy_client(client)
+        return response.descriptors[0].description if response.descriptors else ''
+
+    def require_full_stiffness(self, controller):
+        """Refuse when `controller` would ignore a 12-value stiffness message.
+
+        The pre-patch CRISP does not fail on one: it logs a warning in the robot
+        container and keeps its yaml gains, so a run meant to transport stiffness
+        would silently run a constant one.
+        """
+        from tpgpt.hardware.executor import crisp_accepts_full_stiffness
+
+        description = self.parameter_description(controller, STIFFNESS_TOPIC_PARAMETER)
+        if not crisp_accepts_full_stiffness(description):
+            raise self.error(
+                f'{controller} does not take a full stiffness matrix: it would ignore the 12-value '
+                'messages and run its yaml gains. The robot image is probably the pre-patch one '
+                '(docker-thor:pre-full-stiffness). Pass stiffness_message:=diagonal, or put '
+                'docker-thor:local back on the full-stiffness image '
+                '(~/THOR_DOCKER_SETUP/setup_crisp_controller.md).')
 
     def ensure_loaded(self, name, controller_type=None, params_file=None, missing_hint=''):
         """Load (from `params_file`, a path inside the container) and configure `name`

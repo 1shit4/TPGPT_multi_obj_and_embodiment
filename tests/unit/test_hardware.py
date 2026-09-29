@@ -27,6 +27,7 @@ from tpgpt.hardware.executor import (
     SafetyMonitor,
     approach_trajectory,
     bounded_stiffness,
+    crisp_accepts_full_stiffness,
     crisp_applied_gains,
     crisp_stiffness,
     logged_stiffness,
@@ -466,6 +467,18 @@ class TestApproachAndStiffness:
         for full in (False, True):
             K_run, D_run = crisp_applied_gains(crisp_stiffness(K0, R, 30.0, full=full), R)
             assert np.allclose(K_run, K0) and np.allclose(D_run, D0)
+
+    def test_full_stiffness_support_is_read_from_crisps_own_description(self):
+        # verbatim, as `ros2 param describe` printed them on the two images (2026-09-29)
+        patched = ('Topic name for receiving variable stiffness updates (std_msgs/Float64MultiArray). '
+                   '6 elements: [k_pos_x, k_pos_y, k_pos_z, k_rot_x, k_rot_y, k_rot_z], a diagonal '
+                   'stiffness. 12 elements: a symmetric 3x3 translational stiffness, row-major, ...')
+        stock = ('Topic name for receiving variable stiffness updates (std_msgs/Float64MultiArray '
+                 'with 6 elements: [k_pos_x, k_pos_y, k_pos_z, k_rot_x, k_rot_y, k_rot_z])')
+        assert crisp_accepts_full_stiffness(patched)
+        assert not crisp_accepts_full_stiffness(stock)
+        assert not crisp_accepts_full_stiffness('')
+        assert not crisp_accepts_full_stiffness(None)
 
     def test_logged_stiffness_reads_both_forms(self):
         K = np.diag([100.0, 400.0, 800.0])
