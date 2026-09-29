@@ -13,10 +13,18 @@
 #   * Read ONLY when tpgpt_pick_place runs with experiment:=true. With
 #     experiment:=false (the default) the nodes behave exactly as before and
 #     ignore this file.
+#   * `method:` mirrors the planner's and the executor's own defaults, value for value
+#     (test_x6.py::test_the_frozen_method_is_what_the_nodes_run fails when they drift).
+#     Change a default in a node, then re-sync this file, BEFORE trial 1.
+#
+# Reworked 2026-09-29 for the setup as moved and recalibrated on 2026-09-26: the named
+# shelf slots, the objects that plan, the 18:39 demonstration, the method as the planner
+# runs it today. Expect another pass when more grippers work (hands, objects per hand).
 
 experiment:
   name: X6
-  run_id: hw_2026_09_x6               # one run_id for the whole campaign, all sessions
+  run_id: hw_2026_09_x6_r2            # one run_id for the whole campaign, all sessions
+                                      # (hw_2026_09_x6 was the pre-move campaign: not evidence)
   data_root: ~/thor_ws/src/ycb_point_cloud/TPGPT_multi_obj_and_embodiment/outputs/hardware
   control_rate_hz: 20                 # time in every record = step_index / control_rate_hz
   topics:                             # read by the X6 recorder only
@@ -30,16 +38,22 @@ experiment:
 # ----------------------------------------------------------------------------
 # The one demonstration. Recorded ONCE, Franka Hand, banana, into the shelf.
 # ----------------------------------------------------------------------------
+# The 18:39 demonstration of 2026-09-25: the best measured (192 admissible grasps across
+# six objects and three slots; docs/hardware/GRASP_LIBRARY.md, item 6), and the one every
+# live plan of 2026-09-26 used.
 demonstration:
   object: banana
   hand: panda
-  placed_at_note: "<where you set the banana down; not slot_a or slot_b>"
-  recorded_dir: ~/tpgpt_demos/banana_20260915_113058
-  source_bundle_dir: ~/tpgpt_demos/banana_20260915_113058/source_bundle
+  # From its teach.json: set down on the BOTTOM board at (0.608, -0.264), 81 mm from the
+  # bottom_left mark and 169 mm from the right one. bottom_left is therefore the slot
+  # nearest the demonstration's own destination; say so when reporting it.
+  placed_at_note: "bottom board, (0.608, -0.264, 0.075) base frame, slid in under the top board"
+  recorded_dir: ~/tpgpt_demos/banana_20260925_183904
+  source_bundle_dir: ~/tpgpt_demos/banana_20260925_183904/source_bundle
   sha256:
-    tool_labels.npz: aa34cb32378f1def765735c9b5100631df31b278829cacc84cd8f25c80433267
-    placement.npz: a5648468e053bb679393be00e357d7b8b1d51d3baa12f9f638d66a2e8d3e3f29
-    manifest.json: 84a671368b0787f299502c96ecbbdac073e63828316c2441f6283f8363277bed
+    tool_labels.npz: 80233cc20138387b894cd07ab9e43ac22cbd90a2066cc3edfaa0ca4831d800db
+    placement.npz: 11168ce7085571df0bc7e9899bd274e8985a970f4d656a8be970205ea8c40705
+    manifest.json: 9fc87dc02bcb5d8ed9cda083e9efbe34ab823a42509328ccd9483162c560e48e
   re_record_allowed: false
 # ----------------------------------------------------------------------------
 # Calibration. The file the planner actually loads is the INSTALLED copy.
@@ -54,22 +68,26 @@ calibration:
 # Factors
 # ----------------------------------------------------------------------------
 hands:
-  # The Inspire hand is MOUNTED now (2026-09-15): run trials with -p hand:=inspire and
-  # trial ids 0031-0060. Panda trials 0001-0007 already exist; a panda trial id re-run
-  # with the Inspire hand would OVERWRITE that trial.
+  # Only the Franka Hand has planned since the 2026-09-26 move. The Inspire hand is kept so
+  # its trial ids are reserved; it has not been re-validated on this setup, and this block
+  # is revisited when the other grippers work (user, 2026-09-29).
   mounted: panda
   order: [panda, inspire]             # complete one hand before re-mounting
   files:
     panda: hands/panda.yaml
     inspire: hands/inspire.yaml       # side grasp, no GraspGen-X (INSPIRE_HAND.md)
 
-objects:                              # 5 test objects; topic /ycb_pointclouds/<name>
+# Every object that plans into all three slots (2026-09-26), except the banana, which is
+# the demonstrated object. Names are config/target_objects.yaml's (topic
+# /ycb_pointclouds/<name>), each with its YCB scan and grasp library. The brief asks for 5;
+# the fifth (the tomato soup can) plans nowhere upright and was dropped (GRASP_LIBRARY.md).
+# Each is set down in its protocol pose (docs/hardware/OPERATOR_CHECKLIST.md): the mug
+# opening-up with its handle visible, the pudding box on one of its long narrow sides.
+objects:
   - apple
-  - red_cup
-  - red_mug
-  - cereal_box
-  - tomato_soup_can
-  - bleach_cleanser
+  - mug
+  - pudding_box
+  - foam_brick
 
 # Pick poses: 3 taped marks on the table, SAME marks for every object and for
 # both hands. Spread across the reachable region, each with a different yaw.
@@ -83,19 +101,20 @@ pick_poses:
   - {index: 1, x: TO_FILL, y: TO_FILL, yaw_deg: TO_FILL, note: "centre-far"}
   - {index: 2, x: TO_FILL, y: TO_FILL, yaw_deg: TO_FILL, note: "near-right"}
 
-# Destinations: hard-coded, base frame, no markers. Two shelf slots differing in
-# height AND lateral position. x, y = where the object's centre should end up;
-# surface_height = height of the board it is set down on (TCP touch on the board).
+# Destinations: the planner's named slots, resolved from the touched slot marks in
+# shelf_file (tpgpt.hardware.shelf.slots), so no coordinate is typed here. Each trial
+# records the resolved (x, y, board height) and the shelf file's sha256. bottom_right is
+# abandoned (user, 2026-09-25: 0 admissible on every capture, and the arm reaches it badly).
+# The pick support is inferred by the planner (the table), as outside an experiment.
 destinations:
-  top_shelf: {x: 0.54, y: -0.4, surface_height: 0.35}
-  bottom_shelf: {x: 0.54, y: -0.4, surface_height: 0.08}
-  table_height: -0.006               # support height at the pick marks
+  shelf_file: ~/thor_ws/install/ycb_pointcloud_pipeline/share/ycb_pointcloud_pipeline/config/shelf.yaml
+  slots: [top_left, top_right, bottom_left]
 
 # ----------------------------------------------------------------------------
 # Grid and order
 # ----------------------------------------------------------------------------
 grid:
-  # trials per hand = 5 objects x 3 pick poses x 2 destinations = 30; total 60
+  # trials per hand = 4 objects x 3 pick poses x 3 destinations = 36; total 72
   # Trials are started one at a time by the operator (tpgpt_pick_place
   # experiment:=true trial_id:=...). The order actually run is whatever trial ids
   # were used; follow a randomised order sheet (orders/order_<hand>.csv, generated
@@ -103,13 +122,13 @@ grid:
   trials_per_condition: 1
   randomise_within_hand: true
   seeds: {panda: 6001, inspire: 6002}
-  trial_ids: {panda: "0001-0030", inspire: "0031-0060"}
+  trial_ids: {panda: "0001-0036", inspire: "0037-0072"}
   stop_early: false                   # a hand doing badly still finishes its grid
 
 instrument_check:                     # §4 of the brief
   repetitions: 10                     # re-segment each time, object never touched
-  object: can
-  location: top_shelf
+  object: foam_brick                  # the steadiest detection (255 of 266 frames) and it cannot roll
+  location: top_left
   when: [before_first_trial, after_remount, campaign_end]
 
 robustness_check:                     # optional, AFTER both grids, one sentence in the paper
@@ -123,9 +142,11 @@ scratch_trials:                       # test trials (trial_id s001, s002), never
   object: TO_FILL                     # any object that is neither a grid object nor the banana
 
 # ----------------------------------------------------------------------------
-# METHOD -- frozen. Values copied from the current node defaults (2026-09-15):
-# tpgpt_planner_node.py, tpgpt_executor_node.py, grasp_selection.SelectionSettings,
-# planner.plan. Identical for both hands.
+# METHOD -- frozen. The node defaults, value for value (2026-09-29): tpgpt_planner_node.py,
+# tpgpt_executor_node.py, grasp_selection.SelectionSettings. How each key reaches the
+# planner: x6_common.PLANNER_METHOD_PARAMETERS; every execution key is an executor
+# parameter of the same name. Anything not listed runs at its node default, as it
+# does outside an experiment. Identical for both hands.
 # ----------------------------------------------------------------------------
 method:
   map:
@@ -145,52 +166,64 @@ method:
     min_cloud_points: 40              # planner.MIN_CLOUD_POINTS; pre-flight uses this
     segmentation_period_s: 3.0
     detector_mode: grounded_sam
+    object_model: true                # the YCB scan fitted to the camera cloud (audit A8)
+    object_model_retries: 2           # a refused fit is retried on fresh frames, which the
+                                      # trial captures and records itself
+    use_scene_cloud: true             # the observed scene is an obstacle to the whole path
 
   grasp_generation:
     source: graspgenx
     host: 127.0.0.1
     port: 5556
     planner: diffusion
-    num_grasps: 200
-    topk: 100
+    grasp_library: true               # the object's fixed 2000 grasps (audit A13), carried by the fit
+    grasp_library_size: 2000
+    num_grasps: 400                   # the live draw: only when the fit is refused, or no cache
+    topk: 200
     timeout_s: 30.0
     # The GraspGen-X gripper model is the hand's own description (hands/<hand>.yaml).
 
   selection:                          # grasp_selection.SelectionSettings
-    max_tilt_deg: 85.0
+    max_tilt_deg: 90.0                # audit A10 (sim 85)
+    check_visibility: auto            # on only when the scan was not fitted (audit A10)
+    check_centred: false
     min_support_clearance_m: 0.003
     duplicate_position_m: 0.01
     duplicate_angle_deg: 15.0
-    max_plans: 12
+    max_plans: 100                    # planned in GraspGen-X's score order (sim 100; user 2026-09-29)
     max_aim_grasp_m: 0.01
     max_orientation_error_deg: 15.0
     min_path_clearance_m: -0.002
-    fallback_top_down: true           # kept ON; recorded as grasp.fell_back
+    fallback_top_down: false          # the simulation has none; top-down is not preferred (user 2026-09-29)
     grasp_depth_below_top_m: 0.03     # top-down fallback only
     refine: true
     refine_margin_m: 0.003
     refine_max_depth_m: 0.025
     refine_max_centre_m: 0.010
+    kinematic_criterion: strict       # every waypoint reachable, the pick and place with orientation
+    approach_rejects_grasp: false     # a blocked move onto the path asks for a re-home instead;
+                                      # in a trial that is preflight_failed, not counted
     never_force_rank_in_main_grid: true
 
-  execution:                          # tpgpt_executor_node parameters
+  execution:                          # tpgpt_executor_node parameters, at its defaults
+    # The execution is being reworked (stiffness, attractor labels; 2026-09-29, another
+    # session). Re-sync this block when that lands: the X6 trial passes every key below
+    # to the executor, so a stale value here would silently override the new default.
     use_transported_stiffness: false  # taught demo carries static 400 N/m
-    # Fixed translational stiffness on tpgpt_cartesian_impedance_controller for the
-    # whole run. At the stock 400 N/m the arm trailed its target 20-30 mm (friction),
-    # the lag gate crawled the phase and arrive_grasp aborted (2026-09-15 logs).
-    # 800 with rotational 60 vibrated on the approach and at the grasp; lowered.
-    translational_stiffness: 600.0
-    speed_scale: 0.5
-    lag_tolerance: 0.035
+    translational_stiffness: 400.0
+    speed_scale: 0.35
+    lag_tolerance: 0.045              # method 0.035 (CLAUDE.md, executor deviations)
+    on_stall: continue                # the lag gate and its clamp go off after a stall
     speed_limit_factor: 3.0
     belief_correction: 0.2
     rotational_stiffness: 30.0        # stock CRISP k_rot
     rotational_damping: 12.0
     transit_rotational_scale: -1.0    # auto -> 1.0 for a static (taught) source
-    max_policy_seconds: 120.0
+    max_policy_seconds: 300.0
     stiffness_min_translational: 50.0
     stiffness_max_translational: 900.0
     stiffness_max_rotational: 60.0
+    workspace_check: false            # the path check covers it (user 2026-09-23)
     workspace_min: [0.15, -0.6, -0.25]
     workspace_max: [0.85, 0.6, 0.7]
     max_start_distance: 0.6

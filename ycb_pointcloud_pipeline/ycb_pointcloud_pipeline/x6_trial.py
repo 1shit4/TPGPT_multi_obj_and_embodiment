@@ -115,6 +115,9 @@ class Trial:
         self.plan = self.selection = None
         self.hand = None
         self.prov = None
+        self.frames = []
+        self.retry_captures = 0
+        self.approach_blocked = False
 
     # ------------------------------------------------------------------ files
     def path(self, *parts):
@@ -164,7 +167,7 @@ class Trial:
             self._capture_object()
             self._campaign_bookkeeping()
             if not self._plan():
-                self.status = 'planning_failed'
+                self.status = 'preflight_failed' if self.approach_blocked else 'planning_failed'
                 self._finalize(settle=False)
                 return 0
             self._execute()
@@ -205,6 +208,20 @@ class Trial:
         self.hand = self.cfg.hand(self.hand_name)
         self.session = xc.current_session(self.cfg)
         self.prov = xc.provenance(self.cfg)
+
+    def _retry_capture(self, seen, wait):
+        """The planner's scan-fit retry (TpgptPlannerNode.await_fresh_clouds): capture
+        n_frames fresh segmentations, record them with the others, feed them in."""
+        per = self.m['perception']
+        n = int(per['n_frames'])
+        timeout = float(self.m['outcome'].get('capture_timeout_s', 20.0))
+        print(f'  scan fit refused; capturing {n} fresh segmentations to try again...')
+        frames, freshness = self.capture.capture(n, timeout)
+        print(f'  {len(frames)}/{n} fresh clouds ({freshness})')
+        self.retry_captures += 1
+        self.frames.extend(frames)
+        for f in frames:
+            self.planner._cloud_cb(f['cloud'])
 
     def _capture_object(self):
         """Fresh segmentations of the object, used for planning."""
@@ -264,46 +281,29 @@ class Trial:
                     pass
 
     def _planner_params(self):
-        m, cfg = self.m, self.cfg
-        per, gg, sel = m['perception'], m['grasp_generation'], m['selection']
-        d = cfg.destination(self.destination_name)
-        z = float(d['surface_height'])
+        """The frozen method (x6_common.PLANNER_METHOD_PARAMETERS) plus what only a
+        trial decides. Every other planner parameter stays at its node default."""
+        cfg = self.cfg
         return {
+            **xc.planner_method_parameters(self.m),
             'calibration_yaml': xc.expand(cfg.raw['calibration']['camera_extrinsics_file']),
             'source_bundle_dir': xc.expand(cfg.raw['demonstration']['source_bundle_dir']),
+            'shelf_config': cfg.shelf_file,
             'object_name': self.object_name,
+            # Resolved by the planner from the shelf file's slot marks, exactly as outside
+            # an experiment; the support is inferred (the table).
+            'destination_name': self.destination_name,
             'top_down_grasp': bool(self.top_down_grasp),
             'cloud_topic': '',
-            'n_frames': int(per['n_frames']),
-            'max_cloud_age': float(per['max_cloud_age_s']),
-            'workspace_min': [float(v) for v in per['workspace_min']],
-            'workspace_max': [float(v) for v in per['workspace_max']],
-            'voxel_size': float(per['voxel_size']),
-            'outlier_radius': float(per['outlier_radius']),
-            'outlier_min_neighbors': int(per['outlier_min_neighbors']),
-            'max_points': int(per['max_points']),
-            'support_height': float(cfg.raw['destinations']['table_height']),
-            'destination': [float(d['x']), float(d['y']), z],
-            'destination_height': z,
-            'grasp_depth_below_top': float(sel['grasp_depth_below_top_m']),
-            'grasp_source': str(gg['source']),
-            'graspgen_host': str(gg['host']),
-            'graspgen_port': int(gg['port']),
+            # The trial captures its own n_frames (outcome.capture_timeout_s) and feeds them
+            # in; the planner must not wait for more on a subscription it is not spinning.
+            'frames_wait': 0.0,
             'graspgen_gripper': str(self.hand.get('graspgen_gripper') or 'franka_panda'),
             # Hand on the flange. inspire: scripted side grasp, GraspGen-X is never called.
             'end_effector': str(self.hand.get('end_effector', self.hand_name)),
             'end_effector_config': xc.expand(self.hand['end_effector_config'])
             if self.hand.get('end_effector_config') else '',
-            'graspgen_planner': str(gg['planner']),
-            'graspgen_num_grasps': int(gg['num_grasps']),
-            'graspgen_topk': int(gg['topk']),
-            'graspgen_timeout': float(gg['timeout_s']),
             'graspgen_autostart': True,
-            'grasp_max_tilt_deg': float(sel['max_tilt_deg']),
-            'grasp_max_plans': int(sel['max_plans']),
-            'grasp_min_path_clearance': float(sel['min_path_clearance_m']),
-            'grasp_fallback_top_down': bool(sel['fallback_top_down']),
-            'min_determinant': float(m['map']['min_determinant']),
             'output_dir': self.path('_planner_out'),
             'auto_plan': False,
         }
@@ -395,6 +395,8 @@ class Trial:
             'demonstration_sha256': xc.demo_hashes(demo['source_bundle_dir']),
             'calibration': {'camera_extrinsics_file': cal_file,
                             'camera_extrinsics_sha256': xc.sha256_file(cal_file),
+                            'shelf_file': cfg.shelf_file,
+                            'shelf_file_sha256': xc.sha256_file(cfg.shelf_file),
                             'hand_frame_file': self.hand['_path'],
                             'hand_frame_file_sha256': self.hand['_sha256']},
         }
@@ -411,10 +413,13 @@ class Trial:
             planner.clouds = []
         for f in self.frames:
             planner._cloud_cb(f['cloud'])
-        frame_meta = save_frames(self.dir, self.frames, planner.calib)
+        # A refused scan fit is retried on fresh frames (object_model_retries); the
+        # planner's own wait would see none, its subscription is not spun here.
+        planner.await_fresh_clouds = self._retry_capture
         print('Planning (once; no re-plan in an experiment trial)...')
         self.status = 'planning'
         ok, text = planner._plan()
+        frame_meta = save_frames(self.dir, self.frames, planner.calib)
         info = planner.last_plan_inputs or {}
         points = info.get('points')
         if points is not None:
@@ -429,7 +434,9 @@ class Trial:
         marks = [p for p in self.cfg.raw.get('pick_poses', []) if not xc.is_unfilled(p)]
         self.record['perception'] = {
             'cloud_points': None if points is None else int(len(points)),
-            'n_frames_fused': len(self.frames), 'frames': frame_meta,
+            'n_frames_fused': info.get('n_clouds', len(self.frames)),
+            'n_frames_captured': len(self.frames), 'retry_captures': self.retry_captures,
+            'frames': frame_meta,
             'camera_intrinsics': None if cam is None else list(cam.k),
             'camera_to_base': None if T is None else np.asarray(T).tolist(),
             'segmentation_source': {
@@ -461,6 +468,15 @@ class Trial:
             self.record['grasp'] = grasp
             self.record['timing_s'] = timing
             self.system_abort_reason = f'planning refused: {text}'
+            if str(info.get('error', text)).startswith('approach_blocked'):
+                # The grasp and its path passed; only the move from where the arm was
+                # parked failed. That is the operator's setup, not the method.
+                self.approach_blocked = True
+                self.system_abort_reason = f'{text} -- run this trial id again once homed'
+                self.save_record()
+                print(f'\nNOT A TRIAL (preflight_failed, not counted): {text}\n'
+                      f'Re-home the arm and run trial {self.trial_id} again; it is overwritten.')
+                return False
             self.save_record()
             print(f'\nPLANNING FAILED (counts as a trial, stage "planning"): {text}')
             return False

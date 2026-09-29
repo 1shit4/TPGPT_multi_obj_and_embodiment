@@ -36,6 +36,53 @@ TRIAL_CLI_PARAMETERS = ('experiment', 'trial_id', 'hand', 'object_name', 'destin
 
 FAILURE_STAGES = ('planning', 'approach', 'reach', 'grasp', 'lift', 'carry', 'place', 'settle')
 
+#: How the frozen ``method:`` block reaches the planner node: (block, key) -> planner
+#: parameter. Every other planner parameter runs at its node default, as it does outside
+#: an experiment. test_x6 checks each value (and type) against the node's own default, so
+#: a default changed in the node without re-syncing the config fails there, not on the
+#: robot.
+PLANNER_METHOD_PARAMETERS = {
+    ('perception', 'n_frames'): 'n_frames',
+    ('perception', 'max_cloud_age_s'): 'max_cloud_age',
+    ('perception', 'workspace_min'): 'workspace_min',
+    ('perception', 'workspace_max'): 'workspace_max',
+    ('perception', 'voxel_size'): 'voxel_size',
+    ('perception', 'outlier_radius'): 'outlier_radius',
+    ('perception', 'outlier_min_neighbors'): 'outlier_min_neighbors',
+    ('perception', 'max_points'): 'max_points',
+    ('perception', 'object_model'): 'object_model',
+    ('perception', 'object_model_retries'): 'object_model_retries',
+    ('perception', 'use_scene_cloud'): 'use_scene_cloud',
+    ('grasp_generation', 'source'): 'grasp_source',
+    ('grasp_generation', 'host'): 'graspgen_host',
+    ('grasp_generation', 'port'): 'graspgen_port',
+    ('grasp_generation', 'planner'): 'graspgen_planner',
+    ('grasp_generation', 'grasp_library'): 'grasp_library',
+    ('grasp_generation', 'grasp_library_size'): 'grasp_library_size',
+    ('grasp_generation', 'num_grasps'): 'graspgen_num_grasps',
+    ('grasp_generation', 'topk'): 'graspgen_topk',
+    ('grasp_generation', 'timeout_s'): 'graspgen_timeout',
+    ('selection', 'max_tilt_deg'): 'grasp_max_tilt_deg',
+    ('selection', 'check_visibility'): 'check_visibility',
+    ('selection', 'check_centred'): 'check_centred',
+    ('selection', 'max_plans'): 'grasp_max_plans',
+    ('selection', 'min_path_clearance_m'): 'grasp_min_path_clearance',
+    ('selection', 'fallback_top_down'): 'grasp_fallback_top_down',
+    ('selection', 'grasp_depth_below_top_m'): 'grasp_depth_below_top',
+    ('selection', 'kinematic_criterion'): 'kinematic_criterion',
+    ('selection', 'approach_rejects_grasp'): 'approach_rejects_grasp',
+    ('map', 'min_determinant'): 'min_determinant',
+}
+
+
+def planner_method_parameters(method):
+    """The planner parameters the frozen method block sets, as ``name -> value``."""
+    out = {}
+    for (block, key), name in PLANNER_METHOD_PARAMETERS.items():
+        value = method[block][key]
+        out[name] = [float(v) for v in value] if isinstance(value, list) else value
+    return out
+
 
 def default_config_path():
     """x6_experiment/config/x6_experiment.yaml in the source tree."""
@@ -124,12 +171,23 @@ class X6Config:
         data['_sha256'] = sha256_file(path)
         return data
 
+    @property
+    def shelf_file(self):
+        return expand(self.raw['destinations']['shelf_file'])
+
+    def destination_names(self):
+        return [str(n) for n in self.raw['destinations']['slots']]
+
     def destination(self, name):
-        dest = self.raw['destinations']
-        if name not in dest or name == 'table_height':
-            raise KeyError(f'destination {name!r} not in config (slot names: '
-                           f"{[k for k in dest if k != 'table_height']})")
-        return dest[name]
+        """``{'x', 'y', 'surface_height'}`` of a named slot, from the touched slot marks in
+        the shelf file (tpgpt.hardware.shelf.slots), the same resolution the planner uses."""
+        if name not in self.destination_names():
+            raise KeyError(f'destination {name!r} not in config (slots: '
+                           f'{self.destination_names()})')
+        from tpgpt.hardware.shelf import slots
+        with open(self.shelf_file) as f:
+            x, y, z = slots(yaml.safe_load(f))[name]
+        return {'x': x, 'y': y, 'surface_height': z}
 
     # ------------------------------------------------------------------ paths
     def trial_dir(self, trial_id, scratch=False):

@@ -30,7 +30,7 @@ some runs. **L** is a small numerical mismatch.
 | A13 | **Extended 2026-09-24**: the object's grasps are a fixed library keyed on its scan, not a fresh draw per plan, and coverage against a destination is now measurable offline (`GRASP_LIBRARY.md`). |
 | A4, A7, B1, B2, C1, C2, C4–C7 | Open. |
 | A8 | **Addressed 2026-09-22** (commits `f6a34e4`, `60df37d`), pending a live object that fits. The object cloud is the object's YCB scan fitted to the camera cloud (`tpgpt/hardware/object_model.py`, planner `object_model`, default true), as in the sim's YCB experiment. A fit the camera doesn't support is refused and the camera cloud is used, recorded as `object_cloud_source`. First live fit (a banana on the white sheet) was refused: median 5.0 mm, 78% of points explained, against about 3 mm and at least 93% for a correct fit at 5 mm synthetic noise. |
-| X6 | `x6_experiment.yaml`'s frozen `method:` still sets `max_plans: 12` and `fallback_top_down: true`, which override the new defaults in X6 trials. It is left for the X6 rework. |
+| X6 | **Resolved 2026-09-29.** The frozen `method:` block mirrors the planner's and the executor's defaults value for value (`max_plans` 100, `fallback_top_down` false, the grasp library, the scan fit and its retries, the executor's parameters), and `test_x6.py::test_the_frozen_method_is_what_the_nodes_run` fails when a default drifts from it. So an X6 trial runs the method exactly as a run outside an experiment does, executor deviations C1-C7 included, instead of the mixed set frozen on 2026-09-15. |
 
 ---
 
@@ -72,12 +72,12 @@ deviations are in the node around it.
 
 | # | Sim | Hardware | Sev |
 |---|---|---|---|
-| **C1. What happens after a stall** | The watchdog ends the run as `blocked`, a failure (`rollout.py:475`). | `on_stall: continue` (`tpgpt_executor_node.py:130, 596`) switches **the lag gate and its clamp off** for the rest of the run, which then follows the plan open-loop. This setting is **not frozen in the X6 `method:` block.** | **H** |
+| **C1. What happens after a stall** | The watchdog ends the run as `blocked`, a failure (`rollout.py:475`). | `on_stall: continue` (`tpgpt_executor_node.py:130, 596`) switches **the lag gate and its clamp off** for the rest of the run, which then follows the plan open-loop. Frozen in the X6 `method:` block, at this default, since 2026-09-29. | **H** |
 | **C2. Static offset compensation** | None. Standing sag is handled inside the method, by the watchdog's `static_sag` re-baselining. | The resting error at the plan start is measured and **subtracted from every command** (`offset_compensation: z`, frozen in X6; applied at `:629`). The shared loop never sees it. The gate and watchdog judge a lag that is smaller than the controller's real position error, so part of what the sim handles inside the method is removed before the method sees it. | M |
 | **C3. No infeasible-pose fallback** | When the gate shuts, it relaxes the orientation or skips to the next feasible label (`rollout.py:140, 383`). This uses IK. | Off. Same root cause as A3: it needs FR3 IK, not MuJoCo. | M |
-| **C4. The gate's expected lag uses the wrong stiffness** | The controller runs the predicted K, D, and the gate's `expected = ‖K⁻¹D‖·v` uses the same K, D. | The gate uses the label K, D (400/40 → τ = 0.100 s). The robot runs a fixed 600 N/m with D = 2√K (X6), so τ = 0.082 s (override at `:610`). The gate therefore tolerates about 22 % more lag than the arm actually has. | L |
+| **C4. The gate's expected lag uses the wrong stiffness** | The controller runs the predicted K, D, and the gate's `expected = ‖K⁻¹D‖·v` uses the same K, D. | The gate uses the label K, D (400/40 → τ = 0.100 s). At the node default the robot runs the same 400 N/m with D = 2√K = 40, so the two agree. The gap was X6's fixed 600 N/m (τ = 0.082 s, override at `:610`: the gate tolerated about 22 % more lag than the arm had), which X6 no longer sets (2026-09-29). It returns whenever the fixed stiffness differs from the labels'. | L |
 | **C5. Rotational gains** | k_rot 60, d_rot 12. | k_rot 30. `rotational_damping` is ignored because CRISP runs with d = −1, i.e. 2√k. | L |
-| **C6. Speed** | Runs at the demonstrated speed. | `speed_scale` 0.35 (node default) / 0.5 (X6). The phase clock and the velocities are scaled consistently. | L |
+| **C6. Speed** | Runs at the demonstrated speed. | `speed_scale` 0.35 (node default, and X6 since 2026-09-29; it was 0.5). The phase clock and the velocities are scaled consistently. | L |
 | **C7. The gripper pauses the clock** | The jaws close while the loop keeps stepping through the demonstration's dwell labels. | `command_gripper(..., wait=True)` blocks the loop, so the phase clock stops while the gripper acts (`:625`). | L |
 
 ---
@@ -87,7 +87,7 @@ deviations are in the node around it.
 - The execution loop: `gate_step`, `advance_step`, `advance_phase`, `belief_position`,
   `query_position`, `StallWatchdog`, `ExecutionLaw`, `stiffness_threshold`. These are imported from
   `tpgpt/policy/rollout.py`, in the same order as `rollout_policy`, with the integrate law and the
-  query at the attractor. The X6 config freezes `lag_tolerance` at 0.035, the method's value.
+  query at the attractor. The X6 config froze `lag_tolerance` at the method's 0.035 until 2026-09-29; it now runs the executor's 0.045, like every run outside an experiment (a listed deviation, `CLAUDE.md`).
 - Keypoints: `grasp_cube` / `grasp`, half extent 0.02, `include_contacts=False` (equivalent to the
   sim's `_select_parts(("box",))`), and the roll resolved in `scene_keypoints`.
 - `TransportMap`, `check_diffeomorphism` on the tool path, and `transport_labels`.

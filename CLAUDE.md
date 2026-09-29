@@ -100,8 +100,7 @@ without `host_ros_env.sh`), with fake `/ycb_pointclouds/<obj>`, `/ycb_scene_clou
 `/joint_states` publishers. Base-frame points must be sent in the optical frame through the inverse
 of the installed calibration. If you start the GraspGen-X server for a test, stop it afterwards.
 
-Known failures, not regressions: `test_x6.py` × 2 (`x6_experiment.yaml` lists 6 objects where the
-grid expects 5); TPGPT × 7, all gripper-registry tests, because the local GraspGen-X checkout lacks
+Known failures, not regressions: TPGPT × 7, all gripper-registry tests, because the local GraspGen-X checkout lacks
 4 descriptions (`jaco_3f`, `schunk_svh`, `ability_hand`, `fourier_hand`) and `robosuite_models` is
 not installed, plus `test_graspgen.py::TestServer::test_reports_its_loaded_grippers` whenever the
 GraspGen-X server is not running (8 in all, 904 passing, 2026-09-24). The two hands on the robot (`franka_panda`, `inspire_hand`) are unaffected.
@@ -438,8 +437,16 @@ The planner's support height is: its `support_height` parameter, else the calibr
   trials in `outputs/hardware/hw_2026_09_x6/`, their clouds or plans, nor the 2026-09-15 banana
   demo (its object cloud went through the old calibration). Start from fresh captures and a fresh
   demonstration. The only exception is the FK fixture, which is robot-only.
-- **X6 trials override the selection defaults** from the frozen `method:` block (`max_plans: 12`,
-  `fallback_top_down: true`) via `x6_trial.py`. Don't be surprised; it waits for the X6 rework.
+- **X6's frozen `method:` block is the nodes' defaults, value for value** (reworked 2026-09-29).
+  The trial passes the planner the keys in `x6_common.PLANNER_METHOD_PARAMETERS` and the executor
+  every key of `method.execution`; everything else runs at its default. **Change a planner or
+  executor default and `test_x6.py::test_the_frozen_method_is_what_the_nodes_run` fails**:
+  re-sync `x6_experiment.yaml` (before trial 1 of a campaign; never during one). Destinations are
+  the shelf file's named slots, the prompts are `config/target_objects.yaml` (X6's own copy is
+  gone), a refused scan fit is retried on frames the trial captures and saves, and an
+  `approach_blocked` plan is `preflight_failed` (not counted): re-home, re-run the same id.
+  Grid: apple, mug, pudding box, foam brick x 3 marks x top_left/top_right/bottom_left = 36 per
+  hand. **`bottom_left` is 81 mm from where the 18:39 demonstration set the banana down.**
 - **`auto_plan:=true` re-plans every second** after a refusal (each cloud arrival starts a plan
   while `latest_plan` is unset). Old behaviour; `tpgpt_pick_place` calls the planner once.
 - **The planner and the executor refuse to run without fresh `/joint_states`**: robot container
@@ -490,10 +497,8 @@ The planner's support height is: its `support_height` parameter, else the calibr
 ## Earlier state (2026-09-21)
 
 - Camera and shelf were moved; **recalibrated and validated** (see `docs/hardware/CALIBRATION.md`).
-- **`x6_experiment/config/x6_experiment.yaml` is stale and not yet updated:** its destinations,
-  table height and object list predate the move. The new shelf geometry is recorded in
-  `docs/hardware/CALIBRATION.md` only. The user will rework X6 (including a new `run_id` and
-  possibly four slots) later — do not edit it unprompted.
+- `x6_experiment/config/x6_experiment.yaml` predated the move; reworked 2026-09-29 (run
+  `hw_2026_09_x6_r2`, three slots) at the user's request, to be revisited when more grippers work.
 - **Done 2026-09-21 (audit A1, A2, A3, A6, C3):** the scene cloud, the shelf model, FR3
   kinematics, the whole-path check, the sim's selection rule and funnel stages, and the executor's
   infeasible-pose fallback. Tested offline and in a ROS dry run; **not yet run on the robot, nor on

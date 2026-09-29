@@ -17,7 +17,7 @@ writes. Scratch trials (id starting with `s`) go to `<root>/scratch/` instead of
 |---|---|
 | Campaign config (method frozen, factors, seeds) | `x6_experiment/config/x6_experiment.yaml` |
 | Hand descriptions | `x6_experiment/config/hands/panda.yaml`, `hands/inspire.yaml` (placeholder) |
-| Segmentation prompts for X6 | `x6_experiment/config/x6_target_objects.yaml` |
+| Segmentation prompts | the package's own `ycb_pointcloud_pipeline/config/target_objects.yaml` (chosen on labelled frames, `docs/hardware/SEGMENTATION.md`); each trial records the file it ran with. X6 had its own until 2026-09-29 |
 | Camera extrinsics as loaded | `~/thor_ws/install/ycb_pointcloud_pipeline/share/ycb_pointcloud_pipeline/config/camera_calibration.yaml` (installed copy of `ycb_pointcloud_pipeline/config/camera_calibration.yaml`) |
 | Demonstration as recorded by `tpgpt_teach_node` | `~/tpgpt_demos/banana_<YYYYMMDD_HHMMSS>/` (`raw.npz`, `teach.json`, `source_bundle/`) |
 | The brief | `HARDWARE_EXPERIMENT.md` |

@@ -94,7 +94,7 @@ def order_sheet(config, hand):
     lo, hi = (int(v) for v in raw['grid']['trial_ids'][hand].split('-'))
     objects = list(raw['objects'])
     marks = [int(p['index']) for p in raw['pick_poses']]
-    slots = [k for k in raw['destinations'] if k != 'table_height']
+    slots = config.destination_names()
     cells = list(itertools.product(objects, marks, slots))
     if len(cells) != hi - lo + 1:
         raise ValueError(f'{len(cells)} conditions but trial ids {lo}-{hi} give {hi - lo + 1}')

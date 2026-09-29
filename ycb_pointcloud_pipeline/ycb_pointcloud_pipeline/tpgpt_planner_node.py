@@ -484,6 +484,7 @@ class TpgptPlannerNode(Node):
             info['error'] = str(exc)
             return False, str(exc)
         observed, points, n_clouds = self._object_cloud_with_retries(points, n_clouds)
+        info['n_clouds'] = n_clouds
         self.observed_pub.publish(xyz_to_pointcloud2(observed, self.base,
                                                      self.get_clock().now().to_msg(),
                                                      (255, 255, 255)))
@@ -737,12 +738,7 @@ class TpgptPlannerNode(Node):
                 f"({attempt + 1} of {p('object_model_retries')})")
             with self.lock:
                 seen = len(self.clouds) and self.clouds[-1][0]
-            deadline = time.monotonic() + float(p('object_model_retry_wait'))
-            while time.monotonic() < deadline:
-                time.sleep(0.2)
-                with self.lock:
-                    if len(self.clouds) and self.clouds[-1][0] != seen:
-                        break
+            self.await_fresh_clouds(seen, float(p('object_model_retry_wait')))
             try:
                 observed, n_clouds = self.fused_cloud()
             except RuntimeError:
@@ -752,6 +748,19 @@ class TpgptPlannerNode(Node):
             f'object model: no attempt was accepted; the best explained '
             f'{self.object_fit.explained:.0%} of its cloud. Planning on the camera cloud.')
         return observed, points, n_clouds
+
+    def await_fresh_clouds(self, seen, wait):
+        """Wait up to ``wait`` s for a cloud that arrived after ``seen`` (its arrival time).
+
+        An X6 trial replaces this with a capture of its own, so the frames a retry
+        plans on are among the ones it records (x6_trial.Trial._retry_capture).
+        """
+        deadline = time.monotonic() + wait
+        while time.monotonic() < deadline:
+            time.sleep(0.2)
+            with self.lock:
+                if len(self.clouds) and self.clouds[-1][0] != seen:
+                    return
 
     def _full_object_cloud(self, observed):
         """The fitted YCB scan (tpgpt.hardware.object_model), or the camera cloud.

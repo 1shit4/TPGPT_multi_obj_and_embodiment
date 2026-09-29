@@ -9,19 +9,25 @@ node exits when the trial is finished. To go to the next trial, run the command
 again with the next trial id.
 
 Everything below is built except the **robustness re-runs** (Phase 5, step 2). The
-**Inspire hand** is integrated in code (2026-09-15) but has not run a trial yet; its
-mount, grasp and caveats are in `ycb_pointcloud_pipeline/INSPIRE_HAND.md`.
+**Inspire hand** is integrated in code (2026-09-15) but has not run a trial yet, nor
+planned since the 2026-09-26 move; its mount, grasp and caveats are in
+`ycb_pointcloud_pipeline/INSPIRE_HAND.md`. The config was reworked on 2026-09-29 for the
+current setup and will be again when more grippers work.
+
+**The object protocol and the log lines** are in `docs/hardware/OPERATOR_CHECKLIST.md`:
+the mug opening-up with its handle visible, the pudding box on a long narrow side, the
+arm homed before every trial.
 
 ## At a glance
 
 | item | count |
 |---|---|
-| Demonstrations | **1**: banana, Franka Hand, into the shelf, recorded once, never again |
-| Hands | **2**: `panda` first (all 30 trials), then `inspire` (side grasp, no GraspGen-X) |
-| Test objects | **5**: apple, cup, mug, cereal_box, can |
+| Demonstrations | **1**: banana, Franka Hand, onto the bottom board (`~/tpgpt_demos/banana_20260925_183904`), recorded once, never again |
+| Hands | **2**: `panda` first (all 36 trials), then `inspire` (side grasp, no GraspGen-X) |
+| Test objects | **4**: `apple`, `mug`, `pudding_box`, `foam_brick` (the brief asks for 5; none is the banana) |
 | Pick poses | **3** taped marks, different yaw each, same marks for every object and both hands. **Not typed in**: recorded from the point cloud (centroid + yaw) |
-| Destinations | **2**: `slot_a`, `slot_b` (hard-coded in the config) |
-| Trials per hand | 5 × 3 × 2 = **30**. Panda `0001`–`0030`, Inspire `0031`–`0060`. **60 total** |
+| Destinations | **3**: `top_left`, `top_right`, `bottom_left`, resolved from the touched slot marks in `shelf.yaml` |
+| Trials per hand | 4 × 3 × 3 = **36**. Panda `0001`–`0036`, Inspire `0037`–`0072`. **72 total** |
 | Instrument checks | **3 × 10** captures: before trial 1, after re-mounting, at the end |
 | Robustness check | **6** (3 per hand), after both grids (not built) |
 
@@ -30,7 +36,9 @@ mount, grasp and caveats are in `ycb_pointcloud_pipeline/INSPIRE_HAND.md`.
 - Never edit `method:` in the config.
 - Running an existing trial id **overwrites** that trial: its folder is deleted and its `trial_index.csv` row replaced.
 - Refusing at `yes`, or stopping the node mid-trial, is an **aborted trial**. Its data stays and it counts in the denominator.
-- Finish a hand's 30 trials before re-mounting.
+- Finish a hand's 36 trials before re-mounting.
+- A trial that stops with `approach_blocked` is **not a trial** (`preflight_failed`, not
+  counted): the arm was not at home. Re-home and run the same trial id again.
 
 ---
 
@@ -58,11 +66,11 @@ that installed file's sha256 in `record.json`.
 # T1 robot, FCI active
 cd ~/THOR_DOCKER_SETUP && HARDWARE_ACK=I_UNDERSTAND_FR3_EFFORT_CONTROL ./scripts/run.sh robot
 
-# T2 camera + segmentation with the X6 prompts
+# T2 camera + segmentation, with the package's own prompts (config/target_objects.yaml)
 source ~/THOR_DOCKER_SETUP/scripts/host_ros_env.sh && source ~/thor_ws/install/setup.bash
 source ~/venvs/ycb/bin/activate
-ros2 launch ycb_pointcloud_pipeline ycb_pipeline.launch.py \
-    targets:=$HOME/thor_ws/src/ycb_point_cloud/TPGPT_multi_obj_and_embodiment/x6_experiment/config/x6_target_objects.yaml
+ros2 launch ycb_pointcloud_pipeline ycb_pipeline.launch.py
+bash ~/calib_setup.sh && bash ~/calib_preflight.sh
 
 # T3 GraspGen-X server
 ~/thor_ws/src/ycb_point_cloud/TPGPT_multi_obj_and_embodiment/ycb_pointcloud_pipeline/scripts/run_graspgenx_server.sh --daemon
@@ -90,10 +98,10 @@ start` only groups the following trials (`session_id`, `order_in_session` in
 
 1. Fix the shelf, RealSense and tripod. Take **photo 4**.
 2. Verify the calibration manually: TCP overlay, table plane, at least 4 touched points including one on each slot.
-3. Touch each slot board centre with the fingertip, read `/current_pose`, and fill `destinations.slot_a` and `slot_b` plus `table_height`.
+3. The slots are the touched slot marks in `ycb_pointcloud_pipeline/config/shelf.yaml` (`slots:`); nothing to fill here. If the shelf moves, re-touch the marks there and rebuild. Every trial records the shelf file's sha256.
 4. Tape the 3 pick marks. Optionally touch them and fill `pick_poses` (used only to label trials in the analysis).
-5. Put the can in each slot and confirm it's segmented (≫ 40 points). If a slot can't be seen, choose another slot.
-6. Check that each object's prompt detects the right item. Fix the prompts, then freeze them.
+5. Put the foam brick in each slot and confirm it's segmented (≫ 40 points).
+6. The prompts were chosen on labelled frames (`docs/hardware/SEGMENTATION.md`). Check each object alone on the table is detected, with `save_frames:=misses` on; do not retune them during the campaign.
 7. Fill in the home pose (arm out of camera view), the caliper values in `hands/panda.yaml`, and take **photo 5**.
 8. Optional: fill `method.outcome.retreat_tcp_pose` with a TCP pose that clears the camera's view of the slots. This is a `method:` field, so decide **before trial 1**. Left `null`, you clear the view yourself before pressing Ctrl-C.
 9. **Robot-only checks** (not testable off the robot), before the first real trial:
@@ -107,7 +115,12 @@ start` only groups the following trials (`session_id`, `order_in_session` in
 ros2 launch ycb_pointcloud_pipeline tpgpt_teach.launch.py object_name:=banana     # T4
 ros2 run ycb_pointcloud_pipeline tpgpt_teach_keyboard                            # T6
 ```
-1. Keys in order: `c`, `t`, `s`, grasp, `g`, carry onto the shelf (not slot_a or slot_b), `r`, `x`. Take **photo 1** mid-carry.
+**Done**: the 18:39 demonstration of 2026-09-25 is in the config with its hashes. It set
+the banana down on the bottom board 81 mm from the `bottom_left` mark, so `bottom_left` is
+the slot nearest the demonstrated destination; report it as such. For the record, the
+procedure was:
+
+1. Keys in order: `c`, `t`, `s`, grasp, `g`, carry onto the shelf, `r`, `x`. Take **photo 1** mid-carry.
 2. Run `sha256sum ~/tpgpt_demos/banana_<time>/source_bundle/*` and fill the `demonstration:` block in the config (`recorded_dir`, `source_bundle_dir`, the three hashes, `placed_at_note`).
 
 ## Phase 1b: order sheet (once per hand)
@@ -129,7 +142,7 @@ pose, hand-mount and extrinsics checks are skipped).
 
 ## Phase 2: instrument check (before trial 1)
 
-Put the can in `slot_a` and don't touch it. Arm out of the camera view. Session open.
+Put the foam brick in `top_left` and don't touch it. Arm out of the camera view. Session open.
 ```bash
 ros2 run --prefix python3 ycb_pointcloud_pipeline x6_instrument_check --ros-args -p when:=before_first_trial
 ```
@@ -137,19 +150,19 @@ This takes 10 measurements. Each one is the same procedure as a trial's settled
 capture: 3 fresh segmentations, fused, centroid in the base frame. It prints each
 centroid, then the SD per axis and lateral, and writes
 `<root>/instrument/before_first_trial/instrument.json`. Running it again with the same
-`when` writes `before_first_trial_repeat1` rather than overwriting. Remove the can
+`when` writes `before_first_trial_repeat1` rather than overwriting. Remove the brick
 afterwards.
 
 ## Phase 3: one trial
 
-Example: trial 0001, Franka Hand, apple on a mark, going to slot_a.
+Example: trial 0001, Franka Hand, apple on a mark, going to top_left.
 
-1. Place the apple on a mark. Arm at home. Video running.
+1. Place the apple on a mark. Home the arm (`ros2 run ycb_pointcloud_pipeline joint_homing`). Video running.
 2. In T4:
    ```bash
    ros2 run --prefix python3 ycb_pointcloud_pipeline tpgpt_pick_place --ros-args \
      -p experiment:=true -p trial_id:=0001 -p hand:=panda \
-     -p object_name:=apple -p destination_name:=slot_a
+     -p object_name:=apple -p destination_name:=top_left
    ```
    Only `experiment`, `trial_id`, `hand`, `object_name`, `destination_name`, `dry_run`,
    `top_down_grasp` (true = scripted top-down grasp, GraspGen-X not called) and `x6_config`
@@ -157,7 +170,7 @@ Example: trial 0001, Franka Hand, apple on a mark, going to slot_a.
    comes from the frozen config.
 3. The node runs these in order:
    - **Setup** (no pre-flight checks): loads the hand file, captures fresh segmentations of the apple and prints the fused point count.
-   - **Capture and plan**: one plan, no re-plan. It saves the perception frames, `cloud.npy`, `candidates.json`, `keypoints.npz`, `plan.npy`, `plan_overlay.png` and the pick pose (from the cloud).
+   - **Capture and plan**: one plan, no re-plan (a refused scan fit is retried on freshly captured frames, as outside an experiment, and those frames are saved too). It saves the perception frames, `cloud.npy`, `candidates.json`, `keypoints.npz`, `plan.npy`, `plan_overlay.png` and the pick pose (from the cloud).
    - It shows the plan. **You type `yes`.** Anything else = `refused_at_confirmation` (counted).
    - **Execution**, recording `trace.npz` every control step.
    - When the policy finishes, the controller **holds the arm where it is** (or moves to `retreat_tcp_pose` if you set one) and prints a banner: *press Ctrl-C to finish the trial*.
@@ -177,7 +190,7 @@ Example: trial 0001, Franka Hand, apple on a mark, going to slot_a.
 
 Move the apple to another mark (or keep the mark and change the slot). Run the same command with the next trial id:
 ```bash
-... -p trial_id:=0002 -p hand:=panda -p object_name:=apple -p destination_name:=slot_b
+... -p trial_id:=0002 -p hand:=panda -p object_name:=apple -p destination_name:=bottom_left
 ```
 You don't restart T1, T2 or T3.
 
@@ -185,7 +198,7 @@ You don't restart T1, T2 or T3.
 
 Put the new object on a mark and change `object_name`:
 ```bash
-... -p trial_id:=0003 -p hand:=panda -p object_name:=cup -p destination_name:=slot_a
+... -p trial_id:=0003 -p hand:=panda -p object_name:=mug -p destination_name:=top_right
 ```
 
 **To randomise the order:** follow `orders/order_panda.csv` (Phase 1b) rather than going object by object.
@@ -209,11 +222,12 @@ reuse this one. A Ctrl-C during the questions writes what was answered and marks
 3. Re-verify the calibration manually if the camera was touched.
 4. Run the instrument check again with `when:=after_remount`.
 5. `ros2 run ycb_pointcloud_pipeline x6_order_sheet --hand inspire`.
-6. Run trials `0031`–`0060` with `-p hand:=inspire`: same marks, same slots, same command
+6. Run trials `0037`–`0072` with `-p hand:=inspire`: same marks, same slots, same command
    otherwise. The hand file switches the planner to the side grasp and the executor to
-   `gripper_mode: inspire`. **Only upright round objects** suit that grasp (cup, mug,
-   can, bottle); a cereal box or an apple on its side is outside what it was built for,
-   which is a finding to record, not a setting to change.
+   `gripper_mode: inspire`. **Only upright round objects** suit that grasp (of these, the
+   mug); the others are outside what it was built for, which is a finding to record, not
+   a setting to change. This phase is to be revisited before it runs: the hand has not
+   planned on the current setup, and the grippers' objects may change the grid.
 7. The one demonstration is a top-down Franka Hand grasp. Carried onto a side grasp the
    map is poorly conditioned (min det(J) 0.007-0.40 on three synthetic scenes), so expect
    `map_not_a_diffeomorphism` refusals. Record them as planning failures.

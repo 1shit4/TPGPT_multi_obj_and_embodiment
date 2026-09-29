@@ -1,5 +1,6 @@
 """Unit tests for the X6 recording, provenance, order sheet and analysis. No robot, no ROS graph."""
 
+import ast
 import csv
 import glob
 import json
@@ -16,6 +17,8 @@ from ycb_pointcloud_pipeline import x6_common as xc
 
 CONFIG = os.path.join(os.path.dirname(__file__), '..', '..', 'x6_experiment', 'config',
                       'x6_experiment.yaml')
+PACKAGE = os.path.join(os.path.dirname(__file__), '..')
+SOURCE_SHELF = os.path.join(PACKAGE, 'config', 'shelf.yaml')
 
 
 # ------------------------------------------------------------------------ statistics
@@ -73,23 +76,100 @@ def test_campaign_config_loads_and_hands_resolve():
     assert set(cfg.raw['hands']['files']) == {'panda', 'inspire'}
     assert cfg.hand('panda')['integrated'] is True
     assert cfg.hand('inspire')['integrated'] is True
-    assert len(cfg.raw['objects']) == 5 and 'banana' not in cfg.raw['objects']
-    assert cfg.raw['method']['selection']['fallback_top_down'] is True
+    # New objects only: the demonstrated object is not in the grid (brief, section 2).
+    assert cfg.raw['demonstration']['object'] not in cfg.raw['objects']
+    assert cfg.raw['method']['selection']['fallback_top_down'] is False
+
+
+def test_every_object_is_a_detection_target_with_a_scan():
+    from tpgpt.hardware.object_model import YCB_SCANS
+    with open(os.path.join(PACKAGE, 'config', 'target_objects.yaml')) as f:
+        targets = {t['name'] if isinstance(t, dict) else t
+                   for t in yaml.safe_load(f)['target_objects']}
+    objects = xc.X6Config(CONFIG).raw['objects']
+    assert set(objects) <= targets
+    assert set(objects) <= set(YCB_SCANS)
+
+
+def test_destinations_are_the_shelf_files_named_slots():
+    from tpgpt.hardware.shelf import slots
+    cfg = xc.X6Config(CONFIG)
+    cfg.raw['destinations']['shelf_file'] = SOURCE_SHELF     # the installed copy may be absent
+    with open(SOURCE_SHELF) as f:
+        named = slots(yaml.safe_load(f))
+    assert cfg.destination_names() == ['top_left', 'top_right', 'bottom_left']
+    for name in cfg.destination_names():
+        d = cfg.destination(name)
+        assert (d['x'], d['y'], d['surface_height']) == named[name]
+    with pytest.raises(KeyError):
+        cfg.destination('bottom_right')                       # in the shelf, not in the grid
 
 
 def test_order_sheet_is_a_permutation_of_the_grid_and_reproducible(tmp_path):
     from ycb_pointcloud_pipeline.x6_session import order_sheet
     cfg = xc.X6Config(CONFIG)
+    n = len(cfg.raw['objects']) * len(cfg.raw['pick_poses']) * len(cfg.destination_names())
+    assert n == 36
     rows, seed = order_sheet(cfg, 'panda')
     again, _ = order_sheet(cfg, 'panda')
     assert rows == again
-    assert len(rows) == 30
+    assert len(rows) == n
     cells = {(r['object'], r['pick_mark'], r['destination']) for r in rows}
-    assert len(cells) == 30
-    assert rows[0]['trial_id'] == '0001' and rows[-1]['trial_id'] == '0030'
+    assert len(cells) == n
+    assert rows[0]['trial_id'] == '0001' and rows[-1]['trial_id'] == f'{n:04d}'
     inspire, _ = order_sheet(cfg, 'inspire')
-    assert inspire[0]['trial_id'] == '0031'
+    assert inspire[0]['trial_id'] == f'{n + 1:04d}'
     assert [r['object'] for r in inspire] != [r['object'] for r in rows]
+
+
+def _declared_defaults(module):
+    """``name -> default`` of every ``d('name', <literal>)`` parameter declaration in a
+    node's source; None where the default is not a literal (NaN, a function call)."""
+    with open(os.path.join(PACKAGE, 'ycb_pointcloud_pipeline', module)) as f:
+        tree = ast.parse(f.read())
+    out = {}
+    for node in ast.walk(tree):
+        if (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+                and node.func.id == 'd' and len(node.args) >= 2
+                and isinstance(node.args[0], ast.Constant)):
+            try:
+                out[node.args[0].value] = ast.literal_eval(node.args[1])
+            except ValueError:
+                out[node.args[0].value] = None
+    return out
+
+
+def _same(a, b):
+    """Equal in value and in type, as a ROS parameter override must be (1 is not 1.0)."""
+    if isinstance(a, (list, tuple)) and isinstance(b, (list, tuple)):
+        return len(a) == len(b) and all(_same(x, y) for x, y in zip(a, b))
+    return type(a) is type(b) and a == b
+
+
+def test_the_frozen_method_is_what_the_nodes_run():
+    """Each method value the trial passes equals the node's own default. When this fails,
+    a node default changed: re-sync x6_experiment.yaml's method block (before trial 1)."""
+    method = xc.X6Config(CONFIG).method
+    planner = _declared_defaults('tpgpt_planner_node.py')
+    drift = {name: (value, planner.get(name, 'not declared'))
+             for name, value in xc.planner_method_parameters(method).items()
+             if not _same(value, planner.get(name))}
+    executor = _declared_defaults('tpgpt_executor_node.py')
+    drift.update({f'execution.{k}': (v, executor.get(k, 'not declared'))
+                  for k, v in method['execution'].items()
+                  if k != 'allow_replan' and not _same(v, executor.get(k))})
+    assert not drift, f'x6 method (config, node default) disagree: {drift}'
+
+
+def test_the_recorded_selection_settings_are_the_defaults():
+    """The selection keys the trial does not pass are SelectionSettings defaults."""
+    from tpgpt.hardware.grasp_selection import SelectionSettings
+    sel, s = xc.X6Config(CONFIG).method['selection'], SelectionSettings()
+    for key in ('min_support_clearance_m', 'duplicate_position_m', 'duplicate_angle_deg',
+                'max_aim_grasp_m', 'max_orientation_error_deg', 'refine', 'refine_margin_m',
+                'refine_max_depth_m', 'refine_max_centre_m'):
+        field = key[:-2] if key.endswith('_m') else key
+        assert sel[key] == getattr(s, field), key
 
 
 # ------------------------------------------------------------------------ provenance
@@ -280,3 +360,22 @@ def test_analysis_end_to_end(tmp_path):
     assert r'\begin{tabular}' in tex and 'total' in tex
     with open(os.path.join(root, 'summary.csv')) as f:
         assert len(list(csv.DictReader(f))) == 21
+
+
+def test_every_parameter_a_trial_passes_is_declared_with_its_type(tmp_path):
+    """A misspelt or mistyped override is refused by rclpy only when the node starts."""
+    pytest.importorskip('rclpy')
+    from ycb_pointcloud_pipeline.x6_trial import Trial
+    cfg = xc.X6Config(CONFIG)
+    cfg.raw['destinations']['shelf_file'] = SOURCE_SHELF
+    trial = Trial(cfg, 's999', 'panda', 'apple', 'top_left', dry_run=True)
+    trial.dir, trial.hand = str(tmp_path), cfg.hand('panda')
+    planner = _declared_defaults('tpgpt_planner_node.py')
+    passed = trial._planner_params()
+    assert set(passed) - set(planner) == set()
+    wrong = {k: v for k, v in passed.items()
+             if planner[k] is not None and type(v) is not type(planner[k])}
+    assert not wrong, wrong
+    executor = _declared_defaults('tpgpt_executor_node.py')
+    ex = trial._executor_params(str(tmp_path))
+    assert set(ex) - set(executor) == set()
