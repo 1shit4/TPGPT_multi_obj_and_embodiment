@@ -238,7 +238,11 @@ The planner's support height is: its `support_height` parameter, else the calibr
   the surfaces -- 50 beside a banana, 1400 in front of the boards -- and those were what refused
   otherwise good plans ("the hand meets the shelf", "the carried object touches seen points" by
   one to five points). Cost: an object flatter than 25 mm on the table, or within 30 mm of a shelf
-  panel, is not seen as an obstacle. Shrink both once the calibration is refit.
+  panel, is not seen as an obstacle. **Re-measured after the 2026-09-26 recalibration: keep both.**
+  Table points sit p95 10.8 / p99 20.7 mm from the touched table; shelf points median 6.7, p95 25.6,
+  p99 34.5 mm from the model (at 20 mm 1572 would be left as phantoms, at 30 mm 352). Those 352 are
+  mostly real things, not error: 141 standing inside bottom_right by the right wall, 198 hovering
+  30-50 mm above the bottom board across its width.
 - **The support is inferred, not assumed to be the table** (`support_height` NaN): the highest
   shelf board whose top is at or just under the object's lowest points, else the table
   (`support_match`, 30 mm). A banana standing on the bottom board used to fit 94 mm off, because
