@@ -22,17 +22,34 @@ error above `max_tracking_error`.
 Run with the robot container up (./scripts/run.sh robot) and ROS_DOMAIN_ID matching:
     ros2 run ycb_pointcloud_pipeline cartesian_target_publisher --ros-args \
         -p goal_position:="[0.45, 0.0, 0.40]"
+
+Stiffness check (stiffness_mode isotropic | directional; tpgpt.hardware.stiffness_check):
+activates tpgpt_cartesian_impedance_controller (variable stiffness) instead, sends a
+stiffness every cycle -- isotropic, or 350 N/m along the motion / 600 across and while
+still (the stiffness labels' rule, tpgpt.hardware.teach.directional_matrices, 12-value
+message) -- and runs hold -> move to the goal -> hold -> move back -> hold. It records
+/current_pose to ~/tpgpt_stiffness_checks/<time>_<mode>_<k>/ and reports each hold's jitter
+(size, frequency) and each move's lag along and across the motion. Above `max_jitter` of
+oscillation it drops to 400 / 30 and holds. It imports tpgpt, so run it from the tpgpt venv:
+    ros2 run --prefix python3 ycb_pointcloud_pipeline cartesian_target_publisher --ros-args \
+        -p stiffness_mode:=isotropic -p translational_stiffness:=600.0 \
+        -p goal_offset:="[0.0, 0.15, 0.0]"
 """
 
+import json
 import math
+import os
+import signal
 import threading
 import time
 
 import rclpy
 from controller_manager_msgs.srv import ListControllers, SwitchController
 from geometry_msgs.msg import PoseStamped
-from rclpy.executors import MultiThreadedExecutor
+from rclpy.executors import MultiThreadedExecutor, SingleThreadedExecutor
 from rclpy.node import Node
+from rclpy.signals import SignalHandlerOptions
+from std_msgs.msg import Float64MultiArray
 
 JOINTS = [f'fr3_joint{i}' for i in range(1, 8)]
 HARD_MAX_DISTANCE = 0.4  # m; goals farther than this are refused regardless of parameters
@@ -53,6 +70,16 @@ def _normalize(q):
 def _angle_between(q1, q2):
     d = abs(sum(a * b for a, b in zip(q1, q2)))
     return 2.0 * math.acos(min(1.0, d))
+
+
+def _quat_matrix(q):
+    """Rotation matrix of a quaternion [x, y, z, w]."""
+    import numpy as np
+
+    x, y, z, w = _normalize(q)
+    return np.array([[1 - 2 * (y * y + z * z), 2 * (x * y - z * w), 2 * (x * z + y * w)],
+                     [2 * (x * y + z * w), 1 - 2 * (x * x + z * z), 2 * (y * z - x * w)],
+                     [2 * (x * z - y * w), 2 * (y * z + x * w), 1 - 2 * (x * x + y * y)]])
 
 
 def _slerp(q1, q2, s):
@@ -87,16 +114,52 @@ class CartesianTargetPublisher(Node):
         self.declare_parameter('publish_rate', 50.0)       # Hz
         self.declare_parameter('max_tracking_error', 0.12)  # m, abort above this
         self.declare_parameter('require_confirmation', True)
+        # --- stiffness check (step 3 of the execution-gap plan; tpgpt.hardware.stiffness_check)
+        # 'stock': the behaviour above, unchanged. 'isotropic' / 'directional': load and
+        # activate the variable-stiffness controller, send a stiffness every cycle, and run
+        # hold -> move to the goal -> hold -> move back -> hold, recording /current_pose and
+        # reporting each hold's jitter and each move's lag along and across the motion.
+        self.declare_parameter('stiffness_mode', 'stock')   # stock | isotropic | directional
+        self.declare_parameter('translational_stiffness', 600.0)  # N/m; across when directional
+        self.declare_parameter('stiffness_along', 350.0)    # N/m along the motion (directional)
+        self.declare_parameter('rotational_stiffness', 30.0)  # N m/rad
+        self.declare_parameter('stiffness_controller_name', 'tpgpt_cartesian_impedance_controller')
+        self.declare_parameter('stiffness_controller_type', 'crisp_controllers/CartesianController')
+        self.declare_parameter('stiffness_controller_params_file', '')  # path INSIDE the container
+        self.declare_parameter('goal_offset', [0.0])        # [dx, dy, dz] m from the start; [0.0] = goal_position
+        self.declare_parameter('hold_seconds', 5.0)         # each hold of the sequence
+        self.declare_parameter('return_to_start', True)
+        # Safety cut: when the strongest oscillation at 3 Hz or faster (peak to peak over the
+        # last second, from its spectrum) stays above this (m) for 1.5 s, the stiffness drops
+        # to 400 / 30 and the arm holds where it is (tpgpt.hardware.stiffness_check).
+        self.declare_parameter('max_jitter', 0.004)
+        self.declare_parameter('record_dir', '')            # '' -> ~/tpgpt_stiffness_checks/<time>_<mode>
 
         p = lambda n: self.get_parameter(n).value  # noqa: E731
         self.cm = p('controller_manager').rstrip('/')
+        self.mode = str(p('stiffness_mode'))
+        if self.mode not in ('stock', 'isotropic', 'directional'):
+            raise SystemExit(f"stiffness_mode must be stock, isotropic or directional, not {self.mode!r}")
         self.controller = p('controller_name')
         self.target_topic = p('target_topic')
+        self.stiffness_pub = None
+        if self.mode != 'stock':
+            # the variable-stiffness controller listens on private topics
+            self.controller = p('stiffness_controller_name')
+            self.target_topic = f'/{self.controller}/target_pose'
+            self.stiffness_topic = f'/{self.controller}/target_stiffness'
+            self.stiffness_pub = self.create_publisher(Float64MultiArray, self.stiffness_topic, 1)
         self.frame = p('base_frame')
 
         self._lock = threading.Lock()
         self._pose = None  # (monotonic time, position, orientation [x, y, z, w])
-        self.create_subscription(PoseStamped, p('current_pose_topic'), self._pose_cb, 10)
+        self._samples = None  # while recording: [(stamp, pos, quat, cmd_pos, cmd_speed, segment)]
+        self._cmd = ([0.0] * 3, 0.0, 'none')  # last commanded position, its speed, the segment
+        # The 250 Hz pose stream on its own node, spun alone on its own thread (see main): on a
+        # shared executor this node received 96 of ~240 poses a second, with gaps up to 0.5 s,
+        # while the check ran -- the teach node's measurement and fix (tpgpt_teach_node).
+        self.pose_node = rclpy.create_node(f'{self.get_name()}_pose')
+        self.pose_node.create_subscription(PoseStamped, p('current_pose_topic'), self._pose_cb, 100)
         self.target_pub = self.create_publisher(PoseStamped, self.target_topic, 1)
         self.cli_list = self.create_client(ListControllers, f'{self.cm}/list_controllers')
         self.cli_switch = self.create_client(SwitchController, f'{self.cm}/switch_controller')
@@ -110,6 +173,11 @@ class CartesianTargetPublisher(Node):
         o = msg.pose.orientation
         with self._lock:
             self._pose = (time.monotonic(), pos, [o.x, o.y, o.z, o.w])
+            if self._samples is not None:
+                stamp = msg.header.stamp.sec + 1e-9 * msg.header.stamp.nanosec
+                cmd_pos, cmd_speed, segment = self._cmd
+                self._samples.append((stamp, pos, [o.x, o.y, o.z, o.w], list(cmd_pos),
+                                      cmd_speed, segment))
 
     def measured(self, max_age=0.5):
         with self._lock:
@@ -147,6 +215,9 @@ class CartesianTargetPublisher(Node):
     def hold_current_pose(self):
         try:
             pos, quat = self.measured(max_age=1.0)
+            if self.stiffness_pub is not None:
+                # back to the stock gains: softer, and known not to vibrate (400 / 30)
+                self.stiffness_pub.publish(Float64MultiArray(data=[400.0] * 3 + [30.0] * 3))
             self.publish_target(pos, quat)
             self.get_logger().warn('Commanded the controller to hold the current pose.')
         except AbortMotion:
@@ -156,6 +227,11 @@ class CartesianTargetPublisher(Node):
     # ------------------------------------------------------------------ steps
     def build_goal(self, start_pos, start_quat):
         goal_pos = [float(v) for v in self.get_parameter('goal_position').value]
+        offset = [float(v) for v in self.get_parameter('goal_offset').value]
+        if len(offset) == 3:
+            goal_pos = [a + b for a, b in zip(start_pos, offset)]
+        elif offset != [0.0]:
+            raise AbortMotion('goal_offset must be [dx, dy, dz] or [0.0] (use goal_position)')
         if len(goal_pos) != 3:
             raise AbortMotion('goal_position must be [x, y, z]')
         lo = self.get_parameter('workspace_min').value
@@ -243,7 +319,217 @@ class CartesianTargetPublisher(Node):
                 reached_logged = True
             time.sleep(period)
 
+    # ------------------------------------------------------------ stiffness check
+    def stiffness_for(self, direction, speed):
+        """Translational K (base frame) for this cycle: isotropic, or the directional rule."""
+        import numpy as np
+        from tpgpt.hardware.teach import directional_matrices
+
+        k = float(self.get_parameter('translational_stiffness').value)
+        if self.mode == 'isotropic':
+            return k * np.eye(3)
+        return directional_matrices([direction], [speed],
+                                    float(self.get_parameter('stiffness_along').value), k)[0]
+
+    def publish_stiffness(self, K, quat):
+        """K rotated into the measured hand frame; 12 values when directional, else 6."""
+        from tpgpt.hardware.executor import crisp_stiffness
+
+        values = crisp_stiffness(K, _quat_matrix(quat),
+                                 float(self.get_parameter('rotational_stiffness').value),
+                                 full=self.mode == 'directional')
+        self.stiffness_pub.publish(Float64MultiArray(data=[float(v) for v in values]))
+
+    def _segment(self, name, start_pos, end_pos, quat, duration):
+        """Stream one segment: a hold (start == end) or a smooth move; stiffness every cycle."""
+        from tpgpt.hardware.stiffness_check import OscillationWatch, recent_oscillation
+
+        period = 1.0 / self.get_parameter('publish_rate').value
+        max_err = self.get_parameter('max_tracking_error').value
+        max_jitter = float(self.get_parameter('max_jitter').value)
+        if getattr(self, '_watch', None) is None:
+            self._watch = OscillationWatch(max_jitter, persist=1.5)   # spans segments
+        dist = math.dist(start_pos, end_pos)
+        direction = ([(b - a) / dist for a, b in zip(start_pos, end_pos)] if dist > 1e-9
+                     else [0.0, 0.0, 0.0])
+        t0 = time.monotonic()
+        n = 0
+        while rclpy.ok():
+            t = time.monotonic() - t0
+            if t > duration:
+                return
+            if dist > 1e-9:
+                s = 0.5 - 0.5 * math.cos(math.pi * t / duration)
+                speed = dist * math.pi / (2 * duration) * math.sin(math.pi * t / duration)
+            else:
+                s, speed = 0.0, 0.0
+            pos_cmd = [a + s * (b - a) for a, b in zip(start_pos, end_pos)]
+            _, quat_meas = self.measured()
+            with self._lock:
+                self._cmd = (pos_cmd, speed, name)
+            self.publish_stiffness(self.stiffness_for(direction, speed), quat_meas)
+            self.publish_target(pos_cmd, quat)
+            pos_meas, _ = self.measured()
+            if math.dist(pos_cmd, pos_meas) > max_err:
+                raise AbortMotion(f'{name}: tracking error {math.dist(pos_cmd, pos_meas):.3f} m '
+                                  f'exceeds {max_err} m')
+            n += 1
+            # Vibration cut: the strongest oscillation at 3 Hz or faster over the last second
+            # (from its spectrum), above max_jitter for 1.5 s on end (OscillationWatch). The
+            # path's own range misfires on a lag building up as friction lets go, and a single
+            # reading on the arm catching up at the end of a move; both seen on a mock arm.
+            if n % 5 == 0 and time.monotonic() - self._check_t0 > 1.0:
+                with self._lock:
+                    recent = [(s_[0], s_[1]) for s_ in self._samples[-400:]]
+                if recent:
+                    stamps, positions = zip(*recent)
+                    size, hz = recent_oscillation(stamps, positions, 1.0)
+                    if self._watch.update(time.monotonic(), size):
+                        raise AbortMotion(f'{name}: the arm oscillates {size * 1000:.1f} mm peak to '
+                                          f'peak at {hz:.0f} Hz, above max_jitter '
+                                          f'{max_jitter * 1000:.1f} mm for 1.5 s; back to 400 / 30 '
+                                          'and holding')
+            time.sleep(period)
+
+    def run_stiffness_check(self, start_pos, start_quat, goal_pos):
+        """hold -> move out -> hold -> move back -> hold, then the report."""
+        import numpy as np
+        from tpgpt.hardware.stiffness_check import hold_jitter, move_lag
+
+        g = lambda n: self.get_parameter(n).value  # noqa: E731
+        hold = float(g('hold_seconds'))
+        dist = math.dist(goal_pos, start_pos)
+        move = max(g('min_duration'), 1.5 * dist / g('max_linear_speed'))
+        plan = [('hold_start', start_pos, start_pos, hold), ('move_out', start_pos, goal_pos, move),
+                ('hold_goal', goal_pos, goal_pos, hold)]
+        if g('return_to_start'):
+            plan += [('move_back', goal_pos, start_pos, move), ('hold_end', start_pos, start_pos, hold)]
+        with self._lock:
+            self._samples = []
+        self._check_t0 = time.monotonic()
+        aborted = None
+        try:
+            for name, a, b, duration in plan:
+                self.get_logger().info(f'{name}: {duration:.1f} s')
+                self._segment(name, a, b, start_quat, duration)
+        except (AbortMotion, KeyboardInterrupt) as exc:
+            aborted = exc              # keep what was recorded: a cut run is the one to look at
+        with self._lock:
+            samples, self._samples = self._samples, None
+        if not samples:
+            if aborted is not None:
+                raise aborted
+            raise AbortMotion('no pose was recorded during the check')
+
+        stamps = np.array([s[0] for s in samples])
+        stamps = stamps - stamps[0]
+        meas = np.array([s[1] for s in samples])
+        cmd = np.array([s[3] for s in samples])
+        speed = np.array([s[4] for s in samples])
+        seg = np.array([s[5] for s in samples])
+        report = {'mode': self.mode, 'translational_stiffness': g('translational_stiffness'),
+                  'stiffness_along': g('stiffness_along') if self.mode == 'directional' else None,
+                  'rotational_stiffness': g('rotational_stiffness'),
+                  'aborted': None if aborted is None else (str(aborted) or 'Ctrl-C'),
+                  'segments': {}}
+        for name, a, b, _ in plan:
+            m = seg == name
+            if not m.any():
+                continue
+            if a is b:
+                report['segments'][name] = hold_jitter(stamps[m], meas[m])
+            else:
+                u = [bb - aa for aa, bb in zip(a, b)]
+                report['segments'][name] = move_lag(cmd[m], meas[m], u, speed[m])
+        out = g('record_dir') or os.path.expanduser(
+            time.strftime(f'~/tpgpt_stiffness_checks/%Y%m%d_%H%M%S_{self.mode}_'
+                          f"{int(g('translational_stiffness'))}"))
+        os.makedirs(out, exist_ok=True)
+        with open(os.path.join(out, 'report.json'), 'w') as f:
+            json.dump(report, f, indent=2)
+        with open(os.path.join(out, 'samples.csv'), 'w') as f:
+            f.write('t,segment,meas_x,meas_y,meas_z,qx,qy,qz,qw,cmd_x,cmd_y,cmd_z,cmd_speed\n')
+            for t, s in zip(stamps, samples):
+                f.write(f'{t:.4f},{s[5]},' + ','.join(f'{v:.6f}' for v in (*s[1], *s[2], *s[3]))
+                        + f',{s[4]:.5f}\n')
+        lines = [f'Stiffness check ({self.mode}, {g("translational_stiffness"):.0f} N/m'
+                 + (f' across / {g("stiffness_along"):.0f} along' if self.mode == 'directional' else '')
+                 + f', rotational {g("rotational_stiffness"):.0f}) -> {out}']
+        for name, r in report['segments'].items():
+            if 'p2p_mm' in r:
+                lines.append(f'  {name:10s} jitter p95 {r["p95_mm"]:.2f} mm, peak-to-peak '
+                             f'{r["p2p_mm"]:.2f} mm, strongest {r.get("peak_mm", 0):.2f} mm at '
+                             f'{r.get("peak_hz", 0):.1f} Hz ({r["rate_hz"]:.0f} Hz poses)')
+            elif 'along_median_mm' in r:
+                lines.append(f'  {name:10s} lag along the motion {r["along_median_mm"]:.1f} mm '
+                             f'(max {r["along_max_mm"]:.1f}), across {r["across_median_mm"]:.1f} mm '
+                             f'(max {r["across_max_mm"]:.1f})')
+        self.get_logger().info('\n'.join(lines))
+        if aborted is not None:
+            raise aborted              # main() lowers the stiffness to 400 / 30 and holds
+        return plan[-1][2]
+
+    def run_check(self):
+        """The stiffness check: variable-stiffness controller, the sequence, the report, hold."""
+        from ycb_pointcloud_pipeline.ros_utils import ControllerManagerClient, container_config_path
+
+        g = lambda n: self.get_parameter(n).value  # noqa: E731
+        self.get_logger().info('Waiting for the end-effector pose ...')
+        deadline = time.monotonic() + 10.0
+        while self._pose is None:
+            if time.monotonic() > deadline:
+                raise AbortMotion(f"No pose received within 10 s on {g('current_pose_topic')}")
+            time.sleep(0.05)
+        start_pos, start_quat = self.measured()
+        goal_pos, _ = self.build_goal(start_pos, start_quat)   # the hand keeps its orientation
+        for topic in (self.target_topic, self.stiffness_topic):
+            others = sum(1 for info in self.get_publishers_info_by_topic(topic)
+                         if info.node_name != self.get_name())
+            if others:
+                raise AbortMotion(f'{others} other publisher(s) on {topic}; CRISP ignores '
+                                  'commands when more than one publisher exists')
+        cmc = ControllerManagerClient(self, self.cm, error=AbortMotion)
+        try:
+            params_file = (g('stiffness_controller_params_file')
+                           or container_config_path('tpgpt_variable_stiffness_controller.yaml'))
+        except ValueError as exc:
+            raise AbortMotion(f'{exc} (stiffness_controller_params_file)')
+        cmc.ensure_loaded(self.controller, g('stiffness_controller_type'), params_file)
+        if self.mode == 'directional':
+            cmc.require_full_stiffness(self.controller)
+
+        k = float(g('translational_stiffness'))
+        stiffness = (f'{k:.0f} N/m in every direction' if self.mode == 'isotropic' else
+                     f"{g('stiffness_along'):.0f} N/m along the motion, {k:.0f} across it and "
+                     'while still')
+        dist = math.dist(goal_pos, start_pos)
+        if g('require_confirmation'):
+            print(f'\nAbout to ACTIVATE {self.controller} (effort control) with stiffness '
+                  f"{stiffness}, rotational {g('rotational_stiffness'):.0f} N m/rad, and run:\n"
+                  f"  hold {g('hold_seconds'):.0f} s, move fr3_hand_tcp {dist:.3f} m to {goal_pos} "
+                  f"({self.frame}), hold{', move back, hold' if g('return_to_start') else ''}.\n"
+                  f"  Cut: above {g('max_jitter') * 1000:.1f} mm of oscillation the stiffness drops "
+                  'to 400 / 30 and the arm holds.\nKeep the emergency stop within reach.')
+            if input("Type 'yes' to continue: ").strip().lower() != 'yes':
+                self.get_logger().info('Cancelled; nothing was activated.')
+                return
+        self.activate()
+        # Re-read after activation: CRISP seeded its target with this measured pose
+        start_pos, start_quat = self.measured()
+        self.moving = True
+        final = self.run_stiffness_check(start_pos, start_quat, goal_pos)
+        self.get_logger().info('Holding the last target with the same stiffness; Ctrl-C to stop '
+                               '(the controller keeps holding it).')
+        period = 1.0 / g('publish_rate')
+        while rclpy.ok():
+            _, quat_meas = self.measured()
+            self.publish_stiffness(self.stiffness_for([0.0, 0.0, 0.0], 0.0), quat_meas)
+            self.publish_target(final, start_quat)
+            time.sleep(period)
+
     def run(self):
+        if self.mode != 'stock':
+            return self.run_check()
         self.get_logger().info('Waiting for the end-effector pose ...')
         deadline = time.monotonic() + 10.0
         while self._pose is None:
@@ -278,11 +564,19 @@ class CartesianTargetPublisher(Node):
 
 
 def main(args=None):
-    rclpy.init(args=args)
+    # No rclpy signal handler: with it, Ctrl-C stopped the executor (so the pose went stale)
+    # before KeyboardInterrupt reached this thread, and the final hold never went out. As
+    # free_drive does, Ctrl-C and SIGTERM raise KeyboardInterrupt here with callbacks alive.
+    signal.signal(signal.SIGINT, signal.default_int_handler)
+    signal.signal(signal.SIGTERM, signal.default_int_handler)
+    rclpy.init(args=args, signal_handler_options=SignalHandlerOptions.NO)
     node = CartesianTargetPublisher()
     executor = MultiThreadedExecutor(num_threads=2)
     executor.add_node(node)
     threading.Thread(target=executor.spin, daemon=True).start()
+    pose_executor = SingleThreadedExecutor()
+    pose_executor.add_node(node.pose_node)
+    threading.Thread(target=pose_executor.spin, daemon=True).start()
     exit_code = 0
     try:
         node.run()
@@ -297,6 +591,8 @@ def main(args=None):
     finally:
         time.sleep(0.2)  # let a final hold command go out
         executor.shutdown()
+        pose_executor.shutdown()
+        node.pose_node.destroy_node()
         node.destroy_node()
         rclpy.try_shutdown()
     raise SystemExit(exit_code)

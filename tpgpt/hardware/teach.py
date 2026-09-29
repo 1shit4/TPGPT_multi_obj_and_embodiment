@@ -338,6 +338,23 @@ def motion_directions(positions: np.ndarray, tangent_length: float = DIRECTIONAL
     return directions
 
 
+def directional_matrices(directions: np.ndarray, speeds: np.ndarray,
+                         along: float = DIRECTIONAL_ALONG, across: float = DIRECTIONAL_ACROSS,
+                         ramp: tuple[float, float] = DIRECTIONAL_RAMP) -> np.ndarray:
+    """``K = across I - (across - along) w u u^T``, ``w`` the speed blended over ``ramp``.
+
+    The rule of :func:`directional_stiffness` for given unit directions ``u`` (a zero
+    direction gives ``across I``); also what ``cartesian_target_publisher`` commands
+    when it checks the stiffness on the arm.
+    """
+    u = np.atleast_2d(np.asarray(directions, dtype=float))
+    speeds = np.atleast_1d(np.asarray(speeds, dtype=float))
+    lo, hi = float(ramp[0]), float(ramp[1])
+    weight = np.clip((speeds - lo) / max(hi - lo, 1e-12), 0.0, 1.0)
+    return (across * np.eye(3)[None]
+            - (across - along) * weight[:, None, None] * np.einsum("ni,nj->nij", u, u))
+
+
 def log_euclidean_smooth(stiffness: np.ndarray, half_width: int) -> np.ndarray:
     """Moving log-Euclidean mean of SPD matrices: ``exp(mean(log K))`` over ``+-half_width``.
 
@@ -396,11 +413,8 @@ def directional_stiffness(
     """
     positions = np.asarray(positions, dtype=float).reshape(-1, 3)
     speeds = np.linalg.norm(np.asarray(velocities, dtype=float).reshape(-1, 3), axis=1)
-    lo, hi = float(ramp[0]), float(ramp[1])
-    weight = np.clip((speeds - lo) / max(hi - lo, 1e-12), 0.0, 1.0)
     u = motion_directions(positions, tangent_length)
-    eye = np.eye(3)
-    K = across * eye[None] - (across - along) * weight[:, None, None] * np.einsum("ni,nj->nij", u, u)
+    K = directional_matrices(u, speeds, along, across, ramp)
     K = log_euclidean_smooth(K, int(smoothing))
     values, vectors = np.linalg.eigh(K)
     D = np.einsum("nij,nj,nkj->nik", vectors, 2.0 * np.sqrt(np.maximum(values, 0.0)), vectors)

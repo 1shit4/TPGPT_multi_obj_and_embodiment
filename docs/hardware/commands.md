@@ -287,6 +287,29 @@ ros2 node list                                                  # the authority 
 ros2 daemon stop && ros2 daemon start                           # if node/topic lists look stale
 ```
 
+### Stiffness check (what a stiffness does on the arm)
+
+`cartesian_target_publisher` with `stiffness_mode` isotropic or directional loads and activates
+`tpgpt_cartesian_impedance_controller`, sends a stiffness every cycle, and runs: hold 5 s,
+move `goal_offset` (smooth, peak ~5 cm/s), hold 5 s, move back, hold 5 s. It records
+`/current_pose` to `~/tpgpt_stiffness_checks/<time>_<mode>_<k>/` (`samples.csv`,
+`report.json`) and prints each hold's jitter (size, frequency) and each move's lag along and
+across the motion. If an oscillation of 3 Hz or faster stays above `max_jitter` (4 mm peak to
+peak) for 1.5 s it drops to 400 N/m / 30 N·m/rad and holds. After the report it keeps holding
+with the same stiffness; **Ctrl-C** drops to 400 / 30 and holds where the arm is. Home the arm
+first (`joint_homing`); the 10 cm move below goes to the robot's left (+y) and back.
+
+```bash
+source ~/venvs/tpgpt/bin/activate
+# vibration check: 600, then 700, then 800 N/m, rotational 30 (800/60 vibrated on 2026-09-15)
+ros2 run --prefix python3 ycb_pointcloud_pipeline cartesian_target_publisher --ros-args \
+  -p stiffness_mode:=isotropic -p translational_stiffness:=600.0 -p goal_offset:="[0.0, 0.1, 0.0]"
+# the directional stiffness the labels use: 350 along the motion, 600 across (12-value message)
+ros2 run --prefix python3 ycb_pointcloud_pipeline cartesian_target_publisher --ros-args \
+  -p stiffness_mode:=directional -p translational_stiffness:=600.0 -p stiffness_along:=350.0 \
+  -p goal_offset:="[0.0, 0.1, 0.0]"
+```
+
 ---
 
 ## 9. Camera calibration
