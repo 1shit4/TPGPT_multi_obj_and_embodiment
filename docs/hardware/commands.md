@@ -42,15 +42,23 @@ while segmentation restarts.
 
 ```bash
 # T1  robot container (controllers, /current_pose, /joint_states)
+```
+```bash
 cd ~/THOR_DOCKER_SETUP && HARDWARE_ACK=I_UNDERSTAND_FR3_EFFORT_CONTROL ./scripts/run.sh robot
-
+```
+```bash
 # T2  camera
+```
+```bash
 ros2 launch realsense2_camera rs_launch.py \
   enable_color:=true enable_depth:=true enable_infra1:=false enable_infra2:=false \
   align_depth.enable:=true \
   rgb_camera.color_profile:=848,480,30 depth_module.depth_profile:=848,480,30
-
+  ```
+  ```bash
 # T3  segmentation (NOT its own camera)
+```
+```bash
 source ~/venvs/ycb/bin/activate
 ros2 launch ycb_pointcloud_pipeline ycb_pipeline.launch.py launch_camera:=false
 ```
