@@ -336,6 +336,40 @@ placements and none on one -- workable, not comfortable. What still stops bottom
 as on its end, only less often: the arm or hand against the boards, the fingers below the board
 surface at the set-down, the fold. Raw in `outputs/hardware/coverage_side/`.
 
+**9. The margins behind the 15 live plans** (captures of 2026-09-26 16:42-17:38, measured
+2026-09-29). Each of the fifteen plans that succeeded live (five objects, three slots) replayed on
+its own capture: the 18:39 demonstration, the robot filter at 50 mm, the planner's budget of 100,
+the arm starting at the joints the plan recorded (home), and the move onto the path still
+rejecting (the rule until 2026-09-29; the new rule can only add grasps). Admissible / planned, and
+the rank of the first admissible (0 = the first planned):
+
+| object | top_left | top_right | bottom_left |
+|---|---|---|---|
+| banana | 63/100, 0 | 50/100, 0 | **2/20**, 5 |
+| apple | 22/100, 6 | 31/100, 3 | **2/63**, 5 |
+| mug | 56/100, 0 | 25/100, 7 | **2/59**, 3 |
+| pudding box (long side) | 29/68, 0 | 32/55, 0 | 4/30, 2 |
+| foam brick | 28/46, 0 | 27/39, 0 | **2/15**, 2 |
+
+The top slots have margin: 22 to 63 executable grasps each, and the first is usually the first
+planned. **bottom_left does not**: two executable grasps for four objects of five, four for the
+pudding box. Two is enough to plan, and it planned live on all five, but it is one placement, one
+fit or one calibration shift away from none. That is what item 8's 0/11 already showed for the
+pudding box. What kills the others, over all five objects: the arm or hand against the underside
+of the **top board** in carry, place and retreat (5-22 candidates each; the board has sat 10 mm
+lower since 2026-09-26, 0.3211, headroom 244 mm); the carried object against the **bottom board**
+during the carry (7-32; the taught carry slides in low); and for the apple and the mug, the
+carried object against **seen points** (18 and 23). Those points are the layer the band
+re-measure found: on the mug's capture, 27 obstacle points 31-52 mm above the bottom board, at
+x 0.745-0.805, y -0.229 to -0.181. That is 60-120 mm deeper than the bottom_left mark and 50-100 mm
+to its left. If something is standing there, taking it away returns those candidates. If it is
+part of the shelf, the obstacle is real. Raw in `outputs/hardware/margins_20260926/`, logs in
+`~/tpgpt_coverage_logs/margin_*.log`.
+
+What would make this wrong: the counts are for these captures. A placement a few centimetres off,
+or the mug's handle turned, moves them (item 1 above: 10, 2, 5 and 0 for four captures of one
+motionless banana). So read "2" as "few", not as an exact number.
+
 **Run-to-run variation is now perception, not the sampler.** The four banana captures are minutes
 apart, motionless, yet the fit's heading reads 53.9, 52.2, 47.4 and 47.6 degrees, and the funnel
 moves with it: 1109, 1034, 1052 and 1088 through `from_below`, 431, 375, 315 and 403 through the

@@ -493,6 +493,12 @@ The planner's support height is: its `support_height` parameter, else the calibr
   (`joint_homing`) and the robot filter at 50 mm. The pudding box also planned into bottom_right.
   **Dry runs only: nothing executed on the robot yet.** That morning, before the filter fix and
   from a parked pose, the apple took up to 849 s and top_left refused.
+- **bottom_left plans on a thin margin** (measured 2026-09-29, `GRASP_LIBRARY.md` item 9): of the
+  fifteen live plans' captures, the top slots admit 22-63 executable grasps each; bottom_left
+  admits **2** for banana, apple, mug and foam brick and 4 for the pudding box. What kills it: the
+  arm against the top board (10 mm lower since the move), the carried object against the bottom
+  board, and 27 unexplained points 30-50 mm above the bottom board, 6-12 cm behind the slot mark.
+  Expect bottom_left refusals in the X6 grid before anything else.
 
 ## Earlier state (2026-09-21)
 
