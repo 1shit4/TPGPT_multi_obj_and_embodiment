@@ -242,6 +242,16 @@ The planner's support height is: its `support_height` parameter, else the calibr
   The 18:39 demonstration's directional bundle is `~/tpgpt_demos/banana_20260925_183904/source_bundle_directional`
   (its `source_bundle/` is unchanged). X6's frozen block still says `use_transported_stiffness:
   false`: re-sync it when the execution rework lands.
+- **What stiffness does on this arm, measured 2026-09-29** (audit B2 step 3;
+  `cartesian_target_publisher -p stiffness_mode:=isotropic|directional`, `commands.md` §8):
+  **no vibration at 600, 700 or 800 N/m with rotational 30** (holds within 0.02 mm); the
+  2026-09-15 vibration at 800/60 was not the translational stiffness. **The lag is viscous and
+  about twice CRISP's nominal `2/sqrt(K)`** (149-221 ms at 600, 229-309 ms at 350 along, against
+  82 and 107): 12-17 mm along the motion at execution speed with the directional stiffness. Friction
+  is small (~0.5 N) -- the "~10 N, 20-30 mm steady lag" in `tpgpt_executor_node.py`'s comments is
+  pre-move and does not hold. After a move the arm stops 3.5-6 mm short, whatever the stiffness.
+  The lag gate, whose expected lag uses the nominal time constant, therefore sees ~8 mm of excess
+  at full speed. One line at the home pose was measured, without a payload.
 - **A plan that leaves the executor's workspace box is now refused at selection**
   (`SelectionSettings.workspace_min/max`, fed from the planner's own parameters). It used to be
   found only by the executor, which aborted the whole run instead of taking the next grasp
