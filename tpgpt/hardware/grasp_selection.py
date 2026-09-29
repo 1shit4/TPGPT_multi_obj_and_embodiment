@@ -132,6 +132,11 @@ class SelectionSettings:
     #: reachable with their orientation (user's choice, 2026-09-22). ``"sim"``:
     #: ``min_reachable_fraction`` of the waypoints reachable as planned.
     kinematic_criterion: str = "strict"
+    #: Whether a blocked move from the arm's current pose onto the path rejects the
+    #: grasp. False (user, 2026-09-29): the move is still checked and reported, and
+    #: the planner asks for a re-home instead -- the parked pose is not a property of
+    #: the grasp, and on 2026-09-26 it refused every grasp to top_left.
+    approach_rejects: bool = False
     min_reachable_fraction: float = 0.60
     path_stride: int = 4
     #: With nothing admissible, execute the best candidate that failed on
@@ -621,7 +626,7 @@ def _path_verdict(result: Plan, candidate: Candidate, s: SelectionSettings,
     check = check_plan(result, world, pc.end_effector or FRANKA_HAND, start_q=pc.start_q,
                        start_tcp=pc.start_tcp, stop_early=True, stride=s.path_stride,
                        min_reachable_fraction=s.min_reachable_fraction,
-                       criterion=s.kinematic_criterion)
+                       criterion=s.kinematic_criterion, approach_rejects=s.approach_rejects)
     reason = verdict(check, s.min_reachable_fraction)
     candidate.path_check = {
         "criterion": check["criterion"],
@@ -635,6 +640,7 @@ def _path_verdict(result: Plan, candidate: Candidate, s: SelectionSettings,
         "first_violation": check["first_violation"],
         "faults": dict(list(check["faults"].items())[:6]),
         "approach_in_checked": check["approach_in"] is not None,
+        "approach_in": check["approach_in"],
         "decided_early": check["decided_early"],
         "seconds": time.perf_counter() - t0,
         "verdict": reason,

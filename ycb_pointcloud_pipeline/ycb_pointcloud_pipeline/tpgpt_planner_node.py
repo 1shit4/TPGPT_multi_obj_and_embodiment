@@ -218,6 +218,11 @@ class TpgptPlannerNode(Node):
         d('kinematic_criterion', 'strict')
         d('min_reachable_fraction', 0.60)         # pipeline.MIN_REACHABLE_FRACTION (sim only)
         d('allow_kinematic_fallback', False)      # never a colliding candidate; off under strict
+        # A blocked move from the arm's current pose onto the path no longer rejects the grasp
+        # (user, 2026-09-29): it is checked and reported, and if the chosen grasp's move is
+        # blocked the planner stops with approach_blocked and asks for a re-home. True brings
+        # back rejecting the grasp.
+        d('approach_rejects_grasp', False)
         d('max_centre_offset', 0.025)             # by_centre_offset on a one-sided cloud
         d('output_dir', os.path.expanduser('~/tpgpt_plans'))
         d('auto_plan', False)                     # plan as soon as n_frames arrived
@@ -393,6 +398,21 @@ class TpgptPlannerNode(Node):
                                                    f"{p('scene_max_age')} s")
         return world
 
+    @staticmethod
+    def _approach_blocked(selection):
+        """Why the chosen grasp's move onto the path is blocked, or ``None``."""
+        chosen = getattr(selection, 'chosen', None)
+        check = (getattr(chosen, 'path_check', None) or {}).get('approach_in') or {}
+        if not check or check.get('rejects', True):
+            return None               # checked as part of the path, or not at all
+        faults, unreached = check.get('faults') or {}, int(check.get('unreachable') or 0)
+        if not faults and not unreached:
+            return None
+        parts = [f'{k} x{v}' for k, v in list(faults.items())[:3]]
+        if unreached:
+            parts.append(f'{unreached} of its {check.get("steps")} steps out of reach')
+        return 'the move from where the arm is now onto the path: ' + ', '.join(parts)
+
     def _recent_clouds(self):
         max_age = float(self.get_parameter('max_cloud_age').value)
         now = time.monotonic()
@@ -517,6 +537,7 @@ class TpgptPlannerNode(Node):
             check_path=bool(p('check_path')),
             min_reachable_fraction=float(p('min_reachable_fraction')),
             kinematic_criterion=str(p('kinematic_criterion')),
+            approach_rejects=bool(p('approach_rejects_grasp')),
             allow_kinematic_fallback=bool(p('allow_kinematic_fallback')),
             max_centre_offset=float(p('max_centre_offset')),
             check_visibility=self._check_visibility(),
@@ -575,6 +596,19 @@ class TpgptPlannerNode(Node):
             self._publish_shelf(world)
             return False, str(exc)
         info['timing_s']['selection_total'] = time.monotonic() - t_sel
+        blocked = self._approach_blocked(selection)
+        if blocked:
+            from tpgpt.hardware.planner import PlanningError as _PE
+            exc = _PE(f'approach_blocked: {blocked}. The grasp and its path are fine; re-home '
+                      'the arm (ros2 run ycb_pointcloud_pipeline joint_homing) and plan again')
+            exc.candidates = selection.candidates
+            info['error'] = str(exc)
+            log.error(f'Planning stopped: {exc}')
+            self._save_refused(exc, observed, points, world,
+                               destination=(p('destination_name'), scene.destination))
+            self._publish_cloud_only(points)
+            self._publish_shelf(world)
+            return False, str(exc)
         info['selection'] = selection
         result = selection.plan
         log.info(selection.describe())

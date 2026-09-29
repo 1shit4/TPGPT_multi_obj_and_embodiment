@@ -212,6 +212,15 @@ The planner's support height is: its `support_height` parameter, else the calibr
   covered is now covered by `path_check`: every waypoint and the move onto the path, for
   reachability, self-collision, the table, the shelf model and the seen points. `workspace_check:=true`
   brings it back, and the planner's `executor_workspace_check` mirrors it at selection.
+- **A blocked move onto the path asks for a re-home; it does not reject the grasp** (user,
+  2026-09-29; planner `approach_rejects_grasp`, default false). The move from the arm's current
+  pose onto the path is still checked for every candidate and reported, but the grasp is judged on
+  its path alone; if the chosen grasp's move is blocked the planner stops with `approach_blocked`
+  and a `joint_homing` hint. The path's IK is still seeded from the measured joints, so a poorly
+  parked arm can still cost grasps on the path itself (the arm against the right wall, 2026-09-26)
+  -- **home the arm before planning.**
+- **Selection stays in GraspGen-X's score order** (user, 2026-09-29): near-upright grasps are not
+  moved ahead, even though steep ones fold more often and cost planning time.
 - **Other executor guards still apply**, and they are not the box: `max_start_distance` (0.6 m
   from the plan's first label -- park the arm nearer, or raise it for a dry-run preview),
   `max_tracking_error`, the stall watchdog and `max_policy_seconds`.

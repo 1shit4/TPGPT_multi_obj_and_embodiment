@@ -97,7 +97,8 @@ def coverage(object_name, object_pose, world, source, destination, destination_h
             reasons[str(candidate.rejected).split(":")[0]] += 1
             continue
         report = path_check.check_plan(result, path.world, path.end_effector,
-                                       start_q=path.start_q, criterion=s.kinematic_criterion)
+                                       start_q=path.start_q, criterion=s.kinematic_criterion,
+                                       approach_rejects=s.approach_rejects)
         verdict = path_check.verdict(report)
         if verdict is None:
             admissible += 1

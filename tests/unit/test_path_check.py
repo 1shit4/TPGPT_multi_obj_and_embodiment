@@ -165,6 +165,22 @@ def test_the_move_onto_the_path_is_checked_from_the_measured_joints():
     assert "onto the path" in pc.verdict(r)
 
 
+def test_a_blocked_move_onto_the_path_is_reported_but_does_not_reject_the_path():
+    """approach_rejects=False (user, 2026-09-29): the parked pose is not the grasp's fault."""
+    shelf = _shelf(0.25)
+    positions, rotations = _path([0.45, 0.0, 0.40], [0.45, 0.0, 0.32])
+    from tpgpt.hardware.fr3 import default_model
+
+    start = default_model().solve_ik(np.array([0.45, 0.0, 0.18]), DOWN, seed=HOME_Q,
+                                     max_iterations=400)
+    r = _check(positions, rotations, ShelfWorld.build(shelf), start_q=start.qpos,
+               approach_rejects=False)
+    assert r["approach_in"]["faults"]                  # still checked, still reported
+    assert r["approach_in"]["rejects"] is False
+    assert r["violations"] == 0 and pc.verdict(r) is None
+    assert not any(k.startswith("approach_in") for k in r["faults"])
+
+
 def test_verdict_ranks_collision_before_kinematics():
     r = {"violations": 1, "first_violation": 7, "faults": {"carry: x": 1},
          "reachable_fraction": 0.1}

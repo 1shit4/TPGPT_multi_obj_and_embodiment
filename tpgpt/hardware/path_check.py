@@ -298,6 +298,7 @@ def path_feasibility(
     check_self: bool = True,
     destination_height: float | None = None,
     criterion: str = "strict",
+    approach_rejects: bool = True,
 ) -> dict:
     """Solve and check a transported path, waypoint by waypoint.
 
@@ -441,13 +442,18 @@ def path_feasibility(
             for piece in pieces:
                 if _touches(piece, held):
                     add(bad, f"approach_in: {piece.name} in the object to be picked")
-        approach_in = {"steps": int(n), "unreachable": int(unreached), "faults": bad}
-        if bad:
+        approach_in = {"steps": int(n), "unreachable": int(unreached), "faults": bad,
+                       "rejects": bool(approach_rejects)}
+        # With approach_rejects False the move onto the path is still checked and
+        # reported, but it does not decide the path: where the arm happens to be
+        # parked says nothing about the grasp, and the operator re-homes instead
+        # (the planner's approach_blocked, user 2026-09-29).
+        if bad and approach_rejects:
             faults.update(bad)
             violations, first = 1, -1
-        if unreached and criterion == "strict":
+        if unreached and criterion == "strict" and approach_rejects:
             first_kin = -1
-        if stop_early and (bad or first_kin is not None):
+        if stop_early and approach_rejects and (bad or first_kin is not None):
             return _result(1, 0, violations, first, faults, approach_in, criterion=criterion,
                            first_kinematic=first_kin, **counts)
 
@@ -713,7 +719,8 @@ def verdict(check: dict, min_reachable_fraction: float = MIN_REACHABLE_FRACTION)
                  else f"first at waypoint {check['first_violation']}")
         return f"collision: {where} ({faults})"
     if check.get("criterion", "sim") == "strict":
-        onto = (check.get("approach_in") or {}).get("unreachable", 0)
+        onto_check = check.get("approach_in") or {}
+        onto = onto_check.get("unreachable", 0) if onto_check.get("rejects", True) else 0
         if onto:
             return f"kinematics: {onto} points of the move onto the path are out of reach"
         if check.get("skipped"):
