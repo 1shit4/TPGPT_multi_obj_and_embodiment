@@ -133,6 +133,33 @@ summary it prints:
 | `destination` | the board you used | derived as support + (TCP rise); compare with `shelf.yaml` |
 | `n_labels` | a few hundred | 20 Hz after trimming still periods |
 
+### 3b. Replaying a demonstration (learning its attractor)
+
+TPGPT's labels are the attractor the spring pulls toward, not where the hand went. A taught
+demonstration has only the latter, so it is replayed on the robot and the attractor that makes the
+arm retrace it is learned, a pass at a time (`tpgpt/hardware/replay.py`, `ilc.py`; audit B1).
+Each pass streams the demonstration at `speed_scale` 0.35 under its own stiffness labels (70 s for
+the 18:39 demonstration), acts the gripper at the marks, and records the arm. Before moving, each
+pass's attractor path is checked against the shelf model and the table, and refused on a collision.
+Start the arm near the demonstration's start (within `max_start_distance`, 0.6 m).
+
+```bash
+source ~/venvs/tpgpt/bin/activate
+D=~/tpgpt_demos/banana_20260925_183904            # the demonstration
+# once: the replay directory (pass 0 = the taught path)
+python -m tpgpt.hardware.replay init --bundle $D/source_bundle_directional --out $D/replay
+# a pass: without the object, the gripper not acting
+ros2 run --prefix python3 ycb_pointcloud_pipeline tpgpt_executor_node --ros-args \
+  -p replay_dir:=$D/replay -p dry_run:=false -p gripper_mode:=none
+# then the next pass's attractor, and how the passes went
+python -m tpgpt.hardware.replay update $D/replay          # --gain 0.8 to converge faster
+python -m tpgpt.hardware.replay status $D/replay
+```
+
+Repeat pass/update until the error stops falling (2-4 passes). The last pass runs with the object
+at its taught place and `gripper_mode:=franka_grasp`. Add `-p dry_run:=true` (the default) to
+preview a pass on the simulated arm.
+
 ## 4. Planning (nothing moves)
 
 ```bash

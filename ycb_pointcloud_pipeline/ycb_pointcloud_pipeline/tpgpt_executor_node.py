@@ -75,6 +75,16 @@ from ycb_pointcloud_pipeline.ros_utils import (
 )
 
 
+def _installed_config(name):
+    """Installed config/<name> (as tpgpt_planner_node.default_config_path), else the source's."""
+    try:
+        from ament_index_python.packages import get_package_share_directory
+        return os.path.join(get_package_share_directory('ycb_pointcloud_pipeline'), 'config', name)
+    except Exception:  # noqa: BLE001 - package not installed
+        return os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                            'config', name)
+
+
 class AbortRun(RuntimeError):
     pass
 
@@ -191,12 +201,23 @@ class TpgptExecutorNode(Node):
         d('grasp_speed', 0.05)
         d('grasp_force', 20.0)
         d('log_dir', '')
+        # Replay mode (tpgpt.hardware.replay; audit B1): instead of a plan, stream the pending
+        # pass of a replay directory -- a taught demonstration's attractor, in time, at the
+        # replay's speed_scale, under its own stiffness labels -- and record where the arm was.
+        # No policy, no lag gate: the simulation's teacher records its demonstration the same way.
+        d('replay_dir', '')
+        # The shelf the replay's attractor path is checked against before each pass ('' = no
+        # check): the installed config/shelf.yaml.
+        d('replay_shelf_config', _installed_config('shelf.yaml'))
 
         p = self.p
-        if not p('plan_dir'):
-            raise SystemExit('Set -p plan_dir:=<directory written by tpgpt_planner_node>')
+        self.replay = bool(p('replay_dir'))
+        if not p('plan_dir') and not self.replay:
+            raise SystemExit('Set -p plan_dir:=<directory written by tpgpt_planner_node> '
+                             '(or -p replay_dir:=<replay directory> to replay a demonstration)')
         self.dry = bool(p('dry_run'))
-        self.use_stiffness = bool(p('use_transported_stiffness'))
+        # a replay always sends the demonstration's own stiffness labels
+        self.use_stiffness = bool(p('use_transported_stiffness')) or self.replay
         self.fixed_stiffness = (0.0 if self.use_stiffness
                                 else float(p('translational_stiffness')))
         if self.fixed_stiffness > float(p('stiffness_max_translational')):
@@ -730,6 +751,209 @@ class TpgptExecutorNode(Node):
             time.sleep(dt)
         return True
 
+    # ------------------------------------------------------------------ replay
+    def run_replay(self):
+        """Stream the pending pass of `replay_dir` and record where the arm was (audit B1).
+
+        As the simulation's `record_demonstration` does: the attractor moves label by label
+        in time, linearly between labels, with no policy and no lag gate, under the
+        demonstration's own stiffness labels (12-value message) and the executor's rotational
+        schedule; the gripper acts at the teacher's marks while the clock waits (as the
+        executor does, audit C7). What is recorded, per control step: the label index being
+        commanded, the measured grasp point and hand rotation, and the commanded attractor.
+        `python -m tpgpt.hardware.replay update <dir>` then computes the next pass.
+        """
+        from tpgpt.hardware import replay as rp
+        from tpgpt.hardware.end_effector import end_effector_for_plan
+        from tpgpt.hardware.executor import (SafetyMonitor, approach_trajectory,
+                                             crisp_applied_gains, crisp_stiffness)
+        from tpgpt.hardware.frames import slerp_rotation
+        from tpgpt.policy.rollout import compliance_norm, stiffness_threshold
+
+        log, p = self.get_logger(), self.p
+        root = os.path.expanduser(p('replay_dir'))
+        info, bundle = rp.load_replay(root)
+        k = rp.pending_pass(root)
+        attractor = rp.load_attractor(root, k)
+        labels = bundle.tool_labels
+        n = len(attractor)
+        dt = float(info['dt'])
+        label_period = dt / float(info['speed_scale'])
+        if abs(float(p('speed_scale')) - float(info['speed_scale'])) > 1e-9:
+            log.warn(f"speed_scale {p('speed_scale')} ignored: a replay runs at its own "
+                     f"{info['speed_scale']} (replay.json)")
+        hand = end_effector_for_plan(bundle.metadata)
+        mode = p('gripper_mode')
+        if mode != 'none' and (mode == 'inspire') == hand.is_parallel_jaw:
+            raise AbortRun(f'this demonstration is for the {hand.name} hand but gripper_mode is '
+                           f'{mode!r}')
+        offset = np.asarray(hand.tool_offset, dtype=float) + np.asarray(p('tool_offset'), dtype=float)
+        tcp_R = np.asarray(hand.ee_from_grasp(labels.orientations), dtype=float)
+        tcp_from_tool = lambda pos, R: np.asarray(pos) - np.asarray(R) @ offset  # noqa: E731
+        tool_from_tcp = lambda pos, R: np.asarray(pos) + np.asarray(R) @ offset  # noqa: E731
+        # the executor's rotational schedule (rollout_policy): firm, compliant while carrying
+        transit_scale = float(p('transit_rotational_scale'))
+        if transit_scale < 0:
+            transit_scale = 1.0 if info.get('stiffness') == 'static' else 0.25
+        threshold = stiffness_threshold(labels)
+        compliance = [compliance_norm(K, D) for K, D in zip(labels.stiffness, labels.damping)]
+        k_rot = float(p('rotational_stiffness'))
+
+        def rotational(i):
+            carrying = labels.gripper[i] > 0 and compliance[i] > 0.0 and compliance[i] >= threshold
+            return k_rot * transit_scale if carrying else k_rot
+
+        def message(i, meas_R):
+            return crisp_stiffness(labels.stiffness[i], meas_R, rotational(i),
+                                   float(p('stiffness_min_translational')),
+                                   float(p('stiffness_max_translational')),
+                                   float(p('stiffness_max_rotational')), full=self.full_stiffness)
+
+        for i in range(n):
+            self.check_workspace(tcp_from_tool(attractor[i], tcp_R[i]), f'replay label {i}')
+        # Learning moves the attractor from pass to pass: check this pass's against the shelf
+        # model and the table before anything moves (tpgpt.hardware.replay.check_pass).
+        shelf_config = p('replay_shelf_config')
+        if shelf_config:
+            verdict, _ = rp.check_pass(root, k, shelf_config)
+            if verdict:
+                raise AbortRun(f'pass {k} attractor path: {verdict} (shelf {shelf_config}); '
+                               'not replayed')
+            log.info(f'pass {k} attractor path is clear of the shelf model and the table')
+        else:
+            log.warn('replay_shelf_config empty: the attractor path is NOT checked')
+        start_pos, start_rot = tcp_from_tool(attractor[0], tcp_R[0]), tcp_R[0]
+
+        # --- where the arm is -------------------------------------------------
+        T_now = self.wait_for_pose(3.0 if self.dry else 10.0)
+        if T_now is None:
+            if not self.dry:
+                raise AbortRun(f"no pose on {p('current_pose_topic')} within 10 s")
+            log.warn('dry run: no /current_pose, starting the simulated arm 10 cm above the start')
+            T_now = np.eye(4)
+            T_now[:3, :3], T_now[:3, 3] = start_rot, start_pos + [0, 0, 0.10]
+        if self.dry:
+            self.sim_T = T_now.copy()
+        cur_pos, cur_rot = T_now[:3, 3], T_now[:3, :3]
+        gap = float(np.linalg.norm(cur_pos - start_pos))
+        if gap > p('max_start_distance'):
+            raise AbortRun(f'the TCP is {gap:.3f} m from the replay start (max_start_distance '
+                           f"{p('max_start_distance')}); move the arm closer first")
+        controllers = None
+        if not self.dry:
+            controllers = self.ensure_controller()
+            for topic in (self.pose_topic, self.stiffness_topic):
+                others = other_publishers(self, topic)
+                if others:
+                    raise AbortRun(f'{others} other publisher(s) on {topic}; CRISP ignores '
+                                   'commands when more than one publisher exists')
+            self.setup_gripper()
+        width = float(info.get('object_width_closing_m', 0.04))
+        approach_p, approach_R = approach_trajectory(
+            cur_pos, cur_rot, start_pos, start_rot, dt,
+            float(p('approach_max_linear_speed')), float(p('approach_max_angular_speed')))
+        print(f"\n{'DRY RUN (nothing moves)' if self.dry else 'HARDWARE RUN'}: REPLAY pass {k} of "
+              f"{root}\n"
+              f"  demonstration  {info['bundle']}\n"
+              f"  labels         {n} at speed_scale {info['speed_scale']} (~{n * label_period:.0f} s), "
+              f"grasp {info['grasp_index']}, release {info['release_index']}\n"
+              f"  stiffness      the labels' own ({info.get('stiffness')}), "
+              f"{'12-value' if self.full_stiffness else '6-value'} message, rotational {k_rot:.0f} "
+              f"(x{transit_scale} while carrying)\n"
+              f"  approach       {gap:.3f} m over {len(approach_p) * dt:.1f} s\n"
+              f"  gripper        {mode if not self.dry else 'not sent'} (object {width * 1000:.0f} mm)\n")
+        if not self.dry and p('require_confirmation'):
+            print('Keep the emergency stop within reach.')
+            if input("Type 'yes' to ACTIVATE the controller and replay: ").strip().lower() != 'yes':
+                log.info('Cancelled; nothing was activated.')
+                return False
+        if not self.dry:
+            self.cmc.activate(self.controller, controllers)
+        self.moving = True
+        if mode != 'none':
+            self.command_gripper(False, width, wait=not self.dry)
+        realtime = not self.dry or p('dry_run_realtime')
+
+        def wait_period(next_t):
+            if not realtime:
+                return next_t + dt
+            delay = next_t - time.monotonic()
+            if delay > 0:
+                time.sleep(delay)
+            return max(next_t + dt, time.monotonic() - dt)
+
+        # --- approach and settle at the start ----------------------------------
+        next_t = time.monotonic()
+        for pos, rot in list(zip(approach_p, approach_R)) + [(start_pos, start_rot)] * int(
+                float(p('settle_time')) / dt):
+            meas_p, meas_R = self.measured()
+            if float(np.linalg.norm(meas_p - pos)) > p('max_tracking_error'):
+                raise AbortRun(f'approach tracking error {np.linalg.norm(meas_p - pos) * 1000:.0f} mm')
+            values = message(0, meas_R)
+            self.publish(pos, rot, values)
+            if self.dry:
+                self.simulate(pos, rot, *crisp_applied_gains(values, meas_R), dt)
+            next_t = wait_period(next_t)
+
+        # --- the pass ---------------------------------------------------------------
+        log.info(f'Replaying pass {k}')
+        self.stage = 'replay'
+        safety = SafetyMonitor(max_tracking_error=float(p('max_tracking_error')),
+                               progress_window=int(p('progress_window')),
+                               min_progress_ratio=float(p('min_progress_ratio')))
+        rec = {name: [] for name in ('step', 'label_index', 'positions', 'rotations', 'commanded',
+                                     'gripper')}
+        deadline = time.monotonic() + float(p('max_policy_seconds')) if realtime else float('inf')
+        s, step, closed_now = 0.0, 0, False
+        next_t = time.monotonic()
+        while True:
+            if time.monotonic() > deadline:
+                raise AbortRun('max_policy_seconds exceeded')
+            i = min(int(np.floor(s)), n - 1)
+            j = min(i + 1, n - 1)
+            pos = rp.attractor_at(attractor, s)
+            rot = slerp_rotation(tcp_R[i], tcp_R[j], float(s - i)) if j != i else tcp_R[i]
+            closed = bool(labels.gripper[i] > 0)
+            if closed != closed_now:
+                if mode != 'none':
+                    self.command_gripper(closed, width, wait=not self.dry)   # the clock waits
+                closed_now = closed
+                next_t = time.monotonic()
+            meas_p, meas_R = self.measured()
+            reason = safety.check(tool_from_tcp(meas_p, meas_R), pos)
+            if reason:
+                raise AbortRun(reason)
+            values = message(i, meas_R)
+            target = tcp_from_tool(pos, rot)
+            self.check_workspace(target, 'replay target')
+            self.publish(target, rot, values)
+            if self.dry:
+                self.simulate(target, rot, *crisp_applied_gains(values, meas_R), dt)
+            for name, value in (('step', step), ('label_index', s),
+                                ('positions', tool_from_tcp(meas_p, meas_R)), ('rotations', meas_R),
+                                ('commanded', pos), ('gripper', 1.0 if closed_now else -1.0)):
+                rec[name].append(value)
+            if s >= n - 1:
+                break
+            s = min(s + dt / label_period, float(n - 1))
+            step += 1
+            next_t = wait_period(next_t)
+        for _ in range(int(1.0 / dt)):                     # hold the end a moment
+            self.publish(target, rot, values)
+            if self.dry:
+                self.simulate(target, rot, *crisp_applied_gains(values, meas_R), dt)
+            time.sleep(dt if realtime else 0.0)
+        self.moving = False
+        path = rp.save_recording(root, k, **rec)
+        error, _ = rp.pass_error(root, k)
+        m = error['at_marks']
+        log.info(f"Pass {k} recorded ({path}): error from the taught path rms "
+                 f"{error['error_rms_mm']:.1f} mm, max {error['error_max_mm']:.1f}; at the grasp "
+                 f"{m['grasp']['total_mm']:.1f} mm (closing {m['grasp']['closing_mm']:.1f}), at the "
+                 f"release {m['release']['total_mm']:.1f} (closing {m['release']['closing_mm']:.1f}). "
+                 f'Next: python -m tpgpt.hardware.replay update {root}')
+        return True
+
     def _settle_and_measure_offset(self, start_pos, start_rot, K, D, dt, wait_period, writer,
                                    started):
         """Hold the plan start for `settle_time`, then return the compensation vector.
@@ -870,7 +1094,10 @@ def main(args=None):
     spin_thread.start()
     exit_code = 0
     try:
-        node.run()
+        if node.replay:
+            node.run_replay()
+        else:
+            node.run()
     except AbortRun as exc:
         node.get_logger().error(f'Aborted: {exc}')
         if node.moving:
