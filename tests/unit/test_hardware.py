@@ -26,7 +26,10 @@ from tpgpt.hardware.executor import (
     HardwareExecutor,
     SafetyMonitor,
     approach_trajectory,
+    bounded_stiffness,
+    crisp_applied_gains,
     crisp_stiffness,
+    logged_stiffness,
     stiffness_projection_loss,
 )
 from tpgpt.hardware.planner import (
@@ -411,6 +414,64 @@ class TestApproachAndStiffness:
         R45 = yaw_matrix(np.pi / 4)
         K = R45 @ np.diag([100.0, 900.0, 500.0]) @ R45.T
         assert stiffness_projection_loss(K, np.eye(3)) > 0.3
+
+    # --- the 12-value form (patched CRISP, crisp-full-stiffness.patch) ---------------
+    @staticmethod
+    def _directional(u, k_across=600.0, k_along=350.0):
+        """Soft along u, stiff across it: the directional rule of the execution-gap plan."""
+        u = np.asarray(u, dtype=float) / np.linalg.norm(u)
+        return k_across * np.eye(3) - (k_across - k_along) * np.outer(u, u)
+
+    def test_full_message_is_the_whole_tcp_frame_block(self):
+        K = self._directional([0.0, np.sin(0.42), np.cos(0.42)])
+        R = Rotation.from_euler('xyz', [0.3, -0.7, 1.1]).as_matrix()
+        values = crisp_stiffness(K, R, rotational_stiffness=30.0, full=True)
+        assert values.shape == (12,)
+        block = values[:9].reshape(3, 3)
+        assert np.allclose(block, R.T @ K @ R, atol=1e-9)
+        assert np.allclose(block, block.T, atol=1e-12)
+        assert np.allclose(values[9:], 30.0)
+        # the diagonal form of the same K loses exactly the part the full form keeps
+        assert stiffness_projection_loss(K, R) > 0.05
+
+    def test_full_message_bounds_principal_values_not_entries(self):
+        R = Rotation.from_euler('xyz', [0.2, 0.5, -0.4]).as_matrix()
+        K = R @ np.diag([10.0, 400.0, 1500.0]) @ R.T
+        block = crisp_stiffness(K, np.eye(3), 30.0, full=True)[:9].reshape(3, 3)
+        assert np.allclose(np.linalg.eigvalsh(block), [50.0, 400.0, 900.0], atol=1e-9)
+        assert np.allclose(bounded_stiffness(K, 50.0, 900.0), block, atol=1e-9)
+        inside = R @ np.diag([350.0, 600.0, 600.0]) @ R.T
+        assert np.array_equal(bounded_stiffness(inside, 50.0, 900.0), 0.5 * (inside + inside.T))
+
+    def test_applied_gains_invert_the_message_with_crisp_damping(self):
+        K = self._directional([1.0, -2.0, 0.5])
+        R = Rotation.from_euler('xyz', [-0.6, 0.1, 0.9]).as_matrix()
+        K_run, D_run = crisp_applied_gains(crisp_stiffness(K, R, 30.0, full=True), R)
+        assert np.allclose(K_run, K, atol=1e-9)
+        assert np.allclose(D_run @ D_run, 4.0 * K, rtol=1e-9)   # D = 2 K^(1/2)
+        # along the soft direction the time constant is 2/sqrt(350); across it 2/sqrt(600)
+        u = np.array([1.0, -2.0, 0.5]) / np.linalg.norm([1.0, -2.0, 0.5])
+        assert np.allclose(np.linalg.solve(K_run, D_run) @ u, 2.0 / np.sqrt(350.0) * u)
+
+    def test_diagonal_message_applies_only_its_diagonal(self):
+        K = self._directional([0.0, 1.0, 1.0])
+        K_run, D_run = crisp_applied_gains(crisp_stiffness(K, np.eye(3), 30.0), np.eye(3))
+        assert np.allclose(K_run, np.diag(np.diag(K)))
+        assert np.allclose(D_run, np.diag(2.0 * np.sqrt(np.diag(K))))
+
+    def test_isotropic_stiffness_is_the_same_in_either_form(self):
+        """A fixed stiffness (what every run so far used) gives the same arm in both forms."""
+        R = yaw_matrix(0.8)
+        K0, D0 = 400.0 * np.eye(3), 40.0 * np.eye(3)
+        for full in (False, True):
+            K_run, D_run = crisp_applied_gains(crisp_stiffness(K0, R, 30.0, full=full), R)
+            assert np.allclose(K_run, K0) and np.allclose(D_run, D0)
+
+    def test_logged_stiffness_reads_both_forms(self):
+        K = np.diag([100.0, 400.0, 800.0])
+        for full in (False, True):
+            k_diag, k_rot = logged_stiffness(crisp_stiffness(K, np.eye(3), 30.0, full=full))
+            assert np.allclose(k_diag, [100.0, 400.0, 800.0]) and k_rot == 30.0
 
 
 # ------------------------------------------------ the infeasible-pose fallback

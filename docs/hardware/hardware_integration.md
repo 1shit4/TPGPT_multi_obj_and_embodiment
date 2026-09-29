@@ -629,14 +629,28 @@ the clamp never fired.
 * `true`: `tpgpt_cartesian_impedance_controller`, loaded at runtime from
   `config/tpgpt_variable_stiffness_controller.yaml`, with private topics. CRISP
   applies stiffness to the pose error **in the end-effector frame**
-  (`use_local_jacobian: true`) and accepts only a diagonal. So the transported
-  3×3 base-frame `K` is rotated into the measured TCP frame, `R^T K R`, and its
-  diagonal is sent, clamped to 50–900 N/m. Rotational stiffness follows
+  (`use_local_jacobian: true`), so the transported 3×3 base-frame `K` is rotated
+  into the measured TCP frame, `R^T K R`, and sent every step in one of two forms
+  (`stiffness_message`):
+  * `full` (the default with this option, since 2026-09-29): all of `R^T K R`, a
+    12-value message (the 3×3 row-major, then the rotational stiffness). Needs the
+    patched CRISP (`~/THOR_DOCKER_SETUP`, `crisp-full-stiffness.patch`, in
+    `docker-thor:local`); its principal values are clamped to 50–900 N/m, and CRISP
+    damps it with `2 K^(1/2)`.
+  * `diagonal`: its diagonal only (6 values, any CRISP), clamped to 50–900 N/m,
+    damped with `2√k` per axis; the off-diagonal part is dropped. **Use this after
+    rolling the image back to `docker-thor:pre-full-stiffness`**, which ignores a
+    12-value message and keeps its yaml gains.
+
+  Either way the `k_offdiag_share` column and the summary give the share of `K`
+  off the hand-frame diagonal (applied by `full`, dropped by `diagonal`), and a
+  dry run publishes what would be sent on `/tpgpt/executor/commanded_stiffness`;
+  its simulated arm runs the gains CRISP applies for that message
+  (`executor.crisp_applied_gains`). Rotational stiffness follows
   `rollout_policy`'s schedule: 60 at the ends of the task, 60 × 0.25 while
-  carrying. The share of `K` dropped with the off-diagonal terms is logged
-  (`k_offdiag_share` column and the summary). Damping is set to `2√K` per axis,
-  because CRISP cannot take the transported `D`. For the demonstration's
-  350 N/m that is 37.4 N·s/m against the demonstrated 33.7.
+  carrying. Damping is CRISP's `2√K`, because CRISP cannot take the transported
+  `D`. For the demonstration's 350 N/m that is 37.4 N·s/m against the
+  demonstrated 33.7.
 
 **Aborts** hold the arm at its measured pose. The gripper is left as it is, so a
 held object is not dropped. They fire on: a pose older than 0.2 s; a commanded

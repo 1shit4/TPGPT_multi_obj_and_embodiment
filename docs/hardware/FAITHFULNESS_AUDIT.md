@@ -9,9 +9,9 @@ Audit of 2026-09-21. TPGPT at `d3275d7`. Compared stage by stage:
   `ycb_pointcloud_pipeline/.../tpgpt_{planner,executor}_node.py` and the X6 `method:` block.
 
 **What this list leaves out:** differences the port forces: a one-sided camera cloud instead of the
-sim's full YCB scan, CRISP taking only a diagonal stiffness, the bounded-speed approach from wherever
-the arm is, `SafetyMonitor`, and wall-clock loop timing. Every item below could be implemented the
-way the sim does it.
+sim's full YCB scan, the bounded-speed approach from wherever the arm is, `SafetyMonitor`, and
+wall-clock loop timing. Every item below could be implemented the way the sim does it. (CRISP taking
+only a diagonal stiffness was on this list until 2026-09-29; see B2 in the Status table.)
 
 Severity: **H** changes which grasp is executed or what a trial measures. **M** changes behaviour in
 some runs. **L** is a small numerical mismatch.
@@ -28,7 +28,8 @@ some runs. **L** is a small numerical mismatch.
 | A9 | **Addressed 2026-09-22** (commit pending). The mask is eroded 1 px before deprojection, as the sim does. Restart `segmentation_node` for it to take effect. |
 | A14 | **Fixed 2026-09-24**: the place-side hand clearance was an infinite plane and refused every upper-shelf grasp; it now measures the board under the hand. |
 | A13 | **Extended 2026-09-24**: the object's grasps are a fixed library keyed on its scan, not a fresh draw per plan, and coverage against a destination is now measurable offline (`GRASP_LIBRARY.md`). |
-| A4, A7, B1, B2, C1, C2, C4–C7 | Open. |
+| A4, A7, B1, B2, C1, C2, C4–C7 | Open. B1/B2 are being worked on (2026-09-29, plan: attractor labels from a replayed demonstration, directional stiffness); first step below. |
+| B2, step 1 | **The full transported stiffness reaches the arm (2026-09-29).** The sim's controller takes full `K` and `D` matrices (`tpgpt/sim/controllers/cartesian_impedance.py`); stock CRISP took only a diagonal in the hand frame, which for a stiffness soft along the motion and stiff across it drops a quarter of the matrix (measured on the 18:39 demonstration's path at 350/600 N/m: 421 N/m along the motion instead of 350 before the grasp, 468/486 -- almost isotropic -- at the set-down). CRISP is now patched to take a symmetric 3x3 (`~/THOR_DOCKER_SETUP`, `patches/crisp-full-stiffness.patch`, principal values clamped to [0, 900], damping `2 K^(1/2)`), and the executor sends `R^T K R` whole when `use_transported_stiffness` is on (`stiffness_message: auto`). Remaining difference from the sim: damping is CRISP's `2 K^(1/2)` (critical for a unit mass), not the transported `D`; the sim's demonstration uses `1.8 sqrt(k)`. Verified: unit tests, CRISP on fake hardware, and a ROS dry run whose simulated arm is identical to the diagonal form's for today's constant stiffness (difference 1e-13 mm). Not yet run on the robot. |
 | A8 | **Addressed 2026-09-22** (commits `f6a34e4`, `60df37d`), pending a live object that fits. The object cloud is the object's YCB scan fitted to the camera cloud (`tpgpt/hardware/object_model.py`, planner `object_model`, default true), as in the sim's YCB experiment. A fit the camera doesn't support is refused and the camera cloud is used, recorded as `object_cloud_source`. First live fit (a banana on the white sheet) was refused: median 5.0 mm, 78% of points explained, against about 3 mm and at least 93% for a correct fit at 5 mm synthetic noise. |
 | X6 | **Resolved 2026-09-29.** The frozen `method:` block mirrors the planner's and the executor's defaults value for value (`max_plans` 100, `fallback_top_down` false, the grasp library, the scan fit and its retries, the executor's parameters), and `test_x6.py::test_the_frozen_method_is_what_the_nodes_run` fails when a default drifts from it. So an X6 trial runs the method exactly as a run outside an experiment does, executor deviations C1-C7 included, instead of the mixed set frozen on 2026-09-15. |
 

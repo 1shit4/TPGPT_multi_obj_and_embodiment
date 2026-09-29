@@ -139,6 +139,15 @@ class TpgptExecutorNode(Node):
         d('stiffness_min_translational', 50.0)
         d('stiffness_max_translational', 900.0)
         d('stiffness_max_rotational', 60.0)
+        # Form of the target_stiffness message. 'full': the transported K rotated into the hand
+        # frame, all of it (12 values; needs the patched CRISP, crisp-full-stiffness.patch in
+        # ~/THOR_DOCKER_SETUP, image docker-thor:local since 2026-09-29). 'diagonal': its
+        # diagonal only (6 values, any CRISP; the off-diagonal part is dropped and logged).
+        # 'auto': full with use_transported_stiffness, else diagonal -- a fixed stiffness is
+        # isotropic, so the diagonal is exact and the message works on either image. The
+        # pre-patch image IGNORES a 12-value message (it keeps its yaml gains): pass
+        # 'diagonal' if you roll the image back.
+        d('stiffness_message', 'auto')              # auto | full | diagonal
         # Safety
         # A box the commanded TCP may not leave. **Off by default since 2026-09-23** (the user's
         # call): it is a blunt guard from before the path check existed, and it refused poses the
@@ -192,6 +201,10 @@ class TpgptExecutorNode(Node):
         if self.fixed_stiffness > float(p('stiffness_max_translational')):
             raise SystemExit(f'translational_stiffness {self.fixed_stiffness} exceeds '
                              f"stiffness_max_translational {p('stiffness_max_translational')}")
+        form = str(p('stiffness_message'))
+        if form not in ('auto', 'full', 'diagonal'):
+            raise SystemExit(f"stiffness_message must be auto, full or diagonal, not {form!r}")
+        self.full_stiffness = form == 'full' or (form == 'auto' and self.use_stiffness)
         # Either stiffness mode needs the variable-stiffness controller.
         self.variable_stiffness = self.use_stiffness or self.fixed_stiffness > 0
         self.cm = p('controller_manager').rstrip('/')
@@ -215,7 +228,10 @@ class TpgptExecutorNode(Node):
 
         if self.dry:
             self.pose_pub = self.create_publisher(PoseStamped, '/tpgpt/executor/commanded_pose', 1)
-            self.stiffness_pub = None
+            # What would go to the controller, on a topic no controller listens to.
+            self.stiffness_pub = (
+                self.create_publisher(Float64MultiArray, '/tpgpt/executor/commanded_stiffness', 1)
+                if self.variable_stiffness else None)
         else:
             self.pose_pub = self.create_publisher(PoseStamped, self.pose_topic, 1)
             self.stiffness_pub = (self.create_publisher(Float64MultiArray, self.stiffness_topic, 1)
@@ -430,7 +446,8 @@ class TpgptExecutorNode(Node):
         """Execute the plan. False if the operator cancelled at the prompt."""
         from tpgpt.hardware.end_effector import end_effector_for_plan
         from tpgpt.hardware.executor import (ExecutorSettings, HardwareExecutor, SafetyMonitor,
-                                             approach_trajectory, crisp_stiffness,
+                                             approach_trajectory, crisp_applied_gains,
+                                             crisp_stiffness, logged_stiffness,
                                              stiffness_projection_loss)
         from tpgpt.hardware.planner import Plan
         from tpgpt.policy.gp_policy import GPPolicy
@@ -532,7 +549,7 @@ class TpgptExecutorNode(Node):
             f"  controller      {self.controller} -> {self.pose_topic}"
             f"{' + ' + self.stiffness_topic if self.variable_stiffness else ''}\n"
             f"  stiffness       "
-            f"{'TRANSPORTED (diagonal in TCP frame)' if self.use_stiffness else f'FIXED {self.fixed_stiffness:.0f} N/m translational' if self.fixed_stiffness > 0 else 'controller defaults'}\n"
+            f"{('TRANSPORTED (full 3x3 in TCP frame, 12-value message)' if self.full_stiffness else 'TRANSPORTED (diagonal in TCP frame)') if self.use_stiffness else f'FIXED {self.fixed_stiffness:.0f} N/m translational' if self.fixed_stiffness > 0 else 'controller defaults'}\n"
             f"  approach        {gap:.3f} m over {len(approach_p) * dt:.1f} s\n"
             f"  policy          {len(plan.labels)} labels at speed_scale {settings.speed_scale} "
             f"(~{len(plan.labels) * dt / settings.speed_scale:.0f} s)\n"
@@ -596,7 +613,8 @@ class TpgptExecutorNode(Node):
             self.publish(pos, rot, crisp_stiffness(K0, rot, float(p('rotational_stiffness')),
                                                    float(p('stiffness_min_translational')),
                                                    float(p('stiffness_max_translational')),
-                                                   float(p('stiffness_max_rotational'))))
+                                                   float(p('stiffness_max_rotational')),
+                                                   full=self.full_stiffness))
             if self.dry:
                 self.simulate(pos, rot, K0, D0, dt)
             writer.writerow([f'{time.monotonic() - started:.3f}', 'approach', 0, 1, err, 0, 0, -1,
@@ -652,7 +670,9 @@ class TpgptExecutorNode(Node):
             values = crisp_stiffness(cmd.stiffness, meas_R, cmd.rotational_stiffness,
                                      float(p('stiffness_min_translational')),
                                      float(p('stiffness_max_translational')),
-                                     float(p('stiffness_max_rotational')))
+                                     float(p('stiffness_max_rotational')),
+                                     full=self.full_stiffness)
+            # Share of K_tcp off its diagonal: dropped by the 6-value form, applied by the 12.
             loss = stiffness_projection_loss(cmd.stiffness, meas_R)
             losses.append(loss)
             self.last_cmd = cmd
@@ -669,13 +689,16 @@ class TpgptExecutorNode(Node):
                 meas_p, meas_R = self.measured()     # the hold moved the arm; log where it is now
             self.publish(cmd.tcp_position - self.offset, cmd.tcp_rotation, values)
             if self.dry:
-                self.simulate(cmd.tcp_position - self.offset, cmd.tcp_rotation, cmd.stiffness,
-                              cmd.damping, dt)
+                # The simulated arm runs the gains CRISP applies for this message, not the
+                # policy's own K: the same when nothing is dropped or clamped.
+                K_run, D_run = crisp_applied_gains(values, meas_R)
+                self.simulate(cmd.tcp_position - self.offset, cmd.tcp_rotation, K_run, D_run, dt)
             trace.append((cmd.tcp_position.copy(), cmd.tcp_rotation.copy()))
+            k_diag, k_rot = logged_stiffness(values)
             writer.writerow([f'{time.monotonic() - started:.3f}', 'policy', f'{cmd.phase:.5f}',
                              f'{cmd.gate:.4f}', f'{cmd.behind:.5f}', f'{cmd.expected:.5f}',
                              int(cmd.clamped), int(cmd.gripper), *meas_p, *cmd.tcp_position,
-                             *cmd.attractor, *values[:3], values[3], f'{loss:.4f}'])
+                             *cmd.attractor, *k_diag, k_rot, f'{loss:.4f}'])
             if len(trace) % 10 == 0:
                 self._publish_trace(trace)
             next_t = wait_period(next_t)
@@ -691,8 +714,8 @@ class TpgptExecutorNode(Node):
                 f'({executor.skipped_steps} steps steering), '
                 f'{executor.feasibility_unavailable} gate-shut steps without joint angles')
         if self.use_stiffness and losses:
-            text += (f'; stiffness off-diagonal share dropped: median {np.median(losses):.2f}, '
-                     f'max {np.max(losses):.2f}')
+            text += (f"; stiffness off-diagonal share {'applied (full matrix)' if self.full_stiffness else 'dropped'}: "
+                     f'median {np.median(losses):.2f}, max {np.max(losses):.2f}')
         text += f"; worst loop period {timing['worst'] * 1000:.0f} ms (nominal {dt * 1000:.0f})"
         log.info(text + f'. Log: {log_path}. CRISP keeps holding the last target.')
         # Keep the final target for a moment so the last command is received.
@@ -755,6 +778,8 @@ class TpgptExecutorNode(Node):
         bounded integral term removes whatever resting error the static
         compensation leaves at this pose.
         """
+        from tpgpt.hardware.executor import crisp_applied_gains, logged_stiffness
+
         p, log = self.p, self.get_logger()
         self.stage = stage
         labels = plan.labels
@@ -799,10 +824,12 @@ class TpgptExecutorNode(Node):
             self.check_workspace(out, f'{stage} target')
             self.publish(out, target_R, values)
             if self.dry:
-                self.simulate(out, target_R, cmd.stiffness, cmd.damping, dt)
+                # the dry-run arm holds target_R, so it is also the frame CRISP would use
+                self.simulate(out, target_R, *crisp_applied_gains(values, target_R), dt)
+            k_diag, k_rot = logged_stiffness(values)
             writer.writerow([f'{time.monotonic() - started:.3f}', stage, f'{cmd.phase:.5f}', 1,
                              dist, 0, 0, int(cmd.gripper), *meas_p, *out, *command,
-                             *values[:3], values[3], 0])
+                             *k_diag, k_rot, 0])
             next_t = wait_period(next_t)
         # Keep what the hold learned for the rest of the run: the object's weight after
         # a grasp and the pose-dependent error both persist.

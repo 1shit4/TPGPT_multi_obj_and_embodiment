@@ -223,6 +223,17 @@ The planner's support height is: its `support_height` parameter, else the calibr
 - **Other executor guards still apply**, and they are not the box: `max_start_distance` (0.6 m
   from the plan's first label -- park the arm nearer, or raise it for a dry-run preview),
   `max_tracking_error`, the stall watchdog and `max_policy_seconds`.
+- **The robot's CRISP takes the full 3×3 translational stiffness** (2026-09-29, audit B2 step 1):
+  `~/THOR_DOCKER_SETUP`, `patches/crisp-full-stiffness.patch`, in image `docker-thor:local`; the
+  previous image is kept as `docker-thor:pre-full-stiffness`
+  (`docker tag docker-thor:pre-full-stiffness docker-thor:local` rolls back). The executor sends it
+  as a 12-value `target_stiffness` whenever `use_transported_stiffness` is on
+  (`stiffness_message: auto`); a fixed stiffness still goes as 6 values, exact because it is
+  isotropic. **The pre-patch image silently ignores a 12-value message** and keeps its yaml gains:
+  after a rollback pass `stiffness_message:=diagonal`. Why it exists: a stiffness soft along the
+  motion and stiff across it has off-diagonal terms in the hand frame, and the diagonal dropped
+  about a quarter of it -- almost all of it at the set-down. Dry runs publish what would be sent on
+  `/tpgpt/executor/commanded_stiffness`. Not yet run on the robot.
 - **A plan that leaves the executor's workspace box is now refused at selection**
   (`SelectionSettings.workspace_min/max`, fed from the planner's own parameters). It used to be
   found only by the executor, which aborted the whole run instead of taking the next grasp

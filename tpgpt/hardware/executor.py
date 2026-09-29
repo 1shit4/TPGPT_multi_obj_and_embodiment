@@ -29,8 +29,9 @@ absorbed (``docs/sim/SIM_CLAUDE.md`` rule 3):
   actually commanded. ``speed_scale = 1`` is bit-for-bit the simulated loop;
   ``tests/unit/test_hardware_executor.py`` asserts it against
   :func:`~tpgpt.policy.rollout.rollout_impedance`.
-* **Stiffness is a choice.** CRISP accepts a diagonal stiffness in the
-  end-effector frame, not the full transported matrix; see
+* **Stiffness is a choice.** Stock CRISP accepts only a diagonal stiffness in
+  the end-effector frame; the patched one in ``~/THOR_DOCKER_SETUP``
+  (``crisp-full-stiffness.patch``) also takes the full transported matrix. See
   :func:`crisp_stiffness`.
 """
 
@@ -451,33 +452,86 @@ def approach_trajectory(
     return positions, rotations
 
 
+def bounded_stiffness(stiffness, minimum: float, maximum: float) -> np.ndarray:
+    """The symmetric part of ``K`` with its principal values clamped to ``[minimum, maximum]``.
+
+    CRISP's own rule for a full translational block (``crisp-full-stiffness.patch`` in
+    ``~/THOR_DOCKER_SETUP``): clamping eigenvalues, not entries, keeps the matrix positive
+    definite and inside the bounds in every direction. A matrix already inside is returned
+    unchanged (symmetrized).
+    """
+    K = np.asarray(stiffness, dtype=float).reshape(3, 3)
+    K = 0.5 * (K + K.T)
+    values, vectors = np.linalg.eigh(K)
+    clamped = np.clip(values, minimum, maximum)
+    if np.array_equal(clamped, values):
+        return K
+    return vectors @ np.diag(clamped) @ vectors.T
+
+
 def crisp_stiffness(
     stiffness, tcp_rotation, rotational_stiffness: float,
     min_translational: float = 50.0, max_translational: float = 900.0,
-    max_rotational: float = 60.0,
+    max_rotational: float = 60.0, full: bool = False,
 ) -> np.ndarray:
-    """The six values CRISP's ``target_stiffness`` topic takes.
+    """The values CRISP's ``target_stiffness`` topic takes: 6 (diagonal) or 12 (``full``).
 
     CRISP's ``CartesianController`` with ``use_local_jacobian: true`` (the FR3
     real configuration) computes its pose error **in the end-effector frame**
-    and applies ``diag(k_pos_x, k_pos_y, k_pos_z, k_rot_x, k_rot_y, k_rot_z)``
-    to it (``cartesian_controller.cpp``, ``update`` and
-    ``setStiffnessAndDamping``). The transported ``K`` is a full matrix in the
-    base frame (Sec. III-G). So it is rotated into the measured TCP frame,
-    ``K_tcp = R^T K R``, and its **diagonal** is sent. The off-diagonal terms --
-    the rotation of the stiffness ellipsoid relative to the hand -- cannot be
-    expressed and are dropped; the returned values say how much was dropped in
-    :func:`stiffness_projection_loss`.
+    (``cartesian_controller.cpp``, ``update``). The transported ``K`` is a full
+    matrix in the base frame (Sec. III-G), so it is rotated into the measured TCP
+    frame, ``K_tcp = R^T K R``, and sent in one of two forms:
 
-    Clamped to CRISP's own ``variable_max_stiffness`` bounds, plus a floor so a
-    transported near-zero gain cannot make the arm limp.
+    * **diagonal** (6 values ``[k_x, k_y, k_z, k_rot x3]``): the stock message. The
+      off-diagonal terms -- the rotation of the stiffness ellipsoid relative to the
+      hand -- cannot be expressed and are dropped; :func:`stiffness_projection_loss`
+      says how much. Entries clamped to ``[min, max]``.
+    * **full** (12 values: ``K_tcp`` row-major, then ``k_rot x3``): needs the patched
+      CRISP (``crisp-full-stiffness.patch``). Nothing is dropped; the principal values
+      are clamped to ``[min, max]`` (:func:`bounded_stiffness`), as CRISP itself does.
+
+    The bounds are CRISP's ``variable_max_stiffness``, plus a floor so a transported
+    near-zero gain cannot make the arm limp.
     """
     K = np.asarray(stiffness, dtype=float).reshape(3, 3)
     R = np.asarray(tcp_rotation, dtype=float).reshape(3, 3)
     local = R.T @ K @ R
-    translational = np.clip(np.diag(local), min_translational, max_translational)
     rotational = np.full(3, float(np.clip(rotational_stiffness, 0.0, max_rotational)))
+    if full:
+        block = bounded_stiffness(local, min_translational, max_translational)
+        return np.concatenate([block.ravel(), rotational])
+    translational = np.clip(np.diag(local), min_translational, max_translational)
     return np.concatenate([translational, rotational])
+
+
+def crisp_applied_gains(values, tcp_rotation) -> tuple[np.ndarray, np.ndarray]:
+    """The translational ``(K, D)`` CRISP applies for a ``target_stiffness`` message, in the base frame.
+
+    The inverse of :func:`crisp_stiffness`, for a model of the arm that sees what the
+    controller runs rather than what the policy asked for. Damping is CRISP's automatic
+    rule (``d_pos_*: -1`` in ``tpgpt_variable_stiffness_controller.yaml``): ``2 sqrt(k)``
+    per axis for the 6-value form, and ``2 K^(1/2)`` for the 12-value form -- the same
+    rule along the block's own principal axes.
+    """
+    values = np.asarray(values, dtype=float).ravel()
+    R = np.asarray(tcp_rotation, dtype=float).reshape(3, 3)
+    if values.size == 12:
+        local = values[:9].reshape(3, 3)
+    elif values.size == 6:
+        local = np.diag(values[:3])
+    else:
+        raise ValueError(f'a stiffness message has 6 or 12 values, got {values.size}')
+    principal, axes = np.linalg.eigh(0.5 * (local + local.T))
+    damping_local = axes @ np.diag(2.0 * np.sqrt(np.maximum(principal, 0.0))) @ axes.T
+    return R @ local @ R.T, R @ damping_local @ R.T
+
+
+def logged_stiffness(values) -> tuple[np.ndarray, float]:
+    """``(diagonal of K_tcp, k_rot)`` of a 6- or 12-value message, for the execution log."""
+    values = np.asarray(values, dtype=float).ravel()
+    if values.size == 12:
+        return values[[0, 4, 8]], float(values[9])
+    return values[:3], float(values[3])
 
 
 def stiffness_projection_loss(stiffness, tcp_rotation) -> float:
