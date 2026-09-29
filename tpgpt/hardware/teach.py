@@ -18,12 +18,12 @@ What each field of the bundle is made of, and why:
   onto the control grid. ``docs/sim/SIM_CLAUDE.md`` warns that labels are the *commanded
   attractor* (the point the impedance spring pulls toward), not the measured
   pose, because an impedance arm lags its attractor by ``K^-1 D v``. A hand-held
-  demonstration has no attractor at all. This version deliberately uses the
-  measured path as the attractor and executes it under one **static** stiffness
-  and damping (:data:`TEACH_STIFFNESS`, :data:`TEACH_DAMPING`, the stock
-  ``cartesian_impedance_controller`` gains), so the lag on execution is
-  ``D/K * v = 40/400 * v``: 5 mm at 5 cm/s. Slow the execution with
-  ``speed_scale`` to shrink it proportionally.
+  demonstration has no attractor at all. This version still uses the measured path
+  as the attractor, so the executing arm trails it by its whole lag (audit B1): the
+  viscous part ``D/K * v`` (2/sqrt(350) s along the motion with the directional
+  stiffness: 5 mm at 5 cm/s) plus a static part from joint friction and gravity
+  (~10 N / K). Replacing it with the attractor that reproduces the taught path on
+  the robot is the next stage of the execution-gap plan.
 * **orientations** -- the measured ``fr3_hand_tcp`` rotation converted to the
   grasp convention (``+X`` closing, ``+Z`` approach) with
   :func:`~tpgpt.hardware.frames.fr3_tcp_to_grasp`, as ``export_source`` does
@@ -38,7 +38,12 @@ from ``recording.metadata['end_effector']`` when the teach node wrote it.
 * **velocities** -- Savitzky-Golay derivative of the resampled positions at the
   control period, so they are smooth enough for the policy fit and agree with
   the positions they belong to.
-* **stiffness / damping** -- constant diagonal matrices (static, by choice).
+* **stiffness / damping** -- by default **directional** (:func:`directional_stiffness`,
+  since 2026-09-29): 350 N/m along the direction of motion and 600 across it, stiff in
+  every direction while the hand is still, damped with ``2 K^(1/2)``. A hand-held
+  demonstration has no stiffness to record, so -- as in the simulation, whose scripted
+  teacher sets 350/900 per segment -- the profile is the teacher's specification.
+  ``stiffness_profile="static"`` gives the constant 400/40 every earlier bundle used.
 * **gripper** -- ``+1`` between the grasp and release marks, ``-1`` elsewhere. No
   gripper is actuated during teaching; the marks only say *when* the object was
   held, which ``carry_indices`` and ``carry_transform`` need.
@@ -90,6 +95,37 @@ TEACH_STIFFNESS = 400.0
 
 #: Static translational damping, N s/m, likewise from ``controllers.real.yaml``.
 TEACH_DAMPING = 40.0
+
+#: The stiffness labels a taught demonstration carries by default: ``directional``
+#: (:func:`directional_stiffness`) or ``static`` (TEACH_STIFFNESS / TEACH_DAMPING
+#: throughout, how every demonstration before 2026-09-29 was converted).
+STIFFNESS_PROFILE = "directional"
+
+#: Directional stiffness, N/m: compliant along the direction the hand moves, stiff
+#: across it (and in every direction while it is still). Chosen from this arm
+#: (2026-09-29): 350 along keeps the ~10 N joint friction's lag at 10/350 = 29 mm,
+#: inside the lag gate's 45 mm; 600 across is the highest value below the 800 that
+#: vibrated with rotational 60 (2026-09-15; 600/30 still to be checked on the arm).
+DIRECTIONAL_ALONG = 350.0
+DIRECTIONAL_ACROSS = 600.0
+
+#: Speeds over which the directionality is blended in, m/s: isotropic (stiff) at or
+#: below the first, fully directional at or above the second. The 18:39 demonstration
+#: creeps into its grasp at 1-2.5 mm/s and averages 21 mm/s over the last 30 mm.
+DIRECTIONAL_RAMP = (0.002, 0.020)
+
+#: Path length over which the direction of motion is taken, m: the chord of the last
+#: stretch of path, not the instantaneous velocity, which is noise at creeping speed.
+DIRECTIONAL_TANGENT = 0.010
+
+#: Half-width of the moving log-Euclidean mean applied to the stiffness labels, in labels
+#: (+-5 = 0.55 s of demonstration). Measured 2026-09-29 on the 18:39 demonstration planned
+#: onto banana_20260926_171121 and queried where its dry run queried (attractor, phase):
+#: unsmoothed, the policy's fitted K reached 236..980 N/m against labels of 350..600, 17.9 %
+#: of queries more than 20 N/m outside them (the GP overshoots matrices whose axes turn);
+#: +-3 gave 1.3 %, +-5 and +-6 0.0 % (349..609), and the grasp and release labels stay stiff
+#: in every direction (599..600); +-8 starts softening the grasp (592).
+DIRECTIONAL_SMOOTHING = 5
 
 #: Below this speed the hand counts as still, m/s.
 STILL_SPEED = 0.01
@@ -278,6 +314,99 @@ def select_samples(speed: np.ndarray, dt: float, protected: tuple[int, ...],
     return np.flatnonzero(keep)
 
 
+def motion_directions(positions: np.ndarray, tangent_length: float = DIRECTIONAL_TANGENT
+                      ) -> np.ndarray:
+    """Unit direction of travel at each sample: the chord over the last ``tangent_length`` of path.
+
+    Before the path has covered that length, the chord of its first ``tangent_length``
+    is used. Where the path has not moved at all the direction is zero.
+    """
+    positions = np.asarray(positions, dtype=float).reshape(-1, 3)
+    n = len(positions)
+    arc = np.r_[0.0, np.cumsum(np.linalg.norm(np.diff(positions, axis=0), axis=1))]
+    directions = np.zeros((n, 3))
+    first = min(int(np.searchsorted(arc, tangent_length)), n - 1)
+    for i in range(n):
+        if arc[i] >= tangent_length:
+            j = int(np.searchsorted(arc, arc[i] - tangent_length, side="right")) - 1
+            chord = positions[i] - positions[max(j, 0)]
+        else:
+            chord = positions[first] - positions[0]
+        length = float(np.linalg.norm(chord))
+        if length > 1e-9:
+            directions[i] = chord / length
+    return directions
+
+
+def log_euclidean_smooth(stiffness: np.ndarray, half_width: int) -> np.ndarray:
+    """Moving log-Euclidean mean of SPD matrices: ``exp(mean(log K))`` over ``+-half_width``.
+
+    The standard average of stiffness matrices: it stays positive definite and does not
+    shrink them the way an entry-wise average of matrices with turning axes does.
+    """
+    K = np.asarray(stiffness, dtype=float)
+    if half_width <= 0:
+        return K.copy()
+    values, vectors = np.linalg.eigh(K)
+    logs = np.einsum("nij,nj,nkj->nik", vectors, np.log(values), vectors)
+    csum = np.concatenate([np.zeros((1, 3, 3)), np.cumsum(logs, axis=0)])
+    n = len(K)
+    lo = np.clip(np.arange(n) - half_width, 0, n)
+    hi = np.clip(np.arange(n) + half_width + 1, 0, n)
+    mean = (csum[hi] - csum[lo]) / (hi - lo)[:, None, None]
+    mean = 0.5 * (mean + np.transpose(mean, (0, 2, 1)))
+    values, vectors = np.linalg.eigh(mean)
+    return np.einsum("nij,nj,nkj->nik", vectors, np.exp(values), vectors)
+
+
+def directional_stiffness(
+    positions: np.ndarray, velocities: np.ndarray,
+    along: float = DIRECTIONAL_ALONG, across: float = DIRECTIONAL_ACROSS,
+    ramp: tuple[float, float] = DIRECTIONAL_RAMP,
+    tangent_length: float = DIRECTIONAL_TANGENT,
+    smoothing: int = DIRECTIONAL_SMOOTHING,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Stiffness and damping labels: compliant along the motion, stiff across it.
+
+    ``K_i = across I - (across - along) w_i u_i u_i^T`` with ``u_i`` the direction of
+    travel (:func:`motion_directions`) and ``w_i`` the speed blended from 0 at
+    ``ramp[0]`` to 1 at ``ramp[1]``. So a still hand is stiff in every direction --
+    the simulated teacher's firm grasp and release (``tpgpt.sim.demo``: 900 N/m at the
+    grasp, insertion and release, 350 in transit) -- and a moving one gives way
+    along its motion only: what meets it head-on is not forced through, and what
+    decides a grasp (the closing axis, never the direction of motion in a taught
+    pick) stays stiff.
+
+    The profile is the demonstration's stiffness label (Sec. III-A), transported
+    with the map's rotation part like every stiffness (Sec. III-G). Since the
+    orientation labels rotate by the same ``J_perp`` (Eq. 11), the stiffness seen
+    from the hand is the same at matching labels of the source and the target.
+
+    The profile is then smoothed over ``+-smoothing`` labels with a log-Euclidean
+    mean (:func:`log_euclidean_smooth`): unsmoothed, the policy's regression of it
+    overshot to 236..980 N/m between labels (:data:`DIRECTIONAL_SMOOTHING`).
+
+    ``D_i = 2 K_i^(1/2)``: the damping CRISP applies (``d_pos: -1``) along the
+    stiffness's own axes, so the labels, the lag gate's ``||K^-1 D||`` and the arm
+    agree. The simulated teacher used ``1.8 sqrt(k)``.
+
+    Deviation from the simulation, and why: the sim's teacher is isotropic (one ``k``
+    per segment, stiff at the insertion as a whole); this one is directional, soft
+    along the insertion. ``docs/hardware/FAITHFULNESS_AUDIT.md``, B2.
+    """
+    positions = np.asarray(positions, dtype=float).reshape(-1, 3)
+    speeds = np.linalg.norm(np.asarray(velocities, dtype=float).reshape(-1, 3), axis=1)
+    lo, hi = float(ramp[0]), float(ramp[1])
+    weight = np.clip((speeds - lo) / max(hi - lo, 1e-12), 0.0, 1.0)
+    u = motion_directions(positions, tangent_length)
+    eye = np.eye(3)
+    K = across * eye[None] - (across - along) * weight[:, None, None] * np.einsum("ni,nj->nij", u, u)
+    K = log_euclidean_smooth(K, int(smoothing))
+    values, vectors = np.linalg.eigh(K)
+    D = np.einsum("nij,nj,nkj->nik", vectors, 2.0 * np.sqrt(np.maximum(values, 0.0)), vectors)
+    return K, D
+
+
 def labels_from_recording(
     recording: Recording,
     control_freq: int = TEACH_CONTROL_FREQ,
@@ -287,6 +416,9 @@ def labels_from_recording(
     max_dwell: float = MAX_DWELL,
     smoothing_window: int = SMOOTHING_WINDOW,
     end_effector: EndEffector | None = None,
+    stiffness_profile: str = STIFFNESS_PROFILE,
+    along: float = DIRECTIONAL_ALONG,
+    across: float = DIRECTIONAL_ACROSS,
 ) -> PolicyLabels:
     """Policy labels (grasp point, grasp convention, base frame) from a recording."""
     ee = end_effector or recording_end_effector(recording)
@@ -336,15 +468,31 @@ def labels_from_recording(
     n = len(positions)
     if n < MIN_LABELS:
         raise TeachError(f"too_few_labels: {n} labels after trimming (need {MIN_LABELS})")
-    K = np.eye(3) * float(stiffness)
-    D = np.eye(3) * float(damping)
     speeds = np.linalg.norm(velocities, axis=1)
+    if stiffness_profile == "static":
+        K = np.repeat((np.eye(3) * float(stiffness))[None], n, axis=0)
+        D = np.repeat((np.eye(3) * float(damping))[None], n, axis=0)
+        stiffness_info = {"static_stiffness": float(stiffness), "static_damping": float(damping),
+                          "expected_execution_lag_at_max_speed_m":
+                              float(damping / stiffness * speeds.max())}
+    elif stiffness_profile == "directional":
+        K, D = directional_stiffness(positions, velocities, along, across)
+        # Moving, the lag is along the motion, where the time constant is D/K = 2/sqrt(along).
+        stiffness_info = {"directional_along": float(along), "directional_across": float(across),
+                          "directional_ramp_mps": list(DIRECTIONAL_RAMP),
+                          "directional_tangent_m": DIRECTIONAL_TANGENT,
+                          "directional_smoothing_labels": DIRECTIONAL_SMOOTHING,
+                          "expected_execution_lag_at_max_speed_m":
+                              float(2.0 / np.sqrt(along) * speeds.max())}
+    else:
+        raise ValueError(f"stiffness_profile must be 'directional' or 'static', not "
+                         f"{stiffness_profile!r}")
     return PolicyLabels(
         positions=positions,
         velocities=velocities,
         orientations=ee.grasp_from_ee(tcp_rotations),
-        stiffness=np.repeat(K[None], n, axis=0),
-        damping=np.repeat(D[None], n, axis=0),
+        stiffness=K,
+        damping=D,
         gripper=gripper,
         time_belief=np.linspace(0.0, 1.0, n),
         time_rate=np.full(n, 1.0 / (dt * max(n - 1, 1))),
@@ -360,9 +508,8 @@ def labels_from_recording(
             "recorded_duration_s": float(grid[-1] - grid[0]),
             "max_speed_mps": float(speeds.max()),
             "mean_speed_mps": float(speeds.mean()),
-            "static_stiffness": float(stiffness),
-            "static_damping": float(damping),
-            "expected_execution_lag_at_max_speed_m": float(damping / stiffness * speeds.max()),
+            "stiffness_profile": stiffness_profile,
+            **stiffness_info,
         },
     )
 
@@ -471,8 +618,11 @@ def bundle_from_recording(recording: Recording, **label_options) -> tuple[Source
         "orientation_convention": "grasp (+X closing, +Z approach)",
         "position_reference": (f"{ee.controller_frame} measured, moved to the {ee.name} grasp "
                                "point, used as the attractor"),
-        "stiffness": "static", "static_stiffness": labels.metadata["static_stiffness"],
-        "static_damping": labels.metadata["static_damping"],
+        # "static" makes the executor's transit_rotational_scale auto resolve to 1.0; any
+        # other value to the simulation's 0.25 (tpgpt_executor_node).
+        "stiffness": labels.metadata["stiffness_profile"],
+        **{k: v for k, v in labels.metadata.items()
+           if k.startswith(("static_", "directional_"))},
         "teach_report": report,
         "recording": recording.metadata,
     }
@@ -489,8 +639,14 @@ def main(argv=None):
     parser.add_argument("--raw", type=Path, required=True, help="raw.npz written by tpgpt_teach_node")
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--control-freq", type=int, default=TEACH_CONTROL_FREQ)
-    parser.add_argument("--stiffness", type=float, default=TEACH_STIFFNESS)
-    parser.add_argument("--damping", type=float, default=TEACH_DAMPING)
+    parser.add_argument("--stiffness-profile", choices=("directional", "static"),
+                        default=STIFFNESS_PROFILE)
+    parser.add_argument("--along", type=float, default=DIRECTIONAL_ALONG,
+                        help="directional: N/m along the motion")
+    parser.add_argument("--across", type=float, default=DIRECTIONAL_ACROSS,
+                        help="directional: N/m across the motion, and in every direction when still")
+    parser.add_argument("--stiffness", type=float, default=TEACH_STIFFNESS, help="static: N/m")
+    parser.add_argument("--damping", type=float, default=TEACH_DAMPING, help="static: N s/m")
     parser.add_argument("--still-speed", type=float, default=STILL_SPEED)
     parser.add_argument("--max-dwell", type=float, default=MAX_DWELL)
     parser.add_argument("--smoothing-window", type=int, default=SMOOTHING_WINDOW)
@@ -498,7 +654,8 @@ def main(argv=None):
     bundle, _ = bundle_from_recording(
         Recording.load(args.raw), control_freq=args.control_freq, stiffness=args.stiffness,
         damping=args.damping, still_speed=args.still_speed, max_dwell=args.max_dwell,
-        smoothing_window=args.smoothing_window,
+        smoothing_window=args.smoothing_window, stiffness_profile=args.stiffness_profile,
+        along=args.along, across=args.across,
     )
     bundle.save(args.out)
     print(f"wrote {args.out}: {bundle.tool_labels.describe()}")

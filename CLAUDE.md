@@ -234,6 +234,14 @@ The planner's support height is: its `support_height` parameter, else the calibr
   motion and stiff across it has off-diagonal terms in the hand frame, and the diagonal dropped
   about a quarter of it -- almost all of it at the set-down. Dry runs publish what would be sent on
   `/tpgpt/executor/commanded_stiffness`. Not yet run on the robot.
+- **Taught demonstrations get a directional stiffness by default** (2026-09-29, audit B2 step 2;
+  `teach.directional_stiffness`): 350 N/m along the motion, 600 across it and in every direction
+  when still, smoothed over ±5 labels (without it the policy's fit of it overshot to 236-980 N/m).
+  **Run such a bundle with `use_transported_stiffness:=true`**, or its stiffness never reaches
+  the arm; `--stiffness-profile static` reproduces the old constant 400/40 bundles bit for bit.
+  The 18:39 demonstration's directional bundle is `~/tpgpt_demos/banana_20260925_183904/source_bundle_directional`
+  (its `source_bundle/` is unchanged). X6's frozen block still says `use_transported_stiffness:
+  false`: re-sync it when the execution rework lands.
 - **A plan that leaves the executor's workspace box is now refused at selection**
   (`SelectionSettings.workspace_min/max`, fed from the planner's own parameters). It used to be
   found only by the executor, which aborted the whole run instead of taking the next grasp

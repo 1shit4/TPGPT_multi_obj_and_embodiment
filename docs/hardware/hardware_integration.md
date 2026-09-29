@@ -313,7 +313,8 @@ replaces the emergency stop.
 * `source_bundle/`: **the same three files** `export_source` writes
   (`tool_labels.npz`, `placement.npz`, `manifest.json`), loaded by the same
   `SourceBundle.load`. Nothing downstream can tell them apart except through
-  `manifest.json` (`source: taught_on_fr3`, `stiffness: static`).
+  `manifest.json` (`source: taught_on_fr3`, `stiffness: directional`, or `static` for a
+  bundle converted before 2026-09-29 or with `--stiffness-profile static`).
 * `teach.json`: the conversion report (below) and the settings used.
 
 How each field is made (`tpgpt/hardware/teach.py`):
@@ -323,7 +324,7 @@ How each field is made (`tpgpt/hardware/teach.py`):
 | `positions` | measured `fr3_hand_tcp` (the fingertip centre, the reference TPGPT's keypoints use), resampled to 20 Hz by linear interpolation between message stamps, then Savitzky-Golay smoothed (7 samples = 0.35 s, order 2) |
 | `orientations` | measured `fr3_hand_tcp` rotation, slerp-resampled, converted to the grasp convention with `fr3_tcp_to_grasp` (the inverse of the −90° turn in §2) |
 | `velocities` | the Savitzky-Golay derivative at the 50 ms control period |
-| `stiffness`, `damping` | constant 400 N/m and 40 N·s/m on the diagonal (§5.5) |
+| `stiffness`, `damping` | directional (default): 350 N/m along the motion, 600 across it and in every direction when still, log-Euclidean smoothed over ±5 labels, `D = 2K^½`; or `static`: constant 400 N/m and 40 N·s/m (§5.5) |
 | `gripper` | +1 from the `g` mark to the `r` mark, −1 elsewhere |
 | `time_belief`, `time_rate` | `linspace(0, 1, M)` and `1 / (dt·(M−1))`, from the step index; the message stamps are discarded after resampling (`docs/sim/SIM_CLAUDE.md` rule 5) |
 | `placement.points` | the `capture_scene` cloud |
@@ -348,13 +349,32 @@ height is flagged as approximate (`carry_tilt_ok: false`).
 `capture_placed` checks this against the camera. It reports the xy distance
 between the measured and the predicted placed centroids, and both lowest points.
 
-### 5.5 Static stiffness, and the lag it leaves
+### 5.5 Stiffness labels, and the lag they leave
 
-TPGPT's labels are the **commanded attractor** (the point the impedance spring
+**Directional (the default since 2026-09-29).** A hand-guided demonstration runs at
+zero stiffness, so there is no stiffness to record; like the simulation's scripted
+teacher (350 N/m in transit, 900 at the grasp and insertion), the labels are the
+teacher's specification (`teach.directional_stiffness`):
+`K = 600·I − 250·w·u uᵀ` -- 350 N/m along the direction of motion `u` (the chord of
+the last 10 mm of path), 600 across it, blended in by speed `w` (0 at ≤ 2 mm/s, 1 at
+≥ 20 mm/s), so a still hand (the grasp, the release) is stiff in every direction and a
+moving one gives way along its motion only. The profile is smoothed with a
+log-Euclidean mean over ±5 labels: unsmoothed, the policy's regression of it overshot
+to 236..980 N/m between labels; smoothed it stays at 349..609. `D = 2K^½`, the damping
+CRISP applies. Numbers chosen from this arm: 350 keeps the ~10 N friction's lag at
+29 mm, inside the lag gate's 45 mm; 600 is the highest value below the 800 that
+vibrated (with rotational 60; 600/30 to be checked). Run with
+`use_transported_stiffness:=true` so the full matrix reaches the arm (§7); the
+executor's `transit_rotational_scale` then resolves to 0.25, the simulation's value.
+`--stiffness-profile static` (or the node's `stiffness_profile:=static`) gives the
+old constant labels below, bit for bit.
+
+**Static.** TPGPT's labels are the **commanded attractor** (the point the impedance spring
 pulls toward), not the measured pose. An impedance arm lags a moving attractor by
 `K⁻¹·D·v` (`docs/sim/SIM_CLAUDE.md`, §2.7 of `docs/sim/ROBOTICS_NOTES.md`). A hand-guided demonstration has
-no attractor, only the path the hand took. This version deliberately uses that
-measured path as the attractor, with one **static** stiffness and damping taken
+no attractor, only the path the hand took. Taught bundles still use that
+measured path as the attractor (replacing it is the next stage, audit B1). The static
+profile uses one stiffness and damping taken
 from the controller that will execute it: `cartesian_impedance_controller` runs
 400 N/m and 40 N·s/m (`controllers.real.yaml`), and the executor's default
 `use_transported_stiffness:=false` uses exactly that controller. So the arm will
@@ -622,10 +642,11 @@ the clamp never fired.
 
 * `false` (default): the stock `cartesian_impedance_controller` with its
   configured gains (400 N/m, 30 N·m/rad), poses only on `/target_pose`.
-* **With a taught demonstration keep it `false`**: its labels carry exactly the
+* **With a static taught demonstration keep it `false`**: its labels carry exactly the
   stock controller's 400 N/m and 40 N·s/m (§5.5), so there is nothing to transport
   but the map's distortion of one constant. `transit_rotational_scale` then
-  resolves to 1.0 on its own (§5.5).
+  resolves to 1.0 on its own (§5.5). **A directional one needs `true`**, or its
+  stiffness never reaches the arm.
 * `true`: `tpgpt_cartesian_impedance_controller`, loaded at runtime from
   `config/tpgpt_variable_stiffness_controller.yaml`, with private topics. CRISP
   applies stiffness to the pose error **in the end-effector frame**

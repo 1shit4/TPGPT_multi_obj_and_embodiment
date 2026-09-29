@@ -127,6 +127,12 @@ class TpgptTeachNode(Node):
         d('require_scene', True)                   # capture_scene before start_recording
         # Conversion (tpgpt.hardware.teach)
         d('control_freq', 20)
+        # Stiffness labels (tpgpt.hardware.teach): 'directional' = stiffness_along N/m along the
+        # direction of motion, stiffness_across across it and in every direction while still;
+        # 'static' = stiffness / damping throughout (every demonstration before 2026-09-29).
+        d('stiffness_profile', 'directional')      # directional | static
+        d('stiffness_along', 350.0)                # N/m, directional
+        d('stiffness_across', 600.0)               # N/m, directional
         d('stiffness', 400.0)                      # N/m, static, = stock controller
         d('damping', 40.0)                         # N s/m, static
         d('still_speed', 0.01)                     # m/s
@@ -561,7 +567,9 @@ class TpgptTeachNode(Node):
         p = self.p
         return {'control_freq': int(p('control_freq')), 'stiffness': float(p('stiffness')),
                 'damping': float(p('damping')), 'still_speed': float(p('still_speed')),
-                'max_dwell': float(p('max_dwell')), 'smoothing_window': int(p('smoothing_window'))}
+                'max_dwell': float(p('max_dwell')), 'smoothing_window': int(p('smoothing_window')),
+                'stiffness_profile': str(p('stiffness_profile')),
+                'along': float(p('stiffness_along')), 'across': float(p('stiffness_across'))}
 
     def _write_bundle(self, bundle, info):
         bundle.save(os.path.join(self.demo['dir'], 'source_bundle'))
