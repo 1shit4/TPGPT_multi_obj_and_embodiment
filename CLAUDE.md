@@ -454,6 +454,8 @@ The planner's support height is: its `support_height` parameter, else the calibr
 - `docs/hardware/CALIBRATION.md` — camera calibration: procedure, tooling, current values, measured
   shelf geometry.
 - `docs/hardware/commands.md` — how to launch the robot, pipeline, teaching, planning and execution.
+- `docs/hardware/OPERATOR_CHECKLIST.md` — one page for a session: the protocol poses, homing,
+  what the planner's log lines mean and what to do about each.
 - `docs/hardware/FAITHFULNESS_AUDIT.md` — every place the hardware implementation differs from the
   simulation's, with file:line on both sides, severity, fix order and status.
 - `docs/hardware/FRESH_START.md` — what counts as evidence after the move (nothing before it), and
