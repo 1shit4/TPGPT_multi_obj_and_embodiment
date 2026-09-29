@@ -280,6 +280,8 @@ X6 overrides some selection defaults from its frozen `method:` block; see
 ros2 run ycb_pointcloud_pipeline free_drive                     # float the arm (gravity comp)
 ros2 run ycb_pointcloud_pipeline joint_homing                   # go to the home configuration
 ros2 action send_goal /franka_gripper/move franka_msgs/action/Move "{width: 0.0, speed: 0.03}"
+
+ros2 action send_goal /franka_gripper/move franka_msgs/action/Move "{width: 0.08, speed: 0.03}"
 ros2 run rqt_image_view rqt_image_view /ycb_detections/image    # what segmentation sees
 ros2 node list                                                  # the authority on what is running
 ros2 daemon stop && ros2 daemon start                           # if node/topic lists look stale
@@ -377,7 +379,12 @@ any edge**. 8-10 of them, spread in x, y **and z** (table, both shelf boards, a 
   calibration precision. Confirm the `Clicked point in base:` line in terminal 2. Re-click freely —
   only the newest click counts.
 - Close the gripper, float the arm, put the **centre of the closed fingertip face** on that same
-  sticker, keep hand tilt **under 30 deg**, and hold:
+  sticker, and hold — **press the fingertip FACE flat on the surface** so its centre is the contact point — that is
+what `probe_offset` models. On a horizontal face the hand is near vertical (tilt < ~30 deg);
+on a **vertical** face (an object's front, e.g. on the bottom shelf where the hand cannot
+come down from above) the hand is near horizontal, ~80 deg tilt, and that is **correct**.
+The error to avoid is the face meeting the surface at an angle, where an edge contacts.
+
 ```bash
 ros2 action send_goal /franka_gripper/move franka_msgs/action/Move "{width: 0.0, speed: 0.03}"
 ```
@@ -428,7 +435,11 @@ on anything. The touchable point is the fingertip face, 9.5 mm further along TCP
 ```bash
 python3 ~/calib_tools/touch_point.py     # prints the corrected probe point + hand tilt, live
 ```
-Keep tilt small; beyond ~30 deg an edge of the face contacts instead of its centre.
+The tilt readout is a guide, not a limit: **press the fingertip FACE flat on the surface** so its centre is the contact point — that is
+what `probe_offset` models. On a horizontal face the hand is near vertical (tilt < ~30 deg);
+on a **vertical** face (an object's front, e.g. on the bottom shelf where the hand cannot
+come down from above) the hand is near horizontal, ~80 deg tilt, and that is **correct**.
+The error to avoid is the face meeting the surface at an angle, where an edge contacts.
 
 Reading a point off the cloud instead (no robot, ~5 mm, fits the local plane around your click):
 ```bash

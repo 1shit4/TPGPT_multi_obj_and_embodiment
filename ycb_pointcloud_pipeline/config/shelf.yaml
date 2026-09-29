@@ -22,12 +22,32 @@ shelf:
   # tape, keyed M1..M14 as marked on the diagram docs/hardware/shelf_measurements.html. The shelf is
   # placed in the robot frame by the points touched on 2026-09-21 (CALIBRATION.md), below.
   # (The pre-tape estimate that stood here is in git history, commit 7d57a00.)
+  # RE-TOUCHED 2026-09-26 after the setup was moved by someone else. The shelf itself is back
+  # where it was: the slot marks came back within 3.9 and 1.6 mm in x/y and the table within
+  # 1.2 mm. The TOP BOARD has been put back DOWN to its original notch, +0.3310 -> +0.3211
+  # (0.3213 on 2026-09-21), so the board gap is 244 mm again, not 256.
+  # `bottom_board_top` cannot be touched from above (the top board is over it). It is three
+  # rests of the finger PADS on it (~/calib_tools/rest_point.py), 0.0730/0.0731/0.0732 -- a 0.2 mm
+  # spread, against 2.7 mm for the same measurement on 09-23, and 1.6 mm below that day's 0.0747.
+  # The tool's caution line read "body +23 mm", which is the 31.6 - 8.75 mm the hand geometry
+  # predicts for a horizontal hand resting on a pad's side face: the body was hanging past the
+  # board's front edge, not touching. So the pads were the contact and the reading stands.
+  # Previously RE-TOUCHED 2026-09-23, after the camera was bumped and recalibrated. The shelf itself did
+  # NOT move: the two slot marks came back within 1.6 and 3.5 mm in x/y, the bottom board within
+  # 2.1 mm and the table within 0.9 mm. What changed is the TOP BOARD, re-seated +9.7 mm, so the
+  # board gap went 244.5 -> 256.3 mm. Tape cross-check still holds: apron 72 + thickness 18 = 90 mm
+  # predicted against 89.2 mm measured from table to bottom board.
+  # The bottom board cannot be touched from above (the top board is over it); its height is the
+  # mean of three rests of the finger PADS on it, left to right (0.0762, 0.0744, 0.0735 -> 2.7 mm
+  # of slope or pad-edge contact), via ~/calib_tools/rest_point.py.
+  # Superseded 2026-09-21 values: left [0.6842,-0.2774] right [0.4636,-0.3529]
+  #                               bottom 0.0768  top 0.3213  table -0.0136
   anchors:
-    left_slot: [0.6842, -0.2774]     # touched: top shelf, left slot
-    right_slot: [0.4636, -0.3529]    # touched: top shelf, right slot
-    bottom_board_top: 0.0768         # touched
-    top_board_top: 0.3213            # touched
-    table: -0.0136                   # touched
+    left_slot: [0.6884, -0.2758]     # touched 2026-09-26: top shelf, left slot
+    right_slot: [0.4634, -0.3505]    # touched 2026-09-26: top shelf, right slot
+    bottom_board_top: 0.0731         # rested (pads) 2026-09-26, mean of 3, 0.2 mm spread
+    top_board_top: 0.3211            # touched 2026-09-26, mean of the two slot marks
+    table: -0.0132                   # touched 2026-09-26, mean of 3
   tape_mm:                             # 2026-09-22
     slot_left_to_left_panel: 201       # M1  (hard to hold square)
     slot_right_to_right_panel: 142     # M2  (hard to hold square)

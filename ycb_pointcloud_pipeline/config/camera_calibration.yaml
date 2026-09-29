@@ -19,7 +19,22 @@ camera_calibration:
   #                                then camera_link_to_optical is not used).
   # Rotation: give ONE of rotation_quaternion_xyzw, rotation_rpy_deg,
   # rotation_rpy_rad (ROS fixed-axis roll-pitch-yaw).
-  # REFINED 2026-09-21 (2nd pass): the 8 correspondences alone left a rotation
+  # RECALIBRATED 2026-09-26: the whole setup was moved by someone else and the camera was
+  # knocked ~46 mm / 2.9 deg. The old calibration read the table +24.6 mm and the top board
+  # +44.6 mm out. 9 correspondences (all touched face-flat, fit RMS 7.1 mm) refit jointly with
+  # two plane constraints (table -0.0132, top board +0.3211, both touched the same session).
+  # Verified on a fresh frame: table +3.8 mm, top board +2.1 mm.
+  # NOTE: an attempt to calibrate from the ARM's own geometry instead of stickers FAILED --
+  # three sweeps of one setup disagreed by 176 mm, because fr3.LinkHull is a convex hull of a
+  # non-convex link. See the header of ~/calib_tools/arm_sweep.py. Use correspondences.
+  # Superseded 2026-09-23 pass (the table, which cannot move, had
+  # drifted to -9 mm). 15 correspondences: 6 recovered from the ROS log after the machine hung
+  # mid-session, 9 recorded after. Fit RMS 14.1 mm -- high, because many stickers sit in the
+  # shelf region the camera sees at a grazing angle -- but the transform is good: refit jointly
+  # against those 15 points AND two horizontal-plane constraints (table -0.0144, top board
+  # +0.3310, both re-touched today), then validated on a FRESH frame at table +1.5 mm,
+  # top board -1.8 mm, against -5.2 / -9.4 for the superseded calibration.
+  # Note: judge by surfaces, never by fit RMS. Pass 2 of 2026-09-21, superseded: the 8 correspondences alone left a rotation
   # error that showed up as position-dependent height bias -- table -9.6 mm,
   # top shelf +4.1 mm, bottom shelf +8.5 mm against touched truth. Re-fit
   # jointly against those 8 points AND three horizontal-plane constraints
@@ -45,8 +60,8 @@ camera_calibration:
   base_to_camera:
     parent_frame: base
     child_frame: camera_color_optical_frame
-    translation: [1.196360, 0.504620, 0.860023]                               # m
-    rotation_quaternion_xyzw: [-0.371615, -0.835432, 0.368495, 0.167833]
+    translation: [1.199143, 0.452138, 0.859710]                               # m
+    rotation_quaternion_xyzw: [-0.382130, -0.837698, 0.349104, 0.174255]
     is_placeholder: false
 
   # --------------------------------------------------------------------------
@@ -90,7 +105,7 @@ camera_calibration:
   verification:
     # Height of the table surface in the base frame, measured independently
     # (e.g. touch it with the fingertips and read /current_pose z). null = skip.
-    expected_table_height: -0.0136  # m: measured 2026-09-21 by touching (3 pts, 0.2 mm spread)
+    expected_table_height: -0.0132  # m: re-touched 2026-09-26 (3 pts); -0.0144 on 09-23
     max_intrinsics_mismatch_px: 2.0
     max_table_tilt_deg: 1.5
     max_table_height_error_m: 0.005
