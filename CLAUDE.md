@@ -476,6 +476,14 @@ The planner's support height is: its `support_height` parameter, else the calibr
   Every other contact test had a tolerance (1 mm into exact geometry, 5 mm for resting); the
   robot-against-cloud test had none, so a finger pad clipping four points of a can's rim by 1–2 mm,
   114 mm above the board and moving away, refused an otherwise perfect plan.
+- **The path check poses the arm at the waypoint, to 1 mm / 0.6 deg** (2026-09-30, audit A3b).
+  Reachability is still the sim's 15 mm, but the IK stops as soon as it is inside it, and the
+  collision tests used to pose the arm there -- a median 10.8 mm (max 14.8, up to 8.6 deg) from
+  the waypoint on the 18:39 path, ten times the 1 mm contact tolerance. On the fifteen live
+  captures: 374 -> 372 admissible, the losses real contacts at bottom_left. `path_feasibility`
+  also takes `clearance` and per-piece `tilt` (a gap to keep; off in the planner, used by the
+  replay): a uniform 5 mm would cost 374 -> 333 and empty bottom_left for the banana and mug.
+  `SHELF_AND_PATH_CHECK.md`, "Where the arm is posed, and a margin".
 - **Nothing from before the 2026-09-21 camera/shelf move is evidence** (user, 2026-09-22): not the X6
   trials in `outputs/hardware/hw_2026_09_x6/`, their clouds or plans, nor the 2026-09-15 banana
   demo (its object cloud went through the old calibration). Start from fresh captures and a fresh

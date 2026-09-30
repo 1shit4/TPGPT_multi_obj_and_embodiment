@@ -213,6 +213,13 @@ waypoint (the sim's spacing). At each one:
    - If only the **orientation** can't be reached, the executor will relax it, so the check tests
      the posture it will actually take, marked `(relaxed)`.
    - If even the **position** can't be reached, the path is rejected (see Reachability).
+   - **Where the arm is posed** (since 2026-09-30): "reachable" is decided at the simulation's
+     tolerances (15 mm, 8.6 deg), but the arm is then solved again to within 1 mm and 0.6 deg of
+     the waypoint, and the collision tests below use that posture. The solver stops as soon as it
+     is inside the tolerances, often without moving from the previous waypoint's answer, so
+     before this the posed arm sat a median 10.8 mm (up to 14.8 mm and 8.6 deg) from where the
+     controller will drive it -- ten times the 1 mm contact tolerance. See "Where the arm is posed,
+     and a margin".
 2. **The robot's pieces** at that posture: the 8 arm links as convex shapes around their real
    collision meshes, and the hand as boxes. On the Franka Hand, the palm (`hand_body`) is separate
    from the finger boxes. Fingers are open before the grasp and closed to the object's width while
@@ -275,6 +282,75 @@ when none of them touches it.
   a plan the criterion refused.
 - **Reported:** `orientation_relaxed`, `relaxed_in_pick_or_place`, `skipped` (position out of reach)
   and `first_kinematic`.
+
+## Where the arm is posed, and a margin (2026-09-30)
+
+**Posing.** Two tolerances are easy to confuse. `CONTACT_DEPTH_TOLERANCE` (1 mm, the simulation's
+`tpgpt.grasp.filters` constant) is how deep two surfaces may meet before it counts as contact: it
+absorbs the arithmetic of surfaces that just touch, and it is unchanged. `REACH_TOLERANCE` (15 mm,
+also the simulation's) is how close the IK must get for a waypoint to count as reachable. The
+solver stops the moment it is inside it -- often at once, with the previous waypoint's joints
+unchanged -- and the collision tests used that posture. On the 18:39 demonstration's path the arm
+they tested sat a median **10.8 mm** (90th percentile 13.9, max 14.8) and up to **8.6 deg** from its
+waypoint: the check was accurate to about 15 mm, not 1. Now reachability is still decided at the
+simulation's tolerances, and the posture is then solved again to 1 mm and 0.6 deg
+(`POSE_TOLERANCE`, `POSE_ROTATION_TOLERANCE`); all 149 waypoints of that path converge (a posture
+that does not is kept and counted, `unrefined`). This is a deviation from the simulation's check
+(audit A3b), in the direction of the arm the controller will actually drive.
+
+**A margin** (`clearance`, `tilt`; off in the planner). "No contact" is not "a gap". For a path
+the arm will follow only approximately, `path_feasibility` can ask for a gap: each robot piece
+keeps `clearance` plus `tilt` times its own distance from the grasp point (a tilt turns the hand
+about the grasp point, so the finger pads, 57 mm out, move far less than the hand's top corners at
+169 mm) from the table, the shelf model and the seen points, and the carried object keeps it from
+side panels, board edges and undersides and the seen points. Not given the margin: the arm against
+itself, the fixed base (13 mm above the table), the object at the pick, and the object coming down
+onto a support's top face (the set-down itself). The replay uses it
+(`tpgpt/hardware/replay.py`: the taught path plus the arm's measured stray); the planner will when
+it checks the transported arm path (plan step 6).
+
+**What each costs, measured** on the captures of the fifteen plans that succeeded live on
+2026-09-26 (five objects, three slots; the 18:39 demonstration, library 2000, budget 100, from
+home), with `python -m tpgpt.hardware.coverage --clearance`. Admissible / planned, first admissible
+rank. *before*: the check as it was (this morning's code; it reproduces the 2026-09-29 numbers of
+`GRASP_LIBRARY.md` item 9 exactly). *posed*: the arm at the waypoint. *5 mm*, *10 mm*: posed, with a
+uniform clearance on the plan's path.
+
+| object | slot | before | posed | 5 mm | 10 mm |
+|---|---|---|---|---|---|
+| apple | top_right | 31/100, 3 | 31/100, 3 | 26/100, 3 | 21/100, 3 |
+| apple | top_left | 22/100, 6 | 23/100, 6 | 20/100, 6 | 11/100, 38 |
+| apple | bottom_left | 2/63, 5 | 2/63, 5 | 2/63, 5 | 0/63, - |
+| banana | top_right | 50/100, 0 | 47/100, 0 | 28/100, 0 | 16/100, 4 |
+| banana | top_left | 63/100, 0 | 63/100, 0 | 61/100, 0 | 32/100, 0 |
+| banana | bottom_left | 2/20, 5 | 1/20, 10 | 0/20, - | 0/20, - |
+| foam brick | top_left | 28/46, 0 | 29/46, 0 | 29/46, 0 | 27/46, 0 |
+| foam brick | bottom_left | 2/15, 2 | 2/15, 2 | 2/15, 2 | 1/15, 2 |
+| foam brick | top_right | 27/39, 0 | 27/39, 0 | 26/39, 0 | 25/39, 0 |
+| mug | bottom_left | 2/59, 3 | 1/59, 3 | 0/59, - | 0/59, - |
+| mug | top_left | 56/100, 0 | 58/100, 0 | 58/100, 0 | 56/100, 0 |
+| mug | top_right | 25/100, 7 | 24/100, 7 | 18/100, 16 | 13/100, 16 |
+| pudding box | top_right | 32/55, 0 | 32/55, 0 | 32/55, 0 | 28/55, 0 |
+| pudding box | top_left | 28/68, 0 | 29/68, 0 | 29/68, 0 | 29/68, 0 |
+| pudding box | bottom_left | 4/30, 2 | 3/30, 2 | 2/30, 2 | 1/30, 2 |
+| **all** | | **374** | **372** | **333** | **260** |
+
+- **Posing the arm at the waypoint changes almost nothing overall** (374 -> 372 admissible), but
+  per capture it moves 1-3 grasps both ways, and where it removes one it is a real contact the
+  loose posture missed: at bottom_left the arm in the top board's underside or the right wall
+  (banana 2 -> 1, mug 2 -> 1, pudding box 4 -> 3). Two banana candidates the old check called
+  unreachable solve now, and then collide. Run time unchanged (within the noise of the loaded
+  machine).
+- **A 5 mm margin** costs little in the top slots except the banana into top_right (47 -> 28: the
+  hand and arm within 5 mm of the right wall) and the mug into top_right (24 -> 18). **bottom_left
+  goes to 0 for the banana and the mug**, and 2 for the others.
+- **At 10 mm** bottom_left is 0-1 everywhere, and the hand near the table at the grasp starts to
+  fail too (50 candidates on the banana's top_right capture).
+- What this does and does not say: the uniform margin here is applied to the transported labels.
+  Step 6's margin will be the replay's measured stray, per waypoint, carried along with the arm's
+  measured path, which may be smaller in slow, tight places (the set-down) and larger in fast
+  transit. Raw in `outputs/hardware/clearance_20260930/`, logs in
+  `~/tpgpt_coverage_logs/clearance_*.log`.
 
 ## The scene cloud
 
