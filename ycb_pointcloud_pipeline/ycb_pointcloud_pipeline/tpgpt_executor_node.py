@@ -1132,7 +1132,7 @@ class TpgptExecutorNode(Node):
             log.warn(f"The arm strayed beyond the margin this pass was checked with at "
                      f"{exceeded['labels']} labels (first {exceeded['first']}), by up to "
                      f"{exceeded['worst_mm']:.1f} mm and {exceeded['worst_tilt_deg']:.2f} deg: "
-                     f"the {exceeded['checked_with']} margin was too small there. The next pass "
+                     f"the margin ({exceeded['checked_with']}) was too small there. The next pass "
                      'is checked with what this one measured.')
         if run < runs:
             log.info(f'Next: run pass {k} again (run {run + 1} of {runs}), the same command.')

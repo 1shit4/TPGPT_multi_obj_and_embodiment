@@ -741,8 +741,10 @@ def update(out_dir, gain: float | None = None) -> dict:
             if error["error_rms_mm"] > prev:
                 report["warning"] = (f"pass {k} ({error['error_rms_mm']:.1f} mm RMS) is worse than "
                                      f"pass {k - 1} ({prev:.1f} mm): learning is not converging "
-                                     f"at this gain. Delete pass_{k + 1:03d} and update again "
-                                     "with --gain 0.5.")
+                                     "at this gain. " + (
+                                         f"Delete pass_{k + 1:03d} and update again with --gain "
+                                         "0.5." if settings.gain > 0.5 else
+                                         f"This update already used gain {settings.gain}."))
     (_pass_dir(out, k) / "report.json").write_text(json.dumps(report, indent=2))
     return report
 
@@ -915,7 +917,7 @@ def _print_status(out_dir):
                 line += ("\n    inside the margin it was checked with" if not ex["labels"] else
                          f"\n    MARGIN EXCEEDED at {ex['labels']} labels (first {ex['first']}), by "
                          f"up to {ex['worst_mm']:.1f} mm / {ex['worst_tilt_deg']:.2f} deg: the "
-                         f"{ex['checked_with']} margin was too small there")
+                         f"margin it was checked with ({ex['checked_with']}) was too small there")
             if "gain" in row:
                 line += (f"\n    next pass: attractor moved up to {row['update']['update_max_mm']:.1f}"
                          f" mm and {row['rotation_update']['update_max_deg']:.2f} deg (gain "
