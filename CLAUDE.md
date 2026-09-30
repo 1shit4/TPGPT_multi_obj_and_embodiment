@@ -264,8 +264,10 @@ The planner's support height is: its `support_height` parameter, else the calibr
   orientation** are learned (gain 1.0). Pass 0 is run twice (the spread). Before each pass the
   **taught path, widened by how far the arm strays from it**, is checked against the shelf model
   and the table -- not the attractor: pass 0 with the stiffness checks' measurements
-  (`replay.MEASURED_ROTATION`, 6.5 mm sideways), later passes with what the previous one
-  measured. Nothing is learned from 0.5 s before the grasp mark. **A replay learns the lag at its
+  (`replay.MEASURED_ROTATION`, 6.5 mm sideways -- about half what the 18:39 pass 0 actually
+  strayed), later passes over a **bracket**: the paths from where the last pass went to 50 % past
+  the taught path, each with the run-to-run spread, per point within its segment (audit B1 5c;
+  a ball the size of the last stray refused pass 1 at the pick). Nothing is learned from 0.5 s before the grasp mark. **A replay learns the lag at its
   own `speed_scale`**: run the resulting labels at the same one. **A dry run of a replay only
   checks** (`replay_record_dry:=true` simulates into it, for tests only). **Replay (and execute
   the learned labels) at `rotational_stiffness:=30.0 transit_rotational_scale:=1.0`** (user,

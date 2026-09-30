@@ -891,14 +891,18 @@ class TpgptExecutorNode(Node):
                                        with_object=with_object, start_q=self.measured_joints(),
                                        until=int(p('replay_until_label')))
             clearance, tilt, source = rp.pass_margin(root, k)
-            margin_text = (f'{clearance.min() * 1000:.1f}-{clearance.max() * 1000:.1f} mm and '
-                           f'{np.degrees(tilt.min()):.1f}-{np.degrees(tilt.max()):.1f} deg '
-                           f'({source})')
+            around = (f'{clearance.min() * 1000:.1f}-{clearance.max() * 1000:.1f} mm and '
+                      f'{np.degrees(tilt.min()):.1f}-{np.degrees(tilt.max()):.1f} deg')
+            if source.startswith('the bracket'):
+                what = (f'{source} (from where it went to {rp.BRACKET_OVERSHOOT * 100:.0f} % past '
+                        f'the taught path), {around} around each path')
+            else:
+                what = f'the taught path with a margin of {around} ({source})'
+            margin_text = what
             if verdict:
-                raise AbortRun(f'pass {k}: the taught path with a margin of {margin_text}: '
-                               f'{verdict} (shelf {shelf_config}); not replayed')
-            log.info(f'pass {k}: the taught path is clear of the shelf model and the table with a '
-                     f"margin of {margin_text}{', carrying the object' if with_object else ''}")
+                raise AbortRun(f'pass {k}: {what}: {verdict} (shelf {shelf_config}); not replayed')
+            log.info(f'pass {k}: clear of the shelf model and the table: {what}'
+                     f"{', carrying the object' if with_object else ''}")
         else:
             margin_text = 'NOT CHECKED'
             log.warn('replay_shelf_config empty: the path is NOT checked')

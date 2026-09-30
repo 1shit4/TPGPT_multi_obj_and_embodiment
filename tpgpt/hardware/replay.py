@@ -40,12 +40,15 @@ worst they saw across the motion, 5.3-6.4 mm on 2026-09-29, 4.9-5.8 on 2026-09-3
 tilt the rotational spring leaves at the stiffness each label runs at -- the resting tilt
 after a move plus the turn rate times the turning time constant, both measured at 15, 30, 45
 and 60 N m/rad on 2026-09-30 (:data:`MEASURED_ROTATION`). ``use-checks`` replaces them with
-other stiffness checks. Every later pass's margin is **measured**: the previous pass's
-worst sideways stray and tilt around each label (over ``MARGIN_WINDOW`` labels either
-side) plus the run-to-run spread. If learning works the next pass strays less; if it
-overshoots, the stray moves to the other side at about the same size. Either way the margin
-covers it -- and after each pass the stray it actually had is compared with the margin it
-was checked with (``pass_error``: ``margin_exceeded``), so the assumption is tested every
+other stiffness checks. Every later pass is checked over a **bracket** instead of a ball
+(:data:`BRACKET_OVERSHOOT`): the paths from where the previous pass went, through the taught
+path, to 50 % past it -- where the arm can land if the learning corrects not at all, fully,
+or over-corrects by half -- each with the run-to-run spread around it, point by point, taken
+over ``MARGIN_WINDOW`` labels within its own segment (:data:`SEGMENT_NAMES`). A stray has a
+direction; a ball the size of it also reaches where the arm never went (2026-09-30: pass 1
+refused, a 10.6 mm ball at the pick reaching down to the table, where the arm had been
+8-18 mm *above* the path). After each pass the node checks that the arm stayed inside what
+it was checked with (``pass_error``: ``margin_exceeded``), so the assumption is tested every
 time. No margin is smaller, and no excess is reported, below what the check itself
 resolves (``MARGIN_FLOOR``, ``TILT_FLOOR``: 1 mm and 0.6 deg).
 
@@ -155,6 +158,76 @@ def _running_max(x: np.ndarray, half: int) -> np.ndarray:
     from scipy.ndimage import maximum_filter1d
 
     return maximum_filter1d(np.asarray(x, dtype=float), 2 * int(half) + 1, mode="nearest")
+
+
+#: The task's segments, cut at the grasp and release contact windows: a stray is set by what
+#: the arm is doing, so a margin taken over neighbouring labels never reaches into the next one.
+SEGMENT_NAMES = ("approach", "pick", "lift and carry", "place", "retreat")
+
+
+def segment_ids(info: dict) -> np.ndarray:
+    """Each label's segment (an index into :data:`SEGMENT_NAMES`)."""
+    n = int(info["n_labels"])
+    (g0, g1), (r0, r1) = info["frozen_windows"]
+    ids = np.full(n, 2)
+    ids[:max(g0, 0)] = 0
+    ids[max(g0, 0):g1 + 1] = 1
+    ids[max(r0, 0):r1 + 1] = 3
+    ids[r1 + 1:] = 4
+    return ids
+
+
+def _segment_max(x: np.ndarray, ids: np.ndarray, half: int) -> np.ndarray:
+    """:func:`_running_max`, each segment on its own."""
+    out = np.empty_like(np.asarray(x, dtype=float))
+    for seg in np.unique(ids):
+        m = ids == seg
+        out[m] = _running_max(np.asarray(x, dtype=float)[m], half)
+    return out
+
+
+#: After the first pass, the next one is checked over a **bracket**, not a ball: the paths from
+#: where the last pass went (``alpha`` 0), through the taught path (1), to ``BRACKET_OVERSHOOT``
+#: past it (1.5: the learning over-correcting by half), in steps of ``BRACKET_STEP``. A stray
+#: has a direction -- descending to the 18:39 pick the arm sat 8-18 mm *above* the path, away
+#: from the table -- and a ball of that size also reaches below, toward the table, where the
+#: arm never went (it refused pass 1 there, 2026-09-30). The user set the overshoot to 50 %.
+BRACKET_OVERSHOOT = 0.5
+BRACKET_STEP = 0.1
+
+
+def bracket_path(reference, reference_rot, start, start_rot, alpha: float):
+    """The path ``alpha`` of the way from ``start`` (where a pass went) to the taught path,
+    and past it for ``alpha > 1``: ``(positions, rotations)``, one per label."""
+    from scipy.spatial.transform import Rotation
+
+    P = np.asarray(reference, dtype=float)
+    R = np.asarray(reference_rot, dtype=float)
+    F = np.asarray(start, dtype=float)
+    rv = rotation_errors(R, start_rot)                  # R = exp(rv) R_start
+    return (P + (1.0 - alpha) * (F - P),
+            Rotation.from_rotvec(-(1.0 - alpha) * rv).as_matrix() @ R)
+
+
+def _bracket_alphas(overshoot: float, step: float) -> np.ndarray:
+    return np.arange(0.0, 1.0 + overshoot + 1e-9, step)
+
+
+def _off_bracket(reference, reference_rot, start, start_rot, measured, measured_rot,
+                 overshoot: float) -> tuple[np.ndarray, np.ndarray]:
+    """How far a measured pass lay from its bracket, per label: ``(m, rad)``."""
+    P = np.asarray(reference, dtype=float)
+    A = np.asarray(start, dtype=float)
+    B = P - overshoot * (A - P)
+    M = np.asarray(measured, dtype=float)
+    ab = B - A
+    t = np.clip(((M - A) * ab).sum(1) / np.maximum((ab * ab).sum(1), 1e-12), 0.0, 1.0)
+    dist = np.linalg.norm(A + t[:, None] * ab - M, axis=1)
+    angle = np.full(len(P), np.inf)
+    for alpha in np.linspace(0.0, 1.0 + overshoot, 31):
+        _, rot = bracket_path(P, reference_rot, A, start_rot, alpha)
+        angle = np.minimum(angle, np.linalg.norm(rotation_errors(rot, measured_rot), axis=1))
+    return dist, angle
 
 
 def strays(reference, reference_rot, measured, measured_rot,
@@ -593,6 +666,13 @@ def pass_error(out_dir, k: int) -> tuple[dict, np.ndarray, np.ndarray]:
     margin = _pass_dir(out_dir, k) / "margin.npz"
     if margin.exists():
         m = np.load(margin)
+        if "start_positions" in m.files:
+            # checked over a bracket: how far each run lay outside it
+            side, turn = np.zeros(len(P)), np.zeros(len(P))
+            for p_, r_ in runs:
+                d_, a_ = _off_bracket(P, R, m["start_positions"], m["start_rotations"], p_, r_,
+                                      float(m["overshoot"]))
+                side, turn = np.maximum(side, d_), np.maximum(turn, a_)
         over = np.maximum(side - m["clearance"], 0.0)
         over_t = np.maximum(turn - m["tilt"], 0.0)
         bad = np.flatnonzero((over > MARGIN_FLOOR) | (over_t > TILT_FLOOR))
@@ -631,19 +711,24 @@ def update(out_dir, gain: float | None = None) -> dict:
                               settings)
     new_r, rep_r = ilc_rotation_update(load_attractor_rotations(out, k, bundle), mean_r,
                                        labels.orientations, period, frozen, settings)
-    # The next pass's margin: this pass's worst stray (over its runs) plus the spread.
-    side, turn = np.zeros(info["n_labels"]), np.zeros(info["n_labels"])
-    for p, r in measured_runs(out, k, info):
-        s, t = strays(labels.positions, labels.orientations, p, r)
-        side, turn = np.maximum(side, s), np.maximum(turn, t)
+    # The next pass's check: the bracket from where this pass went (its runs' mean) to
+    # BRACKET_OVERSHOOT past the taught path. Around each checked path, per label: the
+    # run-to-run spread, and half the gap between neighbouring checked paths (so nothing
+    # between them goes unchecked); the worst over MARGIN_WINDOW labels within its segment.
     spread_p, spread_r, spread_from = latest_spread(out, k, info)
-    clearance = np.maximum(_running_max(side + spread_p, MARGIN_WINDOW), MARGIN_FLOOR)
-    tilt = np.maximum(_running_max(turn + spread_r, MARGIN_WINDOW), TILT_FLOOR)
+    seg = segment_ids(info)
+    e_p = np.linalg.norm(mean_p - np.asarray(labels.positions), axis=1)
+    e_r = np.linalg.norm(rotation_errors(labels.orientations, mean_r), axis=1)
+    half = 0.5 * BRACKET_STEP
+    clearance = np.maximum(_segment_max(spread_p + half * e_p, seg, MARGIN_WINDOW), MARGIN_FLOOR)
+    tilt = np.maximum(_segment_max(spread_r + half * e_r, seg, MARGIN_WINDOW), TILT_FLOOR)
     nxt = _pass_dir(out, k + 1)
     nxt.mkdir(parents=True, exist_ok=True)
     np.save(nxt / "attractor.npy", new_p)
     np.save(nxt / "attractor_rot.npy", new_r)
-    np.savez(nxt / "margin.npz", clearance=clearance, tilt=tilt, source=f"pass {k}")
+    np.savez(nxt / "margin.npz", clearance=clearance, tilt=tilt,
+             source=f"the bracket from pass {k}", start_positions=mean_p, start_rotations=mean_r,
+             overshoot=BRACKET_OVERSHOOT, step=BRACKET_STEP)
     report = {"pass": k, **error, "update": rep_p, "rotation_update": rep_r,
               "gain": settings.gain, "spread_from_pass": spread_from,
               "next_margin_max_mm": float(clearance.max() * 1000),
@@ -702,15 +787,31 @@ def check_pass(out_dir, k: int, shelf_config, rotational=None, with_object: bool
     release = info["release_index"]
     if release >= n:
         release, with_object = n - 1, False
-    check = path_check.path_feasibility(
-        labels.positions[:n], hand.ee_from_grasp(labels.orientations[:n]), labels.gripper[:n],
-        hand, world, bundle.placement.points if with_object else np.zeros((0, 3)),
-        min(info["grasp_index"], n - 1), release,
-        closed_width=float(info["object_width_closing_m"]),
-        start_q=HOME_Q if start_q is None else start_q,
-        destination_height=float(bundle.placement.destination_height),
-        clearance=clearance[:n], tilt=tilt[:n])
-    return path_check.verdict(check), check
+    margin = np.load(_pass_dir(out_dir, k) / "margin.npz")
+    if "start_positions" in margin.files:
+        paths = [(a, *bracket_path(labels.positions, labels.orientations,
+                                   margin["start_positions"], margin["start_rotations"], a))
+                 for a in _bracket_alphas(float(margin["overshoot"]), float(margin["step"]))]
+    else:
+        paths = [(1.0, np.asarray(labels.positions), np.asarray(labels.orientations))]
+    for alpha, positions, rotations in paths:
+        check = path_check.path_feasibility(
+            positions[:n], hand.ee_from_grasp(rotations[:n]), labels.gripper[:n],
+            hand, world, bundle.placement.points if with_object else np.zeros((0, 3)),
+            min(info["grasp_index"], n - 1), release,
+            closed_width=float(info["object_width_closing_m"]),
+            start_q=HOME_Q if start_q is None else start_q,
+            destination_height=float(bundle.placement.destination_height),
+            clearance=clearance[:n], tilt=tilt[:n])
+        verdict = path_check.verdict(check)
+        if verdict:
+            if len(paths) > 1:
+                where = ("where the last pass went" if alpha == 0 else "the taught path"
+                         if alpha == 1 else f"{alpha:.2f} of the way to the taught path"
+                         if alpha < 1 else f"{(alpha - 1) * 100:.0f} % past the taught path")
+                verdict = f"{verdict} -- on the bracket's path {where}"
+            return verdict, check
+    return None, check
 
 
 def status(out_dir) -> list[dict]:

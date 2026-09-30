@@ -99,11 +99,12 @@ def test_the_passes_learn_the_attractor(tmp_path):
     assert first["gain"] == 1.0
     assert errors[-1] < errors[0] / 4
     assert tilts[0] > 1.0 and tilts[-1] < 0.2              # the resting tilt, learned away
-    # every later pass's margin is measured: at least the run-to-run spread
+    # every later pass is checked over the bracket from where the last one went
     margin = np.load(root / "pass_001" / "margin.npz")
-    assert str(margin["source"]) == "pass 0"
-    assert margin["clearance"].min() > 0.0
-    assert margin["clearance"].max() * 1000 >= first["stray_max_mm"] - 1e-6
+    assert str(margin["source"]) == "the bracket from pass 0"
+    assert float(margin["overshoot"]) == rp.BRACKET_OVERSHOOT
+    assert margin["start_positions"].shape == (info["n_labels"], 3)
+    assert margin["clearance"].min() >= rp.MARGIN_FLOOR
     rows = rp.status(root)
     assert [r["runs"] for r in rows] == [2, 1, 1, 1, 1]
 
@@ -280,3 +281,52 @@ def test_diagnostic_records_are_not_runs(tmp_path):
     assert path.name == "partial_1.npz"
     assert rp.save_diagnostic(root, 0, "partial", label_index=[0.0]).name == "partial_2.npz"
     assert rp.recordings(root, 0) == [] and rp.pending_pass(root) == (0, 1)
+
+
+
+def test_the_bracket_reaches_past_the_taught_path_but_not_where_the_arm_never_went():
+    P = np.stack([np.linspace(0.3, 0.6, 20), np.zeros(20), np.full(20, 0.1)], axis=1)
+    R = np.repeat(np.eye(3)[None], 20, axis=0)
+    above = P + [0.0, 0.0, 0.012]                               # the pass went 12 mm high
+    pos, _ = rp.bracket_path(P, R, above, R, 0.0)
+    assert np.allclose(pos, above)
+    pos, _ = rp.bracket_path(P, R, above, R, 1.0)
+    assert np.allclose(pos, P)
+    pos, _ = rp.bracket_path(P, R, above, R, 1.5)
+    assert np.allclose(pos, P - [0.0, 0.0, 0.006])             # half past it: 6 mm low, not 12
+    # after the pass: a run inside the bracket is fine, one beside it is outside
+    inside = P + [0.0, 0.0, 0.003]
+    beside = P + [0.0, 0.008, 0.0]
+    d_in, _ = rp._off_bracket(P, R, above, R, inside, R, 0.5)
+    d_out, _ = rp._off_bracket(P, R, above, R, beside, R, 0.5)
+    assert d_in.max() < 1e-9 and np.allclose(d_out, 0.008)
+
+
+def test_segment_windows_stop_at_the_segment():
+    info = {"n_labels": 30, "frozen_windows": [[8, 12], [20, 24]]}
+    ids = rp.segment_ids(info)
+    assert list(ids[[0, 8, 13, 20, 29]]) == [0, 1, 2, 3, 4]
+    x = np.zeros(30)
+    x[13] = 5.0                                                 # a big stray at the carry's start
+    y = rp._segment_max(x, ids, 5)
+    assert y[12] == 0.0 and y[13:19].min() == 5.0               # not borrowed by the pick window
+
+
+def test_the_bracket_check_refuses_an_overshoot_into_the_table(tmp_path):
+    root = rp.init_replay(_taught_bundle(tmp_path), tmp_path / "replay")
+    info, bundle = rp.load_replay(root)
+    n = info["n_labels"]
+    P = np.asarray(bundle.tool_labels.positions)
+    R = np.asarray(bundle.tool_labels.orientations)
+    (root / "pass_001").mkdir()
+    np.save(root / "pass_001" / "attractor.npy", P)
+    for high, expect in ((0.02, None), (0.20, "table")):        # the last pass went this high
+        np.savez(root / "pass_001" / "margin.npz", clearance=np.full(n, 0.002),
+                 tilt=np.full(n, 0.01), source="the bracket from pass 0",
+                 start_positions=P + [0.0, 0.0, high], start_rotations=R, overshoot=0.5,
+                 step=0.25)
+        verdict, _ = rp.check_pass(root, 1, SHELF, with_object=False)
+        if expect is None:
+            assert verdict is None, verdict
+        else:
+            assert verdict is not None and expect in verdict and "past the taught path" in verdict
