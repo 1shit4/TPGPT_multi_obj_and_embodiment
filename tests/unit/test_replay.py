@@ -330,3 +330,28 @@ def test_the_bracket_check_refuses_an_overshoot_into_the_table(tmp_path):
             assert verdict is None, verdict
         else:
             assert verdict is not None and expect in verdict and "past the taught path" in verdict
+
+
+def test_the_learned_bundle_carries_the_attractor_the_arm_path_and_the_settings(tmp_path):
+    from tpgpt.hardware.source_bundle import SourceBundle
+
+    root = rp.init_replay(_taught_bundle(tmp_path), tmp_path / "replay")
+    info, bundle = rp.load_replay(root)
+    _run_pass(root, 0, info, 1)
+    _run_pass(root, 0, info, 2)
+    rp.update(root)
+    _run_pass(root, 1, info, 1)
+    rp.update(root)                                             # pass 2 written, never run
+    path = rp.export_bundle(root, tmp_path / "learned")
+    learned = SourceBundle.load(path)
+    assert np.allclose(learned.tool_labels.positions, rp.load_attractor(root, 1))  # last run
+    assert np.array_equal(learned.tool_labels.stiffness, bundle.tool_labels.stiffness)
+    assert np.array_equal(learned.tool_labels.gripper, bundle.tool_labels.gripper)
+    measured = rp._mean(rp.measured_runs(root, 1, info))[0]
+    assert np.allclose(learned.arm_path["positions"], measured)
+    assert learned.arm_path["margin"].min() >= rp.MARGIN_FLOOR
+    ex = learned.metadata["learned"]["execution"]
+    assert ex["speed_scale"] == info["speed_scale"] and ex["offset_compensation"] == "none"
+    assert ex["use_transported_stiffness"] is True and ex["arrival_hold"] is False
+    assert learned.metadata["learned"]["pass"] == 1
+    assert SourceBundle.load(tmp_path / "bundle").arm_path is None   # a taught bundle has none

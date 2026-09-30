@@ -57,6 +57,7 @@ Command line::
     python -m tpgpt.hardware.replay init --bundle <source_bundle> --out <dir> [--speed-scale 0.35]
     python -m tpgpt.hardware.replay update <dir> [--gain 1.0]
     python -m tpgpt.hardware.replay repeat <dir>
+    python -m tpgpt.hardware.replay bundle <dir> --out <bundle dir> [--pass k]
     python -m tpgpt.hardware.replay use-checks <dir> <stiffness check dir> ...
     python -m tpgpt.hardware.replay status <dir>
 
@@ -755,6 +756,63 @@ def use_checks(out_dir, check_dirs) -> dict:
     return info["first_pass_model"]
 
 
+def export_bundle(out_dir, dest, k: int | None = None) -> Path:
+    """The demonstration with its learned attractor as labels: a source bundle for the planner.
+
+    From pass ``k`` (default: the last one run -- its outcome is measured, a next pass's
+    attractor would only be predicted): positions and orientations are that pass's
+    attractor; velocities its derivative (the teacher's Savitzky-Golay, ``teach.smooth``);
+    stiffness, damping, gripper and the time belief the taught ones, unchanged. The bundle
+    also carries the path the arm really traced (``SourceBundle.arm_path``: the mean of the
+    pass's runs, with the latest run-to-run spread as its margin), which is what the
+    planner checks, and the settings the attractor was learned under
+    (``metadata["learned"]["execution"]``), which the executor then runs with: the lag it
+    learned exists at that speed and that stiffness only.
+    """
+    from tpgpt.hardware.teach import smooth
+
+    out = Path(out_dir).expanduser()
+    info, bundle = load_replay(out)
+    recorded = [j for j in passes(out) if recordings(out, j)]
+    if not recorded:
+        raise FileNotFoundError(f"no recorded pass in {out}")
+    k = recorded[-1] if k is None else int(k)
+    if k not in recorded:
+        raise FileNotFoundError(f"pass {k} has no recording")
+    error, mean_p, mean_r = pass_error(out, k)
+    labels = bundle.tool_labels
+    positions = load_attractor(out, k)
+    _, velocities = smooth(positions, float(info["dt"]))
+    learned_labels = labels.replace(positions=positions, velocities=velocities,
+                                    orientations=load_attractor_rotations(out, k, bundle))
+    rotational = np.concatenate([np.load(r)["rotational"] for r in recordings(out, k)])
+    spread_p, spread_r, spread_from = latest_spread(out, k, info)
+    seg = segment_ids(info)
+    margin = np.maximum(_segment_max(spread_p, seg, MARGIN_WINDOW), MARGIN_FLOOR)
+    metadata = dict(bundle.metadata)
+    metadata["position_reference"] = (f"learned attractor: pass {k} of the replay {out} (ILC, "
+                                      "audit B1); the arm's own path is arm_path.npz")
+    metadata["learned"] = {
+        "replay": str(out), "pass": k, "runs": error["runs"],
+        "error_rms_mm": error["error_rms_mm"], "error_max_mm": error["error_max_mm"],
+        "at_marks": error["at_marks"], "spread_from_pass": spread_from,
+        "spread_max_mm": float(spread_p.max() * 1000),
+        "source_bundle": info["bundle"],
+        "execution": {
+            "speed_scale": float(info["speed_scale"]),
+            "rotational_stiffness": float(rotational.max()),
+            "transit_rotational_scale": float(rotational.min() / rotational.max()),
+            "use_transported_stiffness": True,
+            "offset_compensation": "none",
+            "arrival_hold": False,
+        },
+    }
+    learned = SourceBundle(tool_labels=learned_labels, placement=bundle.placement,
+                           metadata=metadata,
+                           arm_path={"positions": mean_p, "rotations": mean_r, "margin": margin})
+    return learned.save(Path(dest).expanduser())
+
+
 def check_pass(out_dir, k: int, shelf_config, rotational=None, with_object: bool = True,
                start_q=None, until: int | None = None) -> tuple[str | None, dict]:
     """The taught path, with pass ``k``'s margin, against the shelf model and the table:
@@ -877,6 +935,11 @@ def main(argv=None):
     u.add_argument("--gain", type=float, default=None, help="ILC gain for this update (default 1.0)")
     r = sub.add_parser("repeat", help="run the last pass once more with the same attractor")
     r.add_argument("dir")
+    x = sub.add_parser("bundle", help="a source bundle with the learned attractor as labels")
+    x.add_argument("dir")
+    x.add_argument("--out", required=True, help="the bundle directory to write")
+    x.add_argument("--pass", dest="k", type=int, default=None,
+                   help="the pass to take (default: the last one run)")
     c = sub.add_parser("use-checks", help="pass 0's margin from stiffness checks' measurements")
     c.add_argument("dir")
     c.add_argument("checks", nargs="+", help="stiffness check directories "
@@ -900,6 +963,13 @@ def main(argv=None):
         report = update(args.dir, args.gain)
         print(f"pass {report['pass']} -> pass {report['pass'] + 1}: attractor written.")
         _print_status(args.dir)
+    elif args.command == "bundle":
+        path = export_bundle(args.dir, args.out, args.k)
+        b = SourceBundle.load(path)
+        lr = b.metadata["learned"]
+        print(f"learned bundle at {path}: pass {lr['pass']} ({lr['runs']} run(s), "
+              f"{lr['error_rms_mm']:.1f} mm RMS from the taught path); execute with "
+              + ", ".join(f"{k}={v}" for k, v in lr["execution"].items()))
     elif args.command == "repeat":
         k, runs = add_run(args.dir)
         print(f"pass {k} will be run {runs} times; run the replay again.")

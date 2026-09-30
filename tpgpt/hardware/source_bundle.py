@@ -37,6 +37,7 @@ from tpgpt.sim.keypoints import GraspFrame, ObjectPlacement
 from tpgpt.transport.labels import PolicyLabels
 
 LABELS_FILE = "tool_labels.npz"
+ARM_PATH_FILE = "arm_path.npz"
 PLACEMENT_FILE = "placement.npz"
 MANIFEST_FILE = "manifest.json"
 
@@ -107,11 +108,18 @@ class SourceBundle:
             ``transport_labels`` receive in ``pipeline.run``.
         placement: Source object cloud, grasp, support and destination.
         metadata: Provenance: git state, seed, base pose, offsets used.
+        arm_path: Where the arm really went while commanded with these labels, when the
+            labels are a learned attractor (``tpgpt.hardware.replay.export_bundle``):
+            ``positions`` (N, 3) grasp point, ``rotations`` (N, 3, 3) grasp convention and
+            ``margin`` (N,) m, its run-to-run spread. The planner checks this path, carried
+            through the same map, instead of the labels (the arm does not go where the spring
+            pulls). None for a bundle whose labels are the path itself.
     """
 
     tool_labels: PolicyLabels
     placement: ObjectPlacement
     metadata: dict = field(default_factory=dict)
+    arm_path: dict | None = None
 
     @property
     def dt(self) -> float:
@@ -133,6 +141,9 @@ class SourceBundle:
             destination_height=np.array(p.destination_height),
         )
         (directory / MANIFEST_FILE).write_text(json.dumps(self.metadata, indent=2, default=str))
+        if self.arm_path is not None:
+            np.savez_compressed(directory / ARM_PATH_FILE,
+                                **{k: np.asarray(v) for k, v in self.arm_path.items()})
         return directory
 
     @classmethod
@@ -156,4 +167,8 @@ class SourceBundle:
             )
         manifest = directory / MANIFEST_FILE
         metadata = json.loads(manifest.read_text()) if manifest.exists() else {}
-        return cls(tool_labels=labels, placement=placement, metadata=metadata)
+        arm_path = None
+        if (directory / ARM_PATH_FILE).exists():
+            with np.load(directory / ARM_PATH_FILE, allow_pickle=False) as d:
+                arm_path = {k: d[k] for k in d.files}
+        return cls(tool_labels=labels, placement=placement, metadata=metadata, arm_path=arm_path)
