@@ -55,6 +55,7 @@ Run with the TPGPT environment and the robot container up (./scripts/run.sh robo
 
 import csv
 import dataclasses
+import json
 import os
 import threading
 import time
@@ -89,10 +90,58 @@ class AbortRun(RuntimeError):
     pass
 
 
+#: The settings a learned plan's labels are right at (audit B1, step 6): a bundle from
+#: ``python -m tpgpt.hardware.replay bundle`` has labels that are an attractor learned by
+#: replaying the demonstration, and records them (plan.json ``metadata.learned_execution``).
+#: The lag they were learned against depends on each. A parameter left at its default takes
+#: the learned value; one set to anything else is refused.
+LEARNED_SETTINGS = ('speed_scale', 'rotational_stiffness', 'transit_rotational_scale',
+                    'use_transported_stiffness', 'offset_compensation', 'arrival_hold')
+
+
+def _same(a, b) -> bool:
+    if isinstance(a, bool) or isinstance(b, bool) or isinstance(a, str) or isinstance(b, str):
+        return a == b
+    return abs(float(a) - float(b)) < 1e-9
+
+
+def learned_settings(plan_dir: str, given: dict, defaults: dict) -> dict:
+    """What a learned plan must run at, from its plan.json, against the parameters ``given``.
+
+    Returns ``{name: value}`` (empty for a plan that is not learned, or no plan.json -- the
+    plan's own load reports that). Raises SystemExit naming every parameter set to a value
+    other than its default and the learned one.
+    """
+    try:
+        with open(os.path.join(os.path.expanduser(plan_dir), 'plan.json')) as f:
+            info = json.load(f)
+    except (OSError, ValueError):
+        return {}
+    learned = (info.get('metadata') or {}).get('learned_execution') or {}
+    out, clashes = {}, []
+    for name in LEARNED_SETTINGS:
+        if name not in learned:
+            continue
+        want, default = learned[name], defaults[name]
+        if not _same(given[name], default) and not _same(given[name], want):
+            clashes.append(f'{name}:={given[name]!r} (learned at {want!r})')
+        out[name] = type(default)(want)
+    if clashes:
+        raise SystemExit("this plan's labels are a learned attractor, right only at the settings "
+                         f"they were learned under: {', '.join(clashes)}. Leave these at their "
+                         'defaults (the learned values are then used).')
+    return out
+
+
 class TpgptExecutorNode(Node):
     def __init__(self, **kwargs):
         super().__init__('tpgpt_executor_node', **kwargs)
-        d = self.declare_parameter
+        self._defaults = {}
+        self._learned = {}
+
+        def d(name, value):
+            self._defaults[name] = value
+            return self.declare_parameter(name, value)
         d('plan_dir', '')
         d('dry_run', True)
         d('dry_run_realtime', True)
@@ -231,6 +280,13 @@ class TpgptExecutorNode(Node):
         if not p('plan_dir') and not self.replay:
             raise SystemExit('Set -p plan_dir:=<directory written by tpgpt_planner_node> '
                              '(or -p replay_dir:=<replay directory> to replay a demonstration)')
+        if not self.replay:
+            self._learned = learned_settings(
+                p('plan_dir'), {n: p(n) for n in LEARNED_SETTINGS}, self._defaults)
+            if self._learned:
+                self.get_logger().info(
+                    'Learned labels: running at the settings they were learned under: ' +
+                    ', '.join(f'{n} {v}' for n, v in self._learned.items()))
         self.dry = bool(p('dry_run'))
         # a replay always sends the demonstration's own stiffness labels
         self.use_stiffness = bool(p('use_transported_stiffness')) or self.replay
@@ -292,6 +348,8 @@ class TpgptExecutorNode(Node):
         self.policy_executor = None
 
     def p(self, name):
+        if name in self._learned:
+            return self._learned[name]
         return self.get_parameter(name).value
 
     # ------------------------------------------------------------------ inputs
