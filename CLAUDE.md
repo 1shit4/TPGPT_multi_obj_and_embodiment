@@ -252,14 +252,20 @@ The planner's support height is: its `support_height` parameter, else the calibr
   pre-move and does not hold. After a move the arm stops 3.5-6 mm short, whatever the stiffness.
   The lag gate, whose expected lag uses the nominal time constant, therefore sees ~8 mm of excess
   at full speed. One line at the home pose was measured, without a payload.
-- **A taught demonstration's attractor is learned by replaying it** (2026-09-29, audit B1 steps
-  4-5; `commands.md` §3b): `python -m tpgpt.hardware.replay init|update|status` keeps the passes,
-  `tpgpt_executor_node -p replay_dir:=...` runs one (no policy, no gate; the demonstration's own
-  stiffness at `speed_scale` 0.35). Each pass's attractor path is **path-checked against the shelf
-  model and the table before it moves**, and nothing is learned from 0.5 s before the grasp mark
-  (the 18:39 grasp is < 17 mm above the table). **A replay learns the lag at its own
-  `speed_scale`**: run the resulting labels at the same one. Dry-run only so far (4.4 -> 1.1 mm
-  RMS in three passes on the simulated arm).
+- **A taught demonstration's attractor is learned by replaying it** (2026-09-29/30, audit B1 steps
+  4-5b; `commands.md` §3b): `python -m tpgpt.hardware.replay init|use-checks|update|repeat|status`
+  keeps the passes, `tpgpt_executor_node -p replay_dir:=... -p dry_run:=false` runs one (no
+  policy, no gate; the demonstration's own stiffness at `speed_scale` 0.35). Position **and
+  orientation** are learned (gain 1.0). Pass 0 is run twice (the spread). Before each pass the
+  **taught path, widened by how far the arm strays from it**, is checked against the shelf model
+  and the table -- not the attractor: pass 0 with an estimate (or `use-checks`: the stiffness
+  checks' measurements), later passes with what the previous one measured. Nothing is learned
+  from 0.5 s before the grasp mark. **A replay learns the lag at its own `speed_scale`**: run the
+  resulting labels at the same one. **A dry run of a replay only checks** (`replay_record_dry:=true`
+  simulates into it, for tests only). **The rotational stiffness decides whether the 18:39
+  demonstration can be replayed**: link 6 passes 23.5 mm under the top board; with the estimate
+  pass 0 is refused at 30, 45 and 60 N·m/rad (x0.25 while carrying). The stiffness check now turns
+  the hand to measure the tilt and turning lag; run it at 15/30/45/60 first. Dry-run only so far.
 - **A plan that leaves the executor's workspace box is now refused at selection**
   (`SelectionSettings.workspace_min/max`, fed from the planner's own parameters). It used to be
   found only by the executor, which aborted the whole run instead of taking the next grasp
