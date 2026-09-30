@@ -149,16 +149,20 @@ D=~/tpgpt_demos/banana_20260925_183904
 python -m tpgpt.hardware.replay init --bundle $D/source_bundle_directional --out $D/replay
 # one pass; asks 'yes'. Without the object:
 ros2 run --prefix python3 ycb_pointcloud_pipeline tpgpt_executor_node --ros-args \
-  -p replay_dir:=$D/replay -p dry_run:=false -p gripper_mode:=none -p rotational_stiffness:=60.0
+  -p replay_dir:=$D/replay -p dry_run:=false -p gripper_mode:=none \
+  -p rotational_stiffness:=30.0 -p transit_rotational_scale:=1.0
 # with the object (camera and segmentation up, §2):
 ros2 run --prefix python3 ycb_pointcloud_pipeline tpgpt_executor_node --ros-args \
-  -p replay_dir:=$D/replay -p dry_run:=false -p gripper_mode:=franka_grasp -p rotational_stiffness:=60.0
+  -p replay_dir:=$D/replay -p dry_run:=false -p gripper_mode:=franka_grasp \
+  -p rotational_stiffness:=30.0 -p transit_rotational_scale:=1.0
 # when a pass's runs are done: the next attractor, and how the passes went
 python -m tpgpt.hardware.replay update $D/replay
 python -m tpgpt.hardware.replay status $D/replay
 ```
-- `rotational_stiffness:=60.0`, not the executor's default 30: at 30 (7.5 while carrying) the
-  18:39 carry under the top board is refused. Write it with the `.0`.
+- The wrist at 30 N·m/rad the whole way (`transit_rotational_scale:=1.0`: not softened while
+  carrying). At 60 the wrist vibrated as joint 7 neared its limit, and a 15 -> 60 step at the
+  set-down came before a reflex stop; softened to 7.5 while carrying, pass 0 is refused (audit C5).
+  Execute the learned labels with the same two values. Write numbers with the `.0`.
 - **With the object**, before asking `yes` the node guides it onto its taught place: every camera
   cloud it prints how far to move and turn it, and it does not start until the object is within
   10 mm and 10 deg.

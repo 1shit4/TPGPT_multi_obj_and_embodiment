@@ -267,9 +267,12 @@ The planner's support height is: its `support_height` parameter, else the calibr
   (`replay.MEASURED_ROTATION`, 6.5 mm sideways), later passes with what the previous one
   measured. Nothing is learned from 0.5 s before the grasp mark. **A replay learns the lag at its
   own `speed_scale`**: run the resulting labels at the same one. **A dry run of a replay only
-  checks** (`replay_record_dry:=true` simulates into it, for tests only). **Run the 18:39
-  demonstration at `rotational_stiffness:=60.0`**: link 6 passes 23.5 mm under the top board, and
-  pass 0 is refused at 45 and 30 (x0.25 while carrying). **With the object, the pass first guides
+  checks** (`replay_record_dry:=true` simulates into it, for tests only). **Replay (and execute
+  the learned labels) at `rotational_stiffness:=30.0 transit_rotational_scale:=1.0`** (user,
+  2026-09-30; audit C5): 30 N·m/rad the whole way. At 60 the wrist vibrated at 26 Hz as joint 7
+  entered the joint-limit repulsion zone, and the 15 -> 60 step at the set-down preceded the
+  reflex; with the carry softened (x0.25) pass 0 is refused at 30 and 45 (link 6 passes 23.5 mm
+  under the top board, the pads are near the table while lifting); at 30 x1.0 it passes. **With the object, the pass first guides
   it onto its taught place** (the scan fitted to the camera and to the taught cloud; "move it
   N mm toward the robot ..., turn it N deg ..."), and waits until it is within 10 mm / 10 deg;
   camera and segmentation must be up.
