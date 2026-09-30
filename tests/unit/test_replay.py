@@ -210,3 +210,16 @@ def test_pass_0_margin_from_measured_stiffness_checks(tmp_path):
     n = rp.load_replay(root)[0]["n_labels"]
     _, _, source = rp.pass_margin(root, 0, np.full(n, 60.0))
     assert source == "stiffness checks"
+
+
+def test_a_check_asked_above_the_cap_counts_as_the_cap(tmp_path):
+    """Runs asked for 80 and 100 N m/rad ran at 60 (the controller clamps): they are 60 runs."""
+    for name, k, tilt in (("a", 60.0, 0.8), ("b", 100.0, 0.9)):
+        d = tmp_path / name
+        d.mkdir()
+        (d / "report.json").write_text(json.dumps({"rotational_stiffness": k, "segments": {
+            "hold_end": {"tilt_median_deg": tilt}, "turn_out": {"tau_s": 0.3},
+            "move_out": {"across_max_mm": 5.0}}}))
+    model = rp.model_from_checks([tmp_path / "a", tmp_path / "b"])
+    assert [r["k"] for r in model["rotation"]] == [60.0]
+    assert model["rotation"][0]["tilt_deg"] == 0.9                 # the worse of the two

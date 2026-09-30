@@ -226,7 +226,8 @@ How to read a report (one line per segment):
 | `turn_... time constant X s` | how quickly the wrist follows a turn | smaller is better |
 
 **Choose the rotational stiffness**: the highest of 45 and 60 that did not vibrate (60 if both
-were quiet). It is used in every pass below and later in execution. Each check is saved in
+were quiet; on 2026-09-30 all four were quiet, and 60 was chosen). 60 is the controller's cap
+(`variable_max_stiffness.rotational`): the check refuses anything above it. It is used in every pass below and later in execution. Each check is saved in
 `~/tpgpt_stiffness_checks/<date>_<time>_isotropic_600_rot<k>/`.
 
 **Step 4 — open T5 (files) and create the replay.** The first command makes the replay directory

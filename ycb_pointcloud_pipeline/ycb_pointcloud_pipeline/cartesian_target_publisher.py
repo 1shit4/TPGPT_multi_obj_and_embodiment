@@ -339,12 +339,28 @@ class CartesianTargetPublisher(Node):
         return directional_matrices([direction], [speed],
                                     float(self.get_parameter('stiffness_along').value), k)[0]
 
+    def stiffness_limits(self):
+        """``(translational, rotational)``: the variable-stiffness controller's own caps
+        (``variable_max_stiffness`` in the installed tpgpt_variable_stiffness_controller.yaml).
+        CRISP clamps anything above them, and so does ``crisp_stiffness``."""
+        import yaml
+        from ament_index_python.packages import get_package_share_directory
+
+        path = os.path.join(get_package_share_directory('ycb_pointcloud_pipeline'), 'config',
+                            'tpgpt_variable_stiffness_controller.yaml')
+        with open(path) as f:
+            cfg = yaml.safe_load(f)
+        caps = cfg[self.controller]['ros__parameters']['variable_max_stiffness']
+        return float(caps['translational']), float(caps['rotational'])
+
     def publish_stiffness(self, K, quat):
         """K rotated into the measured hand frame; 12 values when directional, else 6."""
         from tpgpt.hardware.executor import crisp_stiffness
 
+        max_t, max_r = self._limits
         values = crisp_stiffness(K, _quat_matrix(quat),
                                  float(self.get_parameter('rotational_stiffness').value),
+                                 max_translational=max_t, max_rotational=max_r,
                                  full=self.mode == 'directional')
         self.stiffness_pub.publish(Float64MultiArray(data=[float(v) for v in values]))
 
@@ -471,6 +487,8 @@ class CartesianTargetPublisher(Node):
         report = {'mode': self.mode, 'translational_stiffness': g('translational_stiffness'),
                   'stiffness_along': g('stiffness_along') if self.mode == 'directional' else None,
                   'rotational_stiffness': g('rotational_stiffness'),
+                  'rotational_stiffness_applied': min(float(g('rotational_stiffness')),
+                                                      self._limits[1]),
                   'aborted': None if aborted is None else (str(aborted) or 'Ctrl-C'),
                   'segments': {}}
         report['turn_deg'] = float(g('turn_deg'))
@@ -530,6 +548,21 @@ class CartesianTargetPublisher(Node):
         from ycb_pointcloud_pipeline.ros_utils import ControllerManagerClient, container_config_path
 
         g = lambda n: self.get_parameter(n).value  # noqa: E731
+        # A stiffness above the controller's caps would be clamped to them without a word, and
+        # the report would name a stiffness the arm never had (2026-09-30: runs asked for 80
+        # and 100 N m/rad and ran at 60). Refuse instead.
+        self._limits = self.stiffness_limits()
+        asked = {'translational': max(float(g('translational_stiffness')),
+                                      float(g('stiffness_along')) if self.mode == 'directional'
+                                      else 0.0),
+                 'rotational': float(g('rotational_stiffness'))}
+        for (name, value), cap in zip(asked.items(), self._limits):
+            if value > cap:
+                raise AbortMotion(f'{name} stiffness {value:g} is above the controller\'s cap '
+                                  f'{cap:g} (variable_max_stiffness.{name} in '
+                                  'config/tpgpt_variable_stiffness_controller.yaml): it would run '
+                                  f'at {cap:g}. Raising the cap is a safety decision; nothing was '
+                                  'activated.')
         self.get_logger().info('Waiting for the end-effector pose ...')
         deadline = time.monotonic() + 10.0
         while self._pose is None:
@@ -631,10 +664,12 @@ def main(args=None):
     node = CartesianTargetPublisher()
     executor = MultiThreadedExecutor(num_threads=2)
     executor.add_node(node)
-    threading.Thread(target=executor.spin, daemon=True).start()
+    spinners = [threading.Thread(target=executor.spin, daemon=True)]
     pose_executor = SingleThreadedExecutor()
     pose_executor.add_node(node.pose_node)
-    threading.Thread(target=pose_executor.spin, daemon=True).start()
+    spinners.append(threading.Thread(target=pose_executor.spin, daemon=True))
+    for t in spinners:
+        t.start()
     exit_code = 0
     try:
         node.run()
@@ -650,6 +685,10 @@ def main(args=None):
         time.sleep(0.2)  # let a final hold command go out
         executor.shutdown()
         pose_executor.shutdown()
+        # Destroying a node its executor thread is still inside aborts the process
+        # ("terminate called without an active exception", seen on an early refusal).
+        for t in spinners:
+            t.join(timeout=2.0)
         node.pose_node.destroy_node()
         node.destroy_node()
         rclpy.try_shutdown()

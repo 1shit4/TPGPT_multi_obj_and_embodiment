@@ -252,6 +252,11 @@ The planner's support height is: its `support_height` parameter, else the calibr
   pre-move and does not hold. After a move the arm stops 3.5-6 mm short, whatever the stiffness.
   The lag gate, whose expected lag uses the nominal time constant, therefore sees ~8 mm of excess
   at full speed. One line at the home pose was measured, without a payload.
+  **Rotational, 2026-09-30** (audit B2 step 3b; the check now turns the hand 15 deg): no vibration
+  at 15-60 N·m/rad; resting tilt 2.5 / 1.3 / 1.0 / 0.8 deg and turning time constant 0.40-0.76 /
+  0.34-0.60 / 0.30-0.44 / 0.25-0.35 s at 15 / 30 / 45 / 60. **60 is a hard cap twice over**
+  (`stiffness_max_rotational` and CRISP's `variable_max_stiffness.rotational`): runs asked for 80
+  and 100 ran at 60. The check now refuses above the cap.
 - **A taught demonstration's attractor is learned by replaying it** (2026-09-29/30, audit B1 steps
   4-5b; `commands.md` §3b): `python -m tpgpt.hardware.replay init|use-checks|update|repeat|status`
   keeps the passes, `tpgpt_executor_node -p replay_dir:=... -p dry_run:=false` runs one (no

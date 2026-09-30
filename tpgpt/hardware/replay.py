@@ -107,6 +107,9 @@ TURN_LAG_FACTOR = 2.0
 #: speed_scale 0.35): the arm's stray at one label is really about where it was, a little
 #: earlier or later along the path.
 MARGIN_WINDOW = 5
+#: The variable-stiffness controller's cap on rotational stiffness, N m/rad
+#: (``variable_max_stiffness.rotational``, config/tpgpt_variable_stiffness_controller.yaml).
+ROTATIONAL_CAP = 60.0
 #: Where along the taught path a measured pose is matched (labels before, after): the
 #: arm lags, so its nearest taught point lies behind the label it was commanded.
 NEAREST_WINDOW = (30, 10)
@@ -208,7 +211,10 @@ def model_from_checks(check_dirs) -> dict:
                                if "across_max_mm" in s])
         if not tilts or not taus:
             continue
-        k = float(report["rotational_stiffness"])
+        # What the arm ran at: reports before 2026-09-30 13:30 named what was asked, which the
+        # controller clamps to its cap (runs asked for 80 and 100 ran at 60).
+        k = float(report.get("rotational_stiffness_applied",
+                             min(float(report["rotational_stiffness"]), ROTATIONAL_CAP)))
         old = rows.get(k, {"tilt_deg": 0.0, "tau_s": 0.0})
         rows[k] = {"k": k, "tilt_deg": max(old["tilt_deg"], max(tilts)),
                    "tau_s": max(old["tau_s"], max(taus))}
