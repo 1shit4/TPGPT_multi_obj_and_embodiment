@@ -163,9 +163,11 @@ python -m tpgpt.hardware.replay status $D/replay
   carrying). At 60 the wrist vibrated as joint 7 neared its limit, and a 15 -> 60 step at the
   set-down came before a reflex stop; softened to 7.5 while carrying, pass 0 is refused (audit C5).
   Execute the learned labels with the same two values. Write numbers with the `.0`.
-- **With the object**, before asking `yes` the node guides it onto its taught place: every camera
-  cloud it prints how far to move and turn it, and it does not start until the object is within
-  10 mm and 10 deg.
+- **With the object**, before asking `yes` the node guides it onto its taught place. Watch
+  `ros2 run rqt_image_view rqt_image_view /tpgpt/replay/place_overlay`: the camera's picture,
+  green outline where the object was taught, orange where the camera fits it now; the same
+  advice is printed ("move it N mm toward the robot ..., turn it N deg ..."). Press Enter when it
+  matches; beyond 10 mm / 10 deg it asks again (Enter keeps aligning, `go` starts anyway).
 - After a pass it prints how far the arm was from the taught path and then `Next:` (run it again,
   or `update`). `Aborted: ... collision` before moving: the path does not fit with that margin;
   `... on the way onto the path`: home the arm and run it again.

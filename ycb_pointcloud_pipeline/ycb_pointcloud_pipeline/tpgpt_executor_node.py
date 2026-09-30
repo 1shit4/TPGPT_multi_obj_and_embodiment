@@ -222,6 +222,9 @@ class TpgptExecutorNode(Node):
         # Stop the pass once this label is reached (-1: the whole pass). A partial pass is a
         # diagnostic -- saved as partial_<n>.npz, never a run the update learns from.
         d('replay_until_label', -1)
+        # the camera picture the object is aligned on (placement guide)
+        d('replay_color_topic', '/camera/camera/color/image_raw')
+        d('replay_camera_info_topic', '/camera/camera/color/camera_info')
 
         p = self.p
         self.replay = bool(p('replay_dir'))
@@ -945,28 +948,18 @@ class TpgptExecutorNode(Node):
               f"  approach       {gap:.3f} m over {len(approach_p) * dt:.1f} s\n"
               f"  gripper        {mode if not self.dry else 'not sent'} (object {width * 1000:.0f} mm)"
               f"{'' if with_object else ' -- NO OBJECT: take it off the table'}\n")
+        placed = None
+        if guide:
+            placed = self._place_object(guide, interactive=not self.dry)
         if self.dry and not p('replay_record_dry'):
-            if guide:
-                self._place_object(guide, loop=False)
             log.info('Dry run: the pass is checked and summarised only, and nothing is recorded '
                      '(replay_record_dry:=true simulates it into the replay, for tests)')
             return True
-        while True:
-            if guide:
-                self._place_object(guide, loop=not self.dry)
-            if self.dry or not p('require_confirmation'):
-                break
+        if not self.dry and p('require_confirmation'):
             print('Keep the emergency stop within reach.')
             if input("Type 'yes' to ACTIVATE the controller and replay: ").strip().lower() != 'yes':
                 log.info('Cancelled; nothing was activated.')
                 return False
-            if not guide:
-                break
-            # one fresh look, taken after the 'yes': it may have been knocked meanwhile
-            offset = self._place_object(guide, loop=False, newer_than=time.monotonic())
-            if offset is not None and offset['in_place']:
-                break
-            print('It is not in place now (or not seen): back to placing it.')
         if not self.dry:
             self.cmc.activate(self.controller, controllers)
         self.moving = True
@@ -1049,8 +1042,9 @@ class TpgptExecutorNode(Node):
                 if self.dry:
                     self.simulate(target, rot, *crisp_applied_gains(values, meas_R), dt)
                 time.sleep(dt if realtime else 0.0)
-        except (AbortRun, KeyboardInterrupt):
-            # What the arm did up to the abort is the record to look at. It is saved by main()
+        except (Exception, KeyboardInterrupt):
+            # What the arm did up to the abort -- any abort, a bug's included -- is the record
+            # to look at. It is saved by main()
             # after the hold has gone out (converting the messages takes a moment).
             self._pending_record = (root, k, rec)
             raise
@@ -1062,6 +1056,9 @@ class TpgptExecutorNode(Node):
                      'the update does not use it.')
             return True
         self.moving = False
+        if placed is not None:          # how far from its taught place the object stood
+            highrate['placement_offset'] = np.array([placed['move_x'], placed['move_y'],
+                                                     placed['turn_deg']])
         path = rp.save_recording(root, k, run, **rec, **highrate)
         error, _, _ = rp.pass_error(root, k)
         m = error['at_marks']
@@ -1087,11 +1084,15 @@ class TpgptExecutorNode(Node):
 
     # ------------------------------------------------------------ replay: the object's place
     def _object_guide(self, info, bundle):
-        """For a replay with the object: its scan fitted to the taught cloud, and the camera's
-        view of it now subscribed to (the fits and the offset: tpgpt.hardware.replay)."""
-        from sensor_msgs.msg import PointCloud2
+        """For a replay with the object: its scan fitted to the taught cloud; the camera's cloud
+        of it fitted as it comes (a worker thread, tpgpt.hardware.replay.placement_offset); and
+        an image to align it by, /tpgpt/replay/place_overlay -- the camera's picture with the
+        taught place drawn green and the latest fit orange, five times a second."""
+        from rclpy.qos import qos_profile_sensor_data
+        from sensor_msgs.msg import CameraInfo, Image, PointCloud2
         from tpgpt.hardware import replay as rp
         from tpgpt.hardware.object_model import ObjectModel, fit_object
+        from ycb_pointcloud_pipeline import camera_calibration as cc
         from ycb_pointcloud_pipeline.camera_tf_publisher import default_calibration_yaml
         from ycb_pointcloud_pipeline.ros_utils import (CalibrationProvider, pointcloud2_to_xyz,
                                                        xyz_to_pointcloud2)
@@ -1110,77 +1111,151 @@ class TpgptExecutorNode(Node):
         if not taught.accepted:
             log.warn(f'the scan fit of the taught {name} was not accepted ({taught.reason}); '
                      'its place is approximate')
-        topic = f'/ycb_pointclouds/{name}'
-        self._object_cloud, self._object_lock = None, threading.Lock()
+        g = {'name': name, 'topic': f'/ycb_pointclouds/{name}', 'model': model, 'taught': taught,
+             'support': support, 'camera': T[:3, 3], 'fit': fit_object, 'lock': threading.Lock(),
+             'cloud': None, 'image': None, 'info': None, 'now': None, 'offset': None,
+             'offset_at': -1.0, 'advice': 'waiting for the camera', 'running': True}
 
         def on_cloud(msg):
             T_now = calib.T_base_optical(msg.header.frame_id or calib.cal.optical_frame)
-            if T_now is None:
-                return
-            xyz = pointcloud2_to_xyz(msg)
-            with self._object_lock:
-                self._object_cloud = (time.monotonic(), xyz @ T_now[:3, :3].T + T_now[:3, 3])
+            if T_now is not None:
+                xyz = pointcloud2_to_xyz(msg)
+                with g['lock']:
+                    g['cloud'] = (time.monotonic(), xyz @ T_now[:3, :3].T + T_now[:3, 3])
 
-        self.create_subscription(PointCloud2, topic, on_cloud, 1)
+        self.create_subscription(PointCloud2, g['topic'], on_cloud, 1)
+        self.create_subscription(Image, p('replay_color_topic'),
+                                 lambda m: g.__setitem__('image', m), qos_profile_sensor_data)
+        self.create_subscription(CameraInfo, p('replay_camera_info_topic'),
+                                 lambda m: g.__setitem__('info', m), qos_profile_sensor_data)
         taught_pub = self.create_publisher(PointCloud2, '/tpgpt/replay/taught_object', 1)
         now_pub = self.create_publisher(PointCloud2, '/tpgpt/replay/object_now', 1)
+        overlay_pub = self.create_publisher(Image, '/tpgpt/replay/place_overlay', 1)
         taught_msg = xyz_to_pointcloud2(taught.full_cloud, self.base,
                                         self.get_clock().now().to_msg(),
                                         rgb=np.array([0, 255, 0], dtype=np.uint8))
-        self._taught_object_timer = self.create_timer(1.0, lambda: taught_pub.publish(taught_msg))
-        return {'name': name, 'topic': topic, 'model': model, 'taught': taught, 'support': support,
-                'camera': T[:3, 3], 'now_pub': now_pub, 'fit': fit_object}
+        T_opt_base = cc.invert_transform(T)
 
-    def _place_object(self, g, loop, newer_than=None):
-        """Fit the camera's view of the object and say how to move it to its taught place.
+        def render():
+            import cv2
 
-        ``loop``: until it is in place on two clouds in a row (Ctrl-C to stop); else one look.
-        Returns the last offset (``replay.placement_offset``), or None if it was not seen.
+            taught_pub.publish(taught_msg)
+            msg = g['image']
+            if msg is None or msg.encoding not in ('rgb8', 'bgr8') or not g['running']:
+                return
+            rows = np.frombuffer(bytes(msg.data), np.uint8).reshape(msg.height, msg.step)
+            img = rows[:, :msg.width * 3].reshape(msg.height, msg.width, 3)
+            img = img[:, :, ::-1].copy() if msg.encoding == 'rgb8' else img.copy()
+            info = g['info']
+            intr = (cc.Intrinsics.from_camera_info_fields(info.k, info.width, info.height)
+                    if info is not None else calib.cal.intrinsics_yaml)
+            now = g['now']
+            # outlines, not fills: the real object stays visible inside them
+            for pts, colour in ((None if now is None else now.full_cloud, (0, 140, 255)),
+                                (taught.full_cloud, (0, 255, 0))):
+                if pts is None:
+                    continue
+                uv, inside = cc.project(cc.transform_points(T_opt_base, pts), intr)
+                mask = np.zeros(img.shape[:2], np.uint8)
+                for u, v in uv[inside].astype(int):
+                    cv2.circle(mask, (int(u), int(v)), 3, 255, -1)
+                mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, np.ones((7, 7), np.uint8))
+                contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
+                cv2.drawContours(img, contours, -1, colour, 2)
+            advice = g['advice']
+            cut = advice.find(': ')
+            lines = ([f"green: where the {name} was taught   orange: where the camera sees it"]
+                     + ([advice[:cut + 1], '  ' + advice[cut + 2:]] if cut > 0 else [advice]))
+            for row, text in enumerate(lines):
+                cv2.putText(img, text, (8, 20 + 20 * row), cv2.FONT_HERSHEY_SIMPLEX, 0.45,
+                            (0, 0, 0), 3, cv2.LINE_AA)
+                cv2.putText(img, text, (8, 20 + 20 * row), cv2.FONT_HERSHEY_SIMPLEX, 0.45,
+                            (255, 255, 255), 1, cv2.LINE_AA)
+            out = Image(header=msg.header, height=img.shape[0], width=img.shape[1],
+                        encoding='bgr8', is_bigendian=0, step=img.shape[1] * 3)
+            out.data = img.tobytes()
+            overlay_pub.publish(out)
+
+        def worker():
+            seen, said, said_at = -1.0, None, -1e9
+            while g['running'] and rclpy.ok():
+                with g['lock']:
+                    cloud = g['cloud']
+                if cloud is None or cloud[0] <= seen:
+                    time.sleep(0.2)
+                    continue
+                seen = cloud[0]
+                fit = fit_object(model, cloud[1], support, g['camera'])
+                g['now'] = fit
+                now_pub.publish(xyz_to_pointcloud2(fit.full_cloud, self.base,
+                                                   self.get_clock().now().to_msg(),
+                                                   rgb=np.array([255, 140, 0], dtype=np.uint8)))
+                if fit.accepted:
+                    off = rp.placement_offset(taught, fit)
+                    g['offset'], g['advice'] = off, rp.placement_advice(off)
+                else:
+                    g['offset'] = None
+                    g['advice'] = (f"the camera's cloud does not fit a {name} ({fit.reason}): is "
+                                   'it alone and fully in view?')
+                g['offset_at'] = time.monotonic()
+                if g['running'] and (g['advice'] != said or time.monotonic() - said_at > 5.0):
+                    print('  ' + g['advice'], flush=True)
+                    said, said_at = g['advice'], time.monotonic()
+
+        g['timer'] = self.create_timer(0.2, render)
+        g['thread'] = threading.Thread(target=worker, daemon=True)
+        g['thread'].start()
+        return g
+
+    def _place_object(self, g, interactive):
+        """Guide the object onto its taught place; returns its last offset
+        (``replay.placement_offset``), or None if the camera never fitted it.
+
+        Interactive: the operator aligns it by the image (rqt_image_view on
+        /tpgpt/replay/place_overlay) and the printed advice, and presses Enter. Within
+        ``PLACE_TOLERANCE`` it goes on; outside, the operator may keep aligning or type 'go'
+        to start anyway (the camera's own error at the table is a few mm, and the numbers are
+        advice: the pass is safe to run -- it is the grasp that suffers). Not interactive (a
+        dry run): one look.
         """
         from tpgpt.hardware import replay as rp
-        from ycb_pointcloud_pipeline.ros_utils import xyz_to_pointcloud2
 
-        if loop:
-            print(f"\nPut the {g['name']} where it was taught. Each camera cloud (about one every "
-                  f"3 s) is compared with the taught place; the pass waits until it is within "
-                  f'{rp.PLACE_TOLERANCE_M * 1000:.0f} mm and {rp.PLACE_TOLERANCE_DEG:.0f} deg. '
-                  'In RViz: /tpgpt/replay/taught_object (green, taught) and '
-                  '/tpgpt/replay/object_now (where it is).', flush=True)
-        seen = newer_than if newer_than is not None else -1.0
-        waited, good, offset = time.monotonic(), 0, None
-        while rclpy.ok():
-            with self._object_lock:
-                cloud = self._object_cloud
-            if cloud is None or cloud[0] <= seen:
-                if time.monotonic() - waited > 10.0:
-                    print(f"  no cloud on {g['topic']} for 10 s: are the camera and segmentation "
-                          f"running, and the {g['name']} in view?", flush=True)
-                    if not loop:
-                        return None
-                    waited = time.monotonic()
+        def fresh(after, wait):
+            deadline = time.monotonic() + wait
+            while time.monotonic() < deadline and g['offset_at'] <= after:
                 time.sleep(0.2)
-                continue
-            seen, waited = cloud[0], time.monotonic()
-            fit = g['fit'](g['model'], cloud[1], g['support'], g['camera'])
-            g['now_pub'].publish(xyz_to_pointcloud2(
-                fit.full_cloud, self.base, self.get_clock().now().to_msg(),
-                rgb=np.array([255, 140, 0], dtype=np.uint8)))
-            if not fit.accepted:
-                good = 0
-                print(f"  the camera's cloud does not fit a {g['name']} ({fit.reason}): is it "
-                      'alone and fully in view?', flush=True)
-                if not loop:
-                    return None
-                continue
-            offset = rp.placement_offset(g['taught'], fit)
-            print('  ' + rp.placement_advice(offset), flush=True)
-            if not loop:
-                return offset
-            good = good + 1 if offset['in_place'] else 0
-            if good >= 2:
-                print('  In place.', flush=True)
-                return offset
-        return offset
+            return g['offset_at'] > after
+
+        try:
+            if not interactive:
+                if not fresh(-1.0, 10.0):
+                    print(f"  no cloud on {g['topic']} for 10 s", flush=True)
+                return g['offset']
+            print(f"\nPut the {g['name']} where it was taught. Watch it on the image:\n"
+                  '    ros2 run rqt_image_view rqt_image_view /tpgpt/replay/place_overlay\n'
+                  f"the green dots are the taught place, the orange ones where the camera fits the "
+                  f"{g['name']} now (every cloud, ~3 s); the line under them is also printed here. "
+                  f'Tolerance {rp.PLACE_TOLERANCE_M * 1000:.0f} mm and '
+                  f'{rp.PLACE_TOLERANCE_DEG:.0f} deg.', flush=True)
+            while True:
+                input(f"Press Enter when the {g['name']} matches the green: ")
+                if not fresh(time.monotonic(), 8.0):
+                    print(f"  no fit since then: are the camera and segmentation running, and the "
+                          f"{g['name']} alone in view?", flush=True)
+                    continue
+                off = g['offset']
+                if off is not None and off['in_place']:
+                    print(f"  {g['advice']}", flush=True)
+                    return off
+                answer = input(f"  It reads: {g['advice']}. Enter to keep aligning, 'go' to "
+                               'start anyway: ').strip().lower()
+                if answer == 'go':
+                    self.get_logger().warn(f"starting with the {g['name']} off its taught place: "
+                                           f"{g['advice']}")
+                    return off
+        finally:
+            g['running'] = False
+            self.destroy_timer(g['timer'])
 
     def save_pending_record(self):
         """After an aborted replay pass (and its hold): save what it recorded, as aborted_<n>."""
@@ -1347,6 +1422,13 @@ def main(args=None):
         if node.moving:
             node.hold_current_pose()
         node.save_pending_record()
+    except Exception:
+        # A bug must not leave the arm on a stale target: hold, keep the record, then report.
+        # (2026-09-30: a replay pass died on its first step with the arm activated.)
+        if node.moving:
+            node.hold_current_pose()
+        node.save_pending_record()
+        raise
     finally:
         time.sleep(0.2)  # let a final hold command go out
         executor.shutdown()
