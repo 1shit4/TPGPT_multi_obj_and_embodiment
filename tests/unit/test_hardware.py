@@ -317,11 +317,13 @@ class TestPlanner:
         assert np.allclose(seen["positions"], result.arm_path.positions)
         assert np.allclose(seen["orientations"], result.arm_path.orientations)
         assert np.allclose(seen["clearance"], 0.005)
+        assert seen["table_clearance"] is False
         plain = plan(bundle, self._scene(bundle))
         seen.clear()
         path_check.check_plan(plain, None, FRANKA_HAND)
         assert np.allclose(seen["positions"], plain.labels.positions)
         assert seen.get("clearance") is None and seen.get("held_shift") is None
+        assert "table_clearance" not in seen
 
     def test_the_jaws_centre_the_object_the_arm_closes_off_centre_on(self, bundle, monkeypatch):
         """The arm grasps 4 mm off across the jaws and 3 mm short along the approach: the

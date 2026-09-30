@@ -240,20 +240,22 @@ def piece_gaps(pieces, clearance: float = 0.0, tilt: float = 0.0, pivot=None) ->
 
 def _robot_faults(pieces, world, phase: str, depth_tolerance: float,
                   check_self: bool = True, clearance: float = 0.0, tilt: float = 0.0,
-                  pivot=None) -> dict:
+                  pivot=None, table_clearance: bool = True) -> dict:
     """Robot pieces against the shelf model, the observed cloud and themselves.
 
     ``clearance`` (m) and ``tilt`` (rad, about ``pivot``) set the gap each piece
     must keep from the table, the shelf model and the seen points
     (:func:`piece_gaps`); the arm against itself is tested without it, and so is
     the base (:data:`FIXED_PIECES`), which is bolted down and cannot stray.
+    ``table_clearance`` False tests the table without the gap (the depth tolerance only).
     """
     faults: dict = _self_faults(pieces, phase, depth_tolerance) if check_self else {}
     gap = piece_gaps(pieces, clearance, tilt, pivot)
     table = getattr(world, "table_height", None)
     if table is not None:
         for piece in pieces:
-            if float(piece.vertices[:, 2].min()) < table - depth_tolerance + gap[piece.name]:
+            g = gap[piece.name] if table_clearance else 0.0
+            if float(piece.vertices[:, 2].min()) < table - depth_tolerance + g:
                 key = f"{phase}: {piece.name} in the table"
                 faults[key] = faults.get(key, 0) + 1
     model = world.model
@@ -359,6 +361,7 @@ def path_feasibility(
     clearance=None,
     tilt=None,
     held_shift=None,
+    table_clearance: bool = True,
 ) -> dict:
     """Solve and check a transported path, waypoint by waypoint.
 
@@ -408,6 +411,12 @@ def path_feasibility(
     the grasp point by up to that angle: each piece's gap grows by the angle
     times how far that piece is from the grasp point (:func:`piece_gaps`), and
     the carried object's by the angle times its own farthest point.
+
+    ``table_clearance`` False keeps the clearance and tilt off the table: the robot is
+    tested against it at the depth tolerance only, as without a clearance. A hand
+    under impedance pressing a few millimetres into the table meets about a newton
+    per millimetre, not a board edge; :func:`check_plan` sets it for an arm path
+    (the user, 2026-10-01).
 
     ``held_shift`` (None or a base-frame vector, m) moves the object by it when the
     jaws close, before it is carried: a parallel jaw closing off-centre pushes the
@@ -555,7 +564,7 @@ def path_feasibility(
             pieces, T = robot_pieces(fr3, seed, end_effector, MAX_OPENING)
             for key, count in _robot_faults(pieces, world, "approach_in", depth_tolerance,
                                             check_self, gap[0], swing[0],
-                                            grasp_point(T)).items():
+                                            grasp_point(T), table_clearance).items():
                 add(bad, key, count)
             for piece in pieces:
                 if _touches(piece, held):
@@ -592,7 +601,8 @@ def path_feasibility(
         pieces, T = robot_pieces(fr3, q, end_effector, opening)
         label = stage + tag
         for key, count in _robot_faults(pieces, world, label, depth_tolerance, check_self,
-                                        gap[k], swing[k], grasp_point(T)).items():
+                                        gap[k], swing[k], grasp_point(T),
+                                        table_clearance).items():
             add(hits, key, count)
 
         if len(held) and stage in ("approach", "pick"):
@@ -833,6 +843,9 @@ def check_plan(plan, world, end_effector, start_q=None, start_tcp=None, fr3: FR3
         extra = kwargs.pop("clearance", None)
         kwargs["clearance"] = np.asarray(plan.arm_margin, dtype=float) + (
             0.0 if extra is None else np.asarray(extra, dtype=float))
+        # Against the table the margin is relaxed (the user, 2026-10-01): pads a few mm into
+        # it under 600 N/m press about 1 N per mm, and the banana's grasps sit that close.
+        kwargs.setdefault("table_clearance", False)
         if end_effector.is_parallel_jaw and "held_shift" not in kwargs:
             # The hand closes where the arm is, off the planned grasp; the coupled jaws
             # centre the object across them (along the approach and the jaws' width it
