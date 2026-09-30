@@ -3,8 +3,10 @@
 import numpy as np
 import pytest
 
-from tpgpt.hardware.ilc import (IlcSettings, frozen_mask, ilc_update, label_positions,
-                                residuals_at)
+from scipy.spatial.transform import Rotation
+
+from tpgpt.hardware.ilc import (IlcSettings, frozen_mask, ilc_rotation_update, ilc_update,
+                                label_positions, label_rotations, residuals_at, rotation_errors)
 
 LABEL_PERIOD = 0.05 / 0.35        # a 20 Hz label replayed at speed_scale 0.35, s
 TAU = 0.27                        # the arm's time constant along the motion at 350 N/m, s
@@ -77,8 +79,9 @@ def test_the_attractor_learned_makes_the_arm_retrace_the_taught_path():
 
 def test_contact_is_bridged_not_learned():
     reference, grasp, release = _taught_path()
-    # the board is 5 mm higher than the taught path thinks around the set-down
-    window = (release - 8, release + 4)
+    # the board is 5 mm higher than the taught path thinks around the set-down; the
+    # window ends at the release, where the hand is still (as in the taught demonstrations)
+    window = (release - 8, release)
     floor = [None] * len(reference)
     for i in range(window[0], window[1] + 1):
         floor[i] = reference[i][2] + 0.005
@@ -88,7 +91,9 @@ def test_contact_is_bridged_not_learned():
     pushed_free = (reference[release][2] - free_a[release][2]) * 1000
     pushed_held = (reference[release][2] - held_a[release][2]) * 1000
     assert pushed_free > 8.0                      # learning the contact presses into the board
-    assert pushed_held < 5.0                      # bridged: only the sag correction carries over
+    # bridged: only the sag correction carries over -- the attractor 3 mm above the taught
+    # point, so the arm, sagging 3 mm, sits on it
+    assert abs(pushed_held - (-SAG[2] * -1000)) < 1.0
     steps = np.linalg.norm(np.diff(held_a, axis=0), axis=1)
     assert steps.max() < np.linalg.norm(np.diff(reference, axis=0), axis=1).max() + 0.003
 
@@ -120,3 +125,78 @@ def test_residuals_are_split_into_the_hands_axes():
     assert out["grasp"]["closing_mm"] == pytest.approx(3.0)
     assert out["grasp"]["approach_mm"] == pytest.approx(10.0)
     assert out["grasp"]["total_mm"] == pytest.approx(np.sqrt(9 + 16 + 100))
+
+
+# --- orientation --------------------------------------------------------------------------
+TAU_ROT = 0.35                                    # s, CRISP's nominal at 30 N m/rad
+TILT = Rotation.from_rotvec(np.radians(1.5) * np.array([0.6, 0.8, 0.0])).as_matrix()   # resting
+
+
+def _taught_turn(n=150):
+    """The hand turning 40 deg about the vertical and tipping 15 deg, slowly, then back."""
+    s = 0.5 - 0.5 * np.cos(2 * np.pi * np.linspace(0.0, 1.0, n))
+    return Rotation.from_rotvec(np.outer(s, np.radians([0.0, 15.0, 40.0]))).as_matrix()
+
+
+def _replay_rotation(attractor, tilt=TILT, substeps=20):
+    """The hand on the label grid: first-order toward ``tilt @ attractor``."""
+    h = LABEL_PERIOD / substeps
+    R = tilt @ attractor[0]
+    out = np.empty_like(attractor)
+    for i, A in enumerate(attractor):
+        out[i] = R
+        for _ in range(substeps):
+            step = Rotation.from_matrix(tilt @ A @ R.T).as_rotvec() * (h / TAU_ROT)
+            R = Rotation.from_rotvec(step).as_matrix() @ R
+    return out
+
+
+def test_label_rotations_takes_the_moment_each_label_was_reached():
+    Rz = lambda deg: Rotation.from_euler("z", deg, degrees=True).as_matrix()   # noqa: E731
+    idx = np.array([0.0, 0.5, 1.0, 1.0, 2.0])
+    rots = np.stack([Rz(0), Rz(10), Rz(20), Rz(90), Rz(30)])
+    out = label_rotations(idx, rots, 3)
+    assert np.allclose(out[1], Rz(20)) and np.allclose(out[2], Rz(30))
+    half = label_rotations(np.array([0.0, 2.0]), np.stack([Rz(0), Rz(40)]), 3)
+    assert np.allclose(half[1], Rz(20))                     # slerped between the samples
+
+
+def test_the_orientation_learned_removes_the_tilt_and_the_lag():
+    reference = _taught_turn()
+    a = reference.copy()
+    errors = []
+    for _ in range(4):
+        measured = _replay_rotation(a)
+        errors.append(np.degrees(np.linalg.norm(rotation_errors(reference, measured), axis=1)))
+        a, report = ilc_rotation_update(a, measured, reference, LABEL_PERIOD)
+    assert errors[0].max() > 1.5                           # the resting tilt, plus the lag
+    assert errors[-1].max() < 0.1
+    assert all(np.sqrt(np.mean(b ** 2)) < np.sqrt(np.mean(e ** 2)) for e, b in zip(errors, errors[1:]))
+
+
+def test_the_orientation_is_bridged_in_contact_and_capped():
+    reference = _taught_turn()
+    frozen = frozen_mask(len(reference), [(60, 80)])
+    measured = _replay_rotation(reference)
+    wild = measured.copy()
+    wild[60:81] = Rotation.from_euler("x", 30, degrees=True).as_matrix() @ wild[60:81]  # a wrench
+    held, _ = ilc_rotation_update(reference, wild, reference, LABEL_PERIOD, frozen)
+    free, _ = ilc_rotation_update(reference, measured, reference, LABEL_PERIOD, frozen)
+    assert np.allclose(held, free)                         # nothing learned from inside the window
+    s = IlcSettings(max_rotation_update_deg=3.0, max_rotation_correction_deg=10.0)
+    far = Rotation.from_euler("x", 45, degrees=True).as_matrix() @ reference
+    a = reference.copy()
+    for _ in range(6):
+        new, report = ilc_rotation_update(a, far, reference, LABEL_PERIOD, settings=s)
+        step = np.degrees(np.linalg.norm(rotation_errors(new, a), axis=1))
+        assert step.max() <= 3.0 + 1e-6
+        a = new
+    assert np.degrees(np.linalg.norm(rotation_errors(a, reference), axis=1)).max() <= 10.0 + 1e-6
+    assert report["capped_total"] > 0
+
+
+def test_residuals_report_the_tilt():
+    R = np.eye(3)[None]
+    tilted = Rotation.from_euler("y", 2.0, degrees=True).as_matrix()[None]
+    out = residuals_at([[0.0, 0.0, 0.0]], [[0.0, 0.0, 0.0]], R, {"grasp": 0}, tilted)
+    assert out["grasp"]["tilt_deg"] == pytest.approx(2.0)
