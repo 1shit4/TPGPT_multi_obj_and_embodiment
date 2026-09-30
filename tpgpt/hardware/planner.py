@@ -137,6 +137,8 @@ class Plan:
     #: it; the executor still runs ``labels``.
     arm_path: PolicyLabels | None = None
     arm_margin: np.ndarray | None = None
+    #: The margin kept from the table (m, per label): the vertical part of ``arm_margin``.
+    arm_table_margin: np.ndarray | None = None
 
     @property
     def dt(self) -> float:
@@ -150,6 +152,9 @@ class Plan:
         if self.arm_path is not None:
             self.arm_path.save(directory / "transported_arm_path.npz")
             np.save(directory / "arm_path_margin.npy", np.asarray(self.arm_margin, dtype=float))
+            if self.arm_table_margin is not None:
+                np.save(directory / "arm_path_table_margin.npy",
+                        np.asarray(self.arm_table_margin, dtype=float))
         self.source_keypoints.save(directory / "source_keypoints.json")
         self.target_keypoints.save(directory / "target_keypoints.json")
         np.savez_compressed(
@@ -195,6 +200,8 @@ class Plan:
         if (directory / "transported_arm_path.npz").exists():
             plan.arm_path = PolicyLabels.load(directory / "transported_arm_path.npz")
             plan.arm_margin = np.load(directory / "arm_path_margin.npy")
+            if (directory / "arm_path_table_margin.npy").exists():
+                plan.arm_table_margin = np.load(directory / "arm_path_table_margin.npy")
         return plan
 
 
@@ -445,6 +452,8 @@ def plan(
         arm_path=arm,
         arm_margin=(None if arm is None else
                     np.asarray(source.arm_path["margin"], dtype=float).copy()),
+        arm_table_margin=(None if arm is None or "margin_vertical" not in source.arm_path else
+                          np.asarray(source.arm_path["margin_vertical"], dtype=float).copy()),
     )
 
 

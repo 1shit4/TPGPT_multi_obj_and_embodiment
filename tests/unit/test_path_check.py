@@ -463,15 +463,17 @@ def test_a_clearance_asks_for_a_gap_to_the_shelf():
     assert any("in shelf board" in k for k in r["faults"]), r["faults"]
 
 
-def test_the_clearance_can_be_kept_off_the_table():
+def test_the_table_can_have_its_own_clearance():
     positions, rotations = _down_to(0.010, TABLE)
     world = ShelfWorld.build(None, support_height=TABLE)
     kw = dict(grasp=60, release=60, clearance=0.012)
     assert _check(positions, rotations, world, **kw)["faults"]
-    assert not _check(positions, rotations, world, table_clearance=False, **kw)["faults"]
-    # still a collision when the hand really goes into it
+    assert not _check(positions, rotations, world, table_clearance=0.008, **kw)["faults"]
+    # a relaxed margin is still a margin, and the table still a collision
+    assert _check(positions, rotations, world, table_clearance=0.012, clearance=0.0,
+                  grasp=60, release=60)["faults"]
     deep, rot = _down_to(-0.003, TABLE)
-    assert any("in the table" in k for k in _check(deep, rot, world, table_clearance=False,
+    assert any("in the table" in k for k in _check(deep, rot, world, table_clearance=0.0,
                                                    **kw)["faults"])
 
 

@@ -268,7 +268,8 @@ class TestPlanner:
             labels.replace(positions=labels.positions + lead), taught.placement,
             {**taught.metadata, "learned": {"execution": {"speed_scale": 0.35}}},
             arm_path={"positions": labels.positions, "rotations": labels.orientations,
-                      "margin": np.full(len(labels), 0.002)},
+                      "margin": np.full(len(labels), 0.002),
+                      "margin_vertical": np.full(len(labels), 0.001)},
             taught_labels=labels)
 
     def test_a_learned_command_is_run_and_its_arm_path_is_measured(self, bundle):
@@ -304,6 +305,7 @@ class TestPlanner:
         assert np.allclose(loaded.arm_path.positions, result.arm_path.positions)
         assert np.allclose(loaded.arm_path.orientations, result.arm_path.orientations)
         assert np.allclose(loaded.arm_margin, 0.002)
+        assert np.allclose(loaded.arm_table_margin, 0.001)
         assert Plan.load(plan(bundle, self._scene(bundle)).save(tmp_path / "plain")).arm_path is None
 
     def test_the_path_check_checks_the_arm_path_with_its_margin(self, bundle, monkeypatch):
@@ -317,7 +319,7 @@ class TestPlanner:
         assert np.allclose(seen["positions"], result.arm_path.positions)
         assert np.allclose(seen["orientations"], result.arm_path.orientations)
         assert np.allclose(seen["clearance"], 0.005)
-        assert seen["table_clearance"] is False
+        assert np.allclose(seen["table_clearance"], 0.004)        # its vertical part + 3 mm
         plain = plan(bundle, self._scene(bundle))
         seen.clear()
         path_check.check_plan(plain, None, FRANKA_HAND)

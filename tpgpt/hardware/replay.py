@@ -628,6 +628,18 @@ def latest_spread(out_dir, upto: int, info: dict) -> tuple[np.ndarray, np.ndarra
     return np.zeros(n), np.zeros(n), None
 
 
+def _vertical_spread(out_dir, k, info: dict) -> np.ndarray:
+    """Per label, the most two runs of pass ``k`` differed in height (zeros if none)."""
+    if k is None:
+        return np.zeros(info["n_labels"])
+    runs = measured_runs(out_dir, k, info)
+    out = np.zeros(info["n_labels"])
+    for a in range(len(runs)):
+        for b in range(a + 1, len(runs)):
+            out = np.maximum(out, np.abs(runs[a][0][:, 2] - runs[b][0][:, 2]))
+    return out
+
+
 def pass_error(out_dir, k: int) -> tuple[dict, np.ndarray, np.ndarray]:
     """How far pass ``k``'s arm was from the taught path: ``(report, mean positions,
     mean rotations)``.
@@ -796,6 +808,10 @@ def export_bundle(out_dir, dest, k: int | None = None) -> Path:
     spread_p, spread_r, spread_from = latest_spread(out, k, info)
     seg = segment_ids(info)
     margin = np.maximum(_segment_max(spread_p, seg, MARGIN_WINDOW), MARGIN_FLOOR)
+    # Against the table only how far the arm may be lower counts: the vertical part of the
+    # spread, taken the same way (the user, 2026-10-01).
+    spread_z = _vertical_spread(out, spread_from, info)
+    margin_z = np.maximum(_segment_max(spread_z, seg, MARGIN_WINDOW), MARGIN_FLOOR)
     metadata = dict(bundle.metadata)
     metadata["position_reference"] = (f"learned attractor: pass {k} of the replay {out} (ILC, "
                                       "audit B1); the arm's own path is arm_path.npz")
@@ -816,7 +832,8 @@ def export_bundle(out_dir, dest, k: int | None = None) -> Path:
     }
     learned = SourceBundle(tool_labels=learned_labels, placement=bundle.placement,
                            metadata=metadata,
-                           arm_path={"positions": mean_p, "rotations": mean_r, "margin": margin},
+                           arm_path={"positions": mean_p, "rotations": mean_r, "margin": margin,
+                                     "margin_vertical": margin_z},
                            taught_labels=bundle.demonstration_labels)
     return learned.save(Path(dest).expanduser())
 

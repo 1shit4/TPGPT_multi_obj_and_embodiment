@@ -112,7 +112,8 @@ class SourceBundle:
         arm_path: Where the arm really went while commanded with these labels, when the
             labels are a learned attractor (``tpgpt.hardware.replay.export_bundle``):
             ``positions`` (N, 3) grasp point, ``rotations`` (N, 3, 3) grasp convention and
-            ``margin`` (N,) m, its run-to-run spread. The planner checks this path, carried
+            ``margin`` (N,) m, its run-to-run spread (``margin_vertical``: its vertical part,
+            the margin kept from the table). The planner checks this path, carried
             through the same map, instead of the labels (the arm does not go where the spring
             pulls). None for a bundle whose labels are the path itself.
         taught_labels: With learned labels, the demonstration they were learned from. What
