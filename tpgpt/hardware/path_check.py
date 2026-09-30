@@ -276,6 +276,18 @@ RETRY_ITERATIONS = 400
 RETRY_SEEDS = 3
 RETRY_PERTURBATION = 0.10       # rad, per joint
 MAX_JOINT_JUMP = 0.50           # rad: a retry further than this from the previous answer is refused
+#: Where the arm is posed for the collision tests: the waypoint itself, to 1 mm and
+#: 0.6 deg. Reachability is decided at the simulation's tolerances (15 mm,
+#: ``fr3.solve_ik``'s 0.15 rad), but the solver returns as soon as it is inside them,
+#: often with the previous waypoint's joints unchanged: on the 18:39 demonstration's
+#: path the arm the check posed sat a median 10.8 mm (max 14.8) and up to 8.6 deg from
+#: its waypoint (2026-09-30). The collision tests were then about a different arm from
+#: the one the controller drives there, by more than any tolerance they apply. From an
+#: answer that close, refining costs a few iterations; where it does not converge the
+#: loose answer is kept and counted (``unrefined``).
+POSE_TOLERANCE = 0.001          # m
+POSE_ROTATION_TOLERANCE = 0.01  # rad
+POSE_ITERATIONS = 100
 
 
 def _is_finger(name: str) -> bool:
@@ -374,13 +386,18 @@ def path_feasibility(
         will put the arm (relaxed orientation, or the straight line it steers
         along past positions it cannot reach).
 
+    Either way a reachable waypoint is then solved again, to :data:`POSE_TOLERANCE`,
+    and the collision tests pose the arm there -- where the controller will drive it
+    -- not where the solver first came within the reachability tolerance.
+
     Returns:
         ``tested``, ``unreachable`` (not reachable as planned), ``reachable_fraction``,
         ``orientation_relaxed``, ``relaxed_in_pick_or_place``, ``skipped``
         (position out of reach), ``steered_unreachable``, ``violations``,
         ``violation_fraction``, ``first_violation`` (``-1``: the move onto the
-        path), ``faults``, ``approach_in``, ``criterion``, ``first_kinematic``
-        and ``decided_early``.
+        path), ``faults``, ``approach_in``, ``criterion``, ``first_kinematic``,
+        ``decided_early`` and ``unrefined`` (postures checked where the solver
+        stopped, not at the waypoint).
     """
     from tpgpt.hardware.hand import MAX_OPENING
 
@@ -414,7 +431,7 @@ def path_feasibility(
     place_support = _support_at(model, table, destination_height)
 
     faults: dict = {}
-    counts = {"relaxed": 0, "relaxed_windows": 0, "skipped": 0, "gap": 0}
+    counts = {"relaxed": 0, "relaxed_windows": 0, "skipped": 0, "gap": 0, "unrefined": 0}
     violations, first, first_kin = 0, None, None
 
     def stage_of(k):
@@ -430,7 +447,20 @@ def path_feasibility(
         hits[key] = hits.get(key, 0) + int(n)
 
     def solve(target_p, target_R, seed, k):
-        """IK with the retries the strict criterion allows."""
+        """IK with the retries the strict criterion allows, then posed at the waypoint."""
+        result = _reach(target_p, target_R, seed, k)
+        if not result.reachable:
+            return result
+        fine = fr3.solve_ik(target_p, target_R, seed=result.qpos, max_iterations=POSE_ITERATIONS,
+                            position_tolerance=POSE_TOLERANCE,
+                            rotation_tolerance=POSE_ROTATION_TOLERANCE)
+        if fine.reachable:
+            return fine
+        counts["unrefined"] += 1
+        return result
+
+    def _reach(target_p, target_R, seed, k):
+        """Reachable at the simulation's tolerances? (the retries of the strict criterion)."""
         result = fr3.solve_ik(target_p, target_R, seed=seed, position_tolerance=tolerance)
         if result.reachable or criterion != "strict":
             return result
@@ -711,7 +741,7 @@ def _describe(kind: str, where: str) -> str:
 def _result(tested, unreachable, violations, first, faults, approach_in,
             decided_early: bool = False, relaxed: int = 0, relaxed_windows: int = 0,
             skipped: int = 0, gap: int = 0, criterion: str = "strict",
-            first_kinematic: int | None = None) -> dict:
+            first_kinematic: int | None = None, unrefined: int = 0) -> dict:
     return {
         "criterion": criterion,
         "decided_early": bool(decided_early),
@@ -726,6 +756,8 @@ def _result(tested, unreachable, violations, first, faults, approach_in,
         "relaxed_in_pick_or_place": int(relaxed_windows),
         "skipped": int(skipped),
         "steered_unreachable": int(gap),
+        # Postures checked where the solver stopped, not at the waypoint (POSE_TOLERANCE).
+        "unrefined": int(unrefined),
         "first_kinematic": first_kinematic,
         "violations": int(violations),
         "violation_fraction": float(violations / tested) if tested else 0.0,
