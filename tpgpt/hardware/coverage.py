@@ -79,7 +79,7 @@ def coverage(object_name, object_pose, world, source, destination, destination_h
     context = ScreenContext(camera_position=camera_position, world=world,
                             destination=np.asarray(destination)[:2],
                             destination_height=float(destination_height),
-                            carry_rotation=carry_transform(source.tool_labels)[0])
+                            carry_rotation=carry_transform(source.demonstration_labels)[0])
     screened = screen_candidates(cloud, poses, scores, float(support_height), s, context=context)
     survivors = [c for c in screened if c.rejected is None]      # Screened is a list of candidates
 

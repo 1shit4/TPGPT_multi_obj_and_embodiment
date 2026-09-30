@@ -351,6 +351,8 @@ def test_the_learned_bundle_carries_the_attractor_the_arm_path_and_the_settings(
     assert np.array_equal(learned.tool_labels.gripper, bundle.tool_labels.gripper)
     measured = rp._mean(rp.measured_runs(root, 1, info))[0]
     assert np.allclose(learned.arm_path["positions"], measured)
+    # what the object did stays the demonstration's
+    assert np.array_equal(learned.demonstration_labels.positions, bundle.tool_labels.positions)
     assert learned.arm_path["margin"].min() >= rp.MARGIN_FLOOR
     ex = learned.metadata["learned"]["execution"]
     assert ex["speed_scale"] == info["speed_scale"] and ex["offset_compensation"] == "none"

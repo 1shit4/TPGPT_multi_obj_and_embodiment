@@ -569,7 +569,7 @@ class TpgptPlannerNode(Node):
             camera_position=None if T_cam is None else T_cam[:3, 3],
             world=world, destination=destination[:2],
             destination_height=scene.destination_height,
-            carry_rotation=carry_transform(self.source.tool_labels)[0])
+            carry_rotation=carry_transform(self.source.demonstration_labels)[0])
         path_ctx = PathContext(world=world, end_effector=self.end_effector, start_q=joints)
         info['screen_context'] = context
         info['world'] = world.to_dict()

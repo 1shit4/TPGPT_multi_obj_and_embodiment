@@ -131,6 +131,12 @@ class Plan:
     metrics: dict = field(default_factory=dict)
     diagnostics: dict = field(default_factory=dict)
     metadata: dict = field(default_factory=dict)
+    #: With labels that are a learned attractor (a bundle with an ``arm_path``): the path
+    #: the arm really goes, transported like the labels (orientations in the controller
+    #: frame), and its margin per label (m). The path check and the geometric metrics use
+    #: it; the executor still runs ``labels``.
+    arm_path: PolicyLabels | None = None
+    arm_margin: np.ndarray | None = None
 
     @property
     def dt(self) -> float:
@@ -141,6 +147,9 @@ class Plan:
         directory = Path(directory)
         directory.mkdir(parents=True, exist_ok=True)
         self.labels.save(directory / "transported_labels.npz")
+        if self.arm_path is not None:
+            self.arm_path.save(directory / "transported_arm_path.npz")
+            np.save(directory / "arm_path_margin.npy", np.asarray(self.arm_margin, dtype=float))
         self.source_keypoints.save(directory / "source_keypoints.json")
         self.target_keypoints.save(directory / "target_keypoints.json")
         np.savez_compressed(
@@ -183,6 +192,9 @@ class Plan:
                 diagnostics={"target_place_points": d["target_place_points"]},
                 metadata=info.get("metadata", {}),
             )
+        if (directory / "transported_arm_path.npz").exists():
+            plan.arm_path = PolicyLabels.load(directory / "transported_arm_path.npz")
+            plan.arm_margin = np.load(directory / "arm_path_margin.npy")
         return plan
 
 
@@ -296,8 +308,10 @@ def plan(
         destination_height=float(scene.destination_height),
     )
     tool_labels = source.tool_labels
+    # What the object did is read off the labels at the grasp and the release; for learned
+    # labels those lead the hand, so the taught ones say it (SourceBundle.demonstration_labels).
     source_set, target_set, diagnostics = scene_keypoints(
-        source.placement, target, tool_labels,
+        source.placement, target, source.demonstration_labels,
         include_contacts=False, box=box, orientation=orientation,
         cube_half_extent=cube_half_extent,
     )
@@ -318,25 +332,44 @@ def plan(
     transported = transport_labels(transport_map, tool_labels)
     grasp_orientations = transported.orientations
     transported = transported.replace(orientations=ee.ee_from_grasp(grasp_orientations))
+    # Learned labels (audit B1, step 6): the labels are an attractor that leads the arm, so they
+    # are not where the arm goes. The path the arm traced when they were learned, carried by the
+    # same map, is what the geometry below and the path check measure. That the arm lags the
+    # transported attractor as it lagged the learned one is an assumption (the transfer
+    # allowance, not yet measured).
+    arm = None
+    if source.arm_path is not None:
+        arm_report = transport_map.check_diffeomorphism(source.arm_path["positions"])
+        if not arm_report.consistent_sign or arm_report.min_determinant < min_determinant:
+            raise PlanningError(
+                f"map_not_a_diffeomorphism: along the arm's path min det(J) "
+                f"{arm_report.min_determinant:.3f} (need >= {min_determinant})")
+        arm = transport_labels(transport_map, PolicyLabels(
+            positions=np.asarray(source.arm_path["positions"], dtype=float),
+            orientations=np.asarray(source.arm_path["rotations"], dtype=float),
+            gripper=tool_labels.gripper))
+        grasp_orientations = arm.orientations
+        arm = arm.replace(orientations=ee.ee_from_grasp(arm.orientations))
+    geometry = arm if arm is not None else transported
 
     # --- geometric checks -----------------------------------------------------
     executed = diagnostics["target_grasp"]
     place_grasp = diagnostics["target_place_grasp"]
     grasp_index, release_index = carry_indices(tool_labels)
-    aim_grasp = float(np.linalg.norm(transported.positions[grasp_index] - executed.tcp))
-    aim_release = float(np.linalg.norm(transported.positions[release_index] - place_grasp.tcp))
+    aim_grasp = float(np.linalg.norm(geometry.positions[grasp_index] - executed.tcp))
+    aim_release = float(np.linalg.norm(geometry.positions[release_index] - place_grasp.tcp))
     orient_grasp = float(np.degrees(rotation_geodesic(
         grasp_orientations[grasp_index], executed.rotation
     )[0]))
     orient_release = float(np.degrees(rotation_geodesic(
         grasp_orientations[release_index], place_grasp.rotation
     )[0]))
-    path = transported.positions
+    path = geometry.positions
     # The destination surface reaches as far as the object being set down on it,
     # plus the hand around it; beyond that the hand is past the board (docstring).
     horizontal = np.linalg.norm(points[:, :2] - np.median(points[:, :2], axis=0), axis=1).max()
     clearance_pick, clearance_place = _hand_clearance(
-        transported, grasp_index, release_index, width, support_height,
+        geometry, grasp_index, release_index, width, support_height,
         float(target.destination_height), ee,
         destination_xy=target.destination[:2],
         footprint_radius=float(horizontal) + PLACE_FOOTPRINT_MARGIN,
@@ -373,6 +406,8 @@ def plan(
         "keypoint_box": box,
         "keypoint_orientation": orientation,
         "cube_half_extent": cube_half_extent,
+        # what the geometric metrics and the path check are measured on
+        "checked_path": "arm path (learned labels)" if arm is not None else "labels",
     }
     return Plan(
         labels=transported,
@@ -404,7 +439,12 @@ def plan(
             # compliant segments into it.
             "source": source.metadata.get("source", "simulation"),
             "source_stiffness": source.metadata.get("stiffness", "demonstrated"),
+            # the settings a learned attractor was learned under; the executor runs with them
+            "learned_execution": source.metadata.get("learned", {}).get("execution"),
         },
+        arm_path=arm,
+        arm_margin=(None if arm is None else
+                    np.asarray(source.arm_path["margin"], dtype=float).copy()),
     )
 
 

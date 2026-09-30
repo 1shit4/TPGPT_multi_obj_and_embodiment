@@ -813,11 +813,21 @@ def _result(tested, unreachable, violations, first, faults, approach_in,
 
 def check_plan(plan, world, end_effector, start_q=None, start_tcp=None, fr3: FR3 | None = None,
                stop_early: bool = False, **kwargs) -> dict:
-    """:func:`path_feasibility` on a :class:`tpgpt.hardware.planner.Plan`."""
+    """:func:`path_feasibility` on a :class:`tpgpt.hardware.planner.Plan`: its labels, or, for
+    learned labels, the arm's own path with its margin (``Plan.arm_path``)."""
     m = plan.metrics
     kwargs.setdefault("destination_height", float(plan.destination_height))
+    path = plan.labels
+    arm = getattr(plan, "arm_path", None)
+    if arm is not None:
+        # Learned labels: the arm's own path is checked, with its run-to-run margin on top of
+        # any clearance asked for (the attractor is not where the arm goes).
+        path = arm
+        extra = kwargs.pop("clearance", None)
+        kwargs["clearance"] = np.asarray(plan.arm_margin, dtype=float) + (
+            0.0 if extra is None else np.asarray(extra, dtype=float))
     return path_feasibility(
-        plan.labels.positions, plan.labels.orientations, plan.labels.gripper, end_effector,
+        path.positions, path.orientations, path.gripper, end_effector,
         world, plan.target_points, int(m["grasp_index"]), int(m["release_index"]),
         closed_width=float(m.get("object_width_closing_m", 0.0)), start_q=start_q,
         start_tcp=start_tcp, fr3=fr3, stop_early=stop_early, **kwargs)

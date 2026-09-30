@@ -259,6 +259,69 @@ class TestPlanner:
         assert loaded.metrics["min_det"] == pytest.approx(result.metrics["min_det"])
         assert np.allclose(loaded.grasp.tcp, result.grasp.tcp)
 
+    # Learned labels (audit B1, step 6): the command leads the hand; the arm's path is checked.
+    @staticmethod
+    def _learned(taught, lead=np.array([0.0, 0.015, 0.0])):
+        labels = taught.tool_labels
+        return SourceBundle(
+            labels.replace(positions=labels.positions + lead), taught.placement,
+            {**taught.metadata, "learned": {"execution": {"speed_scale": 0.35}}},
+            arm_path={"positions": labels.positions, "rotations": labels.orientations,
+                      "margin": np.full(len(labels), 0.002)},
+            taught_labels=labels)
+
+    def test_a_learned_command_is_run_and_its_arm_path_is_measured(self, bundle):
+        result = plan(self._learned(bundle), self._scene(bundle))
+        assert np.allclose(result.labels.positions, bundle.tool_labels.positions + [0, 0.015, 0],
+                           atol=2e-3)
+        assert np.allclose(result.arm_path.positions, bundle.tool_labels.positions, atol=2e-3)
+        # the aim is the arm's, not the command's 15 mm lead
+        assert result.metrics["aim_grasp_m"] < 3e-3
+        assert result.metrics["checked_path"] == "arm path (learned labels)"
+        assert result.metadata["learned_execution"] == {"speed_scale": 0.35}
+        assert plan(bundle, self._scene(bundle)).metadata["learned_execution"] is None
+
+    def test_what_the_object_did_is_read_off_the_taught_labels(self, bundle):
+        """The command's pose at the grasp and the release is not the hand's; the keypoints
+        (the object carried from the grasp to the release) must not move with it."""
+        learned = self._learned(bundle)
+        scene = self._scene(bundle)
+        taught_keys = plan(bundle, scene).source_keypoints.points
+        assert np.allclose(plan(learned, scene).source_keypoints.points, taught_keys)
+        learned.taught_labels = None                       # read off the command instead
+        assert not np.allclose(plan(learned, scene).source_keypoints.points, taught_keys,
+                               atol=1e-3)
+
+    def test_a_learned_plan_and_bundle_round_trip(self, bundle, tmp_path):
+        learned = self._learned(bundle)
+        loaded_bundle = SourceBundle.load(learned.save(tmp_path / "b"))
+        assert np.allclose(loaded_bundle.taught_labels.positions, bundle.tool_labels.positions)
+        assert np.allclose(loaded_bundle.arm_path["margin"], 0.002)
+        result = plan(loaded_bundle, self._scene(bundle))
+        result.save(tmp_path / "plan")
+        loaded = Plan.load(tmp_path / "plan")
+        assert np.allclose(loaded.arm_path.positions, result.arm_path.positions)
+        assert np.allclose(loaded.arm_path.orientations, result.arm_path.orientations)
+        assert np.allclose(loaded.arm_margin, 0.002)
+        assert Plan.load(plan(bundle, self._scene(bundle)).save(tmp_path / "plain")).arm_path is None
+
+    def test_the_path_check_checks_the_arm_path_with_its_margin(self, bundle, monkeypatch):
+        from tpgpt.hardware import path_check
+        seen = {}
+        monkeypatch.setattr(path_check, "path_feasibility",
+                            lambda positions, orientations, *a, **kw: seen.update(
+                                positions=positions, orientations=orientations, **kw))
+        result = plan(self._learned(bundle), self._scene(bundle))
+        path_check.check_plan(result, None, None, clearance=0.003)
+        assert np.allclose(seen["positions"], result.arm_path.positions)
+        assert np.allclose(seen["orientations"], result.arm_path.orientations)
+        assert np.allclose(seen["clearance"], 0.005)
+        plain = plan(bundle, self._scene(bundle))
+        seen.clear()
+        path_check.check_plan(plain, None, None)
+        assert np.allclose(seen["positions"], plain.labels.positions)
+        assert seen.get("clearance") is None
+
     @pytest.mark.skipif(not REAL_BUNDLE.exists(), reason="export_source has not been run")
     def test_the_exported_mujoco_bundle_reproduces_itself(self):
         real = SourceBundle.load(REAL_BUNDLE)

@@ -814,7 +814,8 @@ def export_bundle(out_dir, dest, k: int | None = None) -> Path:
     }
     learned = SourceBundle(tool_labels=learned_labels, placement=bundle.placement,
                            metadata=metadata,
-                           arm_path={"positions": mean_p, "rotations": mean_r, "margin": margin})
+                           arm_path={"positions": mean_p, "rotations": mean_r, "margin": margin},
+                           taught_labels=bundle.demonstration_labels)
     return learned.save(Path(dest).expanduser())
 
 

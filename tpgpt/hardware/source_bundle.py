@@ -38,6 +38,7 @@ from tpgpt.transport.labels import PolicyLabels
 
 LABELS_FILE = "tool_labels.npz"
 ARM_PATH_FILE = "arm_path.npz"
+TAUGHT_LABELS_FILE = "taught_labels.npz"
 PLACEMENT_FILE = "placement.npz"
 MANIFEST_FILE = "manifest.json"
 
@@ -114,12 +115,22 @@ class SourceBundle:
             ``margin`` (N,) m, its run-to-run spread. The planner checks this path, carried
             through the same map, instead of the labels (the arm does not go where the spring
             pulls). None for a bundle whose labels are the path itself.
+        taught_labels: With learned labels, the demonstration they were learned from. What
+            the object did is read off these (``carry_transform``: the hand's pose at the grasp
+            and the release), since the learned labels lead the hand and did not hold it.
     """
 
     tool_labels: PolicyLabels
     placement: ObjectPlacement
     metadata: dict = field(default_factory=dict)
     arm_path: dict | None = None
+    taught_labels: PolicyLabels | None = None
+
+    @property
+    def demonstration_labels(self) -> PolicyLabels:
+        """The labels that say where the hand, and so the object, really went: the taught
+        ones for learned labels, else the labels themselves."""
+        return self.taught_labels if self.taught_labels is not None else self.tool_labels
 
     @property
     def dt(self) -> float:
@@ -144,6 +155,8 @@ class SourceBundle:
         if self.arm_path is not None:
             np.savez_compressed(directory / ARM_PATH_FILE,
                                 **{k: np.asarray(v) for k, v in self.arm_path.items()})
+        if self.taught_labels is not None:
+            self.taught_labels.save(directory / TAUGHT_LABELS_FILE)
         return directory
 
     @classmethod
@@ -171,4 +184,7 @@ class SourceBundle:
         if (directory / ARM_PATH_FILE).exists():
             with np.load(directory / ARM_PATH_FILE, allow_pickle=False) as d:
                 arm_path = {k: d[k] for k in d.files}
-        return cls(tool_labels=labels, placement=placement, metadata=metadata, arm_path=arm_path)
+        taught = (PolicyLabels.load(directory / TAUGHT_LABELS_FILE)
+                  if (directory / TAUGHT_LABELS_FILE).exists() else None)
+        return cls(tool_labels=labels, placement=placement, metadata=metadata, arm_path=arm_path,
+                   taught_labels=taught)
