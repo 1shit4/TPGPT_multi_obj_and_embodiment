@@ -33,7 +33,7 @@ import numpy as np
 def coverage(object_name, object_pose, world, source, destination, destination_height,
              support_height, camera_position, start_q, end_effector, settings=None,
              plan_budget: int = 40, gripper: str = "franka_panda", library_size=None,
-             cloud=None, poses=None, scores=None):
+             cloud=None, poses=None, scores=None, clearance=None):
     """Walk an object's whole grasp library against one destination.
 
     Args:
@@ -48,6 +48,8 @@ def coverage(object_name, object_pose, world, source, destination, destination_h
             walk, already placed. Given, they replace the scan and its library --
             for a capture whose fit was refused, where the planner works from the
             camera's own cloud, and for tests.
+        clearance: a gap the path must keep, m (``path_check.path_feasibility``);
+            None is the planner's check.
 
     Returns a dict: the stage tally, what the planned ones died of, and the
     first admissible grasp's rank if there is one.
@@ -85,7 +87,7 @@ def coverage(object_name, object_pose, world, source, destination, destination_h
                         destination_height=float(destination_height),
                         support_height=float(support_height))
     path = PathContext(world=world, end_effector=end_effector, start_q=start_q)
-    planned, admissible, first_rank = 0, 0, None
+    planned, admissible, first_rank, unrefined = 0, 0, None, 0
     reasons, faults, detail = collections.Counter(), collections.Counter(), collections.Counter()
     for rank, candidate in enumerate(survivors[:int(plan_budget)]):
         planned += 1
@@ -98,7 +100,8 @@ def coverage(object_name, object_pose, world, source, destination, destination_h
             continue
         report = path_check.check_plan(result, path.world, path.end_effector,
                                        start_q=path.start_q, criterion=s.kinematic_criterion,
-                                       approach_rejects=s.approach_rejects)
+                                       approach_rejects=s.approach_rejects, clearance=clearance)
+        unrefined += int(report.get("unrefined", 0))
         verdict = path_check.verdict(report)
         if verdict is None:
             admissible += 1
@@ -119,6 +122,8 @@ def coverage(object_name, object_pose, world, source, destination, destination_h
         "planned": planned,
         "admissible": admissible,
         "first_rank": first_rank,
+        "clearance": clearance,
+        "postures_not_at_their_waypoint": unrefined,
         "why_the_planned_ones_failed": dict(reasons),
         "what_they_touched": dict(faults),
         "faults_detail": dict(detail),
@@ -211,6 +216,9 @@ def main(argv=None):
                          "(the touched marks sit at about 0.09), keeping its position along "
                          "the shelf and its board; nothing in the config changes")
     ap.add_argument("--size", type=int, default=2000, help="grasp library size")
+    ap.add_argument("--clearance", type=float, default=None,
+                    help="a gap every path must keep from the table, the shelf and the seen "
+                         "points, m (default: none, the planner's check)")
     ap.add_argument("--config-dir", default=os.path.expanduser(
         "~/thor_ws/install/ycb_pointcloud_pipeline/share/ycb_pointcloud_pipeline/config"),
         help="where shelf.yaml and camera_calibration.yaml are read (the installed copy, "
@@ -267,7 +275,8 @@ def main(argv=None):
     print(f"{name}: {how}")
     print(f"  scene {os.path.basename(capture)}: {len(obstacles)} obstacle points, "
           f"table {table:+.4f}")
-    print(f"  demo {a.demo}, library {a.size}, plan budget {a.budget}", flush=True)
+    print(f"  demo {a.demo}, library {a.size}, plan budget {a.budget}, clearance "
+          f"{'none' if a.clearance is None else f'{a.clearance * 1000:.0f} mm'}", flush=True)
     out = {}
     for slot in want:
         xyz = slots[slot]
@@ -275,7 +284,7 @@ def main(argv=None):
         start = HOME_Q if a.start_q is None else np.asarray(a.start_q, dtype=float)
         report = coverage(name, (rotation, position), world, source, xyz, xyz[2], table, camera,
                           start, FRANKA_HAND, settings=settings, plan_budget=a.budget,
-                          library_size=a.size)
+                          library_size=a.size, clearance=a.clearance)
         print(f"--- {slot} [{xyz[0]:.3f}, {xyz[1]:.3f}, {xyz[2]:.3f}]  "
               f"({time.monotonic() - t0:.0f} s)")
         print(describe(report), flush=True)
