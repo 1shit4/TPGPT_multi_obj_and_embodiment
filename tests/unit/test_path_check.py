@@ -484,3 +484,32 @@ def test_a_clearance_keeps_the_carried_object_off_a_board_edge():
     assert pc._object_contacts(*args) == []
     assert pc._object_contacts(*args, clearance=0.004) == []
     assert {k for k, _, _ in pc._object_contacts(*args, clearance=0.010)} == {"deep"}
+
+
+def test_a_tilt_swings_each_piece_by_its_own_distance_from_the_grasp_point():
+    from tpgpt.hardware.fr3 import default_model
+    from tpgpt.hardware.hand import MAX_OPENING
+
+    fr3 = default_model()
+    pieces, T = pc.robot_pieces(fr3, HOME_Q, FRANKA_HAND, MAX_OPENING)
+    pivot = T[:3, 3]
+    gaps = pc.piece_gaps(pieces, 0.003, np.radians(2.0), pivot)
+    by_name = {p.name: p for p in pieces}
+    pad = by_name["hand_left_pad"]
+    reach = np.linalg.norm(pad.vertices - pivot, axis=1).max()
+    assert reach == pytest.approx(0.057, abs=0.005)
+    assert gaps["hand_left_pad"] == pytest.approx(0.003 + np.radians(2.0) * reach)
+    wrist = np.linalg.norm(by_name["fr3_link7"].centre - pivot)
+    assert gaps["fr3_link3"] == pytest.approx(0.003 + np.radians(2.0) * wrist)   # follows the wrist
+    assert gaps["fr3_link0"] == 0.0
+    assert pc.piece_gaps(pieces, 0.003)["hand_body"] == 0.003                 # no tilt, no swing
+
+
+def test_a_tilt_can_refuse_what_the_clearance_alone_admits():
+    positions, rotations = _down_to(0.010, TABLE)
+    world = ShelfWorld.build(None, support_height=TABLE)
+    kw = dict(grasp=60, release=60, clearance=0.005)
+    assert not _check(positions, rotations, world, **kw)["faults"]
+    # the pads are ~57 mm from the grasp point: 10 deg swings them 10 mm more, 15 in all
+    r = _check(positions, rotations, world, tilt=np.radians(10.0), **kw)
+    assert any("pad in the table" in k for k in r["faults"]), r["faults"]

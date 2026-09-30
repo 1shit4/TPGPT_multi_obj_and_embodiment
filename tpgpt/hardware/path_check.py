@@ -208,17 +208,48 @@ def _self_faults(pieces, phase: str, depth_tolerance: float) -> dict:
     return faults
 
 
+def piece_gaps(pieces, clearance: float = 0.0, tilt: float = 0.0, pivot=None) -> dict:
+    """The gap each robot piece must keep: ``clearance`` plus how far a ``tilt`` swings it.
+
+    The controller holds the grasp point's position and the hand's orientation with
+    separate springs, so an orientation error turns the hand about the grasp point
+    (``pivot``), and a tilt of ``tilt`` radians moves a point ``r`` from it by at most
+    ``tilt * r``. The hand and link 7 are rigid with it: ``r`` is their farthest
+    vertex (the finger pads 57 mm, the hand's top corners 169 mm). The other links
+    follow the wrist, whose centre -- link 7's origin, ~0.21 m up -- moves by ``tilt``
+    times its own distance; they are given that, which assumes the arm re-poses to
+    carry the wrist and does not magnify its motion (approximately true away from a
+    singularity). The base (:data:`FIXED_PIECES`) gets nothing.
+    """
+    tilt = float(tilt)
+    if tilt <= 0.0 or pivot is None:
+        return {p.name: 0.0 if p.name in FIXED_PIECES else float(clearance) for p in pieces}
+    pivot = np.asarray(pivot, dtype=float)
+    wrist = next((float(np.linalg.norm(p.centre - pivot)) for p in pieces
+                  if p.name == "fr3_link7"), 0.21)
+    gaps = {}
+    for p in pieces:
+        if p.name in FIXED_PIECES:
+            gaps[p.name] = 0.0
+            continue
+        rigid = p.name.startswith("hand_") or p.name == "fr3_link7"
+        reach = float(np.linalg.norm(p.vertices - pivot, axis=1).max()) if rigid else wrist
+        gaps[p.name] = float(clearance) + tilt * reach
+    return gaps
+
+
 def _robot_faults(pieces, world, phase: str, depth_tolerance: float,
-                  check_self: bool = True, clearance: float = 0.0) -> dict:
+                  check_self: bool = True, clearance: float = 0.0, tilt: float = 0.0,
+                  pivot=None) -> dict:
     """Robot pieces against the shelf model, the observed cloud and themselves.
 
-    ``clearance`` (m) is the gap the pieces must keep from the table, the shelf
-    model and the seen points; the arm against itself is tested without it, and
-    so is the base (:data:`FIXED_PIECES`), which is bolted down and cannot stray.
+    ``clearance`` (m) and ``tilt`` (rad, about ``pivot``) set the gap each piece
+    must keep from the table, the shelf model and the seen points
+    (:func:`piece_gaps`); the arm against itself is tested without it, and so is
+    the base (:data:`FIXED_PIECES`), which is bolted down and cannot stray.
     """
     faults: dict = _self_faults(pieces, phase, depth_tolerance) if check_self else {}
-    gap = {piece.name: 0.0 if piece.name in FIXED_PIECES else float(clearance)
-           for piece in pieces}
+    gap = piece_gaps(pieces, clearance, tilt, pivot)
     table = getattr(world, "table_height", None)
     if table is not None:
         for piece in pieces:
@@ -326,6 +357,7 @@ def path_feasibility(
     criterion: str = "strict",
     approach_rejects: bool = True,
     clearance=None,
+    tilt=None,
 ) -> dict:
     """Solve and check a transported path, waypoint by waypoint.
 
@@ -369,7 +401,12 @@ def path_feasibility(
     the object at the pick and the placed object in the retreat (contact there
     is the task), and the carried object coming down onto a support's top face
     (it is set down or lifted off there; a clearance would call the set-down
-    itself a collision).
+    itself a collision), and the fixed base.
+
+    ``tilt`` (None, radians, or one per waypoint) adds the hand turning about
+    the grasp point by up to that angle: each piece's gap grows by the angle
+    times how far that piece is from the grasp point (:func:`piece_gaps`), and
+    the carried object's by the angle times its own farthest point.
 
     **Reachability** (``criterion``):
 
@@ -418,8 +455,13 @@ def path_feasibility(
     model = world.model
     gap = (np.zeros(len(positions)) if clearance is None else
            np.broadcast_to(np.asarray(clearance, dtype=float), (len(positions),)).copy())
-    if np.any(gap < 0.0):
-        raise ValueError("clearance must not be negative")
+    swing = (np.zeros(len(positions)) if tilt is None else
+             np.broadcast_to(np.asarray(tilt, dtype=float), (len(positions),)).copy())
+    if np.any(gap < 0.0) or np.any(swing < 0.0):
+        raise ValueError("clearance and tilt must not be negative")
+
+    def grasp_point(T):
+        return T[:3, 3] + T[:3, :3] @ offset
 
     local = base = None
     if len(held):
@@ -503,9 +545,10 @@ def path_feasibility(
                     continue
                 result = position_only
             seed = result.qpos
-            pieces, _ = robot_pieces(fr3, seed, end_effector, MAX_OPENING)
+            pieces, T = robot_pieces(fr3, seed, end_effector, MAX_OPENING)
             for key, count in _robot_faults(pieces, world, "approach_in", depth_tolerance,
-                                            check_self, gap[0]).items():
+                                            check_self, gap[0], swing[0],
+                                            grasp_point(T)).items():
                 add(bad, key, count)
             for piece in pieces:
                 if _touches(piece, held):
@@ -539,10 +582,10 @@ def path_feasibility(
         nonlocal lifted, fingers_cleared
         hits: dict = {}
         opening = closed_width if gripper[k] > 0 else MAX_OPENING
-        pieces, _ = robot_pieces(fr3, q, end_effector, opening)
+        pieces, T = robot_pieces(fr3, q, end_effector, opening)
         label = stage + tag
         for key, count in _robot_faults(pieces, world, label, depth_tolerance, check_self,
-                                        gap[k]).items():
+                                        gap[k], swing[k], grasp_point(T)).items():
             add(hits, key, count)
 
         if len(held) and stage in ("approach", "pick"):
@@ -556,8 +599,9 @@ def path_feasibility(
             for piece in pieces:
                 if piece.name.startswith("fr3_link") and _touches(piece, obj):
                     add(hits, f"{label}: {piece.name} in the carried object")
+            reach = float(np.linalg.norm(obj - point, axis=1).max()) if swing[k] > 0 else 0.0
             contact = _object_contacts(obj, base, world, model, table, depth_tolerance,
-                                       contact_radius, gap[k])
+                                       contact_radius, gap[k] + swing[k] * reach)
             if not lifted and _clear_of(obj, pick_support, model, table, contact_radius):
                 lifted = True
             allowed = set()
