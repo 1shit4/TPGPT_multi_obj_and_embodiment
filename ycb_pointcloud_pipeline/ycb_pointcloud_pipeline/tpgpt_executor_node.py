@@ -678,6 +678,7 @@ class TpgptExecutorNode(Node):
         approach_p, approach_R = approach_trajectory(
             cur_pos, cur_rot, start_pos, start_rot, dt,
             float(p('approach_max_linear_speed')), float(p('approach_max_angular_speed')))
+        where = plan.arm_path if plan.arm_path is not None else plan.labels
         summary = (
             f"\n{'DRY RUN (nothing moves)' if self.dry else 'HARDWARE RUN'}\n"
             f"  controller      {self.controller} -> {self.pose_topic}"
@@ -687,8 +688,9 @@ class TpgptExecutorNode(Node):
             f"  approach        {gap:.3f} m over {len(approach_p) * dt:.1f} s\n"
             f"  policy          {len(plan.labels)} labels at speed_scale {settings.speed_scale} "
             f"(~{len(plan.labels) * dt / settings.speed_scale:.0f} s)\n"
-            f"  grasp at        {np.round(plan.labels.positions[int(m['grasp_index'])], 3).tolist()}"
-            f"  release at {np.round(plan.labels.positions[int(m['release_index'])], 3).tolist()}\n"
+            f"  grasp at        {np.round(where.positions[int(m['grasp_index'])], 3).tolist()}"
+            f"  release at {np.round(where.positions[int(m['release_index'])], 3).tolist()}"
+            f"{' (the arm; the learned command leads it)' if plan.arm_path is not None else ''}\n"
             f"  hand            {hand.name}, gripper {p('gripper_mode') if not self.dry else 'not sent'}\n"
         )
         print(summary)
