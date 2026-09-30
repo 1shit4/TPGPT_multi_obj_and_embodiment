@@ -358,6 +358,7 @@ def path_feasibility(
     approach_rejects: bool = True,
     clearance=None,
     tilt=None,
+    held_shift=None,
 ) -> dict:
     """Solve and check a transported path, waypoint by waypoint.
 
@@ -407,6 +408,11 @@ def path_feasibility(
     the grasp point by up to that angle: each piece's gap grows by the angle
     times how far that piece is from the grasp point (:func:`piece_gaps`), and
     the carried object's by the angle times its own farthest point.
+
+    ``held_shift`` (None or a base-frame vector, m) moves the object by it when the
+    jaws close, before it is carried: a parallel jaw closing off-centre pushes the
+    object to its centre (its fingers are coupled). :func:`check_plan` passes it
+    for a path the arm really traced, whose hand is not at the planned grasp.
 
     **Reachability** (``criterion``):
 
@@ -465,7 +471,8 @@ def path_feasibility(
 
     local = base = None
     if len(held):
-        local = (held - positions[g]) @ rotations[g]
+        moved = held if held_shift is None else held + np.asarray(held_shift, dtype=float)
+        local = (moved - positions[g]) @ rotations[g]
         at_release = positions[r] + local @ rotations[r].T
         base = at_release[:, 2] <= float(at_release[:, 2].min()) + BASE_BAND
     # Which surface the object is picked from, and which it is set down on.
@@ -826,6 +833,14 @@ def check_plan(plan, world, end_effector, start_q=None, start_tcp=None, fr3: FR3
         extra = kwargs.pop("clearance", None)
         kwargs["clearance"] = np.asarray(plan.arm_margin, dtype=float) + (
             0.0 if extra is None else np.asarray(extra, dtype=float))
+        if end_effector.is_parallel_jaw and "held_shift" not in kwargs:
+            # The hand closes where the arm is, off the planned grasp; the coupled jaws
+            # centre the object across them (along the approach and the jaws' width it
+            # stays where it stood).
+            c = np.asarray(plan.grasp.closing, dtype=float)
+            c = c / np.linalg.norm(c)
+            miss = np.asarray(arm.positions[int(m["grasp_index"])]) - np.asarray(plan.grasp.tcp)
+            kwargs["held_shift"] = float(miss @ c) * c
     return path_feasibility(
         path.positions, path.orientations, path.gripper, end_effector,
         world, plan.target_points, int(m["grasp_index"]), int(m["release_index"]),

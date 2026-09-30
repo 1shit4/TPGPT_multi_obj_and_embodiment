@@ -335,6 +335,21 @@ def test_the_object_may_touch_the_table_only_until_it_lifts_off_or_as_its_destin
     assert not [k for k in placed["faults"] if "carried object" in k]
 
 
+def test_the_held_shift_moves_the_object_when_the_jaws_close():
+    up = np.linspace([0.45, 0.0, 0.20], [0.45, 0.0, 0.30], 30)
+    down = np.linspace([0.45, 0.0, 0.30], [0.45, 0.0, 0.20], 30)
+    positions = np.vstack([up, down])
+    rotations = np.repeat(DOWN[None], len(positions), axis=0)
+    cube = _cube([0.45, 0.0, 0.12])                   # base 3 mm into a table at 0.103
+    world = ShelfWorld.build(None, support_height=0.103)
+    kw = dict(grasp=0, release=59, object_points=cube, destination_height=0.30)
+    assert any("carried object touches table" in k for k in _check(positions, rotations, world,
+                                                                    **kw)["faults"])
+    # held 10 mm higher in the hand, it comes back down 10 mm above the table
+    lifted = _check(positions, rotations, world, held_shift=[0.0, 0.0, 0.010], **kw)
+    assert not [k for k in lifted["faults"] if "carried object" in k]
+
+
 def test_at_the_pick_the_fingers_may_touch_the_object_and_the_palm_may_not():
     positions, rotations = _path([0.45, 0.0, 0.30], [0.45, 0.0, 0.30], n=30)   # hand holds still
     fr3 = __import__("tpgpt.hardware.fr3", fromlist=["default_model"]).default_model()

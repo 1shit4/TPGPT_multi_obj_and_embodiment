@@ -33,6 +33,7 @@ from tpgpt.hardware.executor import (
     logged_stiffness,
     stiffness_projection_loss,
 )
+from tpgpt.hardware.end_effector import FRANKA_HAND
 from tpgpt.hardware.planner import (
     KEYPOINT_BOX,
     KEYPOINT_ORIENTATION,
@@ -312,15 +313,33 @@ class TestPlanner:
                             lambda positions, orientations, *a, **kw: seen.update(
                                 positions=positions, orientations=orientations, **kw))
         result = plan(self._learned(bundle), self._scene(bundle))
-        path_check.check_plan(result, None, None, clearance=0.003)
+        path_check.check_plan(result, None, FRANKA_HAND, clearance=0.003)
         assert np.allclose(seen["positions"], result.arm_path.positions)
         assert np.allclose(seen["orientations"], result.arm_path.orientations)
         assert np.allclose(seen["clearance"], 0.005)
         plain = plan(bundle, self._scene(bundle))
         seen.clear()
-        path_check.check_plan(plain, None, None)
+        path_check.check_plan(plain, None, FRANKA_HAND)
         assert np.allclose(seen["positions"], plain.labels.positions)
-        assert seen.get("clearance") is None
+        assert seen.get("clearance") is None and seen.get("held_shift") is None
+
+    def test_the_jaws_centre_the_object_the_arm_closes_off_centre_on(self, bundle, monkeypatch):
+        """The arm grasps 4 mm off across the jaws and 3 mm short along the approach: the
+        coupled jaws push the object 4 mm across to their centre, not along the approach."""
+        from tpgpt.hardware import path_check
+        seen = {}
+        monkeypatch.setattr(path_check, "path_feasibility",
+                            lambda *a, **kw: seen.update(kw))
+        learned = self._learned(bundle)
+        c = np.asarray(bundle.placement.grasp.closing, dtype=float)
+        a = np.asarray(bundle.placement.grasp.approach, dtype=float)
+        learned.arm_path["positions"] = learned.arm_path["positions"] + 0.004 * c - 0.003 * a
+        result = plan(learned, self._scene(bundle))
+        path_check.check_plan(result, None, FRANKA_HAND)
+        closing = np.asarray(result.grasp.closing) / np.linalg.norm(result.grasp.closing)
+        shift = np.asarray(seen["held_shift"])
+        assert abs(abs(shift @ closing) - 0.004) < 5e-4
+        assert np.linalg.norm(shift - (shift @ closing) * closing) < 1e-9
 
     @pytest.mark.skipif(not REAL_BUNDLE.exists(), reason="export_source has not been run")
     def test_the_exported_mujoco_bundle_reproduces_itself(self):
