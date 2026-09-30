@@ -272,7 +272,22 @@ The planner's support height is: its `support_height` parameter, else the calibr
   pass 0 is refused at 45 and 30 (x0.25 while carrying). **With the object, the pass first guides
   it onto its taught place** (the scan fitted to the camera and to the taught cloud; "move it
   N mm toward the robot ..., turn it N deg ..."), and waits until it is within 10 mm / 10 deg;
-  camera and segmentation must be up. Dry-run only so far.
+  camera and segmentation must be up.
+- **The first robot replay pass (2026-09-30 15:16, pass 0, no object, rotational 60) jittered
+  descending to the pick and ended at the set-down in libfranka's `joint_velocity_violation`
+  reflex** (robot red; FrankaHardwareInterface and every controller deactivated). From the
+  container's log (`~/THOR_DOCKER_SETUP/.cache/ros_logs/ros2_control_node_*.log`; the container
+  runs `--rm`, so `docker logs` is gone once it stops): the rotational stiffness stepped 15 -> 60 at
+  label ~381 as the carry slowed, 1.05 s later joint 5's command hit its 12 N m limit (0.33 rad/s),
+  0.4 s after that the reflex. The executor's "no fresh pose" came between the two, a symptom.
+  Offline: on the branch from home, **joint 7 sits at its limit from label 0 to 156** (the whole
+  approach and pick), inside CRISP's `joint_limit_repulsion` (0.1 rad, 5 N m) -- a candidate for
+  the jitter, unconfirmed (the teach recording has no joints; the hand's half-turn twin frees joint
+  7 but puts link 6 into the top board's margin). A replay pass now keeps every pose and joint
+  state (efforts too), saves `aborted_<n>.npz` on an abort, and `replay_until_label` runs a
+  partial pass (`partial_<n>.npz`, checked only over its labels). Callback load does not explain
+  a stale pose: a copy of the node's structure fed 3x the robot's rates never saw one older than
+  6 ms.
 - **A plan that leaves the executor's workspace box is now refused at selection**
   (`SelectionSettings.workspace_min/max`, fed from the planner's own parameters). It used to be
   found only by the executor, which aborted the whole run instead of taking the next grasp

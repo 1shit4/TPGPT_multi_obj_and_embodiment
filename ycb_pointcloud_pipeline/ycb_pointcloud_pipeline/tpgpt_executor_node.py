@@ -888,7 +888,8 @@ class TpgptExecutorNode(Node):
         with_object = mode != 'none'
         if shelf_config:
             verdict, _ = rp.check_pass(root, k, shelf_config, rotational=schedule,
-                                       with_object=with_object, start_q=self.measured_joints())
+                                       with_object=with_object, start_q=self.measured_joints(),
+                                       until=int(p('replay_until_label')))
             clearance, tilt, source = rp.pass_margin(root, k)
             margin_text = (f'{clearance.min() * 1000:.1f}-{clearance.max() * 1000:.1f} mm and '
                            f'{np.degrees(tilt.min()):.1f}-{np.degrees(tilt.max()):.1f} deg '

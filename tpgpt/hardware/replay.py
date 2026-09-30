@@ -671,7 +671,7 @@ def use_checks(out_dir, check_dirs) -> dict:
 
 
 def check_pass(out_dir, k: int, shelf_config, rotational=None, with_object: bool = True,
-               start_q=None) -> tuple[str | None, dict]:
+               start_q=None, until: int | None = None) -> tuple[str | None, dict]:
     """The taught path, with pass ``k``'s margin, against the shelf model and the table:
     ``(verdict, check)``.
 
@@ -680,7 +680,9 @@ def check_pass(out_dir, k: int, shelf_config, rotational=None, with_object: bool
     taught path is checked with the margin (:func:`pass_margin`). ``rotational`` (per
     label, N m/rad) is needed for pass 0's estimate. ``with_object``: whether the object is
     carried (not when the gripper is not used). No camera cloud: the scene is the measured
-    shelf model and the table (anything else in the way is the operator's).
+    shelf model and the table (anything else in the way is the operator's). ``until``: a
+    partial pass, which runs labels ``0..until`` only, is checked over those; if it ends
+    before the release the carried object is not checked (use it without the object).
     """
     import yaml
 
@@ -696,14 +698,18 @@ def check_pass(out_dir, k: int, shelf_config, rotational=None, with_object: bool
     world = ShelfWorld(model=ShelfModel.from_config(cfg), cloud=np.zeros((0, 3)),
                        table_height=float(cfg["shelf"]["anchors"]["table"]))
     hand = end_effector_for_plan(bundle.metadata)
+    n = info["n_labels"] if until is None or until < 0 else min(int(until) + 1, info["n_labels"])
+    release = info["release_index"]
+    if release >= n:
+        release, with_object = n - 1, False
     check = path_check.path_feasibility(
-        labels.positions, hand.ee_from_grasp(labels.orientations), labels.gripper, hand, world,
-        bundle.placement.points if with_object else np.zeros((0, 3)),
-        info["grasp_index"], info["release_index"],
+        labels.positions[:n], hand.ee_from_grasp(labels.orientations[:n]), labels.gripper[:n],
+        hand, world, bundle.placement.points if with_object else np.zeros((0, 3)),
+        min(info["grasp_index"], n - 1), release,
         closed_width=float(info["object_width_closing_m"]),
         start_q=HOME_Q if start_q is None else start_q,
         destination_height=float(bundle.placement.destination_height),
-        clearance=clearance, tilt=tilt)
+        clearance=clearance[:n], tilt=tilt[:n])
     return path_check.verdict(check), check
 
 
