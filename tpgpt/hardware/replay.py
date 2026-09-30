@@ -192,12 +192,15 @@ def model_from_checks(check_dirs) -> dict:
     Each ``cartesian_target_publisher`` stiffness check (``report.json``) gives, at its
     rotational stiffness: the resting tilt (the largest of its holds' median tilts), the
     turning time constant (the larger of its two turns') and the sideways stray (the
-    largest across the motion of its moves). Returns ``{"stray_m", "rotation": [{"k",
+    largest across the motion of its moves). A check that was cut short is left out.
+    Returns ``{"stray_m", "rotation": [{"k",
     "tilt_deg", "tau_s"}] sorted by k, "checks"}``; a check without a turn gives no tau.
     """
     rows, stray, used = {}, 0.0, []
     for d in check_dirs:
         report = json.loads((Path(d).expanduser() / "report.json").read_text())
+        if report.get("aborted"):
+            continue                    # cut short (a vibration, Ctrl-C): not a stiffness to use
         segs = report.get("segments", {})
         tilts = [s["tilt_median_deg"] for s in segs.values() if "tilt_median_deg" in s]
         taus = [s["tau_s"] for s in segs.values() if "tau_s" in s]
@@ -658,7 +661,7 @@ def main(argv=None):
     c = sub.add_parser("use-checks", help="pass 0's margin from stiffness checks' measurements")
     c.add_argument("dir")
     c.add_argument("checks", nargs="+", help="stiffness check directories "
-                   "(~/tpgpt_stiffness_checks/<time>_<mode>_<k>)")
+                   "(~/tpgpt_stiffness_checks/<time>_<mode>_<k>_rot<k_rot>)")
     s = sub.add_parser("status", help="the passes and their errors")
     s.add_argument("dir")
     args = ap.parse_args(argv)

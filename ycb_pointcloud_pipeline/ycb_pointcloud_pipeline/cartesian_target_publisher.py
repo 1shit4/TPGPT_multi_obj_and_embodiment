@@ -29,7 +29,7 @@ stiffness every cycle -- isotropic, or 350 N/m along the motion / 600 across and
 still (the stiffness labels' rule, tpgpt.hardware.teach.directional_matrices, 12-value
 message) -- and runs hold -> move to the goal -> hold -> move back -> hold, then turns the
 hand `turn_deg` about the vertical and back, holding after each turn. It records
-/current_pose to ~/tpgpt_stiffness_checks/<time>_<mode>_<k>/ and reports each hold's jitter
+/current_pose to ~/tpgpt_stiffness_checks/<time>_<mode>_<k>_rot<k_rot>/ and reports each hold's jitter
 (size, frequency) and resting tilt, each move's lag along and across the motion, and each
 turn's lag and rotational time constant. Above `max_jitter` of
 oscillation it drops to 400 / 30 and holds. It imports tpgpt, so run it from the tpgpt venv:
@@ -489,7 +489,7 @@ class CartesianTargetPublisher(Node):
                 report['segments'][name] = turn_lag(cmd_quat[m], quat[m], [0.0, 0.0, sign], rate[m])
         out = g('record_dir') or os.path.expanduser(
             time.strftime(f'~/tpgpt_stiffness_checks/%Y%m%d_%H%M%S_{self.mode}_'
-                          f"{int(g('translational_stiffness'))}"))
+                          f"{int(g('translational_stiffness'))}_rot{int(g('rotational_stiffness'))}"))
         os.makedirs(out, exist_ok=True)
         with open(os.path.join(out, 'report.json'), 'w') as f:
             json.dump(report, f, indent=2)

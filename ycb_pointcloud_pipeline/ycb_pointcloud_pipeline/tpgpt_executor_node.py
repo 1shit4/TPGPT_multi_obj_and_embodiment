@@ -206,9 +206,13 @@ class TpgptExecutorNode(Node):
         # replay's speed_scale, under its own stiffness labels -- and record where the arm was.
         # No policy, no lag gate: the simulation's teacher records its demonstration the same way.
         d('replay_dir', '')
-        # The shelf the replay's attractor path is checked against before each pass ('' = no
-        # check): the installed config/shelf.yaml.
+        # The shelf the replay's taught path (with its margin) is checked against before each
+        # pass ('' = no check): the installed config/shelf.yaml.
         d('replay_shelf_config', _installed_config('shelf.yaml'))
+        # A dry run of a replay checks and summarises the pass and stops: a simulated arm's
+        # recording saved into the replay would count as a run of it. True simulates the pass
+        # and records it there anyway -- for tests of the replay itself, never on a real one.
+        d('replay_record_dry', False)
 
         p = self.p
         self.replay = bool(p('replay_dir'))
@@ -866,9 +870,12 @@ class TpgptExecutorNode(Node):
             self._taught_object_pub = self.create_publisher(
                 PointCloud2, '/tpgpt/replay/taught_object', latched)
             points = np.asarray(bundle.placement.points, dtype=float)
-            self._taught_object_pub.publish(xyz_to_pointcloud2(
-                points, self.base, self.get_clock().now().to_msg(), rgb=np.array([0, 255, 0],
-                                                                                 dtype=np.uint8)))
+            taught = xyz_to_pointcloud2(points, self.base, self.get_clock().now().to_msg(),
+                                        rgb=np.array([0, 255, 0], dtype=np.uint8))
+            self._taught_object_pub.publish(taught)
+            # and every second, for a display added later with RViz's default (volatile) QoS
+            self._taught_object_timer = self.create_timer(
+                1.0, lambda: self._taught_object_pub.publish(taught))
             centre = points.mean(axis=0)
             log.info(f'The object must stand where it was taught: centre '
                      f'{np.round(centre, 3).tolist()} m ({self.base}), shown green on '
@@ -898,6 +905,10 @@ class TpgptExecutorNode(Node):
               f"  approach       {gap:.3f} m over {len(approach_p) * dt:.1f} s\n"
               f"  gripper        {mode if not self.dry else 'not sent'} (object {width * 1000:.0f} mm)"
               f"{'' if with_object else ' -- NO OBJECT: take it off the table'}\n")
+        if self.dry and not p('replay_record_dry'):
+            log.info('Dry run: the pass is checked and summarised only, and nothing is recorded '
+                     '(replay_record_dry:=true simulates it into the replay, for tests)')
+            return True
         if not self.dry and p('require_confirmation'):
             print('Keep the emergency stop within reach.')
             if input("Type 'yes' to ACTIVATE the controller and replay: ").strip().lower() != 'yes':

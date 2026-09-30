@@ -38,38 +38,51 @@ the **robot container**, the **camera**, and **segmentation**. Nothing here is s
 planning or executing — those come later and each brings its own viewer.
 
 One terminal each. The camera and segmentation are separate so the camera can warm up (and stay up)
-while segmentation restarts.
+while segmentation restarts. Each block below is everything that terminal needs, sourcing
+included: open a new terminal and paste the whole block.
 
-```bash
-# T1  robot container (controllers, /current_pose, /joint_states)
-```
+**T1 — robot container.** Starts the robot's controllers inside Docker; they publish the hand's
+pose (`/current_pose`) and the joint angles (`/joint_states`). Leave it running all session.
 ```bash
 cd ~/THOR_DOCKER_SETUP && HARDWARE_ACK=I_UNDERSTAND_FR3_EFFORT_CONTROL ./scripts/run.sh robot
 ```
+
+**T2 — camera.** Starts the RealSense driver on the host at the resolution the calibration was
+made at. Let it run 15 minutes before measuring anything (it drifts while it warms up).
 ```bash
-# T2  camera
-```
-```bash
+source /opt/ros/jazzy/setup.bash
+source ~/THOR_DOCKER_SETUP/scripts/host_ros_env.sh && source ~/thor_ws/install/setup.bash
 ros2 launch realsense2_camera rs_launch.py \
   enable_color:=true enable_depth:=true enable_infra1:=false enable_infra2:=false \
   align_depth.enable:=true \
   rgb_camera.color_profile:=848,480,30 depth_module.depth_profile:=848,480,30
-  ```
-  ```bash
-# T3  segmentation (NOT its own camera)
 ```
+
+**T3 — segmentation.** Finds the objects in the camera image and publishes each one's points
+(`/ycb_pointclouds/<object>`). It uses the camera from T2 and must not start its own.
 ```bash
+source /opt/ros/jazzy/setup.bash
+source ~/THOR_DOCKER_SETUP/scripts/host_ros_env.sh && source ~/thor_ws/install/setup.bash
 source ~/venvs/ycb/bin/activate
 ros2 launch ycb_pointcloud_pipeline ycb_pipeline.launch.py launch_camera:=false
 ```
 - **`launch_camera:=false` matters.** The pipeline launch starts its own camera otherwise, and two
   drivers fight over the D435: `xioctl(VIDIOC_S_FMT) failed, errno=16 ... Device or resource busy`.
 - The intrinsics are valid at **848x480** only.
-- Check the object is seen before anything else (about one cloud every 3 s):
+- Check the object is seen before anything else, in any terminal with the two `source` lines of
+  T2. Each command runs until **Ctrl-C**.
 ```bash
-ros2 topic hz /ycb_pointclouds/banana        # the object you are about to use
+# How often segmentation publishes the banana's points: about once every 3 s is healthy;
+# nothing printed means it is not being detected (use the object you are about to use)
+ros2 topic hz /ycb_pointclouds/banana
+```
+```bash
+# The same for the whole scene's points (what the planner avoids)
 ros2 topic hz /ycb_scene_cloud
-ros2 run rqt_image_view rqt_image_view /ycb_detections/image     # masks and scores
+```
+```bash
+# A window with the camera image, each detection's mask and its score
+ros2 run rqt_image_view rqt_image_view /ycb_detections/image
 ```
 - **Objects that are detected** (`config/target_objects.yaml`): `banana`, `apple`,
   `tomato_soup_can`, `pudding_box`, `foam_brick`. Each has a YCB scan, so the planner fits the scan
@@ -135,30 +148,186 @@ summary it prints:
 
 ### 3b. Replaying a demonstration (learning its attractor)
 
-TPGPT's labels are the attractor the spring pulls toward, not where the hand went. A taught
-demonstration has only the latter, so it is replayed on the robot and the attractor that makes the
-arm retrace it is learned, a pass at a time (`tpgpt/hardware/replay.py`, `ilc.py`; audit B1).
-Each pass streams the demonstration at `speed_scale` 0.35 under its own stiffness labels (70 s for
-the 18:39 demonstration), acts the gripper at the marks, and records the arm. Before moving, each
-pass's attractor path is checked against the shelf model and the table, and refused on a collision.
-Start the arm near the demonstration's start (within `max_start_distance`, 0.6 m).
+**What it is for.** TPGPT's labels are the point the controller's spring pulls the hand toward
+(the *attractor*), not where the hand went. A demonstration taught by hand records only where the
+hand went. Commanded along that path, the robot runs behind it (about 15 mm at execution speed)
+and sits a little below and beside it. So the robot replays your path, records how far off it
+was, and the command is corrected by that much. After two or three passes the arm retraces your
+path, and the corrected command is the attractor the labels need (`tpgpt/hardware/replay.py`,
+`ilc.py`; audit B1). One pass of the 18:39 demonstration takes about 70 s.
 
+**The check before every pass.** Before anything moves, the node checks your taught path against
+the shelf model and the table, widened by how far the arm may stray from it (sideways, and the
+hand tilting), and refuses if it does not fit. For pass 0 the stray comes from the stiffness
+checks in step 3; after that, from what the previous pass measured.
+
+**Terminals.** The stiffness checks and pass 0 need three: **T1** robot container (§2), **T4** the
+arm (everything that moves the arm, one command at a time; each asks you to type `yes`), and
+**T5** files (the calculations between passes; they never move the arm). The pass with the banana
+(step 9) also needs T2 camera and T3 segmentation (§2), T6 and T7.
+
+Paste one block at a time, and wait for each command to finish before the next. Keep the
+emergency stop in reach whenever T4 is running something.
+
+**Step 1 — open T4 (arm).** Loads ROS, the robot's network settings and the Python that has
+`tpgpt`.
 ```bash
+source /opt/ros/jazzy/setup.bash
+source ~/THOR_DOCKER_SETUP/scripts/host_ros_env.sh && source ~/thor_ws/install/setup.bash
 source ~/venvs/tpgpt/bin/activate
-D=~/tpgpt_demos/banana_20260925_183904            # the demonstration
-# once: the replay directory (pass 0 = the taught path)
-python -m tpgpt.hardware.replay init --bundle $D/source_bundle_directional --out $D/replay
-# a pass: without the object, the gripper not acting
-ros2 run --prefix python3 ycb_pointcloud_pipeline tpgpt_executor_node --ros-args \
-  -p replay_dir:=$D/replay -p dry_run:=false -p gripper_mode:=none
-# then the next pass's attractor, and how the passes went
-python -m tpgpt.hardware.replay update $D/replay          # --gain 0.8 to converge faster
-python -m tpgpt.hardware.replay status $D/replay
 ```
 
-Repeat pass/update until the error stops falling (2-4 passes). The last pass runs with the object
-at its taught place and `gripper_mode:=franka_grasp`. Add `-p dry_run:=true` (the default) to
-preview a pass on the simulated arm.
+**Step 2 — T4: home the arm.** Moves the arm to its home posture and opens the gripper. Check the
+way is clear first; type `yes` at the prompt.
+```bash
+ros2 run ycb_pointcloud_pipeline joint_homing
+```
+
+**Step 3 — T4: the stiffness checks.** Each run holds the hand still for 5 s, moves it 10 cm to the
+robot's left and back, then turns it 15 deg about the vertical and back, holding 5 s after each
+move (about 50 s in all). It measures, at one rotational stiffness: whether the arm vibrates, how
+far the hand sits tilted from the command, and how far it lags while turning. Type `yes` at the
+prompt; if you hear a buzz, press the emergency stop (the tool also cuts to 400 / 30 by itself
+above 4 mm of oscillation). At the end it prints a report and keeps holding; press **Ctrl-C** to
+finish, and run the next one. Four runs, softest first:
+
+```bash
+# 15 N·m/rad: the wrist while carrying, if 60 is chosen (the executor softens it x0.25 in transit)
+ros2 run --prefix python3 ycb_pointcloud_pipeline cartesian_target_publisher --ros-args \
+  -p stiffness_mode:=isotropic -p translational_stiffness:=600.0 -p rotational_stiffness:=15.0 \
+  -p goal_offset:="[0.0, 0.1, 0.0]"
+```
+```bash
+# 30 N·m/rad: today's executor default
+ros2 run --prefix python3 ycb_pointcloud_pipeline cartesian_target_publisher --ros-args \
+  -p stiffness_mode:=isotropic -p translational_stiffness:=600.0 -p rotational_stiffness:=30.0 \
+  -p goal_offset:="[0.0, 0.1, 0.0]"
+```
+```bash
+# 45 N·m/rad
+ros2 run --prefix python3 ycb_pointcloud_pipeline cartesian_target_publisher --ros-args \
+  -p stiffness_mode:=isotropic -p translational_stiffness:=600.0 -p rotational_stiffness:=45.0 \
+  -p goal_offset:="[0.0, 0.1, 0.0]"
+```
+```bash
+# 60 N·m/rad: the simulation's value, and the executor's upper limit (stiffness_max_rotational)
+ros2 run --prefix python3 ycb_pointcloud_pipeline cartesian_target_publisher --ros-args \
+  -p stiffness_mode:=isotropic -p translational_stiffness:=600.0 -p rotational_stiffness:=60.0 \
+  -p goal_offset:="[0.0, 0.1, 0.0]"
+```
+
+How to read a report (one line per segment):
+
+| line | says | what matters |
+|---|---|---|
+| `hold_... jitter ... peak-to-peak X mm` | how much the hand shook while told to stay still | above ~0.5 mm, or a buzz you heard: this stiffness vibrates, do not use it |
+| `hold_... hand tilted X deg off the command` | the resting tilt | smaller is better; it is what the check before pass 0 allows for |
+| `move_... lag along ... across ...` | how far behind and beside the moving target the hand ran | for the record |
+| `turn_... time constant X s` | how quickly the wrist follows a turn | smaller is better |
+
+**Choose the rotational stiffness**: the highest of 45 and 60 that did not vibrate (60 if both
+were quiet). It is used in every pass below and later in execution. Each check is saved in
+`~/tpgpt_stiffness_checks/<date>_<time>_isotropic_600_rot<k>/`.
+
+**Step 4 — open T5 (files) and create the replay.** The first command makes the replay directory
+next to the demonstration: pass 0 commands your taught path as it is, and is run twice (the
+difference between the two runs is the arm's run-to-run scatter). The second gives pass 0's
+check the tilt and stray the stiffness checks measured today, instead of estimates; it prints
+them.
+```bash
+source ~/venvs/tpgpt/bin/activate
+python -m tpgpt.hardware.replay init \
+  --bundle ~/tpgpt_demos/banana_20260925_183904/source_bundle_directional \
+  --out ~/tpgpt_demos/banana_20260925_183904/replay
+python -m tpgpt.hardware.replay use-checks ~/tpgpt_demos/banana_20260925_183904/replay \
+  ~/tpgpt_stiffness_checks/$(date +%Y%m%d)_*_rot*
+```
+
+**Step 5 — take the banana off the table.** Pass 0 does not use the gripper. Keep the table and the
+shelf clear.
+
+**Step 6 — T4: pass 0, first run.** It checks the path, prints a summary (the pass, the stiffness,
+the margin it checked with) and asks `yes`. The arm then moves in a straight line from home to the
+start of your path (0.53 m, about 17 s), holds 1.5 s, and follows your path for about 70 s. It
+records where the arm really was. Replace `60.0` with the stiffness you chose in step 3 (always with the `.0`: ROS refuses
+`60`).
+```bash
+ros2 run --prefix python3 ycb_pointcloud_pipeline tpgpt_executor_node --ros-args \
+  -p replay_dir:=$HOME/tpgpt_demos/banana_20260925_183904/replay \
+  -p dry_run:=false -p gripper_mode:=none -p rotational_stiffness:=60.0
+```
+What it prints at the end, and what to do:
+- `Pass 0 run 1 recorded ... strayed sideways up to X mm and Y deg` and `Next: run pass 0 again`:
+  home the arm (step 2) and paste the same block again for run 2.
+- `The arm strayed beyond the margin ...`: the check allowed less than the arm needed somewhere.
+  Nothing has hit anything, but stop and send me the line.
+- `Aborted: pass 0: the taught path with a margin of ...: collision ...` (before anything moved):
+  the path does not fit with the stray measured. Stop and send me the line.
+- `Aborted: ... on the way onto the path`: the move from where the arm is to the path's start is
+  blocked. Home the arm (step 2) and try again.
+
+**Step 7 — T4: pass 0, second run.** Home the arm (step 2), then paste the step 6 block again.
+It ends with `Next: python -m tpgpt.hardware.replay update ...`.
+
+**Step 8 — T5: learn the next attractor.** Compares both runs of pass 0 with your taught path and
+writes pass 1's corrected command and its margin (what pass 0 actually strayed, plus the scatter
+between its two runs). Then prints every pass so far: how far off the taught path it was, at the
+grasp and the release (`across the jaws` is the direction that would lose the object), and how
+much the two runs differed.
+```bash
+python -m tpgpt.hardware.replay update ~/tpgpt_demos/banana_20260925_183904/replay
+```
+
+**Step 9 — pass 1, with the banana.** The replay retraces your taught path, so the banana must
+stand where you taught it: the node shows that spot as a green cloud, and you line up the camera's
+cloud of the real banana with it. This needs the camera and segmentation (§2, T2 and T3, running
+15 min), plus:
+
+T6 — the camera's banana cloud in the robot's frame (`/tpgpt/base_clouds/banana`); it also logs
+the banana's centre.
+```bash
+source /opt/ros/jazzy/setup.bash
+source ~/THOR_DOCKER_SETUP/scripts/host_ros_env.sh && source ~/thor_ws/install/setup.bash
+ros2 run ycb_pointcloud_pipeline calibration_check_node
+```
+T7 — RViz, with the robot, the shelf and the planner's displays. Once the pass below is started
+(the green taught banana only exists from then on), **Add → By topic** →
+`/tpgpt/replay/taught_object` → PointCloud2, and **Add → By topic** → `/tpgpt/base_clouds/banana`
+→ PointCloud2 (the real banana, as the camera sees it).
+```bash
+source /opt/ros/jazzy/setup.bash
+source ~/THOR_DOCKER_SETUP/scripts/host_ros_env.sh && source ~/thor_ws/install/setup.bash
+rviz2 -d ~/thor_ws/install/ycb_pointcloud_pipeline/share/ycb_pointcloud_pipeline/rviz/tpgpt.rviz
+```
+T4 — home the arm (step 2), put the banana on the table, then start the pass. It prints the taught
+centre (`The object must stand where it was taught: centre [...]`) and waits at the `yes` prompt:
+move the banana until its cloud covers the green one (within about 1 cm), then type `yes`. The
+gripper closes and opens at your marks.
+```bash
+ros2 run --prefix python3 ycb_pointcloud_pipeline tpgpt_executor_node --ros-args \
+  -p replay_dir:=$HOME/tpgpt_demos/banana_20260925_183904/replay \
+  -p dry_run:=false -p gripper_mode:=franka_grasp -p rotational_stiffness:=60.0
+```
+Then **T5**: `update` as in step 8. Pass 2 and later: step 9 again (banana back on the green
+cloud), then `update`, until the error stops falling (the status lines from `update` show it);
+usually one or two more.
+
+**Anytime — T5: where the passes stand.**
+```bash
+python -m tpgpt.hardware.replay status ~/tpgpt_demos/banana_20260925_183904/replay
+```
+**If a pass came out worse than the one before** (`update` prints a WARNING): delete the pass it
+just wrote, learn again at half strength, and run that pass:
+```bash
+rm -r ~/tpgpt_demos/banana_20260925_183904/replay/pass_00N          # N = the pass it named
+python -m tpgpt.hardware.replay update ~/tpgpt_demos/banana_20260925_183904/replay --gain 0.5
+```
+**To run a pass once more with the same command** (another measure of the scatter):
+```bash
+python -m tpgpt.hardware.replay repeat ~/tpgpt_demos/banana_20260925_183904/replay
+```
+**To preview a pass without moving** (the same check and summary; nothing is recorded, nothing
+is activated): change `dry_run:=false` to `dry_run:=true` in the T4 command; it needs no `yes`.
 
 ## 4. Planning (nothing moves)
 
@@ -325,21 +494,27 @@ ros2 daemon stop && ros2 daemon start                           # if node/topic 
 ### Stiffness check (what a stiffness does on the arm)
 
 `cartesian_target_publisher` with `stiffness_mode` isotropic or directional loads and activates
-`tpgpt_cartesian_impedance_controller`, sends a stiffness every cycle, and runs: hold 5 s,
-move `goal_offset` (smooth, peak ~5 cm/s), hold 5 s, move back, hold 5 s. It records
-`/current_pose` to `~/tpgpt_stiffness_checks/<time>_<mode>_<k>/` (`samples.csv`,
-`report.json`) and prints each hold's jitter (size, frequency) and each move's lag along and
-across the motion. If an oscillation of 3 Hz or faster stays above `max_jitter` (4 mm peak to
-peak) for 1.5 s it drops to 400 N/m / 30 N·m/rad and holds. After the report it keeps holding
-with the same stiffness; **Ctrl-C** drops to 400 / 30 and holds where the arm is. Home the arm
-first (`joint_homing`); the 10 cm move below goes to the robot's left (+y) and back.
+`tpgpt_cartesian_impedance_controller`, sends a stiffness every cycle, and runs: hold 5 s, move
+`goal_offset` (smooth, peak ~5 cm/s), hold 5 s, move back, hold 5 s, then turn the hand
+`turn_deg` (15) about the vertical at up to `turn_rate` (6 deg/s) and back, holding 5 s after
+each (`turn_deg:=0.0` leaves the turn out). It records `/current_pose` to
+`~/tpgpt_stiffness_checks/<time>_<mode>_<k>_rot<k_rot>/` (`samples.csv`, `report.json`) and prints,
+per segment: each hold's jitter (size, frequency) and resting tilt, each move's lag along and
+across the motion, each turn's lag and rotational time constant. If an oscillation of 3 Hz or
+faster stays above `max_jitter` (4 mm peak to peak) for 1.5 s it drops to 400 N/m / 30 N·m/rad
+and holds. After the report it keeps holding with the same stiffness; **Ctrl-C** drops to
+400 / 30 and holds where the arm is. Home the arm first (`joint_homing`); the 10 cm move goes to
+the robot's left (+y) and back.
 
+The runs that choose the rotational stiffness for a replay, and how to read their report, are
+§3b step 3. Other uses, in T4 of §3b (ROS sourced, tpgpt venv active):
 ```bash
-source ~/venvs/tpgpt/bin/activate
-# vibration check: 600, then 700, then 800 N/m, rotational 30 (800/60 vibrated on 2026-09-15)
+# isotropic: 600 N/m in every direction, rotational 30
 ros2 run --prefix python3 ycb_pointcloud_pipeline cartesian_target_publisher --ros-args \
   -p stiffness_mode:=isotropic -p translational_stiffness:=600.0 -p goal_offset:="[0.0, 0.1, 0.0]"
-# the directional stiffness the labels use: 350 along the motion, 600 across (12-value message)
+```
+```bash
+# directional, as the stiffness labels: 350 N/m along the motion, 600 across (12-value message)
 ros2 run --prefix python3 ycb_pointcloud_pipeline cartesian_target_publisher --ros-args \
   -p stiffness_mode:=directional -p translational_stiffness:=600.0 -p stiffness_along:=350.0 \
   -p goal_offset:="[0.0, 0.1, 0.0]"
