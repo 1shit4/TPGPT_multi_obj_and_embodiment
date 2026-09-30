@@ -379,13 +379,13 @@ jaws, and bottom_left 10, 2, 5 and 0 admissible. With the draw fixed, this is wh
 
 | object | top_left | top_right | bottom_left |
 |---|---|---|---|
-| banana | 63 -> 58 | 47 -> 32 | 1 -> 4 |
-| apple | 23 -> 17 | 31 -> 21 | 2 -> 0 |
-| mug | 58 -> 49 | 24 -> 17 | 1 -> 1 |
-| pudding box (long side) | 29 -> 28 | 32 -> 32 | 3 -> 2 |
-| foam brick | 29 -> 28 | 27 -> 27 | 2 -> 2 |
+| banana | 63 -> 58 -> 59 | 47 -> 32 -> 33 | 1 -> 4 -> 4 |
+| apple | 23 -> 17 -> 17 | 31 -> 21 -> 21 | **2 -> 0 -> 0** |
+| mug | 58 -> 49 -> 49 | 24 -> 17 -> 17 | 1 -> 1 -> 1 |
+| pudding box (long side) | 29 -> 28 -> 28 | 32 -> 32 -> 32 | 3 -> 2 -> 2 |
+| foam brick | 29 -> 28 -> 28 | 27 -> 27 -> 27 | 2 -> 2 -> 2 |
 
-372 -> 318. The difference is not the labels getting worse: the taught check assumed the arm is where it is commanded, which it is not (pass 0 strayed 17 mm RMS). Three things account for most of it, from a per-candidate re-check of the three worst slots: the arm comes down to the grasp **4-5 mm off across the jaws** (not learned, audit B1 step 6), which puts an open pad on an object that nearly fills the 80 mm opening (apple, mug); the **run-to-run margin against the table** in the last labels before the grasp (banana: 32 with it, 51 without); and after the release the arm drifting 3 mm more across the jaws than the taught hand (a pad back on the placed mug). bottom_left is unchanged at 9. What would make this wrong: the arm path is pass 3's, carried by the map; that the arm strays from a transported command as it strayed from the learned one is assumed, not measured. Raw in `outputs/hardware/learned_20260930/`, logs in `~/tpgpt_coverage_logs/learned_*.log`.
+Taught -> learned with the full margin -> learned with only the margin's vertical part against the table (the check since 2026-10-01): 372 -> 318 -> 320. One cell goes to zero, **apple bottom_left**: on the taught path both of its grasps slide the apple onto the bottom board with 0.1-0.4 mm to spare before the set-down begins; the arm's path runs about 1 mm lower there and crosses the 1 mm tolerance (one of the two also puts a pad on the apple on the way down). Sub-millimetre, on a cell item 9 already called one shift away from none. The difference is not the labels getting worse: the taught check assumed the arm is where it is commanded, which it is not (pass 0 strayed 17 mm RMS). Three things account for most of it, from a per-candidate re-check of the three worst slots: the arm comes down to the grasp **4-5 mm off across the jaws** (not learned, audit B1 step 6), which puts an open pad on an object that nearly fills the 80 mm opening (apple, mug); the **run-to-run margin against the table** in the last labels before the grasp (banana top_right: 32 with it, 33 with only its vertical part, 51 without); and after the release the arm drifting 3 mm more across the jaws than the taught hand (a pad back on the placed mug). bottom_left is unchanged at 9. What would make this wrong: the arm path is pass 3's, carried by the map; that the arm strays from a transported command as it strayed from the learned one is assumed, not measured. Raw in `outputs/hardware/learned_20260930/`, logs in `~/tpgpt_coverage_logs/learned_*.log`.
 
 ## Deviation from the simulation
 

@@ -300,11 +300,14 @@ The planner's support height is: its `support_height` parameter, else the calibr
   (carried by the same map, margin as clearance, the object centred across the jaws when they
   close); the keypoints come from the taught labels, since the command leads the hand. The
   executor takes the learned settings from the plan and refuses others. On the 15 live captures:
-  372 -> 318 admissible -- the taught check had assumed the arm is where it is commanded. Most of
+  372 -> 320 admissible -- the taught check had assumed the arm is where it is commanded; one cell
+  goes to 0, apple bottom_left (2 -> 0, its carried apple ~1 mm lower onto the bottom board). Most of
   the loss: the arm comes down to the grasp **4-5 mm off across the jaws** (a pad on the apple or
   the mug), which the replay did not learn (the arm does not follow the command there; the size of
   the stop-short, unconfirmed), and the margin against the table just before the grasp (banana
-  top_right 32, 51 without). The arm path is pass 3's carried to a new scene: that it transfers is
+  top_right 33, 51 without; the table keeps only the margin's vertical part, the user's
+  call). The arm sits 10-16 mm off its command even when still (6-9 N unmodelled, not lag);
+  the learning removes the part that repeats. The arm path is pass 3's carried to a new scene: that it transfers is
   assumed (step 9), and the lag gate on the real arm is untested (step 8).
 - **A plan that leaves the executor's workspace box is now refused at selection**
   (`SelectionSettings.workspace_min/max`, fed from the planner's own parameters). It used to be
