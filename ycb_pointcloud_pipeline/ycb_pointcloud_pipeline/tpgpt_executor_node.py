@@ -219,6 +219,9 @@ class TpgptExecutorNode(Node):
         # waits until it is in place. False skips it (no camera).
         d('replay_place_check', True)
         d('replay_object', '')          # '' = from the demonstration's directory name
+        # Stop the pass once this label is reached (-1: the whole pass). A partial pass is a
+        # diagnostic -- saved as partial_<n>.npz, never a run the update learns from.
+        d('replay_until_label', -1)
 
         p = self.p
         self.replay = bool(p('replay_dir'))
@@ -252,11 +255,14 @@ class TpgptExecutorNode(Node):
         self.moving = False
         self.gripper_state = None
         self.sim_T = None     # dry-run simulated TCP pose
+        # While a replay pass runs, every pose and joint-state message is also kept, as
+        # received (converted after the pass: see _pose_cb), for the pass's diagnostic record.
+        self._highrate = None  # {'poses': [...], 'joints': [...]} while recording
+        self._pending_record = None  # (replay dir, pass, 20 Hz record) of a pass cut short
         self.create_subscription(PoseStamped, p('current_pose_topic'), self._pose_cb, 1)
         self._joints = None   # (monotonic, JointState) -- converted on demand
         from sensor_msgs.msg import JointState
-        self.create_subscription(JointState, p('joint_states_topic'),
-                                 lambda m: setattr(self, '_joints', (time.monotonic(), m)), 1)
+        self.create_subscription(JointState, p('joint_states_topic'), self._joint_cb, 1)
 
         if self.dry:
             self.pose_pub = self.create_publisher(PoseStamped, '/tpgpt/executor/commanded_pose', 1)
@@ -292,6 +298,37 @@ class TpgptExecutorNode(Node):
         # GIL: measured on fake hardware, a matrix conversion per message stalled
         # the 20 Hz loop for 1.8 s. The conversion happens in measured() instead.
         self._pose = (time.monotonic(), msg)
+        if self._highrate is not None:
+            self._highrate['poses'].append(msg)
+
+    def _joint_cb(self, msg):
+        self._joints = (time.monotonic(), msg)
+        if self._highrate is not None:
+            self._highrate['joints'].append(msg)
+
+    def _take_highrate(self):
+        """Stop keeping messages and return those kept, as arrays (header stamps, s)."""
+        log, self._highrate = self._highrate, None
+        log = log or {'poses': [], 'joints': []}
+        stamp = lambda m: m.header.stamp.sec + 1e-9 * m.header.stamp.nanosec  # noqa: E731
+        out = {}
+        if log['poses']:
+            out['pose_stamp'] = np.array([stamp(m) for m in log['poses']])
+            out['pose_position'] = np.array([[m.pose.position.x, m.pose.position.y,
+                                              m.pose.position.z] for m in log['poses']])
+            out['pose_quaternion'] = np.array([[m.pose.orientation.x, m.pose.orientation.y,
+                                                m.pose.orientation.z, m.pose.orientation.w]
+                                               for m in log['poses']])
+        names = [f'fr3_joint{k}' for k in range(1, 8)]
+        rows = [m for m in log['joints'] if all(n in m.name for n in names)]
+        if rows:
+            order = [rows[0].name.index(n) for n in names]
+            out['joint_stamp'] = np.array([stamp(m) for m in rows])
+            for field in ('position', 'velocity', 'effort'):
+                vals = [list(getattr(m, field)) for m in rows]
+                if all(len(v) == len(rows[0].name) for v in vals):
+                    out[f'joint_{field}'] = np.array(vals)[:, order]
+        return out
 
     def measured(self, max_age=None):
         if self.dry:
@@ -864,6 +901,18 @@ class TpgptExecutorNode(Node):
         else:
             margin_text = 'NOT CHECKED'
             log.warn('replay_shelf_config empty: the path is NOT checked')
+        # Where the commanded path keeps a joint inside CRISP's joint-limit repulsion zone: the
+        # repulsion then pushes against the task spring (2026-09-30: joint 7 at its limit from
+        # label 0 to 156 of the 18:39 demonstration, where the arm jittered at the pick).
+        from tpgpt.hardware.fr3 import HOME_Q
+        start_q = self.measured_joints()
+        zones = rp.joint_limit_zones([tcp_from_tool(a, R) for a, R in zip(attractor, tcp_R)],
+                                     tcp_R, HOME_Q if start_q is None else start_q)
+        for z in zones:
+            log.warn(f"joint {z['joint']} is within {rp.JOINT_LIMIT_SAFE_RANGE} rad of its limit "
+                     f"(closest {z['closest_rad']:.3f}) from label {z['first']} to {z['last']}: "
+                     "CRISP's joint-limit repulsion pushes against the wrist spring there")
+        until = int(p('replay_until_label'))
         guide = (self._object_guide(info, bundle)
                  if with_object and p('replay_place_check') else None)
         controllers = None
@@ -952,49 +1001,63 @@ class TpgptExecutorNode(Node):
         deadline = time.monotonic() + float(p('max_policy_seconds')) if realtime else float('inf')
         s, step, closed_now = 0.0, 0, False
         next_t = time.monotonic()
-        while True:
-            if time.monotonic() > deadline:
-                raise AbortRun('max_policy_seconds exceeded')
-            i = min(int(np.floor(s)), n - 1)
-            j = min(i + 1, n - 1)
-            pos = rp.attractor_at(attractor, s)
-            rot = slerp_rotation(tcp_R[i], tcp_R[j], float(s - i)) if j != i else tcp_R[i]
-            closed = bool(labels.gripper[i] > 0)
-            if closed != closed_now:
-                if mode != 'none':
-                    self.command_gripper(closed, width, wait=not self.dry)   # the clock waits
-                closed_now = closed
-                next_t = time.monotonic()
-            meas_p, meas_R = self.measured()
-            reason = safety.check(tool_from_tcp(meas_p, meas_R), pos)
-            if reason:
-                raise AbortRun(reason)
-            values = message(i, meas_R)
-            target = tcp_from_tool(pos, rot)
-            self.check_workspace(target, 'replay target')
-            self.publish(target, rot, values)
-            if self.dry:
-                self.simulate(target, rot, *crisp_applied_gains(values, meas_R), dt)
-            # orientations in the plan's grasp convention, as the labels they are compared with
-            for name, value in (('step', step), ('label_index', s),
-                                ('positions', tool_from_tcp(meas_p, meas_R)),
-                                ('rotations', hand.grasp_from_ee(meas_R)),
-                                ('commanded', pos), ('commanded_rotations', hand.grasp_from_ee(rot)),
-                                ('rotational', rotational(i)),
-                                ('gripper', 1.0 if closed_now else -1.0)):
-                rec[name].append(value)
-            if s >= n - 1:
-                break
-            s = min(s + dt / label_period, float(n - 1))
-            step += 1
-            next_t = wait_period(next_t)
-        for _ in range(int(1.0 / dt)):                     # hold the end a moment
-            self.publish(target, rot, values)
-            if self.dry:
-                self.simulate(target, rot, *crisp_applied_gains(values, meas_R), dt)
-            time.sleep(dt if realtime else 0.0)
+        self._highrate = {'poses': [], 'joints': []}   # every message, for the record
+        try:
+            while True:
+                if time.monotonic() > deadline:
+                    raise AbortRun('max_policy_seconds exceeded')
+                i = min(int(np.floor(s)), n - 1)
+                j = min(i + 1, n - 1)
+                pos = rp.attractor_at(attractor, s)
+                rot = slerp_rotation(tcp_R[i], tcp_R[j], float(s - i)) if j != i else tcp_R[i]
+                closed = bool(labels.gripper[i] > 0)
+                if closed != closed_now:
+                    if mode != 'none':
+                        self.command_gripper(closed, width, wait=not self.dry)   # the clock waits
+                    closed_now = closed
+                    next_t = time.monotonic()
+                meas_p, meas_R = self.measured()
+                reason = safety.check(tool_from_tcp(meas_p, meas_R), pos)
+                if reason:
+                    raise AbortRun(reason)
+                values = message(i, meas_R)
+                target = tcp_from_tool(pos, rot)
+                self.check_workspace(target, 'replay target')
+                self.publish(target, rot, values)
+                if self.dry:
+                    self.simulate(target, rot, *crisp_applied_gains(values, meas_R), dt)
+                # orientations in the plan's grasp convention, as the labels they are compared with
+                for name, value in (('step', step), ('label_index', s),
+                                    ('positions', tool_from_tcp(meas_p, meas_R)),
+                                    ('rotations', hand.grasp_from_ee(meas_R)),
+                                    ('commanded', pos), ('commanded_rotations', hand.grasp_from_ee(rot)),
+                                    ('rotational', rotational(i)),
+                                    ('gripper', 1.0 if closed_now else -1.0)):
+                    rec[name].append(value)
+                if s >= n - 1 or (0 <= until <= s):
+                    break
+                s = min(s + dt / label_period, float(n - 1))
+                step += 1
+                next_t = wait_period(next_t)
+            for _ in range(int(1.0 / dt)):                     # hold the end a moment
+                self.publish(target, rot, values)
+                if self.dry:
+                    self.simulate(target, rot, *crisp_applied_gains(values, meas_R), dt)
+                time.sleep(dt if realtime else 0.0)
+        except (AbortRun, KeyboardInterrupt):
+            # What the arm did up to the abort is the record to look at. It is saved by main()
+            # after the hold has gone out (converting the messages takes a moment).
+            self._pending_record = (root, k, rec)
+            raise
+        highrate = self._take_highrate()
+        if 0 <= until < n - 1:
+            self.moving = False
+            path = rp.save_diagnostic(root, k, 'partial', **rec, **highrate)
+            log.info(f'Partial pass to label {until} recorded ({path}); not a run of pass {k}, '
+                     'the update does not use it.')
+            return True
         self.moving = False
-        path = rp.save_recording(root, k, run, **rec)
+        path = rp.save_recording(root, k, run, **rec, **highrate)
         error, _, _ = rp.pass_error(root, k)
         m = error['at_marks']
         log.info(f"Pass {k} run {run} recorded ({path}). Over its {error['runs']} run(s): off the "
@@ -1113,6 +1176,17 @@ class TpgptExecutorNode(Node):
                 print('  In place.', flush=True)
                 return offset
         return offset
+
+    def save_pending_record(self):
+        """After an aborted replay pass (and its hold): save what it recorded, as aborted_<n>."""
+        if self._pending_record is None:
+            return
+        from tpgpt.hardware import replay as rp
+
+        root, k, rec = self._pending_record
+        self._pending_record = None
+        path = rp.save_diagnostic(root, k, 'aborted', **rec, **self._take_highrate())
+        self.get_logger().error(f'Pass {k} stopped before its end; what it recorded is in {path}')
 
     def _settle_and_measure_offset(self, start_pos, start_rot, K, D, dt, wait_period, writer,
                                    started):
@@ -1262,10 +1336,12 @@ def main(args=None):
         node.get_logger().error(f'Aborted: {exc}')
         if node.moving:
             node.hold_current_pose()
+        node.save_pending_record()
         exit_code = 1
     except KeyboardInterrupt:
         if node.moving:
             node.hold_current_pose()
+        node.save_pending_record()
     finally:
         time.sleep(0.2)  # let a final hold command go out
         executor.shutdown()

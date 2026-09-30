@@ -436,6 +436,59 @@ def save_recording(out_dir, k: int, run: int, **arrays) -> Path:
     return path
 
 
+def save_diagnostic(out_dir, k: int, kind: str, **arrays) -> Path:
+    """A record of pass ``k`` that is not one of its runs -- ``"partial"`` (stopped at a chosen
+    label) or ``"aborted"`` -- so it never feeds ``update``: ``<kind>_<n>.npz``."""
+    d = _pass_dir(out_dir, k)
+    n = 1 + len(list(d.glob(f"{kind}_[0-9]*.npz")))
+    path = d / f"{kind}_{n}.npz"
+    np.savez_compressed(path, **{name: np.asarray(v) for name, v in arrays.items()})
+    return path
+
+
+#: CRISP's joint-limit repulsion (``joint_limit_repulsion`` in
+#: config/tpgpt_variable_stiffness_controller.yaml): within ``safe_range`` rad of a limit it adds
+#: up to ``max_torque`` N m pushing the joint away, against whatever the task spring asks for.
+JOINT_LIMIT_SAFE_RANGE = 0.1
+
+
+def joint_limit_zones(positions, ee_rotations, start_q, fr3=None,
+                      safe_range: float = JOINT_LIMIT_SAFE_RANGE) -> list[dict]:
+    """Where along a path the arm, followed continuously from ``start_q``, has a joint within
+    ``safe_range`` of its limit: ``[{"joint", "first", "last", "closest_rad"}]`` per stretch.
+
+    The IK is ``fr3.solve_ik`` to 1 mm / 0.6 deg, each waypoint seeded from the one before
+    (as the path check poses the arm). It is one branch of a redundant arm: the real arm's
+    elbow can sit elsewhere, so this says where to look, not what the arm did.
+    """
+    from tpgpt.hardware.fr3 import default_model
+    from tpgpt.hardware.frames import slerp_rotation
+
+    fr3 = fr3 or default_model()
+    q = np.asarray(start_q, dtype=float).copy()
+    # first the straight move onto the path's start, as the executor makes it, so the path is
+    # followed on the branch the arm arrives on
+    T0 = fr3.tcp(q)
+    p0, R0 = np.asarray(positions[0], dtype=float), np.asarray(ee_rotations[0], dtype=float)
+    for s_ in np.linspace(0.0, 1.0, 30)[1:]:
+        q = fr3.solve_ik(T0[:3, 3] + s_ * (p0 - T0[:3, 3]), slerp_rotation(T0[:3, :3], R0, s_),
+                         seed=q, position_tolerance=0.001, rotation_tolerance=0.01,
+                         max_iterations=300).qpos
+    margins = []
+    for p_, R_ in zip(np.asarray(positions, dtype=float), np.asarray(ee_rotations, dtype=float)):
+        q = fr3.solve_ik(p_, R_, seed=q, position_tolerance=0.001, rotation_tolerance=0.01,
+                         max_iterations=300).qpos
+        margins.append(np.minimum(q - fr3.lower, fr3.upper - q))
+    margins = np.array(margins)
+    zones = []
+    for j in range(margins.shape[1]):
+        idx = np.flatnonzero(margins[:, j] < safe_range)
+        for run in (np.split(idx, np.flatnonzero(np.diff(idx) > 1) + 1) if len(idx) else []):
+            zones.append({"joint": j + 1, "first": int(run[0]), "last": int(run[-1]),
+                          "closest_rad": float(margins[run, j].min())})
+    return zones
+
+
 def pass_margin(out_dir, k: int, rotational=None) -> tuple[np.ndarray, np.ndarray, str]:
     """The gap pass ``k`` is checked with: ``(clearance m, tilt rad, where it came from)``.
 

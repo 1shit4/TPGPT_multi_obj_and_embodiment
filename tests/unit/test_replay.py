@@ -250,3 +250,33 @@ def test_placement_offset_says_how_to_put_the_object_back():
     flipped = SimpleNamespace(rotation=np.eye(3), rest_index=1, full_cloud=taught.full_cloud)
     assert "turn it over" in rp.placement_advice(rp.placement_offset(taught, flipped))
     assert rp.object_name({"bundle": "/x/foam_brick_20260925_183904/source_bundle"}) == "foam_brick"
+
+
+def test_joint_limit_zones_find_where_a_joint_sits_at_its_limit():
+    """The hand turned about its approach axis until joint 7 runs out (as at the 18:39 pick)."""
+    from scipy.spatial.transform import Rotation
+
+    from tpgpt.hardware.fr3 import HOME_Q, default_model
+
+    fr3 = default_model()
+    T = fr3.tcp(HOME_Q)
+    turns = np.linspace(0.0, 2.6, 40)                       # joint 7 starts at 0.785 of 3.016
+    zones = {}
+    for sign in (1.0, -1.0):
+        R = np.stack([T[:3, :3] @ Rotation.from_rotvec([0, 0, sign * a]).as_matrix()
+                      for a in turns])
+        zones[sign] = rp.joint_limit_zones(np.repeat(T[:3, 3][None], len(turns), axis=0), R,
+                                           HOME_Q, fr3)
+    found = [z for zs in zones.values() for z in zs if z["joint"] == 7]
+    assert found and found[0]["last"] == len(turns) - 1        # at the end of the turn
+    assert rp.joint_limit_zones(np.repeat(T[:3, 3][None], 5, axis=0),
+                                np.repeat(T[:3, :3][None], 5, axis=0), HOME_Q, fr3) == []
+
+
+def test_diagnostic_records_are_not_runs(tmp_path):
+    root = rp.init_replay(_taught_bundle(tmp_path), tmp_path / "replay")
+    info, _ = rp.load_replay(root)
+    path = rp.save_diagnostic(root, 0, "partial", label_index=[0.0, 0.35])
+    assert path.name == "partial_1.npz"
+    assert rp.save_diagnostic(root, 0, "partial", label_index=[0.0]).name == "partial_2.npz"
+    assert rp.recordings(root, 0) == [] and rp.pending_pass(root) == (0, 1)
