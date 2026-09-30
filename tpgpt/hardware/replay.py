@@ -785,7 +785,12 @@ def export_bundle(out_dir, dest, k: int | None = None) -> Path:
     _, velocities = smooth(positions, float(info["dt"]))
     learned_labels = labels.replace(positions=positions, velocities=velocities,
                                     orientations=load_attractor_rotations(out, k, bundle))
-    rotational = np.concatenate([np.load(r)["rotational"] for r in recordings(out, k)])
+    records = [np.load(r) for r in recordings(out, k)]
+    if any("rotational" not in r.files for r in records):
+        raise ValueError(f"pass {k}'s recordings do not say the rotational stiffness they ran at "
+                         "(recorded by tpgpt_executor_node since 2026-09-30); the settings to "
+                         "execute with are unknown")
+    rotational = np.concatenate([r["rotational"] for r in records])
     spread_p, spread_r, spread_from = latest_spread(out, k, info)
     seg = segment_ids(info)
     margin = np.maximum(_segment_max(spread_p, seg, MARGIN_WINDOW), MARGIN_FLOOR)

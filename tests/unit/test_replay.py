@@ -51,13 +51,15 @@ def _run_pass(root, k, info, run, noise=0.0005):
     rng = np.random.default_rng(100 * k + run)
     wobble = rng.normal(scale=noise, size=3)                 # this run's own small offset
     x, R = attractor[0] + SAG, TILT @ att_R[0]
-    s, rows = 0.0, {"label_index": [], "positions": [], "rotations": [], "step": []}
+    s, rows = 0.0, {"label_index": [], "positions": [], "rotations": [], "step": [],
+                    "rotational": []}
     step = 0
     while True:
         rows["label_index"].append(s)
         rows["positions"].append(x.copy())
         rows["rotations"].append(R.copy())
         rows["step"].append(step)
+        rows["rotational"].append(30.0)                    # as the node records it
         a = rp.attractor_at(attractor, s)
         target_R = TILT @ att_R[min(int(round(s)), n - 1)]
         for _ in range(10):                                # the arm, integrated finely
