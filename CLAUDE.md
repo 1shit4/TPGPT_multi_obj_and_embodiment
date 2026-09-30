@@ -269,9 +269,9 @@ The planner's support height is: its `support_height` parameter, else the calibr
   the taught path, each with the run-to-run spread, per point within its segment (audit B1 5c;
   a ball the size of the last stray refused pass 1 at the pick). Nothing is learned from 0.5 s before the grasp mark. **A replay learns the lag at its
   own `speed_scale`**: run the resulting labels at the same one. **A dry run of a replay only
-  checks** (`replay_record_dry:=true` simulates into it, for tests only). **Replay (and execute
-  the learned labels) at `rotational_stiffness:=30.0 transit_rotational_scale:=1.0`** (user,
-  2026-09-30; audit C5): 30 N·m/rad the whole way. At 60 the wrist vibrated at 26 Hz as joint 7
+  checks** (`replay_record_dry:=true` simulates into it, for tests only). **Replay at
+  `rotational_stiffness:=30.0 transit_rotational_scale:=1.0`** (user, 2026-09-30; audit C5; a
+  plan from the learned bundle runs at them by itself): 30 N·m/rad the whole way. At 60 the wrist vibrated at 26 Hz as joint 7
   entered the joint-limit repulsion zone, and the 15 -> 60 step at the set-down preceded the
   reflex; with the carry softened (x0.25) pass 0 is refused at 30 and 45 (link 6 passes 23.5 mm
   under the top board, the pads are near the table while lifting); at 30 x1.0 it passes. **With the object, the pass first guides
@@ -293,6 +293,19 @@ The planner's support height is: its `support_height` parameter, else the calibr
   partial pass (`partial_<n>.npz`, checked only over its labels). Callback load does not explain
   a stale pose: a copy of the node's structure fed 3x the robot's rates never saw one older than
   6 ms.
+- **Plan with the learned bundle, and know what its check assumes** (2026-09-30, audit B1 step 6;
+  `GRASP_LIBRARY.md` item 10). `~/tpgpt_demos/banana_20260925_183904/source_bundle_learned` (from
+  `replay bundle`) has pass 3's command as labels, the taught labels, and the path the arm traced
+  with its run-to-run margin. The planner executes the command and **checks the arm's path**
+  (carried by the same map, margin as clearance, the object centred across the jaws when they
+  close); the keypoints come from the taught labels, since the command leads the hand. The
+  executor takes the learned settings from the plan and refuses others. On the 15 live captures:
+  372 -> 318 admissible -- the taught check had assumed the arm is where it is commanded. Most of
+  the loss: the arm comes down to the grasp **4-5 mm off across the jaws** (a pad on the apple or
+  the mug), which the replay did not learn (the arm does not follow the command there; the size of
+  the stop-short, unconfirmed), and the margin against the table just before the grasp (banana
+  top_right 32, 51 without). The arm path is pass 3's carried to a new scene: that it transfers is
+  assumed (step 9), and the lag gate on the real arm is untested (step 8).
 - **A plan that leaves the executor's workspace box is now refused at selection**
   (`SelectionSettings.workspace_min/max`, fed from the planner's own parameters). It used to be
   found only by the executor, which aborted the whole run instead of taking the next grasp
