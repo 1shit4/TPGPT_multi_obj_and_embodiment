@@ -139,13 +139,15 @@ def test_a_sideways_stray_is_measured_a_lag_along_the_path_is_not():
     assert np.allclose(side, 0.004) and np.allclose(np.degrees(tilt), 2.0)
 
 
-def test_pass_0_margin_scales_with_the_rotational_stiffness():
+def test_pass_0_margin_is_what_the_stiffness_checks_measured():
     R = np.repeat(np.eye(3)[None], 40, axis=0)                # the hand not turning
     clearance, tilt = rp.first_pass_margin(R, np.full(40, 30.0), 0.05 / 0.35)
     assert np.allclose(clearance, rp.FIRST_PASS_STRAY)
-    assert np.allclose(np.degrees(tilt), 1.5)                  # the measured resting tilt
+    assert np.allclose(np.degrees(tilt), 1.32)                 # measured at 30, 2026-09-30
     _, stiffer = rp.first_pass_margin(R, np.full(40, 60.0), 0.05 / 0.35)
-    assert np.allclose(np.degrees(stiffer), 0.75)
+    assert np.allclose(np.degrees(stiffer), 0.90)
+    _, softer = rp.first_pass_margin(R, np.full(40, 7.5), 0.05 / 0.35)
+    assert np.allclose(np.degrees(softer), 2.47 * 15.0 / 7.5)  # below the softest: scaled up
     from scipy.spatial.transform import Rotation
     turning = Rotation.from_euler("z", np.linspace(0, 20, 40), degrees=True).as_matrix()
     _, moving = rp.first_pass_margin(turning, np.full(40, 30.0), 0.05 / 0.35)
@@ -223,3 +225,28 @@ def test_a_check_asked_above_the_cap_counts_as_the_cap(tmp_path):
     model = rp.model_from_checks([tmp_path / "a", tmp_path / "b"])
     assert [r["k"] for r in model["rotation"]] == [60.0]
     assert model["rotation"][0]["tilt_deg"] == 0.9                 # the worse of the two
+
+
+def test_placement_offset_says_how_to_put_the_object_back():
+    from types import SimpleNamespace
+    from scipy.spatial.transform import Rotation
+
+    cloud = np.random.default_rng(0).normal(scale=0.03, size=(200, 3)) * [2, 1, 0.3]
+    cloud -= cloud.mean(axis=0)                                  # turning it keeps its centre
+    taught = SimpleNamespace(rotation=np.eye(3), rest_index=0, full_cloud=cloud + [0.5, 0.2, 0.0])
+    turned = Rotation.from_euler("z", 12, degrees=True).as_matrix()
+    now = SimpleNamespace(rotation=turned, rest_index=0,
+                          full_cloud=(cloud @ turned.T) + [0.515, 0.192, 0.0])
+    off = rp.placement_offset(taught, now)
+    assert off["move_x"] == pytest.approx(-0.015, abs=1e-3)       # 15 mm toward the robot
+    assert off["move_y"] == pytest.approx(0.008, abs=1e-3)        # 8 mm to its left
+    assert off["turn_deg"] == pytest.approx(-12.0, abs=1e-6)      # turn back clockwise
+    assert not off["in_place"]
+    text = rp.placement_advice(off)
+    assert "15 mm toward the robot" in text and "8 mm to the robot's left" in text
+    assert "12 deg clockwise" in text
+    same = SimpleNamespace(rotation=np.eye(3), rest_index=0, full_cloud=taught.full_cloud + 0.003)
+    assert rp.placement_offset(taught, same)["in_place"]
+    flipped = SimpleNamespace(rotation=np.eye(3), rest_index=1, full_cloud=taught.full_cloud)
+    assert "turn it over" in rp.placement_advice(rp.placement_offset(taught, flipped))
+    assert rp.object_name({"bundle": "/x/foam_brick_20260925_183904/source_bundle"}) == "foam_brick"

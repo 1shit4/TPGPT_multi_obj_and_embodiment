@@ -35,13 +35,12 @@ taught path plus how far it strays from it, so that is what is checked
 * **tilt**: how far the hand may be turned from the taught orientation; each robot piece
   then needs the angle times its own distance from the grasp point.
 
-Pass 0's margin is an estimate, the only one: 6.5 mm sideways (the worst the stiffness check
-saw across the motion, 5.3-6.4 mm) and the tilt the rotational spring leaves -- the measured
-resting 1.5 deg at 30 N m/rad, scaled to the rotational stiffness of each label, plus the
-turning lag at twice CRISP's nominal time constant (the translational one measured two to
-three times its nominal). ``use-checks`` replaces those three numbers with what stiffness
-checks measured at the rotational stiffnesses the pass runs at (the check's turn measures
-the tilt and the turning lag). Every later pass's margin is **measured**: the previous pass's
+Pass 0's margin comes from the stiffness checks, not from this path: 6.5 mm sideways (the
+worst they saw across the motion, 5.3-6.4 mm on 2026-09-29, 4.9-5.8 on 2026-09-30) and the
+tilt the rotational spring leaves at the stiffness each label runs at -- the resting tilt
+after a move plus the turn rate times the turning time constant, both measured at 15, 30, 45
+and 60 N m/rad on 2026-09-30 (:data:`MEASURED_ROTATION`). ``use-checks`` replaces them with
+other stiffness checks. Every later pass's margin is **measured**: the previous pass's
 worst sideways stray and tilt around each label (over ``MARGIN_WINDOW`` labels either
 side) plus the run-to-run spread. If learning works the next pass strays less; if it
 overshoots, the stray moves to the other side at about the same size. Either way the margin
@@ -93,16 +92,19 @@ RELEASE_WINDOW = (-10, 5)
 EDGE_SPEED_WARNING = 0.010
 
 #: Pass 0's margin, before anything on this path is measured (module docstring):
-#: sideways, m -- the worst the stiffness check saw across the motion, 5.3-6.4 mm in all
-#: four runs (median 1.5-2.9; ~/tpgpt_stiffness_checks/20260929_18*, 2026-09-29);
+#: sideways, m -- the worst the stiffness checks saw across the motion (5.3-6.4 mm,
+#: ~/tpgpt_stiffness_checks/20260929_18*; 4.9-5.8 mm, 20260930_13*);
 FIRST_PASS_STRAY = 0.0065
-#: the resting tilt, deg, measured at that rotational stiffness, N m/rad, holding and
-#: moving alike (the same stiffness check);
-RESTING_TILT_DEG = 1.5
-RESTING_TILT_STIFFNESS = 30.0
-#: the turning lag's time constant as a multiple of CRISP's nominal 2/sqrt(k) -- not
-#: measured for rotation; the translational one came out 2-3 times its nominal.
-TURN_LAG_FACTOR = 2.0
+#: and per rotational stiffness (N m/rad), measured 2026-09-30 (audit B2 step 3b,
+#: ~/tpgpt_stiffness_checks/20260930_13*): the resting tilt after a move (the largest of a
+#: check's holds' medians) and the turning time constant (the larger of its two turns').
+#: The runs asked for 80 and 100 ran at the cap, 60, and are counted there.
+MEASURED_ROTATION = (
+    {"k": 15.0, "tilt_deg": 2.47, "tau_s": 0.76},
+    {"k": 30.0, "tilt_deg": 1.32, "tau_s": 0.60},
+    {"k": 45.0, "tilt_deg": 1.03, "tau_s": 0.44},
+    {"k": 60.0, "tilt_deg": 0.90, "tau_s": 0.36},
+)
 #: A measured margin is the worst stray within this many labels either side (0.7 s at
 #: speed_scale 0.35): the arm's stray at one label is really about where it was, a little
 #: earlier or later along the path.
@@ -228,14 +230,12 @@ def model_from_checks(check_dirs) -> dict:
 def _tilt_and_tau(k: np.ndarray, model: dict | None) -> tuple[np.ndarray, np.ndarray]:
     """Resting tilt (rad) and turning time constant (s) at rotational stiffness ``k``.
 
-    Without a model: the 2026-09-29 resting tilt scaled as ``1/k`` and twice CRISP's
-    nominal ``2/sqrt(k)``. With one (:func:`model_from_checks`): interpolated between the
-    stiffnesses measured; below the softest, scaled up from it (``1/k``, ``1/sqrt(k)``);
-    above the stiffest, its values -- never extrapolated to less than was measured.
+    From ``model`` (:func:`model_from_checks`), else :data:`MEASURED_ROTATION`: interpolated
+    between the stiffnesses measured; below the softest, scaled up from it (``1/k``,
+    ``1/sqrt(k)``); above the stiffest, its values -- never extrapolated to less than was
+    measured.
     """
-    if not model:
-        return (np.radians(RESTING_TILT_DEG) * RESTING_TILT_STIFFNESS / k,
-                TURN_LAG_FACTOR * 2.0 / np.sqrt(k))
+    model = model or {"rotation": MEASURED_ROTATION}
     ks = np.array([r["k"] for r in model["rotation"]])
     tilt = np.radians([r["tilt_deg"] for r in model["rotation"]])
     tau = np.array([r["tau_s"] for r in model["rotation"]])
@@ -254,8 +254,9 @@ def first_pass_margin(orientations, rotational, label_period: float, model: dict
     ``rotational``: the rotational stiffness each label runs at, N m/rad (the executor's
     schedule, soft while carrying). Tilt = the resting tilt at that stiffness plus the
     turn rate times the turning time constant (:func:`_tilt_and_tau`); sideways, the
-    stray the stiffness checks measured. ``model`` is what they measured
-    (:func:`model_from_checks`); without it, the estimate in the module docstring.
+    stray the stiffness checks measured. ``model`` is what other checks measured
+    (:func:`model_from_checks`); without it, :data:`FIRST_PASS_STRAY` and
+    :data:`MEASURED_ROTATION`.
     """
     from scipy.spatial.transform import Rotation
 
@@ -267,6 +268,58 @@ def first_pass_margin(orientations, rotational, label_period: float, model: dict
     resting, tau = _tilt_and_tau(k, model)
     stray = float(model["stray_m"]) if model else FIRST_PASS_STRAY
     return np.full(len(R), stray), _running_max(resting + rate * tau, MARGIN_WINDOW)
+
+
+# ------------------------------------------------------------------------ the object's place
+#: How close the object must stand to where it was taught before a pass with it starts: its
+#: centre in the table plane, and its heading. The jaws have about (80 - 37) / 2 = 21 mm of room
+#: either side of the 18:39 banana; the scan fit itself moves a few mm between camera frames.
+PLACE_TOLERANCE_M = 0.010
+PLACE_TOLERANCE_DEG = 10.0
+
+
+def object_name(info: dict) -> str:
+    """The demonstration's object: its directory is named ``<object>_<date>_<time>``."""
+    return Path(info["bundle"]).parent.name.rsplit("_", 2)[0]
+
+
+def placement_offset(taught, now) -> dict:
+    """How the object stands now against where it was taught, both from scan fits
+    (``object_model.fit_object``): what to do to put it back.
+
+    ``move_x``/``move_y`` (m, base frame: +x away from the robot, +y to its left) and
+    ``turn_deg`` (about the vertical, counter-clockwise seen from above) take it from
+    where it is to where it was; ``same_side`` is whether it rests on the same side.
+    """
+    move = taught.full_cloud.mean(axis=0) - now.full_cloud.mean(axis=0)
+    R = np.asarray(taught.rotation) @ np.asarray(now.rotation).T
+    turn = float(np.degrees(np.arctan2(R[1, 0], R[0, 0])))
+    same_side = int(taught.rest_index) == int(now.rest_index)
+    distance = float(np.hypot(move[0], move[1]))
+    return {"move_x": float(move[0]), "move_y": float(move[1]), "distance_m": distance,
+            "turn_deg": turn, "same_side": same_side,
+            "in_place": bool(same_side and distance <= PLACE_TOLERANCE_M
+                             and abs(turn) <= PLACE_TOLERANCE_DEG)}
+
+
+def placement_advice(offset: dict) -> str:
+    """:func:`placement_offset` in words, for the operator at the table."""
+    if not offset["same_side"]:
+        return "it lies on a different side than when taught: turn it over"
+    words = []
+    x, y, turn = offset["move_x"] * 1000, offset["move_y"] * 1000, offset["turn_deg"]
+    if abs(x) >= 2:
+        words.append(f"{abs(x):.0f} mm {'away from' if x > 0 else 'toward'} the robot")
+    if abs(y) >= 2:
+        words.append(f"{abs(y):.0f} mm to the robot's {'left' if y > 0 else 'right'}")
+    move = "move it " + " and ".join(words) if words else ""
+    rot = (f"turn it {abs(turn):.0f} deg {'counter-clockwise' if turn > 0 else 'clockwise'} "
+           "(seen from above)") if abs(turn) >= 2 else ""
+    todo = ", ".join(t for t in (move, rot) if t)
+    where = f"{offset['distance_m'] * 1000:.0f} mm and {abs(turn):.0f} deg from its taught place"
+    if offset["in_place"]:
+        return f"in place ({where})" + (f"; closer still: {todo}" if todo else "")
+    return f"{where}: {todo}"
 
 
 # ------------------------------------------------------------------------ the directory
@@ -396,7 +449,7 @@ def pass_margin(out_dir, k: int, rotational=None) -> tuple[np.ndarray, np.ndarra
         model = info.get("first_pass_model")
         clearance, tilt = first_pass_margin(bundle.tool_labels.orientations, rotational,
                                             label_period(info), model)
-        source = "stiffness checks" if model else "estimate"
+        source = "stiffness checks" if model else "stiffness checks of 2026-09-30"
         np.savez(path, clearance=clearance, tilt=tilt, source=source,
                  rotational=np.asarray(rotational, dtype=float))
         return clearance, tilt, source
