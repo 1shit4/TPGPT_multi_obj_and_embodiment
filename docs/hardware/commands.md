@@ -158,11 +158,15 @@ ros2 run --prefix python3 ycb_pointcloud_pipeline tpgpt_executor_node --ros-args
 # when a pass's runs are done: the next attractor, and how the passes went
 python -m tpgpt.hardware.replay update $D/replay
 python -m tpgpt.hardware.replay status $D/replay
+# once learning is done: the demonstration to plan with (§4), the last pass's command as labels
+python -m tpgpt.hardware.replay bundle $D/replay --out $D/source_bundle_learned
 ```
 - The wrist at 30 N·m/rad the whole way (`transit_rotational_scale:=1.0`: not softened while
   carrying). At 60 the wrist vibrated as joint 7 neared its limit, and a 15 -> 60 step at the
   set-down came before a reflex stop; softened to 7.5 while carrying, pass 0 is refused (audit C5).
-  Execute the learned labels with the same two values. Write numbers with the `.0`.
+  Write numbers with the `.0`. A plan from `source_bundle_learned` runs at the settings it was
+  learned under by itself (these two, its `speed_scale`, its stiffness labels, no offset
+  compensation or arrival hold) and refuses other values for them: leave them out.
 - **With the object**, before asking `yes` the node guides it onto its taught place. Watch
   `ros2 run rqt_image_view rqt_image_view /tpgpt/replay/place_overlay`: the camera's picture,
   green outline where the object was taught, orange where the camera fits it now; the same
