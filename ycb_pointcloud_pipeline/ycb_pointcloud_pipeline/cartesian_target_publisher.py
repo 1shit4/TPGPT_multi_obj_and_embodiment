@@ -27,9 +27,11 @@ Stiffness check (stiffness_mode isotropic | directional; tpgpt.hardware.stiffnes
 activates tpgpt_cartesian_impedance_controller (variable stiffness) instead, sends a
 stiffness every cycle -- isotropic, or 350 N/m along the motion / 600 across and while
 still (the stiffness labels' rule, tpgpt.hardware.teach.directional_matrices, 12-value
-message) -- and runs hold -> move to the goal -> hold -> move back -> hold. It records
+message) -- and runs hold -> move to the goal -> hold -> move back -> hold, then turns the
+hand `turn_deg` about the vertical and back, holding after each turn. It records
 /current_pose to ~/tpgpt_stiffness_checks/<time>_<mode>_<k>/ and reports each hold's jitter
-(size, frequency) and each move's lag along and across the motion. Above `max_jitter` of
+(size, frequency) and resting tilt, each move's lag along and across the motion, and each
+turn's lag and rotational time constant. Above `max_jitter` of
 oscillation it drops to 400 / 30 and holds. It imports tpgpt, so run it from the tpgpt venv:
     ros2 run --prefix python3 ycb_pointcloud_pipeline cartesian_target_publisher --ros-args \
         -p stiffness_mode:=isotropic -p translational_stiffness:=600.0 \
@@ -129,6 +131,11 @@ class CartesianTargetPublisher(Node):
         self.declare_parameter('goal_offset', [0.0])        # [dx, dy, dz] m from the start; [0.0] = goal_position
         self.declare_parameter('hold_seconds', 5.0)         # each hold of the sequence
         self.declare_parameter('return_to_start', True)
+        # The turn: the hand turns this far about the vertical and back, at up to turn_rate
+        # (deg/s; the 18:39 demonstration turns at most 5.6 deg/s at speed_scale 0.35), to
+        # measure the rotational spring's resting tilt and turning lag. 0 = no turn.
+        self.declare_parameter('turn_deg', 15.0)
+        self.declare_parameter('turn_rate', 6.0)
         # Safety cut: when the strongest oscillation at 3 Hz or faster (peak to peak over the
         # last second, from its spectrum) stays above this (m) for 1.5 s, the stiffness drops
         # to 400 / 30 and the arm holds where it is (tpgpt.hardware.stiffness_check).
@@ -154,7 +161,8 @@ class CartesianTargetPublisher(Node):
         self._lock = threading.Lock()
         self._pose = None  # (monotonic time, position, orientation [x, y, z, w])
         self._samples = None  # while recording: [(stamp, pos, quat, cmd_pos, cmd_speed, segment)]
-        self._cmd = ([0.0] * 3, 0.0, 'none')  # last commanded position, its speed, the segment
+        # last commanded position, its speed, the segment, the commanded orientation, its rate
+        self._cmd = ([0.0] * 3, 0.0, 'none', [0.0, 0.0, 0.0, 1.0], 0.0)
         # The 250 Hz pose stream on its own node, spun alone on its own thread (see main): on a
         # shared executor this node received 96 of ~240 poses a second, with gaps up to 0.5 s,
         # while the check ran -- the teach node's measurement and fix (tpgpt_teach_node).
@@ -175,9 +183,9 @@ class CartesianTargetPublisher(Node):
             self._pose = (time.monotonic(), pos, [o.x, o.y, o.z, o.w])
             if self._samples is not None:
                 stamp = msg.header.stamp.sec + 1e-9 * msg.header.stamp.nanosec
-                cmd_pos, cmd_speed, segment = self._cmd
+                cmd_pos, cmd_speed, segment, cmd_quat, cmd_rate = self._cmd
                 self._samples.append((stamp, pos, [o.x, o.y, o.z, o.w], list(cmd_pos),
-                                      cmd_speed, segment))
+                                      cmd_speed, segment, list(cmd_quat), cmd_rate))
 
     def measured(self, max_age=0.5):
         with self._lock:
@@ -340,8 +348,9 @@ class CartesianTargetPublisher(Node):
                                  full=self.mode == 'directional')
         self.stiffness_pub.publish(Float64MultiArray(data=[float(v) for v in values]))
 
-    def _segment(self, name, start_pos, end_pos, quat, duration):
-        """Stream one segment: a hold (start == end) or a smooth move; stiffness every cycle."""
+    def _segment(self, name, start_pos, end_pos, quat, duration, end_quat=None):
+        """Stream one segment: a hold (start == end), a smooth move, or a smooth turn from
+        ``quat`` to ``end_quat``; stiffness every cycle."""
         from tpgpt.hardware.stiffness_check import OscillationWatch, recent_oscillation
 
         period = 1.0 / self.get_parameter('publish_rate').value
@@ -352,23 +361,25 @@ class CartesianTargetPublisher(Node):
         dist = math.dist(start_pos, end_pos)
         direction = ([(b - a) / dist for a, b in zip(start_pos, end_pos)] if dist > 1e-9
                      else [0.0, 0.0, 0.0])
+        turn = 0.0 if end_quat is None else _angle_between(quat, end_quat)
         t0 = time.monotonic()
         n = 0
         while rclpy.ok():
             t = time.monotonic() - t0
             if t > duration:
                 return
-            if dist > 1e-9:
-                s = 0.5 - 0.5 * math.cos(math.pi * t / duration)
-                speed = dist * math.pi / (2 * duration) * math.sin(math.pi * t / duration)
-            else:
-                s, speed = 0.0, 0.0
-            pos_cmd = [a + s * (b - a) for a, b in zip(start_pos, end_pos)]
+            s = 0.5 - 0.5 * math.cos(math.pi * t / duration)
+            profile = math.pi / (2 * duration) * math.sin(math.pi * t / duration)
+            speed = dist * profile if dist > 1e-9 else 0.0
+            rate = turn * profile
+            pos_cmd = [a + s * (b - a) for a, b in zip(start_pos, end_pos)] if dist > 1e-9 \
+                else list(start_pos)
+            quat_cmd = _slerp(quat, end_quat, s) if turn > 1e-9 else list(quat)
             _, quat_meas = self.measured()
             with self._lock:
-                self._cmd = (pos_cmd, speed, name)
+                self._cmd = (pos_cmd, speed, name, quat_cmd, rate)
             self.publish_stiffness(self.stiffness_for(direction, speed), quat_meas)
-            self.publish_target(pos_cmd, quat)
+            self.publish_target(pos_cmd, quat_cmd)
             pos_meas, _ = self.measured()
             if math.dist(pos_cmd, pos_meas) > max_err:
                 raise AbortMotion(f'{name}: tracking error {math.dist(pos_cmd, pos_meas):.3f} m '
@@ -391,27 +402,54 @@ class CartesianTargetPublisher(Node):
                                           'and holding')
             time.sleep(period)
 
-    def run_stiffness_check(self, start_pos, start_quat, goal_pos):
-        """hold -> move out -> hold -> move back -> hold, then the report."""
-        import numpy as np
-        from tpgpt.hardware.stiffness_check import hold_jitter, move_lag
+    def turned(self, quat):
+        """``quat`` turned ``turn_deg`` about the base's vertical."""
+        from scipy.spatial.transform import Rotation
 
+        turn = Rotation.from_euler('z', float(self.get_parameter('turn_deg').value), degrees=True)
+        return list((turn * Rotation.from_quat(quat)).as_quat())
+
+    def check_plan(self, start_pos, start_quat, goal_pos):
+        """The sequence: ``(name, kind, from, to, seconds, from quat, to quat)``."""
         g = lambda n: self.get_parameter(n).value  # noqa: E731
         hold = float(g('hold_seconds'))
         dist = math.dist(goal_pos, start_pos)
         move = max(g('min_duration'), 1.5 * dist / g('max_linear_speed'))
-        plan = [('hold_start', start_pos, start_pos, hold), ('move_out', start_pos, goal_pos, move),
-                ('hold_goal', goal_pos, goal_pos, hold)]
+        q = start_quat
+        plan = [('hold_start', 'hold', start_pos, start_pos, hold, q, q),
+                ('move_out', 'move', start_pos, goal_pos, move, q, q),
+                ('hold_goal', 'hold', goal_pos, goal_pos, hold, q, q)]
+        end = goal_pos
         if g('return_to_start'):
-            plan += [('move_back', goal_pos, start_pos, move), ('hold_end', start_pos, start_pos, hold)]
+            plan += [('move_back', 'move', goal_pos, start_pos, move, q, q),
+                     ('hold_end', 'hold', start_pos, start_pos, hold, q, q)]
+            end = start_pos
+        turn_deg = float(g('turn_deg'))
+        if turn_deg > 0.0:
+            # a smooth turn peaks at pi/2 times its mean rate
+            turn_time = max(g('min_duration'), math.pi * turn_deg / (2.0 * float(g('turn_rate'))))
+            qt = self.turned(q)
+            plan += [('turn_out', 'turn', end, end, turn_time, q, qt),
+                     ('hold_turned', 'hold', end, end, hold, qt, qt),
+                     ('turn_back', 'turn', end, end, turn_time, qt, q),
+                     ('hold_final', 'hold', end, end, hold, q, q)]
+        return plan
+
+    def run_stiffness_check(self, start_pos, start_quat, goal_pos):
+        """The sequence (:meth:`check_plan`), then the report."""
+        import numpy as np
+        from tpgpt.hardware.stiffness_check import hold_jitter, hold_tilt, move_lag, turn_lag
+
+        g = lambda n: self.get_parameter(n).value  # noqa: E731
+        plan = self.check_plan(start_pos, start_quat, goal_pos)
         with self._lock:
             self._samples = []
         self._check_t0 = time.monotonic()
         aborted = None
         try:
-            for name, a, b, duration in plan:
+            for name, kind, a, b, duration, qa, qb in plan:
                 self.get_logger().info(f'{name}: {duration:.1f} s')
-                self._segment(name, a, b, start_quat, duration)
+                self._segment(name, a, b, qa, duration, qb if kind == 'turn' else None)
         except (AbortMotion, KeyboardInterrupt) as exc:
             aborted = exc              # keep what was recorded: a cut run is the one to look at
         with self._lock:
@@ -427,20 +465,28 @@ class CartesianTargetPublisher(Node):
         cmd = np.array([s[3] for s in samples])
         speed = np.array([s[4] for s in samples])
         seg = np.array([s[5] for s in samples])
+        quat = np.array([s[2] for s in samples])
+        cmd_quat = np.array([s[6] for s in samples])
+        rate = np.array([s[7] for s in samples])
         report = {'mode': self.mode, 'translational_stiffness': g('translational_stiffness'),
                   'stiffness_along': g('stiffness_along') if self.mode == 'directional' else None,
                   'rotational_stiffness': g('rotational_stiffness'),
                   'aborted': None if aborted is None else (str(aborted) or 'Ctrl-C'),
                   'segments': {}}
-        for name, a, b, _ in plan:
+        report['turn_deg'] = float(g('turn_deg'))
+        for name, kind, a, b, _, _, _ in plan:
             m = seg == name
             if not m.any():
                 continue
-            if a is b:
-                report['segments'][name] = hold_jitter(stamps[m], meas[m])
-            else:
+            if kind == 'hold':
+                report['segments'][name] = {**hold_jitter(stamps[m], meas[m]),
+                                            **hold_tilt(stamps[m], cmd_quat[m], quat[m])}
+            elif kind == 'move':
                 u = [bb - aa for aa, bb in zip(a, b)]
                 report['segments'][name] = move_lag(cmd[m], meas[m], u, speed[m])
+            else:
+                sign = 1.0 if name == 'turn_out' else -1.0     # the turn back is about -z
+                report['segments'][name] = turn_lag(cmd_quat[m], quat[m], [0.0, 0.0, sign], rate[m])
         out = g('record_dir') or os.path.expanduser(
             time.strftime(f'~/tpgpt_stiffness_checks/%Y%m%d_%H%M%S_{self.mode}_'
                           f"{int(g('translational_stiffness'))}"))
@@ -448,18 +494,28 @@ class CartesianTargetPublisher(Node):
         with open(os.path.join(out, 'report.json'), 'w') as f:
             json.dump(report, f, indent=2)
         with open(os.path.join(out, 'samples.csv'), 'w') as f:
-            f.write('t,segment,meas_x,meas_y,meas_z,qx,qy,qz,qw,cmd_x,cmd_y,cmd_z,cmd_speed\n')
+            f.write('t,segment,meas_x,meas_y,meas_z,qx,qy,qz,qw,cmd_x,cmd_y,cmd_z,cmd_speed,'
+                    'cmd_qx,cmd_qy,cmd_qz,cmd_qw,cmd_rate\n')
             for t, s in zip(stamps, samples):
                 f.write(f'{t:.4f},{s[5]},' + ','.join(f'{v:.6f}' for v in (*s[1], *s[2], *s[3]))
-                        + f',{s[4]:.5f}\n')
+                        + f',{s[4]:.5f},' + ','.join(f'{v:.6f}' for v in s[6])
+                        + f',{s[7]:.5f}\n')
         lines = [f'Stiffness check ({self.mode}, {g("translational_stiffness"):.0f} N/m'
                  + (f' across / {g("stiffness_along"):.0f} along' if self.mode == 'directional' else '')
                  + f', rotational {g("rotational_stiffness"):.0f}) -> {out}']
         for name, r in report['segments'].items():
             if 'p2p_mm' in r:
-                lines.append(f'  {name:10s} jitter p95 {r["p95_mm"]:.2f} mm, peak-to-peak '
+                lines.append(f'  {name:11s} jitter p95 {r["p95_mm"]:.2f} mm, peak-to-peak '
                              f'{r["p2p_mm"]:.2f} mm, strongest {r.get("peak_mm", 0):.2f} mm at '
-                             f'{r.get("peak_hz", 0):.1f} Hz ({r["rate_hz"]:.0f} Hz poses)')
+                             f'{r.get("peak_hz", 0):.1f} Hz ({r["rate_hz"]:.0f} Hz poses); '
+                             f'hand tilted {r.get("tilt_median_deg", float("nan")):.2f} deg off '
+                             'the command')
+            elif 'tau_s' in r:
+                lines.append(f'  {name:11s} turn lag {r["lag_median_deg"]:.2f} deg '
+                             f'(max {r["lag_max_deg"]:.2f}) at up to {r["peak_rate_deg_s"]:.1f} '
+                             f'deg/s: time constant {r["tau_s"]:.2f} s, resting part '
+                             f'{r["offset_deg"]:.2f} deg; off the turn axis up to '
+                             f'{r["off_axis_max_deg"]:.2f} deg')
             elif 'along_median_mm' in r:
                 lines.append(f'  {name:10s} lag along the motion {r["along_median_mm"]:.1f} mm '
                              f'(max {r["along_max_mm"]:.1f}), across {r["across_median_mm"]:.1f} mm '
@@ -467,7 +523,7 @@ class CartesianTargetPublisher(Node):
         self.get_logger().info('\n'.join(lines))
         if aborted is not None:
             raise aborted              # main() lowers the stiffness to 400 / 30 and holds
-        return plan[-1][2]
+        return plan[-1][3]
 
     def run_check(self):
         """The stiffness check: variable-stiffness controller, the sequence, the report, hold."""
@@ -507,8 +563,10 @@ class CartesianTargetPublisher(Node):
             print(f'\nAbout to ACTIVATE {self.controller} (effort control) with stiffness '
                   f"{stiffness}, rotational {g('rotational_stiffness'):.0f} N m/rad, and run:\n"
                   f"  hold {g('hold_seconds'):.0f} s, move fr3_hand_tcp {dist:.3f} m to {goal_pos} "
-                  f"({self.frame}), hold{', move back, hold' if g('return_to_start') else ''}.\n"
-                  f"  Cut: above {g('max_jitter') * 1000:.1f} mm of oscillation the stiffness drops "
+                  f"({self.frame}), hold{', move back, hold' if g('return_to_start') else ''}"
+                  + (f", turn the hand {g('turn_deg'):.0f} deg about the vertical and back, holding "
+                     'after each' if g('turn_deg') > 0 else '') + '.\n'
+                  + f"  Cut: above {g('max_jitter') * 1000:.1f} mm of oscillation the stiffness drops "
                   'to 400 / 30 and the arm holds.\nKeep the emergency stop within reach.')
             if input("Type 'yes' to continue: ").strip().lower() != 'yes':
                 self.get_logger().info('Cancelled; nothing was activated.')

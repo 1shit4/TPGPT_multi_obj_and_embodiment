@@ -13,8 +13,15 @@ the stiffness labels' numbers, and both are measured on the arm, not assumed:
   moving target by ``K^-1 D v`` (viscous) plus ``F / K`` (friction, gravity). With a
   stiffness soft along the motion the lag should be mostly *along* the motion;
   :func:`move_lag` splits it into along and across.
+* **How far off does the hand's orientation sit, and how far behind does it turn?**
+  The rotational spring errs the same two ways (2026-09-30: this decides whether a
+  taught path that brings the wrist 23.5 mm under a board can be replayed).
+  :func:`hold_tilt` measures the resting tilt in a hold -- the angle between the
+  commanded and the measured orientation -- and :func:`turn_lag` the lag of a turn
+  about a fixed axis, with its time constant: lag = tau x turn rate + offset.
 
-Times are the pose messages' own stamps, relative to the first one.
+Times are the pose messages' own stamps, relative to the first one. Orientations are
+quaternions ``[x, y, z, w]``, as ROS and scipy write them.
 """
 
 from __future__ import annotations
@@ -163,3 +170,55 @@ def move_lag(commanded, measured, direction, commanded_speed, min_speed: float =
             "along_max_mm": float(np.max(along) * 1000),
             "across_median_mm": float(np.median(across) * 1000),
             "across_max_mm": float(np.max(across) * 1000)}
+
+
+def _rotvecs(commanded_quats, measured_quats) -> np.ndarray:
+    """The rotation taking each measured orientation to the commanded one (base frame)."""
+    from scipy.spatial.transform import Rotation
+
+    c = Rotation.from_quat(np.asarray(commanded_quats, dtype=float))
+    m = Rotation.from_quat(np.asarray(measured_quats, dtype=float))
+    return (c * m.inv()).as_rotvec()
+
+
+def hold_tilt(stamps, commanded_quats, measured_quats, skip: float = 1.0) -> dict:
+    """The resting tilt of a hold: the angle between commanded and measured orientation.
+
+    The first ``skip`` seconds are left out (the arm settling from the move before).
+    """
+    t = np.asarray(stamps, dtype=float)
+    keep = t >= t[0] + skip if len(t) and t[-1] - t[0] > 2 * skip else np.ones(len(t), bool)
+    if not keep.any():
+        return {}
+    angle = np.degrees(np.linalg.norm(_rotvecs(np.asarray(commanded_quats)[keep],
+                                               np.asarray(measured_quats)[keep]), axis=1))
+    return {"tilt_median_deg": float(np.median(angle)), "tilt_max_deg": float(np.max(angle))}
+
+
+def turn_lag(commanded_quats, measured_quats, axis, commanded_rate,
+             min_fraction: float = 0.5) -> dict:
+    """How far a turn about ``axis`` runs behind, and its time constant.
+
+    The error (measured -> commanded) is split into its component along the turn axis
+    -- the lag -- and the rest (a tilt off the axis). On samples turning faster than
+    ``min_fraction`` of the peak rate, ``lag = tau * rate + offset`` is fitted by least
+    squares: ``tau`` is the rotational counterpart of the translational time constant
+    (``move_lag``), ``offset`` the resting part. Rates in rad/s.
+    """
+    u = np.asarray(axis, dtype=float)
+    u = u / max(np.linalg.norm(u), 1e-12)
+    e = _rotvecs(commanded_quats, measured_quats)
+    rate = np.asarray(commanded_rate, dtype=float)
+    fast = rate > min_fraction * rate.max() if len(rate) and rate.max() > 0 else np.zeros(len(e), bool)
+    if fast.sum() < 5:
+        return {}
+    along = e[fast] @ u
+    off = np.linalg.norm(e[fast] - np.outer(along, u), axis=1)
+    A = np.column_stack([rate[fast], np.ones(int(fast.sum()))])
+    (tau, offset), *_ = np.linalg.lstsq(A, along, rcond=None)
+    return {"n": int(fast.sum()),
+            "peak_rate_deg_s": float(np.degrees(rate.max())),
+            "lag_median_deg": float(np.degrees(np.median(along))),
+            "lag_max_deg": float(np.degrees(np.max(along))),
+            "off_axis_max_deg": float(np.degrees(np.max(off))),
+            "tau_s": float(tau), "offset_deg": float(np.degrees(offset))}

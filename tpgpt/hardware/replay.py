@@ -35,11 +35,13 @@ taught path plus how far it strays from it, so that is what is checked
 * **tilt**: how far the hand may be turned from the taught orientation; each robot piece
   then needs the angle times its own distance from the grasp point.
 
-Pass 0's margin is an estimate, the only one: 3 mm sideways (the stiffness check's
-1.5-3 mm across the motion) and the tilt the rotational spring leaves -- the measured
+Pass 0's margin is an estimate, the only one: 6.5 mm sideways (the worst the stiffness check
+saw across the motion, 5.3-6.4 mm) and the tilt the rotational spring leaves -- the measured
 resting 1.5 deg at 30 N m/rad, scaled to the rotational stiffness of each label, plus the
 turning lag at twice CRISP's nominal time constant (the translational one measured two to
-three times its nominal). Every later pass's margin is **measured**: the previous pass's
+three times its nominal). ``use-checks`` replaces those three numbers with what stiffness
+checks measured at the rotational stiffnesses the pass runs at (the check's turn measures
+the tilt and the turning lag). Every later pass's margin is **measured**: the previous pass's
 worst sideways stray and tilt around each label (over ``MARGIN_WINDOW`` labels either
 side) plus the run-to-run spread. If learning works the next pass strays less; if it
 overshoots, the stray moves to the other side at about the same size. Either way the margin
@@ -53,6 +55,7 @@ Command line::
     python -m tpgpt.hardware.replay init --bundle <source_bundle> --out <dir> [--speed-scale 0.35]
     python -m tpgpt.hardware.replay update <dir> [--gain 1.0]
     python -m tpgpt.hardware.replay repeat <dir>
+    python -m tpgpt.hardware.replay use-checks <dir> <stiffness check dir> ...
     python -m tpgpt.hardware.replay status <dir>
 
 The label period of a replay is ``dt / speed_scale`` (0.05 / 0.35 = 0.143 s): the executor
@@ -90,8 +93,9 @@ RELEASE_WINDOW = (-10, 5)
 EDGE_SPEED_WARNING = 0.010
 
 #: Pass 0's margin, before anything on this path is measured (module docstring):
-#: sideways, m -- the stiffness check's 1.5-3 mm across the motion (2026-09-29);
-FIRST_PASS_STRAY = 0.003
+#: sideways, m -- the worst the stiffness check saw across the motion, 5.3-6.4 mm in all
+#: four runs (median 1.5-2.9; ~/tpgpt_stiffness_checks/20260929_18*, 2026-09-29);
+FIRST_PASS_STRAY = 0.0065
 #: the resting tilt, deg, measured at that rotational stiffness, N m/rad, holding and
 #: moving alike (the same stiffness check);
 RESTING_TILT_DEG = 1.5
@@ -182,14 +186,67 @@ def strays(reference, reference_rot, measured, measured_rot,
     return side, tilt
 
 
-def first_pass_margin(orientations, rotational, label_period: float
+def model_from_checks(check_dirs) -> dict:
+    """What stiffness checks measured, as pass 0's margin needs it.
+
+    Each ``cartesian_target_publisher`` stiffness check (``report.json``) gives, at its
+    rotational stiffness: the resting tilt (the largest of its holds' median tilts), the
+    turning time constant (the larger of its two turns') and the sideways stray (the
+    largest across the motion of its moves). Returns ``{"stray_m", "rotation": [{"k",
+    "tilt_deg", "tau_s"}] sorted by k, "checks"}``; a check without a turn gives no tau.
+    """
+    rows, stray, used = {}, 0.0, []
+    for d in check_dirs:
+        report = json.loads((Path(d).expanduser() / "report.json").read_text())
+        segs = report.get("segments", {})
+        tilts = [s["tilt_median_deg"] for s in segs.values() if "tilt_median_deg" in s]
+        taus = [s["tau_s"] for s in segs.values() if "tau_s" in s]
+        stray = max([stray] + [s["across_max_mm"] / 1000 for s in segs.values()
+                               if "across_max_mm" in s])
+        if not tilts or not taus:
+            continue
+        k = float(report["rotational_stiffness"])
+        old = rows.get(k, {"tilt_deg": 0.0, "tau_s": 0.0})
+        rows[k] = {"k": k, "tilt_deg": max(old["tilt_deg"], max(tilts)),
+                   "tau_s": max(old["tau_s"], max(taus))}
+        used.append(str(Path(d).expanduser()))
+    if not rows:
+        raise ValueError("none of these stiffness checks measured a tilt and a turn")
+    return {"stray_m": stray or FIRST_PASS_STRAY, "rotation": [rows[k] for k in sorted(rows)],
+            "checks": used}
+
+
+def _tilt_and_tau(k: np.ndarray, model: dict | None) -> tuple[np.ndarray, np.ndarray]:
+    """Resting tilt (rad) and turning time constant (s) at rotational stiffness ``k``.
+
+    Without a model: the 2026-09-29 resting tilt scaled as ``1/k`` and twice CRISP's
+    nominal ``2/sqrt(k)``. With one (:func:`model_from_checks`): interpolated between the
+    stiffnesses measured; below the softest, scaled up from it (``1/k``, ``1/sqrt(k)``);
+    above the stiffest, its values -- never extrapolated to less than was measured.
+    """
+    if not model:
+        return (np.radians(RESTING_TILT_DEG) * RESTING_TILT_STIFFNESS / k,
+                TURN_LAG_FACTOR * 2.0 / np.sqrt(k))
+    ks = np.array([r["k"] for r in model["rotation"]])
+    tilt = np.radians([r["tilt_deg"] for r in model["rotation"]])
+    tau = np.array([r["tau_s"] for r in model["rotation"]])
+    t = np.interp(k, ks, tilt)
+    s = np.interp(k, ks, tau)
+    soft = k < ks[0]
+    t[soft] = tilt[0] * ks[0] / k[soft]
+    s[soft] = tau[0] * np.sqrt(ks[0] / k[soft])
+    return t, s
+
+
+def first_pass_margin(orientations, rotational, label_period: float, model: dict | None = None
                       ) -> tuple[np.ndarray, np.ndarray]:
-    """Pass 0's estimated margin: ``(clearance m, tilt rad)`` per label.
+    """Pass 0's margin: ``(clearance m, tilt rad)`` per label.
 
     ``rotational``: the rotational stiffness each label runs at, N m/rad (the executor's
-    schedule, soft while carrying). Tilt = the resting tilt scaled to that stiffness (a
-    spring twice as stiff leaves half the tilt against the same torque) plus the turn
-    rate times twice CRISP's nominal time constant ``2/sqrt(k)``.
+    schedule, soft while carrying). Tilt = the resting tilt at that stiffness plus the
+    turn rate times the turning time constant (:func:`_tilt_and_tau`); sideways, the
+    stray the stiffness checks measured. ``model`` is what they measured
+    (:func:`model_from_checks`); without it, the estimate in the module docstring.
     """
     from scipy.spatial.transform import Rotation
 
@@ -198,9 +255,9 @@ def first_pass_margin(orientations, rotational, label_period: float
     step = np.linalg.norm(Rotation.from_matrix(
         R[1:] @ np.transpose(R[:-1], (0, 2, 1))).as_rotvec(), axis=1)
     rate = _running_max(np.r_[0.0, step] / float(label_period), MARGIN_WINDOW)
-    resting = np.radians(RESTING_TILT_DEG) * RESTING_TILT_STIFFNESS / k
-    turning = rate * TURN_LAG_FACTOR * 2.0 / np.sqrt(k)
-    return np.full(len(R), FIRST_PASS_STRAY), _running_max(resting + turning, MARGIN_WINDOW)
+    resting, tau = _tilt_and_tau(k, model)
+    stray = float(model["stray_m"]) if model else FIRST_PASS_STRAY
+    return np.full(len(R), stray), _running_max(resting + rate * tau, MARGIN_WINDOW)
 
 
 # ------------------------------------------------------------------------ the directory
@@ -320,17 +377,20 @@ def save_recording(out_dir, k: int, run: int, **arrays) -> Path:
 def pass_margin(out_dir, k: int, rotational=None) -> tuple[np.ndarray, np.ndarray, str]:
     """The gap pass ``k`` is checked with: ``(clearance m, tilt rad, where it came from)``.
 
-    Pass 0: :func:`first_pass_margin` from ``rotational`` (saved, so the pass's own record
-    says what it was checked with). Later passes: what ``update`` measured.
+    Pass 0: :func:`first_pass_margin` from ``rotational`` and, when ``use-checks`` has
+    put them in ``replay.json``, the stiffness checks' measurements (saved, so the pass's
+    own record says what it was checked with). Later passes: what ``update`` measured.
     """
     path = _pass_dir(out_dir, k) / "margin.npz"
     if k == 0 and rotational is not None:
         info, bundle = load_replay(out_dir)
+        model = info.get("first_pass_model")
         clearance, tilt = first_pass_margin(bundle.tool_labels.orientations, rotational,
-                                            label_period(info))
-        np.savez(path, clearance=clearance, tilt=tilt, source="estimate",
+                                            label_period(info), model)
+        source = "stiffness checks" if model else "estimate"
+        np.savez(path, clearance=clearance, tilt=tilt, source=source,
                  rotational=np.asarray(rotational, dtype=float))
-        return clearance, tilt, "estimate"
+        return clearance, tilt, source
     if not path.exists():
         raise FileNotFoundError(f"{path} missing: pass 0 needs the rotational stiffness, later "
                                 "passes the margin `update` writes")
@@ -486,6 +546,15 @@ def update(out_dir, gain: float | None = None) -> dict:
     return report
 
 
+def use_checks(out_dir, check_dirs) -> dict:
+    """Put what the stiffness checks measured into ``replay.json`` for pass 0's margin."""
+    out = Path(out_dir).expanduser()
+    info, _ = load_replay(out)
+    info["first_pass_model"] = model_from_checks(check_dirs)
+    (out / "replay.json").write_text(json.dumps(info, indent=2))
+    return info["first_pass_model"]
+
+
 def check_pass(out_dir, k: int, shelf_config, rotational=None, with_object: bool = True,
                start_q=None) -> tuple[str | None, dict]:
     """The taught path, with pass ``k``'s margin, against the shelf model and the table:
@@ -586,6 +655,10 @@ def main(argv=None):
     u.add_argument("--gain", type=float, default=None, help="ILC gain for this update (default 1.0)")
     r = sub.add_parser("repeat", help="run the last pass once more with the same attractor")
     r.add_argument("dir")
+    c = sub.add_parser("use-checks", help="pass 0's margin from stiffness checks' measurements")
+    c.add_argument("dir")
+    c.add_argument("checks", nargs="+", help="stiffness check directories "
+                   "(~/tpgpt_stiffness_checks/<time>_<mode>_<k>)")
     s = sub.add_parser("status", help="the passes and their errors")
     s.add_argument("dir")
     args = ap.parse_args(argv)
@@ -608,6 +681,13 @@ def main(argv=None):
     elif args.command == "repeat":
         k, runs = add_run(args.dir)
         print(f"pass {k} will be run {runs} times; run the replay again.")
+    elif args.command == "use-checks":
+        model = use_checks(args.dir, args.checks)
+        print(f"pass 0's margin now comes from {len(model['checks'])} stiffness check(s): "
+              f"sideways {model['stray_m'] * 1000:.1f} mm; per rotational stiffness:")
+        for row in model["rotation"]:
+            print(f"  {row['k']:5.1f} N m/rad: resting tilt {row['tilt_deg']:.2f} deg, turning "
+                  f"time constant {row['tau_s']:.2f} s")
     else:
         _print_status(args.dir)
 

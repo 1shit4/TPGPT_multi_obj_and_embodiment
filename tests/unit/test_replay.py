@@ -182,3 +182,31 @@ def test_attractor_at_interpolates_between_labels():
     assert np.allclose(rp.attractor_at(a, 0.5), [0.5, 0, 0])
     assert np.allclose(rp.attractor_at(a, 1.5), [2.0, 0, 0])
     assert np.allclose(rp.attractor_at(a, 9.0), [3.0, 0, 0])
+
+
+def test_pass_0_margin_from_measured_stiffness_checks(tmp_path):
+    for k, tilt, tau, across in ((15.0, 4.0, 0.9, 6.0), (60.0, 1.0, 0.4, 5.0)):
+        d = tmp_path / f"check_{int(k)}"
+        d.mkdir()
+        (d / "report.json").write_text(json.dumps({"rotational_stiffness": k, "segments": {
+            "hold_start": {"tilt_median_deg": tilt * 0.5}, "hold_end": {"tilt_median_deg": tilt},
+            "move_out": {"across_max_mm": across}, "turn_out": {"tau_s": tau},
+            "turn_back": {"tau_s": tau * 0.9}}}))
+    model = rp.model_from_checks([tmp_path / "check_15", tmp_path / "check_60"])
+    assert model["stray_m"] == pytest.approx(0.006)
+    assert [r["k"] for r in model["rotation"]] == [15.0, 60.0]
+    R = np.repeat(np.eye(3)[None], 10, axis=0)
+    period = 0.05 / 0.35
+    c, t = rp.first_pass_margin(R, np.full(10, 60.0), period, model)
+    assert np.allclose(c, 0.006) and np.allclose(np.degrees(t), 1.0)
+    _, t = rp.first_pass_margin(R, np.full(10, 15.0), period, model)
+    assert np.allclose(np.degrees(t), 4.0)
+    _, t = rp.first_pass_margin(R, np.full(10, 7.5), period, model)        # softer than measured
+    assert np.allclose(np.degrees(t), 8.0)
+    _, t = rp.first_pass_margin(R, np.full(10, 90.0), period, model)       # stiffer: no less
+    assert np.allclose(np.degrees(t), 1.0)
+    root = rp.init_replay(_taught_bundle(tmp_path), tmp_path / "replay")
+    rp.use_checks(root, [tmp_path / "check_15", tmp_path / "check_60"])
+    n = rp.load_replay(root)[0]["n_labels"]
+    _, _, source = rp.pass_margin(root, 0, np.full(n, 60.0))
+    assert source == "stiffness checks"

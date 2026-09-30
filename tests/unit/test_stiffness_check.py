@@ -90,3 +90,39 @@ def test_directional_matrix_is_the_rule():
     K = directional_matrices([[0.0, 0.0, 1.0], [0.0, 0.0, 1.0]], [0.1, 0.0], 350.0, 600.0)
     assert np.allclose(K[0], np.diag([600.0, 600.0, 350.0]))
     assert np.allclose(K[1], 600.0 * np.eye(3))              # still: stiff in every direction
+
+
+def test_hold_tilt_is_the_angle_between_commanded_and_measured():
+    from scipy.spatial.transform import Rotation
+
+    t = np.arange(0.0, 5.0, 0.004)
+    cmd = np.repeat(Rotation.from_euler("x", 180, degrees=True).as_quat()[None], len(t), axis=0)
+    meas = (Rotation.from_euler("y", 1.5, degrees=True)
+            * Rotation.from_quat(cmd)).as_quat()
+    meas[:100] = cmd[:100]                                   # settling: skipped
+    from tpgpt.hardware.stiffness_check import hold_tilt
+
+    out = hold_tilt(t, cmd, meas)
+    assert out["tilt_median_deg"] == pytest.approx(1.5, abs=1e-6)
+
+
+def test_turn_lag_recovers_the_time_constant():
+    from scipy.spatial.transform import Rotation
+
+    from tpgpt.hardware.stiffness_check import turn_lag
+
+    dt, tau, rest = 0.004, 0.4, np.radians(1.0)
+    t = np.arange(0.0, 4.0, dt)
+    angle = np.radians(15.0) * (0.5 - 0.5 * np.cos(np.pi * t / 4.0))      # the commanded turn
+    rate = np.gradient(angle, dt)
+    measured, x = [], 0.0
+    for a in angle:                                           # a first-order hand, 1 deg short
+        measured.append(x)
+        x += (a - rest - x) * dt / tau
+    base = Rotation.from_euler("x", 180, degrees=True)
+    cmd = (Rotation.from_rotvec(np.outer(angle, [0, 0, 1])) * base).as_quat()
+    meas = (Rotation.from_rotvec(np.outer(measured, [0, 0, 1])) * base).as_quat()
+    out = turn_lag(cmd, meas, [0, 0, 1], rate)
+    assert out["tau_s"] == pytest.approx(tau, rel=0.1)
+    assert out["offset_deg"] == pytest.approx(1.0, abs=0.2)
+    assert out["off_axis_max_deg"] < 1e-6
