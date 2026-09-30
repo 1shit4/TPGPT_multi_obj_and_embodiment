@@ -854,6 +854,25 @@ class TpgptExecutorNode(Node):
         else:
             margin_text = 'NOT CHECKED'
             log.warn('replay_shelf_config empty: the path is NOT checked')
+        if with_object:
+            # The replay retraces the taught path, so the object must stand where it was taught:
+            # its taught cloud, latched, for RViz next to the camera's.
+            from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
+            from sensor_msgs.msg import PointCloud2
+            from ycb_pointcloud_pipeline.ros_utils import xyz_to_pointcloud2
+
+            latched = QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL,
+                                 reliability=ReliabilityPolicy.RELIABLE)
+            self._taught_object_pub = self.create_publisher(
+                PointCloud2, '/tpgpt/replay/taught_object', latched)
+            points = np.asarray(bundle.placement.points, dtype=float)
+            self._taught_object_pub.publish(xyz_to_pointcloud2(
+                points, self.base, self.get_clock().now().to_msg(), rgb=np.array([0, 255, 0],
+                                                                                 dtype=np.uint8)))
+            centre = points.mean(axis=0)
+            log.info(f'The object must stand where it was taught: centre '
+                     f'{np.round(centre, 3).tolist()} m ({self.base}), shown green on '
+                     '/tpgpt/replay/taught_object -- line the camera\'s cloud up with it in RViz')
         controllers = None
         if not self.dry:
             controllers = self.ensure_controller()
