@@ -263,14 +263,16 @@ The planner's support height is: its `support_height` parameter, else the calibr
   policy, no gate; the demonstration's own stiffness at `speed_scale` 0.35). Position **and
   orientation** are learned (gain 1.0). Pass 0 is run twice (the spread). Before each pass the
   **taught path, widened by how far the arm strays from it**, is checked against the shelf model
-  and the table -- not the attractor: pass 0 with an estimate (or `use-checks`: the stiffness
-  checks' measurements), later passes with what the previous one measured. Nothing is learned
-  from 0.5 s before the grasp mark. **A replay learns the lag at its own `speed_scale`**: run the
-  resulting labels at the same one. **A dry run of a replay only checks** (`replay_record_dry:=true`
-  simulates into it, for tests only). **The rotational stiffness decides whether the 18:39
-  demonstration can be replayed**: link 6 passes 23.5 mm under the top board; with the estimate
-  pass 0 is refused at 30, 45 and 60 N·m/rad (x0.25 while carrying). The stiffness check now turns
-  the hand to measure the tilt and turning lag; run it at 15/30/45/60 first. Dry-run only so far.
+  and the table -- not the attractor: pass 0 with the stiffness checks' measurements
+  (`replay.MEASURED_ROTATION`, 6.5 mm sideways), later passes with what the previous one
+  measured. Nothing is learned from 0.5 s before the grasp mark. **A replay learns the lag at its
+  own `speed_scale`**: run the resulting labels at the same one. **A dry run of a replay only
+  checks** (`replay_record_dry:=true` simulates into it, for tests only). **Run the 18:39
+  demonstration at `rotational_stiffness:=60.0`**: link 6 passes 23.5 mm under the top board, and
+  pass 0 is refused at 45 and 30 (x0.25 while carrying). **With the object, the pass first guides
+  it onto its taught place** (the scan fitted to the camera and to the taught cloud; "move it
+  N mm toward the robot ..., turn it N deg ..."), and waits until it is within 10 mm / 10 deg;
+  camera and segmentation must be up. Dry-run only so far.
 - **A plan that leaves the executor's workspace box is now refused at selection**
   (`SelectionSettings.workspace_min/max`, fed from the planner's own parameters). It used to be
   found only by the executor, which aborted the whole run instead of taking the next grasp
