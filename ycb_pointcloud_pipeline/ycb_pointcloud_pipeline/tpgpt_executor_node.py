@@ -759,9 +759,11 @@ class TpgptExecutorNode(Node):
         in time, linearly between labels, with no policy and no lag gate, under the
         demonstration's own stiffness labels (12-value message) and the executor's rotational
         schedule; the gripper acts at the teacher's marks while the clock waits (as the
-        executor does, audit C7). What is recorded, per control step: the label index being
-        commanded, the measured grasp point and hand rotation, and the commanded attractor.
-        `python -m tpgpt.hardware.replay update <dir>` then computes the next pass.
+        executor does, audit C7). The orientation commanded is the pass's attractor
+        orientation, learned like the position. What is recorded, per control step: the
+        label index being commanded, the measured grasp point and hand orientation (the
+        plan's grasp convention, as the labels), the commanded attractor and the rotational
+        stiffness. `python -m tpgpt.hardware.replay update <dir>` then computes the next pass.
         """
         from tpgpt.hardware import replay as rp
         from tpgpt.hardware.end_effector import end_effector_for_plan
@@ -773,8 +775,10 @@ class TpgptExecutorNode(Node):
         log, p = self.get_logger(), self.p
         root = os.path.expanduser(p('replay_dir'))
         info, bundle = rp.load_replay(root)
-        k = rp.pending_pass(root)
+        k, run = rp.pending_pass(root)
+        runs = rp.planned_runs(info, k)
         attractor = rp.load_attractor(root, k)
+        attractor_R = rp.load_attractor_rotations(root, k, bundle)
         labels = bundle.tool_labels
         n = len(attractor)
         dt = float(info['dt'])
@@ -788,7 +792,7 @@ class TpgptExecutorNode(Node):
             raise AbortRun(f'this demonstration is for the {hand.name} hand but gripper_mode is '
                            f'{mode!r}')
         offset = np.asarray(hand.tool_offset, dtype=float) + np.asarray(p('tool_offset'), dtype=float)
-        tcp_R = np.asarray(hand.ee_from_grasp(labels.orientations), dtype=float)
+        tcp_R = np.asarray(hand.ee_from_grasp(attractor_R), dtype=float)   # commanded
         tcp_from_tool = lambda pos, R: np.asarray(pos) - np.asarray(R) @ offset  # noqa: E731
         tool_from_tcp = lambda pos, R: np.asarray(pos) + np.asarray(R) @ offset  # noqa: E731
         # the executor's rotational schedule (rollout_policy): firm, compliant while carrying
@@ -809,19 +813,9 @@ class TpgptExecutorNode(Node):
                                    float(p('stiffness_max_translational')),
                                    float(p('stiffness_max_rotational')), full=self.full_stiffness)
 
+        schedule = np.array([rotational(i) for i in range(n)])
         for i in range(n):
             self.check_workspace(tcp_from_tool(attractor[i], tcp_R[i]), f'replay label {i}')
-        # Learning moves the attractor from pass to pass: check this pass's against the shelf
-        # model and the table before anything moves (tpgpt.hardware.replay.check_pass).
-        shelf_config = p('replay_shelf_config')
-        if shelf_config:
-            verdict, _ = rp.check_pass(root, k, shelf_config)
-            if verdict:
-                raise AbortRun(f'pass {k} attractor path: {verdict} (shelf {shelf_config}); '
-                               'not replayed')
-            log.info(f'pass {k} attractor path is clear of the shelf model and the table')
-        else:
-            log.warn('replay_shelf_config empty: the attractor path is NOT checked')
         start_pos, start_rot = tcp_from_tool(attractor[0], tcp_R[0]), tcp_R[0]
 
         # --- where the arm is -------------------------------------------------
@@ -839,6 +833,27 @@ class TpgptExecutorNode(Node):
         if gap > p('max_start_distance'):
             raise AbortRun(f'the TCP is {gap:.3f} m from the replay start (max_start_distance '
                            f"{p('max_start_distance')}); move the arm closer first")
+        # Before anything moves: the taught path, with this pass's margin for how far the arm
+        # strays from it, against the shelf model and the table -- and the move onto it from
+        # where the arm is (tpgpt.hardware.replay.check_pass). Not the attractor: the arm
+        # does not go where the spring pulls, it lags it.
+        shelf_config = p('replay_shelf_config')
+        with_object = mode != 'none'
+        if shelf_config:
+            verdict, _ = rp.check_pass(root, k, shelf_config, rotational=schedule,
+                                       with_object=with_object, start_q=self.measured_joints())
+            clearance, tilt, source = rp.pass_margin(root, k)
+            margin_text = (f'{clearance.min() * 1000:.1f}-{clearance.max() * 1000:.1f} mm and '
+                           f'{np.degrees(tilt.min()):.1f}-{np.degrees(tilt.max()):.1f} deg '
+                           f'({source})')
+            if verdict:
+                raise AbortRun(f'pass {k}: the taught path with a margin of {margin_text}: '
+                               f'{verdict} (shelf {shelf_config}); not replayed')
+            log.info(f'pass {k}: the taught path is clear of the shelf model and the table with a '
+                     f"margin of {margin_text}{', carrying the object' if with_object else ''}")
+        else:
+            margin_text = 'NOT CHECKED'
+            log.warn('replay_shelf_config empty: the path is NOT checked')
         controllers = None
         if not self.dry:
             controllers = self.ensure_controller()
@@ -852,16 +867,18 @@ class TpgptExecutorNode(Node):
         approach_p, approach_R = approach_trajectory(
             cur_pos, cur_rot, start_pos, start_rot, dt,
             float(p('approach_max_linear_speed')), float(p('approach_max_angular_speed')))
-        print(f"\n{'DRY RUN (nothing moves)' if self.dry else 'HARDWARE RUN'}: REPLAY pass {k} of "
-              f"{root}\n"
+        print(f"\n{'DRY RUN (nothing moves)' if self.dry else 'HARDWARE RUN'}: REPLAY pass {k}, "
+              f"run {run} of {runs}, of {root}\n"
               f"  demonstration  {info['bundle']}\n"
               f"  labels         {n} at speed_scale {info['speed_scale']} (~{n * label_period:.0f} s), "
               f"grasp {info['grasp_index']}, release {info['release_index']}\n"
               f"  stiffness      the labels' own ({info.get('stiffness')}), "
               f"{'12-value' if self.full_stiffness else '6-value'} message, rotational {k_rot:.0f} "
               f"(x{transit_scale} while carrying)\n"
+              f"  path check     the taught path with a margin of {margin_text}\n"
               f"  approach       {gap:.3f} m over {len(approach_p) * dt:.1f} s\n"
-              f"  gripper        {mode if not self.dry else 'not sent'} (object {width * 1000:.0f} mm)\n")
+              f"  gripper        {mode if not self.dry else 'not sent'} (object {width * 1000:.0f} mm)"
+              f"{'' if with_object else ' -- NO OBJECT: take it off the table'}\n")
         if not self.dry and p('require_confirmation'):
             print('Keep the emergency stop within reach.')
             if input("Type 'yes' to ACTIVATE the controller and replay: ").strip().lower() != 'yes':
@@ -902,7 +919,7 @@ class TpgptExecutorNode(Node):
                                progress_window=int(p('progress_window')),
                                min_progress_ratio=float(p('min_progress_ratio')))
         rec = {name: [] for name in ('step', 'label_index', 'positions', 'rotations', 'commanded',
-                                     'gripper')}
+                                     'commanded_rotations', 'rotational', 'gripper')}
         deadline = time.monotonic() + float(p('max_policy_seconds')) if realtime else float('inf')
         s, step, closed_now = 0.0, 0, False
         next_t = time.monotonic()
@@ -929,9 +946,13 @@ class TpgptExecutorNode(Node):
             self.publish(target, rot, values)
             if self.dry:
                 self.simulate(target, rot, *crisp_applied_gains(values, meas_R), dt)
+            # orientations in the plan's grasp convention, as the labels they are compared with
             for name, value in (('step', step), ('label_index', s),
-                                ('positions', tool_from_tcp(meas_p, meas_R)), ('rotations', meas_R),
-                                ('commanded', pos), ('gripper', 1.0 if closed_now else -1.0)):
+                                ('positions', tool_from_tcp(meas_p, meas_R)),
+                                ('rotations', hand.grasp_from_ee(meas_R)),
+                                ('commanded', pos), ('commanded_rotations', hand.grasp_from_ee(rot)),
+                                ('rotational', rotational(i)),
+                                ('gripper', 1.0 if closed_now else -1.0)):
                 rec[name].append(value)
             if s >= n - 1:
                 break
@@ -944,14 +965,27 @@ class TpgptExecutorNode(Node):
                 self.simulate(target, rot, *crisp_applied_gains(values, meas_R), dt)
             time.sleep(dt if realtime else 0.0)
         self.moving = False
-        path = rp.save_recording(root, k, **rec)
-        error, _ = rp.pass_error(root, k)
+        path = rp.save_recording(root, k, run, **rec)
+        error, _, _ = rp.pass_error(root, k)
         m = error['at_marks']
-        log.info(f"Pass {k} recorded ({path}): error from the taught path rms "
-                 f"{error['error_rms_mm']:.1f} mm, max {error['error_max_mm']:.1f}; at the grasp "
-                 f"{m['grasp']['total_mm']:.1f} mm (closing {m['grasp']['closing_mm']:.1f}), at the "
-                 f"release {m['release']['total_mm']:.1f} (closing {m['release']['closing_mm']:.1f}). "
-                 f'Next: python -m tpgpt.hardware.replay update {root}')
+        log.info(f"Pass {k} run {run} recorded ({path}). Over its {error['runs']} run(s): off the "
+                 f"taught path {error['error_rms_mm']:.1f} mm RMS, {error['error_max_mm']:.1f} worst, "
+                 f"tilt {error['tilt_max_deg']:.2f} deg worst; at the grasp "
+                 f"{m['grasp']['total_mm']:.1f} mm ({m['grasp']['closing_mm']:.1f} across the jaws), "
+                 f"at the release {m['release']['total_mm']:.1f} ({m['release']['closing_mm']:.1f} "
+                 f"across the jaws); strayed sideways up to {error['stray_max_mm']:.1f} mm and "
+                 f"{error['stray_tilt_max_deg']:.2f} deg")
+        exceeded = error.get('margin_exceeded') or {}
+        if exceeded.get('labels'):
+            log.warn(f"The arm strayed beyond the margin this pass was checked with at "
+                     f"{exceeded['labels']} labels (first {exceeded['first']}), by up to "
+                     f"{exceeded['worst_mm']:.1f} mm and {exceeded['worst_tilt_deg']:.2f} deg: "
+                     f"the {exceeded['checked_with']} margin was too small there. The next pass "
+                     'is checked with what this one measured.')
+        if run < runs:
+            log.info(f'Next: run pass {k} again (run {run + 1} of {runs}), the same command.')
+        else:
+            log.info(f'Next: python -m tpgpt.hardware.replay update {root}')
         return True
 
     def _settle_and_measure_offset(self, start_pos, start_rot, K, D, dt, wait_period, writer,
