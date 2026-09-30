@@ -400,3 +400,87 @@ def test_the_face_set_down_is_the_one_down_at_the_release_not_at_the_pick():
                  destination_height=0.20)
     assert res["skipped"] == 0 and res["relaxed_in_pick_or_place"] == 0
     assert not [k for k in res["faults"] if "carried object" in k], res["faults"]
+
+
+# --- clearance: a gap to keep, for a path the arm follows only approximately ------------
+TABLE = -0.0132                    # the touched table, below the robot's base (2026-09-26)
+
+
+def _lowest_hand_point(position, rotation=DOWN):
+    """The lowest point of the open hand with its grasp point at ``position``."""
+    from tpgpt.hardware.fr3 import default_model
+    from tpgpt.hardware.hand import MAX_OPENING
+
+    fr3 = default_model()
+    result = fr3.solve_ik(np.asarray(position), rotation, seed=HOME_Q)
+    assert result.reachable
+    pieces, _ = pc.robot_pieces(fr3, result.qpos, FRANKA_HAND, MAX_OPENING)
+    return min(float(piece.vertices[:, 2].min()) for piece in pieces
+               if piece.name.startswith("hand_"))
+
+
+def _down_to(height_above, surface):
+    """A descent that ends with the hand's lowest point ``height_above`` a surface.
+
+    61 waypoints, so the check's stride of 2 tests the last one.
+    """
+    below = 0.10 - _lowest_hand_point([0.45, 0.0, 0.10])        # grasp point above the hand's bottom
+    return _path([0.45, 0.0, 0.30], [0.45, 0.0, surface + height_above + below], n=61)
+
+
+def test_a_clearance_asks_for_a_gap_to_the_table():
+    positions, rotations = _down_to(0.010, TABLE)
+    world = ShelfWorld.build(None, support_height=TABLE)
+    kw = dict(grasp=60, release=60)
+    assert not _check(positions, rotations, world, **kw)["faults"]
+    assert not _check(positions, rotations, world, clearance=0.008, **kw)["faults"]
+    r = _check(positions, rotations, world, clearance=0.012, **kw)
+    assert set(r["faults"]) == {"pick: hand_left_pad in the table",
+                                "pick: hand_right_pad in the table"}, r["faults"]
+
+
+def test_a_clearance_asks_for_a_gap_to_the_shelf():
+    positions, rotations = _down_to(0.010, 0.15)
+    world = ShelfWorld.build(_shelf(0.15))                       # a board at 15 cm under the hand
+    kw = dict(grasp=60, release=60)
+    assert not _check(positions, rotations, world, clearance=0.008, **kw)["faults"]
+    r = _check(positions, rotations, world, clearance=0.012, **kw)
+    assert any("in shelf board" in k for k in r["faults"]), r["faults"]
+
+
+def test_a_clearance_is_per_waypoint():
+    positions, rotations = _down_to(0.010, TABLE)
+    world = ShelfWorld.build(None, support_height=TABLE)
+    gap = np.full(len(positions), 0.012)
+    gap[-8:] = 0.005                                             # small where the hand is low
+    assert not _check(positions, rotations, world, grasp=60, release=60, clearance=gap)["faults"]
+    with pytest.raises(ValueError):
+        _check(positions, rotations, world, grasp=60, release=60, clearance=-0.001)
+
+
+def test_the_base_needs_no_clearance():
+    """It is bolted 13 mm above the table and cannot stray towards it."""
+    positions, rotations = _path([0.45, 0.0, 0.40], [0.45, 0.0, 0.30])
+    world = ShelfWorld.build(None, support_height=TABLE)
+    r = _check(positions, rotations, world, grasp=59, release=59, clearance=0.03)
+    assert not r["faults"], r["faults"]
+
+
+def test_a_clearance_does_not_call_the_set_down_a_collision():
+    """The object coming down onto its destination's top face is the task."""
+    positions, rotations, grasp, cube = _cube_set_down(0.003)
+    r = _check(positions, rotations, ShelfWorld.build(_shelf(0.20)), grasp=grasp, release=59,
+               object_points=cube, destination_height=0.20, clearance=0.015)
+    assert [k for k in r["faults"] if "carried object" in k] == []
+
+
+def test_a_clearance_keeps_the_carried_object_off_a_board_edge():
+    board = _shelf(0.20)                                         # front edge at x = 0.35
+    g = np.mgrid[-0.02:0.021:0.01, -0.02:0.021:0.01, -0.02:0.021:0.01].reshape(3, -1).T
+    base = np.zeros(len(g), dtype=bool)
+    world = ShelfWorld.build(board)
+    beside = g + [0.35 - 0.02 - 0.006, 0.0, 0.19]                # 6 mm in front of the edge
+    args = (beside, base, world, board, None, 0.001, 0.005)
+    assert pc._object_contacts(*args) == []
+    assert pc._object_contacts(*args, clearance=0.004) == []
+    assert {k for k, _, _ in pc._object_contacts(*args, clearance=0.010)} == {"deep"}

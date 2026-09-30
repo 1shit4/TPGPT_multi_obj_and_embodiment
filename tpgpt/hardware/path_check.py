@@ -96,6 +96,10 @@ STRIDE = 4
 MIN_REACHABLE_FRACTION = 0.60
 #: Spacing of the checked approach-in line, metres.
 APPROACH_IN_STEP = 0.02
+#: Robot pieces that never move, so a clearance for straying does not apply to
+#: them: the base sits 13 mm above the touched table (2026-09-26), and a larger
+#: clearance would call the bolted-down base a collision.
+FIXED_PIECES = frozenset({"fr3_link0"})
 
 
 @dataclass
@@ -141,15 +145,16 @@ def robot_pieces(fr3: FR3, q, end_effector, opening: float) -> tuple[list[_Piece
     return pieces, T
 
 
-def _touches(piece: "_Piece", points: np.ndarray) -> int:
+def _touches(piece: "_Piece", points: np.ndarray, clearance: float = 0.0) -> int:
     """How many measured points are inside ``piece`` deeper than the slack.
 
     Returns 0 unless at least :data:`MIN_CLOUD_CONTACT_POINTS` are, so a stray
-    depth pixel or a millimetre of fit error is not a collision.
+    depth pixel or a millimetre of fit error is not a collision. With a
+    ``clearance`` the piece is grown by it first (see :func:`path_feasibility`).
     """
     if points is None or not len(points):
         return 0
-    n = int(piece.contains(points, CLOUD_CONTACT_SLACK).sum())
+    n = int(piece.contains(points, CLOUD_CONTACT_SLACK - clearance).sum())
     return n if n >= MIN_CLOUD_CONTACT_POINTS else 0
 
 
@@ -204,13 +209,20 @@ def _self_faults(pieces, phase: str, depth_tolerance: float) -> dict:
 
 
 def _robot_faults(pieces, world, phase: str, depth_tolerance: float,
-                  check_self: bool = True) -> dict:
-    """Robot pieces against the shelf model, the observed cloud and themselves."""
+                  check_self: bool = True, clearance: float = 0.0) -> dict:
+    """Robot pieces against the shelf model, the observed cloud and themselves.
+
+    ``clearance`` (m) is the gap the pieces must keep from the table, the shelf
+    model and the seen points; the arm against itself is tested without it, and
+    so is the base (:data:`FIXED_PIECES`), which is bolted down and cannot stray.
+    """
     faults: dict = _self_faults(pieces, phase, depth_tolerance) if check_self else {}
+    gap = {piece.name: 0.0 if piece.name in FIXED_PIECES else float(clearance)
+           for piece in pieces}
     table = getattr(world, "table_height", None)
     if table is not None:
         for piece in pieces:
-            if float(piece.vertices[:, 2].min()) < table - depth_tolerance:
+            if float(piece.vertices[:, 2].min()) < table - depth_tolerance + gap[piece.name]:
                 key = f"{phase}: {piece.name} in the table"
                 faults[key] = faults.get(key, 0) + 1
     model = world.model
@@ -218,16 +230,17 @@ def _robot_faults(pieces, world, phase: str, depth_tolerance: float,
         surface, owner = world.surface()
         tree = world.tree("surface")
         for piece in pieces:
-            if not model.near(piece.vertices, 0.0):
+            c = gap[piece.name]
+            if not model.near(piece.vertices, c):
                 continue
             depth, names = model.penetration(piece.vertices)
-            deep = depth > depth_tolerance
+            deep = depth > depth_tolerance - c
             hit = {names[i] for i in np.flatnonzero(deep)}
             if tree is not None:
-                near = tree.query_ball_point(piece.centre, piece.radius + 1e-6)
+                near = tree.query_ball_point(piece.centre, piece.radius + c + 1e-6)
                 if near:
                     near = np.asarray(near, dtype=int)
-                    inside = piece.contains(surface[near])
+                    inside = piece.contains(surface[near], -c)
                     hit |= {model.boxes[k].name for k in np.unique(owner[near[inside]])}
             for panel in hit:
                 key = f"{phase}: {piece.name} in shelf {panel}"
@@ -235,10 +248,11 @@ def _robot_faults(pieces, world, phase: str, depth_tolerance: float,
     tree = world.tree("cloud")
     if tree is not None:
         for piece in pieces:
-            near = tree.query_ball_point(piece.centre, piece.radius + 1e-6)
+            c = gap[piece.name]
+            near = tree.query_ball_point(piece.centre, piece.radius + c + 1e-6)
             if not near:
                 continue
-            n = _touches(piece, world.cloud[np.asarray(near, dtype=int)])
+            n = _touches(piece, world.cloud[np.asarray(near, dtype=int)], c)
             if n:
                 key = f"{phase}: {piece.name} in the seen points"
                 faults[key] = faults.get(key, 0) + n
@@ -299,6 +313,7 @@ def path_feasibility(
     destination_height: float | None = None,
     criterion: str = "strict",
     approach_rejects: bool = True,
+    clearance=None,
 ) -> dict:
     """Solve and check a transported path, waypoint by waypoint.
 
@@ -324,6 +339,25 @@ def path_feasibility(
 
     In every stage the robot touches neither the table, the shelf, the seen
     points, nor itself (``_robot_faults``).
+
+    **Clearance** (``clearance``: None, metres, or one value per waypoint).
+    Without it (the planner's check, as the simulation's), "touches" means
+    more than ``depth_tolerance`` (1 mm) *into* the table or a shelf panel.
+    That tolerance absorbs the arithmetic of surfaces that just meet; it says
+    nothing about the arm not being exactly on the path. A clearance ``c`` asks
+    for a gap instead: the robot pieces must stay ``c`` from the table, the
+    shelf model and the seen points (the test becomes ``depth > tolerance -
+    c``; outside a box its depth is minus the distance, slightly less near a
+    corner, which errs towards less room), and the carried object ``c`` from
+    the side panels, the boards' edges and undersides and the seen points. It
+    is how a path the arm will follow only approximately -- a taught path the
+    arm strays from by a measured amount (``tpgpt.hardware.replay``) -- is
+    checked. Not given the clearance, on purpose: the arm against itself (a
+    stray moves the whole arm, not one link into another), the robot against
+    the object at the pick and the placed object in the retreat (contact there
+    is the task), and the carried object coming down onto a support's top face
+    (it is set down or lifted off there; a clearance would call the set-down
+    itself a collision).
 
     **Reachability** (``criterion``):
 
@@ -365,6 +399,10 @@ def path_feasibility(
     cloud_tree = world.tree("cloud")
     table = getattr(world, "table_height", None)
     model = world.model
+    gap = (np.zeros(len(positions)) if clearance is None else
+           np.broadcast_to(np.asarray(clearance, dtype=float), (len(positions),)).copy())
+    if np.any(gap < 0.0):
+        raise ValueError("clearance must not be negative")
 
     local = base = None
     if len(held):
@@ -437,7 +475,7 @@ def path_feasibility(
             seed = result.qpos
             pieces, _ = robot_pieces(fr3, seed, end_effector, MAX_OPENING)
             for key, count in _robot_faults(pieces, world, "approach_in", depth_tolerance,
-                                            check_self).items():
+                                            check_self, gap[0]).items():
                 add(bad, key, count)
             for piece in pieces:
                 if _touches(piece, held):
@@ -473,7 +511,8 @@ def path_feasibility(
         opening = closed_width if gripper[k] > 0 else MAX_OPENING
         pieces, _ = robot_pieces(fr3, q, end_effector, opening)
         label = stage + tag
-        for key, count in _robot_faults(pieces, world, label, depth_tolerance, check_self).items():
+        for key, count in _robot_faults(pieces, world, label, depth_tolerance, check_self,
+                                        gap[k]).items():
             add(hits, key, count)
 
         if len(held) and stage in ("approach", "pick"):
@@ -488,7 +527,7 @@ def path_feasibility(
                 if piece.name.startswith("fr3_link") and _touches(piece, obj):
                     add(hits, f"{label}: {piece.name} in the carried object")
             contact = _object_contacts(obj, base, world, model, table, depth_tolerance,
-                                       contact_radius)
+                                       contact_radius, gap[k])
             if not lifted and _clear_of(obj, pick_support, model, table, contact_radius):
                 lifted = True
             allowed = set()
@@ -596,7 +635,8 @@ def _support_at(model, table, height):
     return None
 
 
-def _object_contacts(obj, base, world, model, table, depth_tolerance, contact_radius):
+def _object_contacts(obj, base, world, model, table, depth_tolerance, contact_radius,
+                     clearance: float = 0.0):
     """Every contact of the carried object with the world, classified.
 
     Returns ``[(kind, where, count)]``: ``kind`` is ``"base_rest"`` (points of
@@ -605,9 +645,11 @@ def _object_contacts(obj, base, world, model, table, depth_tolerance, contact_ra
     ``"rest"`` (other points there), ``"deep"`` (into a support deeper than
     that), ``"into"`` (into a non-support face: a side panel, a board's
     underside or edge) or ``"seen"`` (within ``contact_radius`` of a seen
-    point).
+    point). ``clearance`` grows the ``deep``, ``into`` and ``seen`` tests by
+    that much and leaves the support tops alone (:func:`path_feasibility`).
     """
     out = []
+    c = float(clearance)
     if table is not None:
         touching = obj[:, 2] < float(table) + depth_tolerance
         if touching.any():
@@ -619,10 +661,11 @@ def _object_contacts(obj, base, world, model, table, depth_tolerance, contact_ra
                 out.append(("rest", "table", int((on_top & ~base).sum())))
             if deep.any():
                 out.append(("deep", "table", int(deep.sum())))
-    if model is not None and model.near(obj, 0.0):
+    if model is not None and model.near(obj, c):
         for box in model.boxes:
-            inside = box.penetration(obj) > depth_tolerance
-            if not inside.any():
+            depth = box.penetration(obj)
+            inside, within = depth > depth_tolerance, depth > depth_tolerance - c
+            if not within.any():
                 continue
             if box.name in model.supports:
                 z_local = (obj - box.position) @ box.rotation[:, 2]
@@ -632,13 +675,13 @@ def _object_contacts(obj, base, world, model, table, depth_tolerance, contact_ra
                     out.append(("base_rest", box.name, int((on_top & base).sum())))
                 if (on_top & ~base).any():
                     out.append(("rest", box.name, int((on_top & ~base).sum())))
-                if (inside & ~top).any():
-                    out.append(("deep", box.name, int((inside & ~top).sum())))
+                if (within & ~top).any():
+                    out.append(("deep", box.name, int((within & ~top).sum())))
             else:
-                out.append(("into", box.name, int(inside.sum())))
+                out.append(("into", box.name, int(within.sum())))
     tree = world.tree("cloud")
     if tree is not None:
-        near = tree.query_ball_point(obj, contact_radius)
+        near = tree.query_ball_point(obj, contact_radius + c)
         touched = {int(i) for group in near for i in group}
         if touched:
             out.append(("seen", "seen points", len(touched)))
