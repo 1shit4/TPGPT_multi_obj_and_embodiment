@@ -128,6 +128,15 @@ class ArmPathSettings:
       1.5-4 mm beside, the clock stopped, "blocked" with nothing in the way). So as the
       clock slows the correction takes the along-path gap too -- all of it when the
       clock has stopped -- and the clock recovers once the arm is back.
+    * **Unwinding: what was taken along the path is given back once the arm runs ahead.**
+      The along part of the correction is the force that broke a standing gap behind; once
+      the arm is past its path point by more than the margin it only holds it ahead, so it
+      is bled back toward zero at the rate it was built (``correction_gain`` x how far
+      ahead beyond the margin), never past zero (2026-10-02 00:47, the mug: stuck 7 s at
+      labels 343-355 with the correction at its 30 mm cap, 23-25 mm of it along the path;
+      the arm then slipped 33 mm in 0.6 s to 26 mm ahead, and the 17-20 mm left along kept
+      it 24-31 mm ahead, so the mug met the board at label ~365 where the plan arrives at
+      ~375).
     * **Blocked** means the arm does not move: the clock held back or the correction at its
       cap for ``blocked_steps`` steps, and the arm itself moved less than
       ``blocked_motion`` in them. Then the run stops and holds. An arm that keeps moving
@@ -155,6 +164,9 @@ class ArmPathSettings:
     blocked_progress: float = 0.001
     blocked_motion: float = 0.002
     max_forgiven: int = 3
+    #: Off: the along-path correction is kept when the arm runs ahead (to measure what the
+    #: unwinding is needed for).
+    unwinding: bool = True
     #: Below this path speed (m/s at execution) a label counts as still.
     still_speed: float = 0.002
     #: Labels either side of the clock's label searched for where the command is.
@@ -528,6 +540,16 @@ class HardwareExecutor:
             c = float(np.linalg.norm(self.correction))
             if c > s.correction_max:
                 self.correction *= s.correction_max / c
+        if s.correction and s.unwinding and u is not None:
+            # Given back once the arm is ahead: the part along the path was taken from a held
+            # clock to break a standing gap behind, and once the arm is past its path point it
+            # only holds the arm ahead. At the rate it was built, never past zero, in contact
+            # too (it only returns the command toward the plan's own).
+            stored = float(self.correction @ u)
+            ahead = -behind - target["margin"]
+            if ahead > 0.0 and stored > 0.0:
+                self.correction = (self.correction
+                                   - min(stored, s.correction_gain * self.dt * ahead) * u)
         point = self.attractor + self.correction
         radius = target["lead"] + s.correction_max + s.bound_slack
         reach = point - position

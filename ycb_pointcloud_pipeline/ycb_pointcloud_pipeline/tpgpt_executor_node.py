@@ -250,6 +250,7 @@ class TpgptExecutorNode(Node):
         d('path_correction', True)                  # bring an arm beside its path back
         d('path_correction_gain', 1.5)              # 1/s
         d('path_correction_max', 0.03)              # m
+        d('path_unwinding', True)                   # give back the along-path correction once the arm runs ahead
         d('path_bound_slack', 0.01)                 # m, on top of the plan's lead + the correction cap
         d('path_blocked_steps', 40)                 # steps stopped or at the cap without closing in
         d('arrival_tolerance', 0.004)               # m, measured TCP to the plan's grasp/release
@@ -680,9 +681,11 @@ class TpgptExecutorNode(Node):
                 correction=bool(p('path_correction')),
                 correction_gain=float(p('path_correction_gain')),
                 correction_max=float(p('path_correction_max')),
+                unwinding=bool(p('path_unwinding')),
                 bound_slack=float(p('path_bound_slack')),
                 blocked_steps=int(p('path_blocked_steps')))
             on = [name for name, key in (('pacing', 'path_pacing'), ('correction', 'path_correction'),
+                                         ('unwinding', 'path_unwinding'),
                                          ('hold at the marks', 'path_hold')) if p(key)]
             log.info(f"Learned plan: following its arm path ({', '.join(on) or 'nothing added'}) "
                      "instead of the simulation's lag gate and clamp")

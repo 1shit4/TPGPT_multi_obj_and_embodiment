@@ -136,7 +136,9 @@ Two facts that need several files to see, and that decide whether a change is fa
   when it is beside it, the run stops and holds only when the arm is blocked, and the arrival
   hold aims at the plan's marks; in contact (the replay's contact windows) the correction is
   held and the release hold only waits, so the transported stiffness alone sets contact forces.
-  On the robot (mug, top_left, 2026-10-01) it was needed: without it the hand missed the grasp
+  What the correction took *along* the path while the clock was held is **given back once the arm
+  runs ahead** (`path_unwinding`, 2026-10-02): kept, it held the mug 24-31 mm ahead after a
+  stick-slip and set it down ~10 labels early. On the robot (mug, top_left, 2026-10-01) it was needed: without it the hand missed the grasp
   by 15 mm and the release by 16, with it by 4 and 2. Both guards judge normal lag by the spring model (2-6 mm), and
   the learned command must lead this arm by 17-35 mm: they would slow it to 0.67 and cut it on 262
   of 488 labels. The policy query, the speed cap and the clock's update are still the shared code.

@@ -500,7 +500,7 @@ def follow_case():
 
 
 def _follow(follow_case, *, path=True, offset=(0.0, 0.0, 0.0), tau=TAU_ARM, stop_at=None,
-            push=None, n_steps=1200, contact=None, record=None, **arm):
+            push=None, n_steps=1200, contact=None, record=None, stick=None, **arm):
     policy, arm_path = follow_case
     route = {"positions": arm_path, "margin": np.full(len(arm_path), 0.002)}
     if contact is not None:
@@ -519,7 +519,9 @@ def _follow(follow_case, *, path=True, offset=(0.0, 0.0, 0.0), tau=TAU_ARM, stop
         reach.append(np.linalg.norm(cmd.tcp_position - x))
         bounded += cmd.clamped
         if stop_at is None or k < stop_at:
-            x = x + (cmd.tcp_position + np.asarray(offset) - x) * DT / tau
+            # stick = (from, to, tau): the arm creeps (friction holding it) between two steps
+            lag = stick[2] if stick is not None and stick[0] <= k < stick[1] else tau
+            x = x + (cmd.tcp_position + np.asarray(offset) - x) * DT / lag
         if push is not None and k == push[0]:
             x = x + np.asarray(push[1])
         if ex.finished:
@@ -580,6 +582,22 @@ class TestFollowArmPath:
         assert ex.correction[0] > 0.008                          # pushed forward along the path
         assert np.median(deviation[150:300]) < 0.0075             # from 15 mm
         assert ex.steps < 1.1 * self.NOMINAL                      # and the clock recovered
+
+    def test_what_was_taken_along_the_path_is_given_back_once_the_arm_runs_ahead(self, follow_case):
+        """Stick-slip (2026-10-02 00:47, the mug): the arm creeps for 4 s, the held clock
+        hands the gap along the path to the correction, up to its cap; the arm breaks free.
+        Kept, that correction holds it ~33 mm ahead for the rest of the run."""
+        stick = (80, 160, 4.0)
+        s = ArmPathSettings()
+        steps = []
+        ex, deviation, *_ = _follow(follow_case, stick=stick, record=steps)
+        assert max(c[0] for _, c in steps[80:160]) > 0.99 * s.correction_max   # it was taken
+        assert not ex.blocked and ex.finished
+        assert abs(ex.correction[0]) < 1e-9                     # given back, not past zero
+        assert deviation[200:300].max() < 0.004                 # 1 s after it broke free
+        kept, kept_deviation, *_ = _follow(follow_case, stick=stick, unwinding=False)
+        assert kept.correction[0] > 0.99 * s.correction_max
+        assert kept_deviation[200:300].min() > 0.025
 
     def test_without_correction_a_standing_gap_is_forgiven_not_blocked(self, follow_case):
         # 50 mm short of its command: even with the clock stopped it is beyond the pace span
