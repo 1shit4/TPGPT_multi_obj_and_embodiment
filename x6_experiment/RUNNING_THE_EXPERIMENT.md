@@ -115,9 +115,13 @@ start` only groups the following trials (`session_id`, `order_in_session` in
 ros2 launch ycb_pointcloud_pipeline tpgpt_teach.launch.py object_name:=banana     # T4
 ros2 run ycb_pointcloud_pipeline tpgpt_teach_keyboard                            # T6
 ```
-**Done**: the 18:39 demonstration of 2026-09-25 is in the config with its hashes. It set
-the banana down on the bottom board 81 mm from the `bottom_left` mark, so `bottom_left` is
-the slot nearest the demonstrated destination; report it as such. For the record, the
+**Done**: the 18:39 demonstration of 2026-09-25 is in the config with its hashes, as
+`source_bundle_learned`: its attractor learned by replaying it on the arm (passes 0-3,
+2026-09-30; `docs/hardware/commands.md` §3b), which every hand uses -- one demonstration,
+one replay. It set the banana down on the bottom board 81 mm from the `bottom_left` mark, so
+`bottom_left` is the slot nearest the demonstrated destination; report it as such. A trial
+of a learned plan follows its arm path (audit B1 step 8), so the trace's
+`path_deviation`/`path_across` columns are part of what to report. For the record, the
 procedure was:
 
 1. Keys in order: `c`, `t`, `s`, grasp, `g`, carry onto the shelf, `r`, `x`. Take **photo 1** mid-carry.

@@ -379,3 +379,6 @@ def test_every_parameter_a_trial_passes_is_declared_with_its_type(tmp_path):
     executor = _declared_defaults('tpgpt_executor_node.py')
     ex = trial._executor_params(str(tmp_path))
     assert set(ex) - set(executor) == set()
+    wrong = {k: (v, executor[k]) for k, v in ex.items()
+             if executor[k] is not None and type(v) is not type(executor[k])}
+    assert not wrong, wrong

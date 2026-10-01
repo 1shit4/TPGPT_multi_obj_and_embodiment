@@ -310,7 +310,7 @@ class Trial:
 
     def _executor_params(self, plan_dir):
         ex = self.m['execution']
-        ints = {'progress_window'}
+        ints = {'progress_window', 'path_blocked_steps'}
         params = {'plan_dir': plan_dir, 'dry_run': bool(self.dry_run),
                   'log_dir': xc.expand(f'~/.ros/x6_executor_csv/{self.cfg.run_id}_{self.trial_id}')}
         for k, v in ex.items():

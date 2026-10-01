@@ -49,11 +49,18 @@ demonstration:
   # nearest the demonstration's own destination; say so when reporting it.
   placed_at_note: "bottom board, (0.608, -0.264, 0.075) base frame, slid in under the top board"
   recorded_dir: ~/tpgpt_demos/banana_20260925_183904
-  source_bundle_dir: ~/tpgpt_demos/banana_20260925_183904/source_bundle
-  sha256:
-    tool_labels.npz: 80233cc20138387b894cd07ab9e43ac22cbd90a2066cc3edfaa0ca4831d800db
+  # The same demonstration, its attractor learned by replaying it on this arm (audit B1,
+  # steps 4-6; passes 0-3 in ~/tpgpt_demos/banana_20260925_183904/replay, 2026-09-30):
+  # labels = pass 3's command; taught_labels.npz = the taught path (directional stiffness,
+  # source_bundle_directional); arm_path.npz = where the arm went, with its run-to-run
+  # margin. One demonstration and one replay serve every hand, object and slot.
+  source_bundle_dir: ~/tpgpt_demos/banana_20260925_183904/source_bundle_learned
+  sha256:                             # informational; every trial records its own hashes
+    arm_path.npz: 8ea97c9771b721560d9fb2e0ac97365c6834a946dc118830da225180e97afff3
+    manifest.json: ce181d4279c118766d87a5086453cd9bd011fa7659d67657dfea2b8c8122509b
     placement.npz: 11168ce7085571df0bc7e9899bd274e8985a970f4d656a8be970205ea8c40705
-    manifest.json: 9fc87dc02bcb5d8ed9cda083e9efbe34ab823a42509328ccd9483162c560e48e
+    taught_labels.npz: 98677fdaf2305bb30065f96be8dcbf5bc138f410eb7bcae23857c811ffa3366d
+    tool_labels.npz: 70f7296329b026943dbfbf6598802c4cf662892994e90ed65f6775e63e8acb68
   re_record_allowed: false
 # ----------------------------------------------------------------------------
 # Calibration. The file the planner actually loads is the INSTALLED copy.
@@ -206,19 +213,23 @@ method:
     never_force_rank_in_main_grid: true
 
   execution:                          # tpgpt_executor_node parameters, at its defaults
-    # The execution is being reworked (stiffness, attractor labels; 2026-09-29, another
-    # session). Re-sync this block when that lands: the X6 trial passes every key below
-    # to the executor, so a stale value here would silently override the new default.
-    use_transported_stiffness: false  # taught demo carries static 400 N/m
+    # Re-synced 2026-10-01 with the execution rework (audit B1 steps 6 and 8). The trial
+    # passes every key below. A LEARNED plan (the demonstration above) runs at the settings
+    # it was learned under -- speed_scale 0.35, rotational 30 x1.0, its transported
+    # stiffness, no offset compensation -- and those keys here must therefore stay at the
+    # node's defaults (a value equal to neither the default nor the learned one is refused),
+    # and it is followed against its arm path (follow_arm_path) instead of the lag gate and
+    # clamp below, which taught plans still use.
+    use_transported_stiffness: false  # default; a learned plan turns it on
     translational_stiffness: 400.0
     speed_scale: 0.35
     lag_tolerance: 0.045              # method 0.035 (CLAUDE.md, executor deviations)
-    on_stall: continue                # the lag gate and its clamp go off after a stall
+    on_stall: continue                # the lag gate goes off after a stall (taught plans)
     speed_limit_factor: 3.0
     belief_correction: 0.2
     rotational_stiffness: 30.0        # stock CRISP k_rot
     rotational_damping: 12.0
-    transit_rotational_scale: -1.0    # auto -> 1.0 for a static (taught) source
+    transit_rotational_scale: -1.0    # default (auto); a learned plan uses 1.0
     max_policy_seconds: 300.0
     stiffness_min_translational: 50.0
     stiffness_max_translational: 900.0
@@ -236,13 +247,22 @@ method:
     min_progress_ratio: 0.3
     max_pose_age: 0.2
     settle_time: 1.5
-    offset_compensation: z
+    offset_compensation: z            # default; a learned plan uses none
     max_offset_compensation: 0.03
-    arrival_hold: false
+    arrival_hold: false               # taught plans; a learned plan holds at its marks (path_hold)
     arrival_tolerance: 0.004
     arrival_timeout: 4.0
     arrival_gain: 1.5
     arrival_max_gap: 0.04
+    follow_arm_path: true             # learned plans: tpgpt.hardware.executor.ArmPathSettings
+    path_pace_span: 0.02
+    path_pacing: true
+    path_hold: true
+    path_correction: true
+    path_correction_gain: 1.5
+    path_correction_max: 0.03
+    path_bound_slack: 0.01
+    path_blocked_steps: 40
     require_confirmation: true        # a refusal = aborted trial, counted
     allow_replan: false               # experiment:=true only: one plan per trial, no "Re-plan?" loop
                                       # (experiment:=false keeps today's re-plan prompt)
