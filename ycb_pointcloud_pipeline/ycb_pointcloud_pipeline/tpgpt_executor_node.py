@@ -422,6 +422,20 @@ class TpgptExecutorNode(Node):
         T = pose_to_matrix(pose[1].pose)
         return T[:3, 3].copy(), T[:3, :3].copy()
 
+    def _joints_near_limits(self, safe_range: float = 0.1) -> str:
+        """", joint N is X rad from its limit" for each measured joint inside CRISP's
+        joint-limit repulsion zone (``safe_range``, 0.1 rad in the controller config): an arm
+        held there by the repulsion is not blocked by anything in its way."""
+        q = self.measured_joints()
+        if q is None:
+            return ''
+        from tpgpt.hardware.fr3 import default_model
+        fr3 = default_model()
+        margin = np.minimum(np.asarray(q) - fr3.lower, fr3.upper - np.asarray(q))
+        near = [f'joint {j + 1} is {margin[j]:.3f} rad from its limit'
+                for j in np.flatnonzero(margin < safe_range)]
+        return ('; ' + ', '.join(near) + ' (CRISP pushes back within 0.1 rad)') if near else ''
+
     def measured_joints(self):
         """The arm's seven joint angles, or None (dry run, or nothing fresh)."""
         if self.dry or self._joints is None:
@@ -753,7 +767,7 @@ class TpgptExecutorNode(Node):
                          'meas_x', 'meas_y', 'meas_z', 'cmd_x', 'cmd_y', 'cmd_z',
                          'att_x', 'att_y', 'att_z', 'k_tcp_x', 'k_tcp_y', 'k_tcp_z', 'k_rot',
                          'k_offdiag_share', 'path_index', 'path_deviation', 'path_across',
-                         'corr_x', 'corr_y', 'corr_z'])
+                         'corr_x', 'corr_y', 'corr_z', 'q1', 'q2', 'q3', 'q4', 'q5', 'q6', 'q7'])
         realtime = not self.dry or p('dry_run_realtime')
         started = time.monotonic()
         trace = []
@@ -829,9 +843,11 @@ class TpgptExecutorNode(Node):
             if time.monotonic() > policy_deadline:
                 raise AbortRun('max_policy_seconds exceeded')
             meas_p, meas_R = self.measured()
-            cmd = executor.step(meas_p, meas_R, self.measured_joints())
+            joints = self.measured_joints()
+            cmd = executor.step(meas_p, meas_R, joints)
             if following and executor.blocked:
-                raise AbortRun(f'blocked: {executor.blocked_reason}; holding here')
+                raise AbortRun(f'blocked: {executor.blocked_reason}{self._joints_near_limits()}; '
+                               'holding here')
             if executor.stalled and p('on_stall') == 'continue':
                 log.warn(f'execution watchdog declared the arm stuck at phase {executor.phase:.3f} '
                          f'after {executor.steps} steps; on_stall=continue: lag gate OFF, '
@@ -890,7 +906,9 @@ class TpgptExecutorNode(Node):
                              *cmd.attractor, *k_diag, k_rot, f'{loss:.4f}',
                              *((f"{cmd.trace['path_index']:.2f}", f"{cmd.trace['deviation']:.5f}",
                                 f"{cmd.trace['across']:.5f}",
-                                *np.round(cmd.trace['correction'], 5)) if following else ())])
+                                *np.round(cmd.trace['correction'], 5),
+                                *(np.round(joints, 5) if joints is not None else [''] * 7))
+                              if following else ())])
             if following:
                 follow_log.append((cmd.trace['across'], cmd.behind, cmd.gate, cmd.clamped,
                                    float(np.linalg.norm(cmd.trace['correction']))))
