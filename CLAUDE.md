@@ -128,8 +128,15 @@ Two facts that need several files to see, and that decide whether a change is fa
   `tpgpt/policy/rollout.py` — the exact code the simulation runs. Never reimplement them. The only
   deviations live in `tpgpt_executor_node.py`'s parameter defaults: `lag_tolerance` 0.045 (method
   0.035), `rotational_stiffness` 30 (60), `speed_scale` 0.35, `use_transported_stiffness` False,
-  and `on_stall: continue`, which **switches the lag gate and its clamp off** for the rest of a run
-  after a stall.
+  and `on_stall: continue`, which **switches the lag gate off** for the rest of a run after a
+  stall (the clamp's speed limit stays: with no gate its radius is `speed_limit_factor` x the
+  fastest label speed x compliance). **A learned plan uses neither the gate nor the clamp**
+  (2026-10-01, audit B1 step 8; `follow_arm_path`): it is followed against the path the arm
+  traced -- the clock slows when the arm is behind it, a slow capped correction brings it back
+  when it is beside it, the run stops and holds only when the arm is blocked, and the arrival
+  hold aims at the plan's marks. Both guards judge normal lag by the spring model (2-6 mm), and
+  the learned command must lead this arm by 17-35 mm: they would slow it to 0.67 and cut it on 262
+  of 488 labels. The policy query, the speed cap and the clock's update are still the shared code.
 - **Grasp selection is the simulation's rule, and sees the shelf** (since 2026-09-21,
   `docs/hardware/SHELF_AND_PATH_CHECK.md`). `grasp_selection.select_and_plan` walks survivors in
   score order and takes the first whose **whole transported path** passes
@@ -308,7 +315,9 @@ The planner's support height is: its `support_height` parameter, else the calibr
   top_right 33, 51 without; the table keeps only the margin's vertical part, the user's
   call). The arm sits 10-16 mm off its command even when still (6-9 N unmodelled, not lag);
   the learning removes the part that repeats. The arm path is pass 3's carried to a new scene: that it transfers is
-  assumed (step 9), and the lag gate on the real arm is untested (step 8).
+  assumed (step 9). **Executed** without the simulation's gate and clamp, against its arm path
+  (audit B1 step 8, above); dry-run only so far. The executor's summary reports how far the arm
+  was *beside* its path (what matters) and *along* it (ahead is still on the checked path).
 - **A plan that leaves the executor's workspace box is now refused at selection**
   (`SelectionSettings.workspace_min/max`, fed from the planner's own parameters). It used to be
   found only by the executor, which aborted the whole run instead of taking the next grasp
