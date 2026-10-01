@@ -100,7 +100,8 @@ def coverage(object_name, object_pose, world, source, destination, destination_h
             continue
         report = path_check.check_plan(result, path.world, path.end_effector,
                                        start_q=path.start_q, criterion=s.kinematic_criterion,
-                                       approach_rejects=s.approach_rejects, clearance=clearance)
+                                       approach_rejects=s.approach_rejects, clearance=clearance,
+                                       joint_margin=s.joint_margin)
         unrefined += int(report.get("unrefined", 0))
         verdict = path_check.verdict(report)
         if verdict is None:
@@ -216,6 +217,9 @@ def main(argv=None):
                          "(the touched marks sit at about 0.09), keeping its position along "
                          "the shelf and its board; nothing in the config changes")
     ap.add_argument("--size", type=int, default=2000, help="grasp library size")
+    ap.add_argument("--joint-margin", type=float, default=None,
+                    help="refuse paths with joints 1-6 this close to a limit, rad (default: "
+                         "off; path_check.JOINT_MARGIN is CRISP's 0.1)")
     ap.add_argument("--clearance", type=float, default=None,
                     help="a gap every path must keep from the table, the shelf and the seen "
                          "points, m (default: none, the planner's check)")
@@ -262,7 +266,8 @@ def main(argv=None):
     # The planner node's defaults: tilt cap 90 (A10), visibility off for a fitted scan,
     # centred off, no grasp offset (A5), strict reachability.
     settings = SelectionSettings(max_tilt_deg=90.0, check_centred=False, check_visibility=False,
-                                 grasp_offset=(0.0, 0.0, 0.0), kinematic_criterion="strict")
+                                 grasp_offset=(0.0, 0.0, 0.0), kinematic_criterion="strict",
+                                 joint_margin=a.joint_margin)
     want = list(slots) if a.slots == "all" else a.slots.split(",")
     if a.slot_depth is not None:
         shelf_model = world.model

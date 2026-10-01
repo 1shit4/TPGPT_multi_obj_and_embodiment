@@ -542,3 +542,35 @@ def test_a_tilt_can_refuse_what_the_clearance_alone_admits():
     # the pads are ~57 mm from the grasp point: 10 deg swings them 10 mm more, 15 in all
     r = _check(positions, rotations, world, tilt=np.radians(10.0), **kw)
     assert any("pad in the table" in k for k in r["faults"]), r["faults"]
+
+
+def _arm_with_joint_limit_at(joint, side, positions, rotations):
+    """A copy of the FR3 model whose ``joint`` limit (``side`` 'lower'/'upper') sits right at
+    the angle the arm takes on this path, as the check poses it."""
+    import copy
+    from tpgpt.hardware.fr3 import default_model
+    fr3 = copy.deepcopy(default_model())
+    q = fr3.solve_ik(positions[0], rotations[0], seed=HOME_Q, position_tolerance=0.001,
+                     rotation_tolerance=0.01, max_iterations=300).qpos
+    getattr(fr3, side)[joint] = q[joint] + (-0.02 if side == "lower" else 0.02)
+    return fr3
+
+
+def test_a_joint_near_its_limit_is_refused_only_when_the_margin_is_on():
+    positions, rotations = _path([0.45, 0.0, 0.30], [0.45, 0.05, 0.30], n=30)
+    world = ShelfWorld.build(None)
+    fr3 = _arm_with_joint_limit_at(3, "lower", positions, rotations)        # the elbow
+    off = _check(positions, rotations, world, grasp=29, release=29, fr3=fr3)
+    assert not [k for k in off["faults"] if "of its limit" in k]
+    on = _check(positions, rotations, world, grasp=29, release=29, fr3=fr3,
+                joint_margin=pc.JOINT_MARGIN)
+    assert any("joint 4 within 0.10 rad of its limit" in k for k in on["faults"]), on["faults"]
+    assert pc.verdict(on) is not None
+
+
+def test_joint_7_near_its_limit_is_not_refused():
+    positions, rotations = _path([0.45, 0.0, 0.30], [0.45, 0.05, 0.30], n=30)
+    fr3 = _arm_with_joint_limit_at(6, "upper", positions, rotations)
+    r = _check(positions, rotations, ShelfWorld.build(None), grasp=29, release=29, fr3=fr3,
+               joint_margin=pc.JOINT_MARGIN)
+    assert not [k for k in r["faults"] if "of its limit" in k]

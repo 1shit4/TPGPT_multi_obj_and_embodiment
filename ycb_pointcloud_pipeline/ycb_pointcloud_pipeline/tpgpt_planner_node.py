@@ -223,6 +223,9 @@ class TpgptPlannerNode(Node):
         # blocked the planner stops with approach_blocked and asks for a re-home. True brings
         # back rejecting the grasp.
         d('approach_rejects_grasp', False)
+        # rad; > 0 refuses a path with joints 1-6 that close to a limit (CRISP pushes back
+        # there; path_check.JOINT_MARGIN = 0.1). 0 = off.
+        d('grasp_joint_margin', 0.0)
         d('max_centre_offset', 0.025)             # by_centre_offset on a one-sided cloud
         d('output_dir', os.path.expanduser('~/tpgpt_plans'))
         d('auto_plan', False)                     # plan as soon as n_frames arrived
@@ -539,6 +542,8 @@ class TpgptPlannerNode(Node):
             min_reachable_fraction=float(p('min_reachable_fraction')),
             kinematic_criterion=str(p('kinematic_criterion')),
             approach_rejects=bool(p('approach_rejects_grasp')),
+            joint_margin=(float(p('grasp_joint_margin')) if float(p('grasp_joint_margin')) > 0
+                          else None),
             allow_kinematic_fallback=bool(p('allow_kinematic_fallback')),
             max_centre_offset=float(p('max_centre_offset')),
             check_visibility=self._check_visibility(),

@@ -96,6 +96,19 @@ STRIDE = 4
 MIN_REACHABLE_FRACTION = 0.60
 #: Spacing of the checked approach-in line, metres.
 APPROACH_IN_STEP = 0.02
+#: How close a joint may come to its limit (rad) when ``joint_margin`` is on: CRISP's
+#: ``joint_limit_repulsion.safe_range`` (config/tpgpt_variable_stiffness_controller.yaml).
+#: Inside it the controller pushes the joint back (up to 5 N m), a torque the arm's joint
+#: torque sensors and the executor cannot tell from friction, and it holds the hand tens of
+#: millimetres off its command: the 2026-10-01 22:20 mug plan's path, posed by this IK, ran
+#: the elbow 0.04 rad from its limit over labels 0-28 and joint 1 to its limit at 37, where
+#: the run stopped (the arm 33-40 mm off its path from the first label).
+JOINT_MARGIN = 0.1
+#: The joints held to it. Joint 7 turns the hand about its own axis, so pushed back it turns
+#: the hand without moving it: at its limit through the replay's whole approach and both
+#: mug runs that worked (2026-10-01), harmless.
+MARGIN_JOINTS = (0, 1, 2, 3, 4, 5)
+
 #: Robot pieces that never move, so a clearance for straying does not apply to
 #: them: the base sits 13 mm above the touched table (2026-09-26), and a larger
 #: clearance would call the bolted-down base a collision.
@@ -363,6 +376,8 @@ def path_feasibility(
     tilt=None,
     held_shift=None,
     table_clearance=None,
+    joint_margin=None,
+    margin_joints=MARGIN_JOINTS,
 ) -> dict:
     """Solve and check a transported path, waypoint by waypoint.
 
@@ -418,6 +433,10 @@ def path_feasibility(
     plane, so only how far the arm may be *lower* matters there; :func:`check_plan`
     passes an arm path's vertical margin (the user, 2026-10-01: relax the table's
     margin, do not drop it).
+
+    ``joint_margin`` (None, or rad: :data:`JOINT_MARGIN`) makes a posture with any of
+    ``margin_joints`` closer than that to its limit a fault at that waypoint (``"<stage>:
+    joint N within ... rad of its limit"``): reachable, but inside the controller's push-back.
 
     ``held_shift`` (None or a base-frame vector, m) moves the object by it when the
     jaws close, before it is carried: a parallel jaw closing off-centre pushes the
@@ -607,6 +626,13 @@ def path_feasibility(
                                         gap[k], swing[k], grasp_point(T),
                                         None if table_gap is None else table_gap[k]).items():
             add(hits, key, count)
+        if joint_margin is not None:
+            qq = np.asarray(q, dtype=float)
+            room = np.minimum(qq - fr3.lower, fr3.upper - qq)
+            for j in margin_joints:
+                if room[j] < float(joint_margin):
+                    add(hits, f"{label}: joint {j + 1} within {float(joint_margin):.2f} rad "
+                              "of its limit")
 
         if len(held) and stage in ("approach", "pick"):
             # The object stands where it is; only the fingers, and only at the pick.
@@ -900,7 +926,8 @@ def verdict(check: dict, min_reachable_fraction: float = MIN_REACHABLE_FRACTION)
     return None
 
 
-__all__ = ["BASE_BAND", "penetration", "CLOUD_CONTACT_RADIUS", "CLOUD_CONTACT_SLACK",
+__all__ = [
+    "JOINT_MARGIN","BASE_BAND", "penetration", "CLOUD_CONTACT_RADIUS", "CLOUD_CONTACT_SLACK",
            "MIN_CLOUD_CONTACT_POINTS", "CONTACT_DEPTH_TOLERANCE", "GRASP_CONTACT_WINDOW",
            "MIN_REACHABLE_FRACTION", "PLACE_WINDOW", "REACH_TOLERANCE", "STRIDE",
            "check_plan", "path_feasibility", "robot_pieces", "verdict"]

@@ -137,6 +137,9 @@ class SelectionSettings:
     #: the planner asks for a re-home instead -- the parked pose is not a property of
     #: the grasp, and on 2026-09-26 it refused every grasp to top_left.
     approach_rejects: bool = False
+    #: Refuse a path that puts joints 1-6 inside CRISP's joint-limit push-back zone
+    #: (``path_check.JOINT_MARGIN``, rad; None = off). See path_check.JOINT_MARGIN.
+    joint_margin: float | None = None
     min_reachable_fraction: float = 0.60
     path_stride: int = 4
     #: With nothing admissible, execute the best candidate that failed on
@@ -626,7 +629,8 @@ def _path_verdict(result: Plan, candidate: Candidate, s: SelectionSettings,
     check = check_plan(result, world, pc.end_effector or FRANKA_HAND, start_q=pc.start_q,
                        start_tcp=pc.start_tcp, stop_early=True, stride=s.path_stride,
                        min_reachable_fraction=s.min_reachable_fraction,
-                       criterion=s.kinematic_criterion, approach_rejects=s.approach_rejects)
+                       criterion=s.kinematic_criterion, approach_rejects=s.approach_rejects,
+                       joint_margin=s.joint_margin)
     reason = verdict(check, s.min_reachable_fraction)
     candidate.path_check = {
         "criterion": check["criterion"],
