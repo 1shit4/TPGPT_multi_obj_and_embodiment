@@ -655,7 +655,12 @@ class TpgptExecutorNode(Node):
         arm_path = arm_settings = None
         if following:
             from tpgpt.hardware.executor import ArmPathSettings
-            arm_path = {'positions': plan.arm_path.positions, 'margin': plan.arm_margin}
+            from tpgpt.hardware.ilc import frozen_mask
+            from tpgpt.hardware.replay import contact_windows
+            contact = frozen_mask(len(plan.labels), contact_windows(int(m['grasp_index']),
+                                                                    int(m['release_index'])))
+            arm_path = {'positions': plan.arm_path.positions, 'margin': plan.arm_margin,
+                        'contact': contact}
             arm_settings = ArmPathSettings(
                 pace_span=float(p('path_pace_span')), pacing=bool(p('path_pacing')),
                 correction=bool(p('path_correction')),
@@ -1449,6 +1454,11 @@ class TpgptExecutorNode(Node):
         the attractor off -- does not apply: its command is meant to be off. Returns the
         last commanded TCP position; for a learned plan the caller hands the residual to
         the executor's correction instead of the static offset.
+
+        At a learned plan's **release** the object is already set down, so the hold only
+        waits for the arm to settle and does not push: placement was decided at touch-down,
+        and pushing the hand onto the mark could only slide the object along its support
+        against the transported stiffness (the user, 2026-10-01).
         """
         from tpgpt.hardware.executor import crisp_applied_gains, logged_stiffness
 
@@ -1481,14 +1491,23 @@ class TpgptExecutorNode(Node):
         step = float(p('approach_max_linear_speed')) * dt
         command = cmd.tcp_position.copy()
         goal = target_p
-        if learned:
+        wait_only = learned and stage == 'arrive_release'
+        if wait_only:
+            goal = command                                # hold still: no walk, no integral
+        elif learned:
             goal = command + (target_p - executor.tcp_from_tool(
                 executor.tool_position(*self.measured()), target_R))
+        recent = []
         while True:
             meas_p, _ = self.measured()
             error = target_p - meas_p
             dist = float(np.linalg.norm(error))
             inside = inside + 1 if dist <= tol else 0
+            recent = (recent + [meas_p.copy()])[-5:]
+            if wait_only and len(recent) == 5 and float(np.ptp(np.array(recent), axis=0).max()) < 0.0005:
+                log.info(f'{stage}: settled {dist * 1000:.1f} mm from the plan (set down: '
+                         'waiting only, no push)')
+                break
             if inside >= 3:
                 log.info(f'{stage}: within {dist * 1000:.1f} mm of the plan '
                          f'(integral {np.round(integral * 1000, 1).tolist()} mm)')
@@ -1500,7 +1519,7 @@ class TpgptExecutorNode(Node):
                 break
             delta = goal - command
             command = command + delta * min(1.0, step / max(float(np.linalg.norm(delta)), 1e-9))
-            if float(np.linalg.norm(goal - command)) < 1e-6:
+            if float(np.linalg.norm(goal - command)) < 1e-6 and not wait_only:
                 integral = integral + gain * dt * error
                 if np.linalg.norm(integral) > limit:
                     integral *= limit / np.linalg.norm(integral)

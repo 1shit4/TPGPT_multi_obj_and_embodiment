@@ -405,6 +405,16 @@ def label_period(info: dict) -> float:
     return float(info["dt"]) / float(info["speed_scale"])
 
 
+def contact_windows(grasp: int, release: int) -> list:
+    """The labels where the hand is in contact, ``[(first, last), ...]`` inclusive: from
+    ``GRASP_WINDOW`` around the grasp mark (the descent's last 0.5 s, the close, the lift-off)
+    and ``RELEASE_WINDOW`` around the release (the set-down). Nothing is learned there
+    (:func:`tpgpt.hardware.ilc.frozen_mask`), and a learned plan's path correction is held
+    there (:class:`tpgpt.hardware.executor.ArmPathSettings`)."""
+    return [(int(grasp) + GRASP_WINDOW[0], int(grasp) + GRASP_WINDOW[1]),
+            (int(release) + RELEASE_WINDOW[0], int(release) + RELEASE_WINDOW[1])]
+
+
 def init_replay(bundle_dir, out_dir, speed_scale: float = 0.35,
                 settings: IlcSettings = IlcSettings(), pass0_runs: int = 2) -> Path:
     """Start a replay: pass 0 commands the taught path itself."""
@@ -415,8 +425,7 @@ def init_replay(bundle_dir, out_dir, speed_scale: float = 0.35,
     labels = bundle.tool_labels
     grasp, release = marks(labels.gripper)
     n = len(labels.positions)
-    windows = [(grasp + GRASP_WINDOW[0], grasp + GRASP_WINDOW[1]),
-               (release + RELEASE_WINDOW[0], release + RELEASE_WINDOW[1])]
+    windows = contact_windows(grasp, release)
     dt = float(labels.metadata.get("dt", 1.0 / float(bundle.metadata.get("control_freq", 20))))
     P = np.asarray(labels.positions, dtype=float)
     speed = np.r_[0.0, np.linalg.norm(np.diff(P, axis=0), axis=1)] / (dt / float(speed_scale))

@@ -500,16 +500,20 @@ def follow_case():
 
 
 def _follow(follow_case, *, path=True, offset=(0.0, 0.0, 0.0), tau=TAU_ARM, stop_at=None,
-            push=None, n_steps=1200, **arm):
+            push=None, n_steps=1200, contact=None, record=None, **arm):
     policy, arm_path = follow_case
+    route = {"positions": arm_path, "margin": np.full(len(arm_path), 0.002)}
+    if contact is not None:
+        route["contact"] = contact
     ex = HardwareExecutor(
         policy, DT, ExecutorSettings(speed_scale=SCALE, lag_tolerance=0.045),
-        arm_path={"positions": arm_path, "margin": np.full(len(arm_path), 0.002)} if path else None,
-        arm_settings=ArmPathSettings(**arm))
+        arm_path=route if path else None, arm_settings=ArmPathSettings(**arm))
     x = policy.labels.positions[0].copy()
     deviation, reach, bounded = [], [], 0
     for k in range(n_steps):
         cmd = ex.step(x, np.eye(3))
+        if record is not None:
+            record.append((cmd.trace.get("path_index"), ex.correction.copy()))
         if path:
             deviation.append(np.linalg.norm(ex.arm_target(cmd.phase, cmd.attractor)["position"] - x))
         reach.append(np.linalg.norm(cmd.tcp_position - x))
@@ -540,6 +544,18 @@ class TestFollowArmPath:
         assert -0.008 < ex.correction[1] < -0.004 and abs(ex.correction[0]) < 1e-9
         _, uncorrected, *_ = _follow(follow_case, offset=(0.0, 0.008, 0.0), correction=False)
         assert np.median(uncorrected[150:300]) > 0.007
+
+    def test_the_correction_is_held_where_the_hand_is_in_contact(self, follow_case):
+        """Inside a contact window the transported stiffness alone sets the force."""
+        n = len(follow_case[1])
+        contact = np.zeros(n, dtype=bool)
+        contact[0:60] = True                       # from the start, before it could converge
+        steps = []
+        _follow(follow_case, offset=(0.0, 0.008, 0.0), contact=contact, record=steps)
+        held = [c for i, c in steps if i <= 58]
+        assert held and np.allclose(held, 0.0)                      # never grown inside
+        after = [c for i, c in steps if i > 80]
+        assert np.linalg.norm(after[-1]) > 0.004                    # it resumes after it
 
     def test_a_slower_arm_is_given_time(self, follow_case):
         ex, deviation, *_ = _follow(follow_case, tau=0.6)

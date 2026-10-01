@@ -115,7 +115,10 @@ class ArmPathSettings:
       (``correction_gain`` x the deviation beyond the margin, per second) brings an arm
       that sits *beside* the path back onto it -- what waiting cannot do for a static
       offset. Across the path while it moves, in every direction while it is still;
-      at most ``correction_max``.
+      at most ``correction_max``. **Held, not grown, where the hand is in contact**
+      (``arm_path["contact"]``, the replay's contact windows): there the transported
+      stiffness alone must set the force -- grown, it pushed through it (21 mm at the
+      set-down of the 2026-10-01 mug run, 12 N at 600 N/m; the user, 2026-10-01).
     * **Bound**: the command is kept within the plan's own lead at this label plus
       ``correction_max`` plus ``bound_slack`` of the arm (the force cap the clamp
       gave, without cutting what the plan needs).
@@ -242,6 +245,7 @@ class HardwareExecutor:
         if labels.time_belief is None or len(path) != len(labels.positions):
             raise ValueError("an arm path needs one point per label and labels with a time belief")
         margin = np.asarray(arm_path.get("margin", np.zeros(len(path))), dtype=float)
+        contact = np.asarray(arm_path.get("contact", np.zeros(len(path), dtype=bool)), dtype=bool)
         tangent = np.gradient(path, axis=0)
         speed = np.linalg.norm(tangent, axis=1) / self.dt * float(self.settings.speed_scale)
         self.arm = {
@@ -249,6 +253,7 @@ class HardwareExecutor:
             "command": np.asarray(labels.positions, dtype=float),
             "time": np.asarray(labels.time_belief, dtype=float),
             "path": path, "margin": margin, "tangent": tangent, "speed": speed,
+            "contact": contact,
             # how far ahead of the arm the command is meant to be, per label
             "lead": np.linalg.norm(np.asarray(labels.positions, dtype=float) - path, axis=1),
         }
@@ -289,6 +294,7 @@ class HardwareExecutor:
         n = float(np.linalg.norm(t))
         moving = mix(a["speed"]) > a["settings"].still_speed and n > 0.0
         return {"index": i, "position": mix(a["path"]), "margin": float(mix(a["margin"])),
+                "contact": bool(a["contact"][int(round(i))]),
                 "lead": float(mix(a["lead"])), "direction": t / n if moving else None}
 
     # ------------------------------------------------------------- frames
@@ -495,7 +501,7 @@ class HardwareExecutor:
                                            law=self.law.attractor_law)
         side = error - (error @ u) * u if u is not None else error
         size = float(np.linalg.norm(side))                           # beside the path
-        if s.correction:
+        if s.correction and not target["contact"]:
             excess = size - target["margin"]
             if excess > 0.0:
                 self.correction = self.correction + s.correction_gain * self.dt * side / size * excess
@@ -558,6 +564,7 @@ class HardwareExecutor:
                 # beside the path (across it while it moves; all of it while it is still) --
                 # what can take the arm off the checked path. ``behind`` is along it.
                 "across": size,
+                "contact": target["contact"],
                 "margin": target["margin"],
                 "correction": self.correction.copy(),
                 "lead": target["lead"],
