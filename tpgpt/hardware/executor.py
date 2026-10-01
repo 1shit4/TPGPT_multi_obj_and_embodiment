@@ -488,9 +488,9 @@ class HardwareExecutor:
 
         self.attractor = advance_attractor(self.attractor, velocity, self.dt, pace,
                                            law=self.law.attractor_law)
+        side = error - (error @ u) * u if u is not None else error
+        size = float(np.linalg.norm(side))                           # beside the path
         if s.correction:
-            side = error - (error @ u) * u if u is not None else error
-            size = float(np.linalg.norm(side))
             excess = size - target["margin"]
             if excess > 0.0:
                 self.correction = self.correction + s.correction_gain * self.dt * side / size * excess
@@ -550,6 +550,9 @@ class HardwareExecutor:
                 "following_arm_path": True,
                 "path_index": float(target["index"]),
                 "deviation": deviation,
+                # beside the path (across it while it moves; all of it while it is still) --
+                # what can take the arm off the checked path. ``behind`` is along it.
+                "across": size,
                 "margin": target["margin"],
                 "correction": self.correction.copy(),
                 "lead": target["lead"],

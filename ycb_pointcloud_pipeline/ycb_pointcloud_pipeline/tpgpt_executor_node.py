@@ -742,8 +742,8 @@ class TpgptExecutorNode(Node):
         writer.writerow(['t', 'stage', 'phase', 'gate', 'behind', 'expected', 'clamped', 'gripper',
                          'meas_x', 'meas_y', 'meas_z', 'cmd_x', 'cmd_y', 'cmd_z',
                          'att_x', 'att_y', 'att_z', 'k_tcp_x', 'k_tcp_y', 'k_tcp_z', 'k_rot',
-                         'k_offdiag_share', 'path_index', 'path_deviation', 'corr_x', 'corr_y',
-                         'corr_z'])
+                         'k_offdiag_share', 'path_index', 'path_deviation', 'path_across',
+                         'corr_x', 'corr_y', 'corr_z'])
         realtime = not self.dry or p('dry_run_realtime')
         started = time.monotonic()
         trace = []
@@ -879,9 +879,10 @@ class TpgptExecutorNode(Node):
                              int(cmd.clamped), int(cmd.gripper), *meas_p, *cmd.tcp_position,
                              *cmd.attractor, *k_diag, k_rot, f'{loss:.4f}',
                              *((f"{cmd.trace['path_index']:.2f}", f"{cmd.trace['deviation']:.5f}",
+                                f"{cmd.trace['across']:.5f}",
                                 *np.round(cmd.trace['correction'], 5)) if following else ())])
             if following:
-                follow_log.append((cmd.trace['deviation'], cmd.gate, cmd.clamped,
+                follow_log.append((cmd.trace['across'], cmd.behind, cmd.gate, cmd.clamped,
                                    float(np.linalg.norm(cmd.trace['correction']))))
             if len(trace) % 10 == 0:
                 self._publish_trace(trace)
@@ -898,9 +899,10 @@ class TpgptExecutorNode(Node):
                 f'({executor.skipped_steps} steps steering), '
                 f'{executor.feasibility_unavailable} gate-shut steps without joint angles')
         if follow_log:
-            dev, pace, bounded, corr = (np.array(v, dtype=float) for v in zip(*follow_log))
-            text += (f'; arm path: deviation median {np.median(dev) * 1000:.1f} mm, worst '
-                     f'{dev.max() * 1000:.1f}; clock slowed on {int((pace < 1).sum())} steps '
+            across, behind, pace, bounded, corr = (np.array(v, dtype=float) for v in zip(*follow_log))
+            text += (f'; arm path: beside it median {np.median(across) * 1000:.1f} mm, worst '
+                     f'{across.max() * 1000:.1f}; along it from {behind.min() * 1000:+.1f} (ahead) to '
+                     f'{behind.max() * 1000:+.1f} mm (behind); clock slowed on {int((pace < 1).sum())} steps '
                      f'(slowest {pace.min():.2f}); correction up to {corr.max() * 1000:.1f} mm; '
                      f'command bounded on {int(bounded.sum())} steps')
         if self.use_stiffness and losses:
