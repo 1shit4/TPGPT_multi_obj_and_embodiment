@@ -283,6 +283,16 @@ class TestPlanner:
         assert result.metadata["learned_execution"] == {"speed_scale": 0.35}
         assert plan(bundle, self._scene(bundle)).metadata["learned_execution"] is None
 
+    def test_a_learned_plan_marks_where_the_hand_should_be_when_the_jaws_act(self, bundle):
+        """The arrival hold's targets: the taught plan's own grasp and release poses."""
+        taught = plan(bundle, self._scene(bundle))
+        learned = plan(self._learned(bundle), self._scene(bundle))
+        g, r = int(taught.metrics["grasp_index"]), int(taught.metrics["release_index"])
+        assert np.allclose(learned.marks["positions"], taught.labels.positions[[g, r]], atol=1e-9)
+        assert np.allclose(learned.marks["orientations"], taught.labels.orientations[[g, r]],
+                           atol=1e-9)
+        assert taught.marks is None
+
     def test_what_the_object_did_is_read_off_the_taught_labels(self, bundle):
         """The command's pose at the grasp and the release is not the hand's; the keypoints
         (the object carried from the grasp to the release) must not move with it."""
@@ -306,6 +316,7 @@ class TestPlanner:
         assert np.allclose(loaded.arm_path.orientations, result.arm_path.orientations)
         assert np.allclose(loaded.arm_margin, 0.002)
         assert np.allclose(loaded.arm_table_margin, 0.001)
+        assert np.allclose(loaded.marks["positions"], result.marks["positions"])
         assert Plan.load(plan(bundle, self._scene(bundle)).save(tmp_path / "plain")).arm_path is None
 
     def test_the_path_check_checks_the_arm_path_with_its_margin(self, bundle, monkeypatch):

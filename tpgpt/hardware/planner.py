@@ -139,6 +139,11 @@ class Plan:
     arm_margin: np.ndarray | None = None
     #: The margin kept from the table (m, per label): the vertical part of ``arm_margin``.
     arm_table_margin: np.ndarray | None = None
+    #: With learned labels: where the hand should be when the gripper acts -- the taught
+    #: path transported at the grasp and the release (``positions`` (2, 3) grasp point,
+    #: ``orientations`` (2, 3, 3) controller frame). The executor's arrival hold aims here;
+    #: the learned command at those labels is offset from it by the lead.
+    marks: dict | None = None
 
     @property
     def dt(self) -> float:
@@ -155,6 +160,9 @@ class Plan:
             if self.arm_table_margin is not None:
                 np.save(directory / "arm_path_table_margin.npy",
                         np.asarray(self.arm_table_margin, dtype=float))
+        if self.marks is not None:
+            np.savez(directory / "transported_marks.npz",
+                     **{k: np.asarray(v, dtype=float) for k, v in self.marks.items()})
         self.source_keypoints.save(directory / "source_keypoints.json")
         self.target_keypoints.save(directory / "target_keypoints.json")
         np.savez_compressed(
@@ -202,6 +210,9 @@ class Plan:
             plan.arm_margin = np.load(directory / "arm_path_margin.npy")
             if (directory / "arm_path_table_margin.npy").exists():
                 plan.arm_table_margin = np.load(directory / "arm_path_table_margin.npy")
+        if (directory / "transported_marks.npz").exists():
+            with np.load(directory / "transported_marks.npz") as d:
+                plan.marks = {k: d[k] for k in d.files}
         return plan
 
 
@@ -344,7 +355,7 @@ def plan(
     # same map, is what the geometry below and the path check measure. That the arm lags the
     # transported attractor as it lagged the learned one is an assumption (the transfer
     # allowance, not yet measured).
-    arm = None
+    arm = marks = None
     if source.arm_path is not None:
         arm_report = transport_map.check_diffeomorphism(source.arm_path["positions"])
         if not arm_report.consistent_sign or arm_report.min_determinant < min_determinant:
@@ -357,6 +368,11 @@ def plan(
             gripper=tool_labels.gripper))
         grasp_orientations = arm.orientations
         arm = arm.replace(orientations=ee.ee_from_grasp(arm.orientations))
+        # Where the hand should be when the jaws act: the taught path, carried by the same map.
+        gi, ri = carry_indices(tool_labels)
+        taught = transport_labels(transport_map, source.demonstration_labels)
+        marks = {"positions": np.asarray(taught.positions)[[gi, ri]],
+                 "orientations": ee.ee_from_grasp(np.asarray(taught.orientations)[[gi, ri]])}
     geometry = arm if arm is not None else transported
 
     # --- geometric checks -----------------------------------------------------
@@ -452,6 +468,7 @@ def plan(
         arm_path=arm,
         arm_margin=(None if arm is None else
                     np.asarray(source.arm_path["margin"], dtype=float).copy()),
+        marks=marks,
         arm_table_margin=(None if arm is None or "margin_vertical" not in source.arm_path else
                           np.asarray(source.arm_path["margin_vertical"], dtype=float).copy()),
     )
