@@ -686,6 +686,9 @@ class TpgptExecutorNode(Node):
                                          ('hold at the marks', 'path_hold')) if p(key)]
             log.info(f"Learned plan: following its arm path ({', '.join(on) or 'nothing added'}) "
                      "instead of the simulation's lag gate and clamp")
+            if plan.marks is None and p('path_hold'):
+                log.warn('this plan predates the planner storing its marks (2026-10-01): no '
+                         'arrival hold; re-plan for one')
         elif plan.arm_path is not None:
             log.warn('Learned plan with follow_arm_path:=false: the lag gate and clamp will slow '
                      'and cut its command (audit B1 step 8)')
@@ -874,7 +877,7 @@ class TpgptExecutorNode(Node):
             self.last_cmd = cmd
             closed = cmd.gripper > 0
             if closed != gripper_closed:
-                if p('arrival_hold') or (following and p('path_hold')):
+                if p('arrival_hold') or (following and p('path_hold') and plan.marks is not None):
                     index = int(m['grasp_index'] if closed else m['release_index'])
                     held = self._arrive(plan, executor, index, cmd, values, dt, wait_period,
                                         writer, started,
