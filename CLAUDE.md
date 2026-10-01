@@ -250,8 +250,8 @@ The planner's support height is: its `support_height` parameter, else the calibr
   **Run such a bundle with `use_transported_stiffness:=true`**, or its stiffness never reaches
   the arm; `--stiffness-profile static` reproduces the old constant 400/40 bundles bit for bit.
   The 18:39 demonstration's directional bundle is `~/tpgpt_demos/banana_20260925_183904/source_bundle_directional`
-  (its `source_bundle/` is unchanged). X6's frozen block still says `use_transported_stiffness:
-  false`: re-sync it when the execution rework lands.
+  (its `source_bundle/` is unchanged). X6 was re-synced with the execution rework on 2026-10-01
+  (its demonstration is now `source_bundle_learned`); it has not been run.
 - **What stiffness does on this arm, measured 2026-09-29** (audit B2 step 3;
   `cartesian_target_publisher -p stiffness_mode:=isotropic|directional`, `commands.md` §8):
   **no vibration at 600, 700 or 800 N/m with rotational 30** (holds within 0.02 mm); the
