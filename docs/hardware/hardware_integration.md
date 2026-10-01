@@ -638,6 +638,12 @@ the clamp never fired.
 10. at the end, keep publishing the last target for 1 s. CRISP holds it
     afterwards.
 
+Beside the 20 Hz CSV, a hardware run keeps every `/current_pose` and `/joint_states`
+message it received (positions, velocities, efforts) in `<csv name>_highrate.npz`,
+times in s since the run started (the CSV's `t`), saved at the end and after an
+abort (2026-10-02: a stick-slip, a vibration in the retreat and the elbow's swing
+do not show at 20 Hz). A dry run keeps none: its arm is simulated.
+
 **Stiffness option** (`use_transported_stiffness`):
 
 * `false` (default): the stock `cartesian_impedance_controller` with its

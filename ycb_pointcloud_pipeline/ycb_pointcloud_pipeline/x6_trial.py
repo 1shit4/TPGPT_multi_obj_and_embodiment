@@ -558,6 +558,7 @@ class Trial:
         except AbortRun as exc:
             self.moved = self.moved or ex.moving or len(self.trace) > 0
             self._hold_if_moving()
+            ex.save_run_record()
             self.system_abort_reason = f'executor abort: {exc}'
             self.status = 'aborted_during_motion' if self.moved else 'aborted_before_motion'
             print(f'\nEXECUTION ABORTED: {exc}')

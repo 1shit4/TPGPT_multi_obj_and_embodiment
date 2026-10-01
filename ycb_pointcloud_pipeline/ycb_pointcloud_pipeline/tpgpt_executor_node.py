@@ -334,6 +334,9 @@ class TpgptExecutorNode(Node):
         # received (converted after the pass: see _pose_cb), for the pass's diagnostic record.
         self._highrate = None  # {'poses': [...], 'joints': [...]} while recording
         self._pending_record = None  # (replay dir, pass, 20 Hz record) of a pass cut short
+        # A policy run on the robot keeps them too, beside its 20 Hz log: a slip, a vibration
+        # and the elbow's swing do not show at 20 Hz (2026-10-02, the mug).
+        self._run_record = None      # (npz path, ROS time at the run's start, s)
         self.create_subscription(PoseStamped, p('current_pose_topic'), self._pose_cb, 1)
         self._joints = None   # (monotonic, JointState) -- converted on demand
         from sensor_msgs.msg import JointState
@@ -776,6 +779,10 @@ class TpgptExecutorNode(Node):
                          'corr_x', 'corr_y', 'corr_z', 'q1', 'q2', 'q3', 'q4', 'q5', 'q6', 'q7'])
         realtime = not self.dry or p('dry_run_realtime')
         started = time.monotonic()
+        if not self.dry:     # a dry run's arm is simulated; the messages would be the idle robot
+            self._run_record = (log_path[:-len('.csv')] + '_highrate.npz',
+                                self.get_clock().now().nanoseconds * 1e-9)
+            self._highrate = {'poses': [], 'joints': []}
         trace = []
         timing = {'last': None, 'worst': 0.0}
 
@@ -949,6 +956,7 @@ class TpgptExecutorNode(Node):
         for _ in range(int(1.0 / dt)):
             self.publish(cmd.tcp_position - self.offset, cmd.tcp_rotation, values)
             time.sleep(dt)
+        self.save_run_record()
         return True
 
     # ------------------------------------------------------------------ replay
@@ -1407,8 +1415,26 @@ class TpgptExecutorNode(Node):
             g['running'] = False
             self.destroy_timer(g['timer'])
 
+    def save_run_record(self):
+        """Save every pose and joint state a policy run received, beside its 20 Hz log
+        (``<log>_highrate.npz``; ``pose_t``/``joint_t`` in s since the run started, as the
+        log's ``t``, from the messages' stamps). Also after an abort, from :meth:`save_pending_record`."""
+        if self._run_record is None:
+            return
+        path, origin = self._run_record
+        self._run_record = None
+        out = self._take_highrate()
+        for key in ('pose', 'joint'):
+            if f'{key}_stamp' in out:
+                out[f'{key}_t'] = out.pop(f'{key}_stamp') - origin
+        np.savez_compressed(path, **out)
+        self.get_logger().info(f"Full-rate record ({len(out.get('pose_t', ()))} poses, "
+                               f"{len(out.get('joint_t', ()))} joint states): {path}")
+
     def save_pending_record(self):
-        """After an aborted replay pass (and its hold): save what it recorded, as aborted_<n>."""
+        """After an aborted replay pass (and its hold): save what it recorded, as aborted_<n>.
+        After an aborted policy run: its full-rate record."""
+        self.save_run_record()
         if self._pending_record is None:
             return
         from tpgpt.hardware import replay as rp

@@ -114,8 +114,10 @@ def main(args=None):
                 node.get_logger().error(f'Aborted: {exc}')
                 if node.moving:
                     node.hold_current_pose()
+                    node.save_run_record()
                     exit_code = 1
                     break
+                node.save_run_record()
                 executed = False
             if executed:
                 break
@@ -129,6 +131,8 @@ def main(args=None):
     except KeyboardInterrupt:
         if node is not None and node.moving:
             node.hold_current_pose()
+        if node is not None:
+            node.save_run_record()
     finally:
         time.sleep(0.2)  # let a final hold command go out
         if node is not None:
