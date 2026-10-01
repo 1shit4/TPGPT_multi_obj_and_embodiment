@@ -128,11 +128,14 @@ class ArmPathSettings:
       1.5-4 mm beside, the clock stopped, "blocked" with nothing in the way). So as the
       clock slows the correction takes the along-path gap too -- all of it when the
       clock has stopped -- and the clock recovers once the arm is back.
-    * **Blocked**: the correction at its cap for ``blocked_steps`` steps and the deviation
-      not shrunk by ``blocked_progress``: the arm cannot get there; the run stops and
-      holds. A stopped clock alone is not blocked. With the correction off, a standing
-      gap behind is forgiven as sag instead (as the simulation's watchdog does), up to
-      ``max_forgiven`` times; only after that is it blocked.
+    * **Blocked** means the arm does not move: the clock held back or the correction at its
+      cap for ``blocked_steps`` steps, and the arm itself moved less than
+      ``blocked_motion`` in them. Then the run stops and holds. An arm that keeps moving
+      is not blocked, however far the correction falls short (2026-10-01 22:41, the mug:
+      the plan needed 25-36 mm, the correction stopped at its 30 mm cap with the arm 10 mm
+      off its path and moving on, and "blocked" fired). With the correction off, a gap
+      behind that is not closing is forgiven as sag (as the simulation's watchdog does),
+      up to ``max_forgiven`` times.
 
     The velocity cap (``speed_limit``), the policy query and the clock's update stay
     the simulation's. Values are starting points: how far the arm strays on a new
@@ -150,6 +153,7 @@ class ArmPathSettings:
     bound_slack: float = 0.01
     blocked_steps: int = 40
     blocked_progress: float = 0.001
+    blocked_motion: float = 0.002
     max_forgiven: int = 3
     #: Below this path speed (m/s at execution) a label counts as still.
     still_speed: float = 0.002
@@ -240,7 +244,7 @@ class HardwareExecutor:
         self.correction = np.zeros(3)
         self.blocked = False
         self.blocked_reason = ""
-        self._stuck_steps, self._stuck_ref = 0, 0.0
+        self._stuck_steps, self._stuck_ref, self._stuck_from = 0, 0.0, None
         self.forgiven, self.forgivals = 0.0, 0         # standing gap forgiven (correction off)
         if arm_path is not None:
             self._init_arm_path(arm_path, arm_settings or ArmPathSettings())
@@ -546,22 +550,24 @@ class HardwareExecutor:
         deviation = float(np.linalg.norm(error))
         saturated = s.correction and float(np.linalg.norm(self.correction)) >= 0.99 * s.correction_max
         stopped = (not s.correction) and pace < 0.05
-        if saturated or stopped:
+        held = pace < 0.05 or saturated
+        if held or stopped:
             if self._stuck_steps == 0:
-                self._stuck_ref = deviation
+                self._stuck_ref, self._stuck_from = deviation, np.asarray(position).copy()
             self._stuck_steps += 1
             if self._stuck_steps >= s.blocked_steps:
+                moved = float(np.linalg.norm(np.asarray(position) - self._stuck_from))
                 if self._stuck_ref - deviation < s.blocked_progress:
                     if stopped and self.forgivals < s.max_forgiven:
                         self.forgiven = max(behind - target["margin"], 0.0)
                         self.forgivals += 1
-                    else:
+                    elif moved < s.blocked_motion:
                         self.blocked, self.finished = True, True
                         self.blocked_reason = (
-                            f"the arm is {deviation * 1000:.0f} mm from its path at label "
-                            f"{target['index']:.0f} and has not come closer in {s.blocked_steps} "
-                            "steps (" + ("correction at its cap" if saturated else
-                                         f"clock stopped, {self.forgivals} gaps forgiven") + ")")
+                            f"the arm has moved {moved * 1000:.1f} mm in {s.blocked_steps} steps, "
+                            f"{deviation * 1000:.0f} mm from its path at label "
+                            f"{target['index']:.0f} ("
+                            + ("correction at its cap" if saturated else "clock stopped") + ")")
                 self._stuck_steps = 0
         else:
             self._stuck_steps = 0
