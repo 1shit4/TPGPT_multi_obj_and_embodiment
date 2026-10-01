@@ -33,14 +33,16 @@ def _defaults():
 def test_defaults_take_the_learned_values(tmp_path):
     ex = _module()
     got = ex.learned_settings(_plan(tmp_path), _defaults(), _defaults())
-    assert got == LEARNED
+    # arrival_hold is not one: a learned plan always holds, at its marks (follow_arm_path)
+    assert got == {k: v for k, v in LEARNED.items() if k != 'arrival_hold'}
     assert type(got['use_transported_stiffness']) is bool
 
 
 def test_a_value_equal_to_the_learned_one_is_accepted(tmp_path):
     ex = _module()
     given = {**_defaults(), 'transit_rotational_scale': 1.0, 'offset_compensation': 'none'}
-    assert ex.learned_settings(_plan(tmp_path), given, _defaults()) == LEARNED
+    assert ex.learned_settings(_plan(tmp_path), given, _defaults()) == {
+        k: v for k, v in LEARNED.items() if k != 'arrival_hold'}
 
 
 def test_any_other_value_is_refused(tmp_path):

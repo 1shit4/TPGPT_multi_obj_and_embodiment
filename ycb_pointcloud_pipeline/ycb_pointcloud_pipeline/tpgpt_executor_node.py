@@ -96,7 +96,7 @@ class AbortRun(RuntimeError):
 #: The lag they were learned against depends on each. A parameter left at its default takes
 #: the learned value; one set to anything else is refused.
 LEARNED_SETTINGS = ('speed_scale', 'rotational_stiffness', 'transit_rotational_scale',
-                    'use_transported_stiffness', 'offset_compensation', 'arrival_hold')
+                    'use_transported_stiffness', 'offset_compensation')
 
 
 def _same(a, b) -> bool:
@@ -146,6 +146,9 @@ class TpgptExecutorNode(Node):
         d('dry_run', True)
         d('dry_run_realtime', True)
         d('dry_run_resting_error', [0.0, 0.0, 0.0])  # m; simulated arm rests this far from its target
+        # The simulated arm's lag, as a multiple of CRISP's nominal time constant. This arm
+        # measured about 2 (audit B2 step 3); 1 is the spring model the simulation uses.
+        d('dry_run_lag_scale', 1.0)
         d('use_transported_stiffness', False)
         # Fixed translational stiffness (N/m) sent to the variable-stiffness controller
         # for the whole run (approach, settle, policy, arrival), when the transported
@@ -237,6 +240,16 @@ class TpgptExecutorNode(Node):
         d('offset_compensation', 'z')               # none | z | xyz: subtract the resting error
         d('max_offset_compensation', 0.03)          # m, bound on any compensation
         d('arrival_hold', False)                    # true: servo onto the grasp/release before the gripper acts
+        # A learned plan (one with an arm path) is followed against the path the arm traced,
+        # not with the simulation's lag gate and clamp (tpgpt.hardware.executor.ArmPathSettings;
+        # the user, 2026-10-01), and always holds at its marks before the gripper acts.
+        d('follow_arm_path', True)
+        d('path_pace_span', 0.02)                   # m behind the path (beyond its margin) where the clock stops
+        d('path_correction', True)                  # bring an arm beside its path back
+        d('path_correction_gain', 1.5)              # 1/s
+        d('path_correction_max', 0.03)              # m
+        d('path_bound_slack', 0.01)                 # m, on top of the plan's lead + the correction cap
+        d('path_blocked_steps', 40)                 # steps stopped or at the cap without closing in
         d('arrival_tolerance', 0.004)               # m, measured TCP to the plan's grasp/release
         d('arrival_timeout', 4.0)                   # s
         d('arrival_gain', 1.5)                      # 1/s, integral gain of the hold
@@ -567,7 +580,7 @@ class TpgptExecutorNode(Node):
 
     def simulate(self, cmd_position, cmd_rotation, K, D, dt):
         """Dry run plant: the first-order impedance arm of rollout_impedance."""
-        A = np.linalg.solve(D, K)
+        A = np.linalg.solve(D, K) / float(self.p('dry_run_lag_scale'))
         x = self.sim_T[:3, 3]
         rest = np.asarray(self.p('dry_run_resting_error'), dtype=float)
         self.sim_T[:3, 3] = x + A @ (cmd_position + rest - x) * dt
@@ -636,7 +649,24 @@ class TpgptExecutorNode(Node):
             speed_scale=float(p('speed_scale')),
             tool_offset=tuple(float(v) for v in tool_offset),
         )
-        executor = HardwareExecutor(policy, dt, settings)
+        following = plan.arm_path is not None and bool(p('follow_arm_path'))
+        arm_path = arm_settings = None
+        if following:
+            from tpgpt.hardware.executor import ArmPathSettings
+            arm_path = {'positions': plan.arm_path.positions, 'margin': plan.arm_margin}
+            arm_settings = ArmPathSettings(
+                pace_span=float(p('path_pace_span')), correction=bool(p('path_correction')),
+                correction_gain=float(p('path_correction_gain')),
+                correction_max=float(p('path_correction_max')),
+                bound_slack=float(p('path_bound_slack')),
+                blocked_steps=int(p('path_blocked_steps')))
+            log.info('Learned plan: following its arm path (pacing, correction, hold at the marks) '
+                     "instead of the simulation's lag gate and clamp")
+        elif plan.arm_path is not None:
+            log.warn('Learned plan with follow_arm_path:=false: the lag gate and clamp will slow '
+                     'and cut its command (audit B1 step 8)')
+        executor = HardwareExecutor(policy, dt, settings, arm_path=arm_path,
+                                    arm_settings=arm_settings)
         self.policy_executor = executor
         start_pos, start_rot = executor.start_pose
         object_width = float(m.get('object_width_closing_m', 0.04))
@@ -712,7 +742,8 @@ class TpgptExecutorNode(Node):
         writer.writerow(['t', 'stage', 'phase', 'gate', 'behind', 'expected', 'clamped', 'gripper',
                          'meas_x', 'meas_y', 'meas_z', 'cmd_x', 'cmd_y', 'cmd_z',
                          'att_x', 'att_y', 'att_z', 'k_tcp_x', 'k_tcp_y', 'k_tcp_z', 'k_rot',
-                         'k_offdiag_share'])
+                         'k_offdiag_share', 'path_index', 'path_deviation', 'corr_x', 'corr_y',
+                         'corr_z'])
         realtime = not self.dry or p('dry_run_realtime')
         started = time.monotonic()
         trace = []
@@ -780,6 +811,7 @@ class TpgptExecutorNode(Node):
                                progress_window=int(p('progress_window')),
                                min_progress_ratio=float(p('min_progress_ratio')))
         gripper_closed = False
+        follow_log = []
         policy_deadline = (time.monotonic() + float(p('max_policy_seconds'))
                            if realtime else float('inf'))
         losses = []
@@ -788,6 +820,8 @@ class TpgptExecutorNode(Node):
                 raise AbortRun('max_policy_seconds exceeded')
             meas_p, meas_R = self.measured()
             cmd = executor.step(meas_p, meas_R, self.measured_joints())
+            if following and executor.blocked:
+                raise AbortRun(f'blocked: {executor.blocked_reason}; holding here')
             if executor.stalled and p('on_stall') == 'continue':
                 log.warn(f'execution watchdog declared the arm stuck at phase {executor.phase:.3f} '
                          f'after {executor.steps} steps; on_stall=continue: lag gate OFF, '
@@ -814,10 +848,19 @@ class TpgptExecutorNode(Node):
             self.last_cmd = cmd
             closed = cmd.gripper > 0
             if closed != gripper_closed:
-                if p('arrival_hold'):
+                if p('arrival_hold') or following:
                     index = int(m['grasp_index'] if closed else m['release_index'])
-                    self._arrive(plan, executor, index, cmd, values, dt, wait_period, writer,
-                                 started, 'arrive_grasp' if closed else 'arrive_release')
+                    held = self._arrive(plan, executor, index, cmd, values, dt, wait_period,
+                                        writer, started,
+                                        'arrive_grasp' if closed else 'arrive_release',
+                                        learned=following)
+                    if following:
+                        # carry on from where the hold left the command, not jump back
+                        executor.correction = executor.correction + (held + self.offset
+                                                                     - cmd.tcp_position)
+                        cap = float(p('path_correction_max'))
+                        if np.linalg.norm(executor.correction) > cap:
+                            executor.correction *= cap / np.linalg.norm(executor.correction)
                 if p('gripper_mode') != 'none':
                     self.command_gripper(closed, object_width, wait=not self.dry)
                 gripper_closed = closed
@@ -834,7 +877,12 @@ class TpgptExecutorNode(Node):
             writer.writerow([f'{time.monotonic() - started:.3f}', 'policy', f'{cmd.phase:.5f}',
                              f'{cmd.gate:.4f}', f'{cmd.behind:.5f}', f'{cmd.expected:.5f}',
                              int(cmd.clamped), int(cmd.gripper), *meas_p, *cmd.tcp_position,
-                             *cmd.attractor, *k_diag, k_rot, f'{loss:.4f}'])
+                             *cmd.attractor, *k_diag, k_rot, f'{loss:.4f}',
+                             *((f"{cmd.trace['path_index']:.2f}", f"{cmd.trace['deviation']:.5f}",
+                                *np.round(cmd.trace['correction'], 5)) if following else ())])
+            if following:
+                follow_log.append((cmd.trace['deviation'], cmd.gate, cmd.clamped,
+                                   float(np.linalg.norm(cmd.trace['correction']))))
             if len(trace) % 10 == 0:
                 self._publish_trace(trace)
             next_t = wait_period(next_t)
@@ -849,6 +897,12 @@ class TpgptExecutorNode(Node):
                 f'{executor.relaxed_steps} relaxed steps, {executor.skips} skips '
                 f'({executor.skipped_steps} steps steering), '
                 f'{executor.feasibility_unavailable} gate-shut steps without joint angles')
+        if follow_log:
+            dev, pace, bounded, corr = (np.array(v, dtype=float) for v in zip(*follow_log))
+            text += (f'; arm path: deviation median {np.median(dev) * 1000:.1f} mm, worst '
+                     f'{dev.max() * 1000:.1f}; clock slowed on {int((pace < 1).sum())} steps '
+                     f'(slowest {pace.min():.2f}); correction up to {corr.max() * 1000:.1f} mm; '
+                     f'command bounded on {int(bounded.sum())} steps')
         if self.use_stiffness and losses:
             text += (f"; stiffness off-diagonal share {'applied (full matrix)' if self.full_stiffness else 'dropped'}: "
                      f'median {np.median(losses):.2f}, max {np.max(losses):.2f}')
@@ -1372,7 +1426,7 @@ class TpgptExecutorNode(Node):
         return offset
 
     def _arrive(self, plan, executor, index, cmd, values, dt, wait_period, writer, started,
-                stage):
+                stage, learned=False):
         """Servo onto the plan's grasp (or release) pose before the gripper acts.
 
         The policy clock is paused. The target is the transported label itself, not
@@ -1380,16 +1434,30 @@ class TpgptExecutorNode(Node):
         lag clamp engages (a red-cup run closed 82 mm from its grasp that way). A
         bounded integral term removes whatever resting error the static
         compensation leaves at this pose.
+
+        A **learned** plan's labels are a command offset from where the hand should be,
+        so its target is the plan's mark (``Plan.marks``: the taught path transported),
+        the orientation the learned command's own (it is what puts the hand at the planned
+        orientation), and the command-to-target check -- which caught the clamp dragging
+        the attractor off -- does not apply: its command is meant to be off. Returns the
+        last commanded TCP position; for a learned plan the caller hands the residual to
+        the executor's correction instead of the static offset.
         """
         from tpgpt.hardware.executor import crisp_applied_gains, logged_stiffness
 
         p, log = self.p, self.get_logger()
         self.stage = stage
         labels = plan.labels
-        target_R = np.asarray(labels.orientations[index], dtype=float)
-        target_p = executor.tcp_from_tool(labels.positions[index], target_R)
+        if learned:
+            row = 0 if stage == 'arrive_grasp' else 1
+            target_R = np.asarray(cmd.tcp_rotation, dtype=float)
+            target_p = executor.tcp_from_tool(plan.marks['positions'][row],
+                                              np.asarray(plan.marks['orientations'][row]))
+        else:
+            target_R = np.asarray(labels.orientations[index], dtype=float)
+            target_p = executor.tcp_from_tool(labels.positions[index], target_R)
         gap = float(np.linalg.norm(cmd.tcp_position - target_p))
-        if gap > float(p('arrival_max_gap')):
+        if not learned and gap > float(p('arrival_max_gap')):
             raise AbortRun(f'{stage}: the commanded pose is {gap * 1000:.0f} mm from the planned '
                            f'{"grasp" if stage == "arrive_grasp" else "release"} when the gripper '
                            f'should act (arrival_max_gap {float(p("arrival_max_gap")) * 1000:.0f} '
@@ -1400,9 +1468,15 @@ class TpgptExecutorNode(Node):
         inside = 0
         deadline = time.monotonic() + float(p('arrival_timeout'))
         next_t = time.monotonic()
-        # Walk the command from where it is onto the target at approach speed.
+        # Walk the command from where it is onto the target at approach speed. A learned
+        # command sits off the target by the arm's own offset, which it keeps: it is moved by
+        # how far the *arm* is from the target, and the integral does the rest.
         step = float(p('approach_max_linear_speed')) * dt
         command = cmd.tcp_position.copy()
+        goal = target_p
+        if learned:
+            goal = command + (target_p - executor.tcp_from_tool(
+                executor.tool_position(*self.measured()), target_R))
         while True:
             meas_p, _ = self.measured()
             error = target_p - meas_p
@@ -1417,9 +1491,9 @@ class TpgptExecutorNode(Node):
                          f'{float(p("arrival_timeout")):.1f} s ({np.round(error * 1000, 1).tolist()} '
                          'mm); acting anyway')
                 break
-            delta = target_p - command
+            delta = goal - command
             command = command + delta * min(1.0, step / max(float(np.linalg.norm(delta)), 1e-9))
-            if float(np.linalg.norm(target_p - command)) < 1e-6:
+            if float(np.linalg.norm(goal - command)) < 1e-6:
                 integral = integral + gain * dt * error
                 if np.linalg.norm(integral) > limit:
                     integral *= limit / np.linalg.norm(integral)
@@ -1435,9 +1509,12 @@ class TpgptExecutorNode(Node):
                              *k_diag, k_rot, 0])
             next_t = wait_period(next_t)
         # Keep what the hold learned for the rest of the run: the object's weight after
-        # a grasp and the pose-dependent error both persist.
-        self.offset = self.offset - integral
+        # a grasp and the pose-dependent error both persist. (A learned plan's executor
+        # takes it into its path correction instead: the caller.)
+        if not learned:
+            self.offset = self.offset - integral
         self.stage = 'policy'
+        return out
 
     def _open_log(self, plan_dir):
         directory = self.p('log_dir') or os.path.join(plan_dir, 'executions')
