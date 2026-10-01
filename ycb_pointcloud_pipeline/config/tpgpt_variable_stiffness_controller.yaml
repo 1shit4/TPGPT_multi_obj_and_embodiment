@@ -91,3 +91,86 @@ tpgpt_cartesian_impedance_controller:
       computed_torques: false
       dynamic_params: false
       timing: false
+
+# --- Friction-compensation TEST controller (2026-10-02) -------------------------------------
+# The same controller with CRISP's friction compensation on (crisp_controllers
+# utils/friction_model.hpp: the Panda model of Gaz et al., velocity-only, the Panda's
+# parameters; at zero joint speed it adds nothing). A separate name, so the controller
+# execution uses is untouched and a loaded copy of it is not silently kept: the offset check
+# loads this one with -p stiffness_controller_name:=tpgpt_cartesian_impedance_controller_friction.
+# Measured without it (2026-10-01 offset check): the arm stops 2-6 mm short on the side it
+# came from, 5-12 mm after a 5 cm move; the robot's force estimate sees ~0.4-2.4 of the
+# spring's 1.3-7.0 N -- joint friction.
+tpgpt_cartesian_impedance_controller_friction:
+  ros__parameters:
+    joints:
+      - fr3_joint1
+      - fr3_joint2
+      - fr3_joint3
+      - fr3_joint4
+      - fr3_joint5
+      - fr3_joint6
+      - fr3_joint7
+    end_effector_frame: fr3_hand_tcp
+    base_frame: base
+    use_operational_space: false
+    task:
+      k_pos_x: 400.0
+      d_pos_x: -1.0
+      k_pos_y: 400.0
+      d_pos_y: -1.0
+      k_pos_z: 400.0
+      d_pos_z: -1.0
+      k_rot_x: 30.0
+      d_rot_x: -1.0
+      k_rot_y: 30.0
+      d_rot_y: -1.0
+      k_rot_z: 30.0
+      d_rot_z: -1.0
+    nullspace:
+      stiffness: 2.0
+      damping: 2.8284271247461903
+      projector_type: kinematic
+      regularization: 1.0e-06
+      max_tau: 5.0
+    filter:
+      target_pose: 0.1
+      q: 0.5
+      dq: 0.5
+      q_ref: 0.5
+      output_torque: 0.5
+    use_friction: true                 # the only difference: CRISP friction compensation
+    use_coriolis_compensation: true
+    use_gravity_compensation: false   # libfranka already compensates gravity
+    use_local_jacobian: true
+    topics:
+      target_pose: ~/target_pose
+      target_joint: ~/target_joint
+      target_wrench: ~/target_wrench
+    limit_error: true
+    limit_torques: true
+    max_delta_tau: 0.5
+    stop_commands: false
+    joint_limit_repulsion:
+      enabled: true
+      safe_range: 0.1
+      max_torque: 5.0
+    noise:
+      add_random_noise: false
+      amplitude: 0.0
+    variable_max_stiffness:
+      translational: 900.0      # executor's stiffness_max_translational must not exceed this
+      rotational: 60.0
+    variable_stiffness:
+      enabled: true
+      topic: ~/target_stiffness
+    enable_introspection: false
+    log:
+      enabled: false
+      robot_state: false
+      control_values: false
+      limits: false
+      controller_parameters: false
+      computed_torques: false
+      dynamic_params: false
+      timing: false
