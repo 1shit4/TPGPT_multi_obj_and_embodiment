@@ -122,9 +122,17 @@ class ArmPathSettings:
     * **Bound**: the command is kept within the plan's own lead at this label plus
       ``correction_max`` plus ``bound_slack`` of the arm (the force cap the clamp
       gave, without cutting what the plan needs).
-    * **Blocked**: when the clock has been stopped, or the correction at its cap,
-      for ``blocked_steps`` steps and the deviation has not shrunk by
-      ``blocked_progress``, the arm cannot get there; the run stops and holds.
+    * **A held clock hands the gap to the correction.** Waiting closes lag, not a standing
+      offset: an arm resting short of its command *along* the path stays there however
+      long the clock waits (2026-10-01 22:20, the mug: 18-21 mm behind at labels 27-36,
+      1.5-4 mm beside, the clock stopped, "blocked" with nothing in the way). So as the
+      clock slows the correction takes the along-path gap too -- all of it when the
+      clock has stopped -- and the clock recovers once the arm is back.
+    * **Blocked**: the correction at its cap for ``blocked_steps`` steps and the deviation
+      not shrunk by ``blocked_progress``: the arm cannot get there; the run stops and
+      holds. A stopped clock alone is not blocked. With the correction off, a standing
+      gap behind is forgiven as sag instead (as the simulation's watchdog does), up to
+      ``max_forgiven`` times; only after that is it blocked.
 
     The velocity cap (``speed_limit``), the policy query and the clock's update stay
     the simulation's. Values are starting points: how far the arm strays on a new
@@ -142,6 +150,7 @@ class ArmPathSettings:
     bound_slack: float = 0.01
     blocked_steps: int = 40
     blocked_progress: float = 0.001
+    max_forgiven: int = 3
     #: Below this path speed (m/s at execution) a label counts as still.
     still_speed: float = 0.002
     #: Labels either side of the clock's label searched for where the command is.
@@ -232,6 +241,7 @@ class HardwareExecutor:
         self.blocked = False
         self.blocked_reason = ""
         self._stuck_steps, self._stuck_ref = 0, 0.0
+        self.forgiven, self.forgivals = 0.0, 0         # standing gap forgiven (correction off)
         if arm_path is not None:
             self._init_arm_path(arm_path, arm_settings or ArmPathSettings())
         self.relax_orientation = False
@@ -494,20 +504,26 @@ class HardwareExecutor:
         error = target["position"] - position                     # where it should be - where it is
         u = target["direction"]
         behind = float(error @ u) if u is not None else 0.0
-        pace = (float(np.clip(1.0 - (behind - target["margin"]) / s.pace_span, 0.0, 1.0))
-                if s.pacing else 1.0)
+        pace = (float(np.clip(1.0 - (behind - target["margin"] - self.forgiven) / s.pace_span,
+                              0.0, 1.0)) if s.pacing else 1.0)
 
         self.attractor = advance_attractor(self.attractor, velocity, self.dt, pace,
                                            law=self.law.attractor_law)
-        side = error - (error @ u) * u if u is not None else error
+        along = (error @ u) * u if u is not None else np.zeros(3)
+        side = error - along
         size = float(np.linalg.norm(side))                           # beside the path
         if s.correction and not target["contact"]:
-            excess = size - target["margin"]
-            if excess > 0.0:
-                self.correction = self.correction + s.correction_gain * self.dt * side / size * excess
-                c = float(np.linalg.norm(self.correction))
-                if c > s.correction_max:
-                    self.correction *= s.correction_max / c
+            # Across the path, beyond the margin. Along it, as much as the clock is held back
+            # (all of it when stopped) -- no deadband there: the clock is only held once the
+            # arm is beyond the margin. (With the margin on both, a half-held clock and a
+            # partly closed gap balanced: 7.4 mm behind for good, the clock at 0.73.)
+            drive = (1.0 - pace) * along
+            if size > target["margin"]:
+                drive = drive + side / size * (size - target["margin"])
+            self.correction = self.correction + s.correction_gain * self.dt * drive
+            c = float(np.linalg.norm(self.correction))
+            if c > s.correction_max:
+                self.correction *= s.correction_max / c
         point = self.attractor + self.correction
         radius = target["lead"] + s.correction_max + s.bound_slack
         reach = point - position
@@ -525,20 +541,27 @@ class HardwareExecutor:
                                    cfg.belief_correction)
         self.steps += 1
 
-        # Blocked: stopped (or correcting at the cap) and not getting closer.
+        # Blocked: correcting at the cap and not getting closer. (Without the correction a
+        # stopped clock that is not getting closer forgives the gap as sag, then blocks.)
         deviation = float(np.linalg.norm(error))
         saturated = s.correction and float(np.linalg.norm(self.correction)) >= 0.99 * s.correction_max
-        if pace < 0.05 or saturated:
+        stopped = (not s.correction) and pace < 0.05
+        if saturated or stopped:
             if self._stuck_steps == 0:
                 self._stuck_ref = deviation
             self._stuck_steps += 1
             if self._stuck_steps >= s.blocked_steps:
                 if self._stuck_ref - deviation < s.blocked_progress:
-                    self.blocked, self.finished = True, True
-                    self.blocked_reason = (
-                        f"the arm is {deviation * 1000:.0f} mm from its path at label "
-                        f"{target['index']:.0f} and has not come closer in {s.blocked_steps} steps "
-                        f"({'clock stopped' if pace < 0.05 else 'correction at its cap'})")
+                    if stopped and self.forgivals < s.max_forgiven:
+                        self.forgiven = max(behind - target["margin"], 0.0)
+                        self.forgivals += 1
+                    else:
+                        self.blocked, self.finished = True, True
+                        self.blocked_reason = (
+                            f"the arm is {deviation * 1000:.0f} mm from its path at label "
+                            f"{target['index']:.0f} and has not come closer in {s.blocked_steps} "
+                            "steps (" + ("correction at its cap" if saturated else
+                                         f"clock stopped, {self.forgivals} gaps forgiven") + ")")
                 self._stuck_steps = 0
         else:
             self._stuck_steps = 0
@@ -569,6 +592,7 @@ class HardwareExecutor:
                 "correction": self.correction.copy(),
                 "lead": target["lead"],
                 "blocked": self.blocked,
+                "forgiven": self.forgiven,
                 "blocked_reason": self.blocked_reason,
                 "carrying": bool(carrying),
             },

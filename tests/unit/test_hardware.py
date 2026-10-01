@@ -557,16 +557,34 @@ class TestFollowArmPath:
         after = [c for i, c in steps if i > 80]
         assert np.linalg.norm(after[-1]) > 0.004                    # it resumes after it
 
-    def test_a_slower_arm_is_given_time(self, follow_case):
+    def test_a_slower_arm_is_given_time_and_brought_along(self, follow_case):
+        """Lagging more than the plan says: the clock is held back, and as it is the gap
+        along the path passes to the correction, so the arm ends up on time on its path."""
         ex, deviation, *_ = _follow(follow_case, tau=0.6)
-        assert ex.steps > 1.1 * self.NOMINAL and not ex.blocked
+        assert not ex.blocked and ex.finished
         assert deviation[60:300].max() < 0.002 + 0.02             # margin + pace_span
+        assert np.median(deviation[150:300]) < 0.0075
+        assert ex.correction[0] > 0.004                           # ahead, along the motion
 
     def test_without_pacing_the_clock_does_not_wait_for_a_slower_arm(self, follow_case):
-        ex, deviation, *_ = _follow(follow_case, tau=0.6, pacing=False)
+        ex, deviation, *_ = _follow(follow_case, tau=0.6, pacing=False, correction=False)
         assert ex.steps < 1.05 * self.NOMINAL and not ex.blocked
-        paced, paced_deviation, *_ = _follow(follow_case, tau=0.6)
+        paced, paced_deviation, *_ = _follow(follow_case, tau=0.6, correction=False)
         assert deviation[60:300].max() > paced_deviation[60:300].max()   # it falls further behind
+
+    def test_a_standing_gap_behind_is_closed_not_called_blocked(self, follow_case):
+        """An arm resting 15 mm short of its command along the path (2026-10-01 22:20): the
+        held clock hands the gap to the correction, which closes it; the run goes on."""
+        ex, deviation, *_ = _follow(follow_case, offset=(-0.015, 0.0, 0.0))
+        assert not ex.blocked and ex.finished
+        assert ex.correction[0] > 0.008                          # pushed forward along the path
+        assert np.median(deviation[150:300]) < 0.0075             # from 15 mm
+        assert ex.steps < 1.1 * self.NOMINAL                      # and the clock recovered
+
+    def test_without_correction_a_standing_gap_is_forgiven_not_blocked(self, follow_case):
+        # 50 mm short of its command: even with the clock stopped it is beyond the pace span
+        ex, *_ = _follow(follow_case, offset=(-0.05, 0.0, 0.0), correction=False)
+        assert ex.forgivals >= 1 and not ex.blocked and ex.finished
 
     def test_a_blocked_arm_stops_the_run_and_its_push_is_bounded(self, follow_case):
         s = ArmPathSettings()
