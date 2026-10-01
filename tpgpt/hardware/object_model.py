@@ -134,10 +134,26 @@ FULL_CLOUD_POINTS = 4096
 FIT_POINTS = 2000
 
 #: Headings scored per resting orientation, and how many of the best
-#: (orientation, heading) starts are refined.
+#: (orientation, heading) starts are refined -- per centring (:data:`FACING_CENTRING`).
 HEADINGS = 24
 REFINE_STARTS = 6
 ICP_ITERATIONS = 30
+
+#: Each coarse start is placed twice: the scan's whole median on the cloud's median, and
+#: (shifted this many times) the median of the scan's camera-facing surface on it. The
+#: camera sees only the near side, so the cloud's median lies toward the camera from the
+#: object's centre; centred by its whole median, a scan at the right heading sits off the
+#: seen faces and can score worse than a wrong heading whose corner covers them, and only
+#: the best starts are refined. Measured 2026-10-02: the pudding box on its long side was
+#: fitted ~50 deg off on all four captures of 10-01/10-02 (median 5.9-6.0 mm, 64-66 %
+#: explained, accepted), so the plan's jaws met the real box across a corner; started from
+#: the facing surface too, 4.1-4.5 mm and 81-84 %. The best :data:`REFINE_STARTS` of each
+#: centring are refined, each centring's winner is finished (rest tilt included) and the
+#: fit's own score picks between the two. On the 45 recorded captures that score picked the
+#: better-explained of the two on 14 of the 15 where they differ (the other: 0.87 vs 0.88);
+#: banana, mug and brick fits unchanged. Synthetic views of the box at 36 placements: 10
+#: off by 4.1-7.3 mm (surface gap) before, none after.
+FACING_CENTRING = 2
 
 #: Robust scale of the fit, metres: the camera's depth noise on an object at
 #: about 0.8 m.
@@ -464,8 +480,9 @@ def _fit_once(model: ObjectModel, observed: np.ndarray, support_height: float,
         rho = lambda d: np.log1p((d / NOISE) ** 2)  # noqa: E731  Cauchy
         return float(rho(d_obs).mean() + 0.5 * rho(np.minimum(d_face, 0.03)).mean())
 
-    # ---- coarse: every resting orientation x heading, centred on the cloud ----
-    starts = []
+    # ---- coarse: every resting orientation x heading, centred on the cloud twice ----
+    # (by the scan's whole median and by its camera-facing surface: FACING_CENTRING)
+    whole, facing_starts = [], []
     allowed = getattr(model, "allowed_rests", None)
     for k, rest in enumerate(model.rests):
         if allowed is not None and k not in allowed:
@@ -474,42 +491,37 @@ def _fit_once(model: ObjectModel, observed: np.ndarray, support_height: float,
             body, nrm, _ = placed(rest, heading, None)
             t = centre_obs - np.median(body, axis=0)
             t[2] = support_height - body[:, 2].min()
-            starts.append((score(body, nrm, t), k, heading, t))
-    starts.sort(key=lambda s: s[0])
+            whole.append((score(body, nrm, t), k, heading, t))
+            tf = t.copy()
+            for _ in range(FACING_CENTRING):
+                seen_now = _visible(body + tf, camera)
+                if seen_now.any():
+                    tf[:2] += centre_obs[:2] - np.median((body + tf)[seen_now], axis=0)[:2]
+            facing_starts.append((score(body, nrm, tf), k, heading, tf))
 
-    # ---- refine the best few with robust ICP in (x, y, z, heading) ----
+    # ---- refine the best few of each with robust ICP in (x, y, z, heading) ----
+    finalists = []
+    for group in (whole, facing_starts):
+        group.sort(key=lambda s: s[0])
+        finalists.append(_refine(group[:REFINE_STARTS], model, obs, tree_obs, camera, placed,
+                                 score))
+
+    # ---- finish each centring's best (the rest tilt included), keep the lower score ----
+    # (chosen after the tilt: chosen before it, an apple's other start won on its untilted
+    # score and ended worse, 55 % explained against 60 %)
     best = None
-    for _, k, heading, t in starts[:REFINE_STARTS]:
-        for _ in range(ICP_ITERATIONS):
-            body, nrm, _ = placed(model.rests[k], heading, t)
-            world = body + t
-            d, j = cKDTree(world).query(obs)
-            w = 1.0 / (1.0 + (d / NOISE) ** 2)
-            src, dst = world[j], obs               # move model points onto observed
-            facing = _visible(world, camera)
-            if facing.any():
-                d2, j2 = tree_obs.query(world[facing])
-                keep = d2 < 0.03
-                src = np.vstack([src, world[facing][keep]])
-                dst = np.vstack([dst, obs[j2[keep]]])
-                w = np.concatenate([w, 0.5 / (1.0 + (d2[keep] / NOISE) ** 2)])
-            dtheta, dxy, dz = _planar_step(src, dst, w, pivot=t)
-            heading += dtheta
-            t = t + np.array([dxy[0], dxy[1], dz])
-            if abs(dtheta) < 1e-4 and np.linalg.norm(dxy) < 1e-5 and abs(dz) < 1e-5:
-                break
-        body, nrm, _ = placed(model.rests[k], heading, t)
-        s = score(body, nrm, t)
+    for _, k, heading, t in finalists:
+        if model.name in FLAT_RESTING:
+            # On a flat face on a flat table the object cannot lean; the tilt search
+            # there only fitted depth artefacts (see FLAT_RESTING).
+            R_k, t_k = _rot_z(heading) @ model.rests[k], t
+        else:
+            R_k, t_k = _rest_tilt(model, obs, _rot_z(heading) @ model.rests[k], t,
+                                  support_height)
+        s = score(pts @ R_k.T, normals @ R_k.T, t_k)
         if best is None or s < best[0]:
-            best = (s, k, heading, t)
-
-    _, k, heading, t = best
-    if model.name in FLAT_RESTING:
-        # On a flat face on a flat table the object cannot lean; the tilt search
-        # there only fitted depth artefacts (see FLAT_RESTING).
-        R = _rot_z(heading) @ model.rests[k]
-    else:
-        R, t = _rest_tilt(model, obs, _rot_z(heading) @ model.rests[k], t, support_height)
+            best = (s, k, R_k, t_k)
+    _, k, R, t = best
     body = pts @ R.T
     nrm = normals @ R.T
     heading = float(np.arctan2(R[1, 0], R[0, 0]))
@@ -541,6 +553,38 @@ def _fit_once(model: ObjectModel, observed: np.ndarray, support_height: float,
                      heading_deg=float(np.degrees(heading) % 360.0), median_mm=median * 1000.0,
                      explained=explained, seen=seen, in_front=in_front, dz_mm=dz * 1000.0,
                      observed_points=int(len(obs)), dropped_below_table=int(below.sum()), full_cloud=full @ R.T + position)
+
+
+def _refine(starts, model, obs, tree_obs, camera, placed, score):
+    """Robust ICP in (x, y, z, heading) from each of ``starts`` (``(score, rest, heading,
+    t)``); the lowest-scoring result as ``(score, rest, heading, t)``."""
+    from scipy.spatial import cKDTree
+
+    best = None
+    for _, k, heading, t in starts:
+        for _ in range(ICP_ITERATIONS):
+            body, nrm, _ = placed(model.rests[k], heading, t)
+            world = body + t
+            d, j = cKDTree(world).query(obs)
+            w = 1.0 / (1.0 + (d / NOISE) ** 2)
+            src, dst = world[j], obs               # move model points onto observed
+            facing = _visible(world, camera)
+            if facing.any():
+                d2, j2 = tree_obs.query(world[facing])
+                keep = d2 < 0.03
+                src = np.vstack([src, world[facing][keep]])
+                dst = np.vstack([dst, obs[j2[keep]]])
+                w = np.concatenate([w, 0.5 / (1.0 + (d2[keep] / NOISE) ** 2)])
+            dtheta, dxy, dz = _planar_step(src, dst, w, pivot=t)
+            heading += dtheta
+            t = t + np.array([dxy[0], dxy[1], dz])
+            if abs(dtheta) < 1e-4 and np.linalg.norm(dxy) < 1e-5 and abs(dz) < 1e-5:
+                break
+        body, nrm, _ = placed(model.rests[k], heading, t)
+        s = score(body, nrm, t)
+        if best is None or s < best[0]:
+            best = (s, k, heading, t)
+    return best
 
 
 #: Where the free-space test is trustworthy. A model point seen edge-on, or one

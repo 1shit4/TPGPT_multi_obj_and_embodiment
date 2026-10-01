@@ -73,6 +73,19 @@ def test_the_scan_lands_on_the_object(name, rest, heading):
     assert fit.full_cloud[:, 2].min() == pytest.approx(TABLE, abs=5e-4)
 
 
+@pytest.mark.parametrize("rest,heading_deg", [(1, 0), (1, 170), (3, 0), (3, 10)])
+def test_a_box_seen_from_its_near_side_is_not_turned_onto_its_corner(rest, heading_deg):
+    """The camera sees two faces of the box: the cloud's median sits toward the camera,
+    and centred there by its whole median the right heading scored worse than a wrong one
+    (2026-10-02: the pudding box ~50 deg off on four real captures). Before the search also
+    started from the camera-facing surface, these placements fitted 5.9-7.3 mm off."""
+    model = ObjectModel.load("pudding_box")
+    R, t = _placed(model, rest, np.radians(heading_deg), (0.50, 0.13))
+    fit = fit_object(model, _view(model, R, t), TABLE, CAMERA)
+    assert fit.accepted, fit.reason
+    assert _surface_gap(model, R, t, fit) < 0.004
+
+
 def test_the_can_on_its_side_is_found_on_its_side():
     model = ObjectModel.load("tomato_soup_can")
     lying = next(k for k, r in enumerate(model.rests)

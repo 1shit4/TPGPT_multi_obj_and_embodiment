@@ -414,6 +414,13 @@ The planner's support height is: its `support_height` parameter, else the calibr
   handle in four known directions (`~/tpgpt_bags/mug_handles`): within 30 deg on 9/14, 13/14,
   20/22 fits when visible, 2/18 when turned away from the camera -- nothing to fit it to.
   Other objects' fits are unchanged. The planner logs how many points it dropped.
+- **The scan fit starts from the camera-facing surface too** (2026-10-02, audit A8;
+  `object_model.FACING_CENTRING`). It used to centre every coarse start by the scan's whole
+  median on the cloud's -- which lies toward the camera -- and refine only the best 6: the
+  pudding box on its long side came out ~50 deg off on all four recent captures, accepted
+  (64-66 % explained), and the jaws closed across its corner exactly as planned. Now 81-84 %.
+  When a grasp looks wrong at execution, first compare the planned hand with the arm's at the
+  close (FK of the logged joints); if they agree, the plan -- usually the fit -- is the suspect.
 - **Flat-resting objects are fitted without lean** (`object_model.FLAT_RESTING`: mug, pudding
   box, foam brick; 2026-09-25). The rest-tilt search (up to 25 deg) is for what can really rest
   rolled or leaning (banana, apple, can); on the planner's live fits it leaned the foam brick 19.5
