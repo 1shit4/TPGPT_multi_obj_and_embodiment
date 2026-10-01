@@ -22,6 +22,7 @@ from scipy.spatial.transform import Rotation
 
 from tpgpt.hardware import frames
 from tpgpt.hardware.executor import (
+    ArmPathSettings,
     ExecutorSettings,
     HardwareExecutor,
     SafetyMonitor,
@@ -484,6 +485,85 @@ class TestExecutor:
     def test_speed_scale_is_validated(self, line_policy):
         with pytest.raises(ValueError):
             HardwareExecutor(line_policy, DT, ExecutorSettings(speed_scale=1.5))
+
+
+# A learned plan is followed against the path the arm traced (ArmPathSettings).
+SCALE = 0.35
+TAU_ARM = 0.34          # this "real" arm lags its command 0.34 s; the spring model says ~0.1
+
+
+@pytest.fixture(scope="module")
+def follow_case():
+    labels = line_labels()
+    path = labels.positions - TAU_ARM * labels.velocities * SCALE   # where this arm goes
+    return GPPolicy().fit(labels), path
+
+
+def _follow(follow_case, *, path=True, offset=(0.0, 0.0, 0.0), tau=TAU_ARM, stop_at=None,
+            push=None, n_steps=1200, **arm):
+    policy, arm_path = follow_case
+    ex = HardwareExecutor(
+        policy, DT, ExecutorSettings(speed_scale=SCALE, lag_tolerance=0.045),
+        arm_path={"positions": arm_path, "margin": np.full(len(arm_path), 0.002)} if path else None,
+        arm_settings=ArmPathSettings(**arm))
+    x = policy.labels.positions[0].copy()
+    deviation, reach, bounded = [], [], 0
+    for k in range(n_steps):
+        cmd = ex.step(x, np.eye(3))
+        if path:
+            deviation.append(np.linalg.norm(ex.arm_target(cmd.phase, cmd.attractor)["position"] - x))
+        reach.append(np.linalg.norm(cmd.tcp_position - x))
+        bounded += cmd.clamped
+        if stop_at is None or k < stop_at:
+            x = x + (cmd.tcp_position + np.asarray(offset) - x) * DT / tau
+        if push is not None and k == push[0]:
+            x = x + np.asarray(push[1])
+        if ex.finished:
+            break
+    return ex, np.array(deviation), np.array(reach), bounded
+
+
+class TestFollowArmPath:
+    NOMINAL = 119 / SCALE           # steps for 119 label intervals at speed_scale 0.35
+
+    def test_an_arm_that_lags_as_learned_is_neither_slowed_nor_cut(self, follow_case):
+        ex, deviation, _, bounded = _follow(follow_case)
+        assert ex.steps < 1.05 * self.NOMINAL and not ex.blocked and bounded == 0
+        assert deviation[60:300].max() < 0.002
+        # the simulation's gate reads the same arm as lagging and slows it
+        gated, *_ = _follow(follow_case, path=False)
+        assert gated.steps > 1.15 * self.NOMINAL
+
+    def test_an_arm_beside_its_path_is_brought_back(self, follow_case):
+        ex, deviation, *_ = _follow(follow_case, offset=(0.0, 0.008, 0.0))
+        assert np.median(deviation[150:300]) < 0.003              # the 2 mm margin, plus a little
+        assert -0.008 < ex.correction[1] < -0.004 and abs(ex.correction[0]) < 1e-9
+        _, uncorrected, *_ = _follow(follow_case, offset=(0.0, 0.008, 0.0), correction=False)
+        assert np.median(uncorrected[150:300]) > 0.007
+
+    def test_a_slower_arm_is_given_time(self, follow_case):
+        ex, deviation, *_ = _follow(follow_case, tau=0.6)
+        assert ex.steps > 1.1 * self.NOMINAL and not ex.blocked
+        assert deviation[60:300].max() < 0.002 + 0.02             # margin + pace_span
+
+    def test_a_blocked_arm_stops_the_run_and_its_push_is_bounded(self, follow_case):
+        s = ArmPathSettings()
+        ex, _, reach, _ = _follow(follow_case, stop_at=100)
+        assert ex.blocked and "has not come closer" in ex.blocked_reason
+        assert ex.steps < 100 + 3 * s.blocked_steps
+        lead = TAU_ARM * 0.168 * SCALE
+        assert reach.max() <= lead + s.correction_max + s.bound_slack + 1e-9
+
+    def test_an_arm_pushed_away_keeps_the_command_within_the_bound(self, follow_case):
+        s = ArmPathSettings()
+        ex, _, reach, bounded = _follow(follow_case, push=(150, (0.0, 0.2, 0.0)), n_steps=160)
+        lead = TAU_ARM * 0.168 * SCALE
+        assert bounded > 0 and reach.max() <= lead + s.correction_max + s.bound_slack + 1e-9
+
+    def test_an_arm_path_needs_one_point_per_label(self, follow_case):
+        policy, arm_path = follow_case
+        with pytest.raises(ValueError, match="one point per label"):
+            HardwareExecutor(policy, DT, ExecutorSettings(), arm_path={"positions": arm_path[:-1]})
 
 
 class TestApproachAndStiffness:

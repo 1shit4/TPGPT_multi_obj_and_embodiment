@@ -46,9 +46,12 @@ from tpgpt.hardware.frames import rotation_angle, slerp_rotation
 from tpgpt.policy.rollout import (
     ExecutionLaw,
     StallWatchdog,
+    advance_attractor,
     advance_phase,
     advance_step,
     belief_position,
+    clamp_speed,
+    compliance_norm,
     gate_step,
     phase_epsilon_from,
     query_position,
@@ -93,6 +96,51 @@ class ExecutorSettings:
         return dataclasses.asdict(self)
 
 
+@dataclass(frozen=True)
+class ArmPathSettings:
+    """How a learned plan is followed: against the path the arm really traced.
+
+    A learned plan's labels are a command that leads the arm (audit B1 step 6), and
+    the plan carries where the arm went when it was learned (``Plan.arm_path``). The
+    simulation's lag gate and clamp judge "normal lag" by the spring model
+    (``||K^-1 D|| v``: 2-6 mm on the 18:39 plan), while on this arm the command must
+    sit 17 mm ahead on average and up to 35 (twice the model's lag plus a 10-16 mm
+    static offset), so they would slow the clock (gate 0.67 median) and cut the command
+    (262 of 488 labels). Measured 2026-10-01; the user's decision to replace them for
+    learned plans. What replaces them, against the arm path at the current phase:
+
+    * **Pacing**: the clock (and the command) slow when the arm is behind the path,
+      along it, by more than the path's margin, and stop ``pace_span`` beyond that.
+    * **Correction**: a slowly growing offset on the command
+      (``correction_gain`` x the deviation beyond the margin, per second) brings an arm
+      that sits *beside* the path back onto it -- what waiting cannot do for a static
+      offset. Across the path while it moves, in every direction while it is still;
+      at most ``correction_max``.
+    * **Bound**: the command is kept within the plan's own lead at this label plus
+      ``correction_max`` plus ``bound_slack`` of the arm (the force cap the clamp
+      gave, without cutting what the plan needs).
+    * **Blocked**: when the clock has been stopped, or the correction at its cap,
+      for ``blocked_steps`` steps and the deviation has not shrunk by
+      ``blocked_progress``, the arm cannot get there; the run stops and holds.
+
+    The velocity cap (``speed_limit``), the policy query and the clock's update stay
+    the simulation's. Values are starting points: how far the arm strays on a new
+    scene is not measured yet (step 9).
+    """
+
+    pace_span: float = 0.02
+    correction: bool = True
+    correction_gain: float = 1.5
+    correction_max: float = 0.03
+    bound_slack: float = 0.01
+    blocked_steps: int = 40
+    blocked_progress: float = 0.001
+    #: Below this path speed (m/s at execution) a label counts as still.
+    still_speed: float = 0.002
+    #: Labels either side of the clock's label searched for where the command is.
+    search_window: int = 20
+
+
 @dataclass
 class Command:
     """One control step's output, ready for the controller."""
@@ -131,7 +179,7 @@ class HardwareExecutor:
     """
 
     def __init__(self, policy, dt: float, settings: ExecutorSettings | None = None,
-                 kinematics=None):
+                 kinematics=None, arm_path=None, arm_settings: ArmPathSettings | None = None):
         if policy.labels is None:
             raise ValueError("HardwareExecutor needs a fitted policy")
         self.policy = policy
@@ -171,10 +219,73 @@ class HardwareExecutor:
         self.stalled = False
         # Infeasible-pose fallback state, as rollout_policy keeps it.
         self._kinematics = kinematics
+        # Following a learned plan's arm path (ArmPathSettings) instead of the gate/clamp.
+        self.arm = None
+        self.correction = np.zeros(3)
+        self.blocked = False
+        self.blocked_reason = ""
+        self._stuck_steps, self._stuck_ref = 0, 0.0
+        if arm_path is not None:
+            self._init_arm_path(arm_path, arm_settings or ArmPathSettings())
         self.relax_orientation = False
         self.skip_index: int | None = None
         self.relaxed_steps = self.skipped_steps = self.skips = 0
         self.feasibility_unavailable = 0
+
+    def _init_arm_path(self, arm_path: dict, settings: ArmPathSettings) -> None:
+        labels = self.policy.labels
+        path = np.asarray(arm_path["positions"], dtype=float)
+        if labels.time_belief is None or len(path) != len(labels.positions):
+            raise ValueError("an arm path needs one point per label and labels with a time belief")
+        margin = np.asarray(arm_path.get("margin", np.zeros(len(path))), dtype=float)
+        tangent = np.gradient(path, axis=0)
+        speed = np.linalg.norm(tangent, axis=1) / self.dt * float(self.settings.speed_scale)
+        self.arm = {
+            "settings": settings,
+            "command": np.asarray(labels.positions, dtype=float),
+            "time": np.asarray(labels.time_belief, dtype=float),
+            "path": path, "margin": margin, "tangent": tangent, "speed": speed,
+            # how far ahead of the arm the command is meant to be, per label
+            "lead": np.linalg.norm(np.asarray(labels.positions, dtype=float) - path, axis=1),
+        }
+
+    def command_index(self, attractor, phase: float) -> float:
+        """Where the command is along its labels, as a fractional label index.
+
+        The arm path is paired with the command label by label, so this -- not the
+        clock -- says where the arm should be: the shared clock advances at the policy's
+        predicted rate, which drifts from the command's own progress (on a straight line
+        5 % slow, 25 mm apart after 160 steps). Searched within ``search_window`` labels
+        of the clock's label; along a dwell, where many labels coincide, the one nearest
+        the clock's.
+        """
+        a = self.arm
+        n = len(a["time"])
+        clock = float(np.interp(phase, a["time"], np.arange(n)))
+        w = int(a["settings"].search_window)
+        lo, hi = max(int(clock) - w, 0), min(int(clock) + w + 1, n - 1)
+        seg_a, seg_b = a["command"][lo:hi], a["command"][lo + 1:hi + 1]
+        d = seg_b - seg_a
+        length2 = np.einsum("ij,ij->i", d, d)
+        t = np.clip(np.einsum("ij,ij->i", np.asarray(attractor) - seg_a, d)
+                    / np.maximum(length2, 1e-12), 0.0, 1.0)
+        dist = np.linalg.norm(seg_a + t[:, None] * d - attractor, axis=1)
+        index = np.arange(lo, hi) + t
+        near = dist <= dist.min() + 0.001
+        return float(index[near][np.argmin(np.abs(index[near] - clock))])
+
+    def arm_target(self, phase: float, attractor=None) -> dict:
+        """The arm path where the command is: where the arm should be, its direction, margin."""
+        a = self.arm
+        i = self.command_index(self.attractor if attractor is None else attractor, phase)
+        k = min(int(i), len(a["time"]) - 2)
+        w = i - k
+        mix = lambda v: (1.0 - w) * v[k] + w * v[k + 1]   # noqa: E731
+        t = mix(a["tangent"])
+        n = float(np.linalg.norm(t))
+        moving = mix(a["speed"]) > a["settings"].still_speed and n > 0.0
+        return {"index": i, "position": mix(a["path"]), "margin": float(mix(a["margin"])),
+                "lead": float(mix(a["lead"])), "direction": t / n if moving else None}
 
     # ------------------------------------------------------------- frames
     def tool_position(self, tcp_position, tcp_rotation) -> np.ndarray:
@@ -255,6 +366,8 @@ class HardwareExecutor:
         cfg = self.settings
         tcp_rotation = np.asarray(tcp_rotation, dtype=float).reshape(3, 3)
         position = self.tool_position(tcp_position, tcp_rotation)
+        if self.arm is not None:
+            return self._follow_step(position, tcp_rotation)
 
         # prediction = policy.predict(query_position(attractor, position, ...))
         prediction = self._predict(query_position(self.attractor, position, self.law.query_at))
@@ -352,6 +465,96 @@ class HardwareExecutor:
                 "max_lag": float(step_out.max_lag),
                 "static_sag": float(self.watchdog.static_sag),
                 "sag_rebaselines": int(self.watchdog.rebaselines),
+                "carrying": bool(carrying),
+            },
+        )
+
+
+    def _follow_step(self, position, tcp_rotation) -> Command:
+        """One step of a learned plan, against its arm path (:class:`ArmPathSettings`)."""
+        cfg, a = self.settings, self.arm
+        s = a["settings"]
+        prediction = self._predict(self.attractor)                  # queried at the attractor
+        gripper_command = 1.0 if float(prediction.gripper[0]) > 0 else -1.0
+        rotation = prediction.orientation[0] if prediction.orientation is not None else None
+        velocity = clamp_speed(prediction.velocity[0], self.law.speed_limit)
+        compliance = compliance_norm(prediction.stiffness[0], prediction.damping[0])
+
+        target = self.arm_target(self.phase)
+        error = target["position"] - position                     # where it should be - where it is
+        u = target["direction"]
+        behind = float(error @ u) if u is not None else 0.0
+        pace = float(np.clip(1.0 - (behind - target["margin"]) / s.pace_span, 0.0, 1.0))
+
+        self.attractor = advance_attractor(self.attractor, velocity, self.dt, pace,
+                                           law=self.law.attractor_law)
+        if s.correction:
+            side = error - (error @ u) * u if u is not None else error
+            size = float(np.linalg.norm(side))
+            excess = size - target["margin"]
+            if excess > 0.0:
+                self.correction = self.correction + s.correction_gain * self.dt * side / size * excess
+                c = float(np.linalg.norm(self.correction))
+                if c > s.correction_max:
+                    self.correction *= s.correction_max / c
+        point = self.attractor + self.correction
+        radius = target["lead"] + s.correction_max + s.bound_slack
+        reach = point - position
+        bounded = float(np.linalg.norm(reach)) > radius
+        if bounded:
+            point = position + reach * (radius / float(np.linalg.norm(reach)))
+
+        firm = compliance
+        carrying = gripper_command > 0 and firm > 0.0 and firm >= self.stiff_threshold
+        rotational_gain = (cfg.rotational_stiffness * cfg.transit_rotational_scale
+                           if carrying else cfg.rotational_stiffness)
+        commanded_rotation = tcp_rotation if rotation is None else rotation
+        query_phase = self.phase
+        self.phase = advance_phase(self.policy, self.attractor, self.phase, self.phase_dt, pace,
+                                   cfg.belief_correction)
+        self.steps += 1
+
+        # Blocked: stopped (or correcting at the cap) and not getting closer.
+        deviation = float(np.linalg.norm(error))
+        saturated = s.correction and float(np.linalg.norm(self.correction)) >= 0.99 * s.correction_max
+        if pace < 0.05 or saturated:
+            if self._stuck_steps == 0:
+                self._stuck_ref = deviation
+            self._stuck_steps += 1
+            if self._stuck_steps >= s.blocked_steps:
+                if self._stuck_ref - deviation < s.blocked_progress:
+                    self.blocked, self.finished = True, True
+                    self.blocked_reason = (
+                        f"the arm is {deviation * 1000:.0f} mm from its path at label "
+                        f"{target['index']:.0f} and has not come closer in {s.blocked_steps} steps "
+                        f"({'clock stopped' if pace < 0.05 else 'correction at its cap'})")
+                self._stuck_steps = 0
+        else:
+            self._stuck_steps = 0
+        if self.phase >= cfg.stop_time_belief:
+            self.finished = True
+
+        return Command(
+            tcp_position=self.tcp_from_tool(point, commanded_rotation),
+            tcp_rotation=np.asarray(commanded_rotation, dtype=float),
+            attractor=self.attractor.copy(),
+            stiffness=np.asarray(prediction.stiffness[0], dtype=float),
+            damping=np.asarray(prediction.damping[0], dtype=float),
+            rotational_stiffness=float(rotational_gain),
+            rotational_damping=float(cfg.rotational_damping * (rotational_gain / cfg.rotational_stiffness)),
+            gripper=gripper_command, phase=query_phase, next_phase=self.phase,
+            gate=pace, behind=behind, expected=0.0, clamped=bounded,
+            velocity=np.asarray(velocity, dtype=float),
+            done=self.finished and not self.blocked, stalled=self.blocked, relaxed=rotation is None,
+            trace={
+                "following_arm_path": True,
+                "path_index": float(target["index"]),
+                "deviation": deviation,
+                "margin": target["margin"],
+                "correction": self.correction.copy(),
+                "lead": target["lead"],
+                "blocked": self.blocked,
+                "blocked_reason": self.blocked_reason,
                 "carrying": bool(carrying),
             },
         )
