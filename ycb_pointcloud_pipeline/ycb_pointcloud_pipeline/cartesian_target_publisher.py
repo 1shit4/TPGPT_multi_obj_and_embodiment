@@ -32,7 +32,15 @@ hand `turn_deg` about the vertical and back, holding after each turn. It records
 /current_pose to ~/tpgpt_stiffness_checks/<time>_<mode>_<k>_rot<k_rot>/ and reports each hold's jitter
 (size, frequency) and resting tilt, each move's lag along and across the motion, and each
 turn's lag and rotational time constant. Above `max_jitter` of
-oscillation it drops to 400 / 30 and holds. It imports tpgpt, so run it from the tpgpt venv:
+oscillation it drops to 400 / 30 and holds. Offset check (``two_sided:=true``, 2026-10-01): after the move out and back, the same move
+the other way and back, so the start pose is held once arrived from each side; every hold
+also records the robot's own estimate of the external force on the hand
+(``o_f_ext_hat_k`` on ``robot_state_topic``, from its joint torque sensors, which sit after the
+gearboxes). The report gives, per hold, the arm's offset from its command, the force the
+spring pulls with (stiffness x offset) and the robot's force estimate. A force estimate as large
+as the spring's says the robot's model of what it carries is off (or something real pulls);
+one near zero says the force is lost in the joints (friction); an offset that changes with the
+side the arm came from says friction too. It imports tpgpt, so run it from the tpgpt venv:
     ros2 run --prefix python3 ycb_pointcloud_pipeline cartesian_target_publisher --ros-args \
         -p stiffness_mode:=isotropic -p translational_stiffness:=600.0 \
         -p goal_offset:="[0.0, 0.15, 0.0]"
@@ -141,6 +149,9 @@ class CartesianTargetPublisher(Node):
         # to 400 / 30 and the arm holds where it is (tpgpt.hardware.stiffness_check).
         self.declare_parameter('max_jitter', 0.004)
         self.declare_parameter('record_dir', '')            # '' -> ~/tpgpt_stiffness_checks/<time>_<mode>
+        # the offset check: the start reached from both sides, and the robot's force estimate
+        self.declare_parameter('two_sided', False)
+        self.declare_parameter('robot_state_topic', '/franka_robot_state_broadcaster/robot_state')
 
         p = lambda n: self.get_parameter(n).value  # noqa: E731
         self.cm = p('controller_manager').rstrip('/')
@@ -168,6 +179,14 @@ class CartesianTargetPublisher(Node):
         # while the check ran -- the teach node's measurement and fix (tpgpt_teach_node).
         self.pose_node = rclpy.create_node(f'{self.get_name()}_pose')
         self.pose_node.create_subscription(PoseStamped, p('current_pose_topic'), self._pose_cb, 100)
+        self._wrench = None   # while recording: [(monotonic time, force xyz, torque xyz)]
+        if p('stiffness_mode') != 'stock':
+            try:
+                from franka_msgs.msg import FrankaRobotState
+                self.pose_node.create_subscription(FrankaRobotState, p('robot_state_topic'),
+                                                   self._state_cb, 10)
+            except ImportError:            # franka_msgs not installed: no force estimate
+                pass
         self.target_pub = self.create_publisher(PoseStamped, self.target_topic, 1)
         self.cli_list = self.create_client(ListControllers, f'{self.cm}/list_controllers')
         self.cli_switch = self.create_client(SwitchController, f'{self.cm}/switch_controller')
@@ -186,6 +205,13 @@ class CartesianTargetPublisher(Node):
                 cmd_pos, cmd_speed, segment, cmd_quat, cmd_rate = self._cmd
                 self._samples.append((stamp, pos, [o.x, o.y, o.z, o.w], list(cmd_pos),
                                       cmd_speed, segment, list(cmd_quat), cmd_rate))
+
+    def _state_cb(self, msg):
+        w = msg.o_f_ext_hat_k.wrench
+        with self._lock:
+            if self._wrench is not None:
+                self._wrench.append((time.monotonic(), [w.force.x, w.force.y, w.force.z],
+                                     [w.torque.x, w.torque.y, w.torque.z]))
 
     def measured(self, max_age=0.5):
         with self._lock:
@@ -244,10 +270,14 @@ class CartesianTargetPublisher(Node):
             raise AbortMotion('goal_position must be [x, y, z]')
         lo = self.get_parameter('workspace_min').value
         hi = self.get_parameter('workspace_max').value
-        for axis, v, a, b in zip('xyz', goal_pos, lo, hi):
-            if not a <= v <= b:
-                raise AbortMotion(f'goal {axis}={v:.3f} m is outside the workspace box '
-                                  f'[{a}, {b}]')
+        points = [('goal', goal_pos)]
+        if self.get_parameter('two_sided').value:     # the other side of the start, mirrored
+            points.append(('other side', [2.0 * a - b for a, b in zip(start_pos, goal_pos)]))
+        for what, point in points:
+            for axis, v, a, b in zip('xyz', point, lo, hi):
+                if not a <= v <= b:
+                    raise AbortMotion(f'{what} {axis}={v:.3f} m is outside the workspace box '
+                                      f'[{a}, {b}]')
         dist = math.dist(goal_pos, start_pos)
         max_dist = min(self.get_parameter('max_distance').value, HARD_MAX_DISTANCE)
         if dist > max_dist:
@@ -436,10 +466,17 @@ class CartesianTargetPublisher(Node):
                 ('move_out', 'move', start_pos, goal_pos, move, q, q),
                 ('hold_goal', 'hold', goal_pos, goal_pos, hold, q, q)]
         end = goal_pos
-        if g('return_to_start'):
+        if g('return_to_start') or g('two_sided'):
             plan += [('move_back', 'move', goal_pos, start_pos, move, q, q),
                      ('hold_end', 'hold', start_pos, start_pos, hold, q, q)]
             end = start_pos
+        if g('two_sided'):
+            # the same move the other way, and back: the start reached from the other side
+            other = [2.0 * a - b for a, b in zip(start_pos, goal_pos)]
+            plan += [('move_out_other', 'move', start_pos, other, move, q, q),
+                     ('hold_goal_other', 'hold', other, other, hold, q, q),
+                     ('move_back_other', 'move', other, start_pos, move, q, q),
+                     ('hold_end_other', 'hold', start_pos, start_pos, hold, q, q)]
         turn_deg = float(g('turn_deg'))
         if turn_deg > 0.0:
             # a smooth turn peaks at pi/2 times its mean rate
@@ -460,16 +497,23 @@ class CartesianTargetPublisher(Node):
         plan = self.check_plan(start_pos, start_quat, goal_pos)
         with self._lock:
             self._samples = []
+            self._wrench = []
         self._check_t0 = time.monotonic()
+        wall0 = time.monotonic()
+        windows = {}                     # hold name -> (monotonic start, end)
         aborted = None
         try:
             for name, kind, a, b, duration, qa, qb in plan:
                 self.get_logger().info(f'{name}: {duration:.1f} s')
+                t_seg = time.monotonic()
                 self._segment(name, a, b, qa, duration, qb if kind == 'turn' else None)
+                if kind == 'hold':
+                    windows[name] = (t_seg + 0.5 * duration, time.monotonic())   # settled half
         except (AbortMotion, KeyboardInterrupt) as exc:
             aborted = exc              # keep what was recorded: a cut run is the one to look at
         with self._lock:
             samples, self._samples = self._samples, None
+            wrench, self._wrench = self._wrench, None
         if not samples:
             if aborted is not None:
                 raise aborted
@@ -499,6 +543,21 @@ class CartesianTargetPublisher(Node):
             if kind == 'hold':
                 report['segments'][name] = {**hold_jitter(stamps[m], meas[m]),
                                             **hold_tilt(stamps[m], cmd_quat[m], quat[m])}
+                # the settled half of the hold: offset, the spring's pull, the robot's estimate
+                half = m & (stamps >= stamps[m][0] + 0.5 * (stamps[m][-1] - stamps[m][0]))
+                offset = np.median(cmd[half] - meas[half], axis=0)
+                k = float(g('translational_stiffness'))
+                entry = {'offset_mm': (offset * 1000).round(2).tolist(),
+                         'offset_norm_mm': round(float(np.linalg.norm(offset)) * 1000, 2),
+                         'spring_force_N': (k * offset).round(2).tolist()}
+                w0, w1 = windows.get(name, (None, None))
+                forces = [f for t_, f, _ in (wrench or []) if w0 is not None and w0 <= t_ <= w1]
+                if forces:
+                    fe = np.median(np.array(forces), axis=0)
+                    entry.update({'robot_external_force_N': fe.round(2).tolist(),
+                                  'robot_external_force_norm_N': round(float(np.linalg.norm(fe)), 2),
+                                  'robot_state_messages': len(forces)})
+                report['segments'][name].update(entry)
             elif kind == 'move':
                 u = [bb - aa for aa, bb in zip(a, b)]
                 report['segments'][name] = move_lag(cmd[m], meas[m], u, speed[m])
@@ -518,6 +577,11 @@ class CartesianTargetPublisher(Node):
                 f.write(f'{t:.4f},{s[5]},' + ','.join(f'{v:.6f}' for v in (*s[1], *s[2], *s[3]))
                         + f',{s[4]:.5f},' + ','.join(f'{v:.6f}' for v in s[6])
                         + f',{s[7]:.5f}\n')
+        if wrench:
+            with open(os.path.join(out, 'wrench.csv'), 'w') as f:
+                f.write('t,fx,fy,fz,tx,ty,tz\n')
+                for t_, fo, to in wrench:
+                    f.write(f'{t_ - wall0:.4f},' + ','.join(f'{v:.4f}' for v in (*fo, *to)) + '\n')
         lines = [f'Stiffness check ({self.mode}, {g("translational_stiffness"):.0f} N/m'
                  + (f' across / {g("stiffness_along"):.0f} along' if self.mode == 'directional' else '')
                  + f', rotational {g("rotational_stiffness"):.0f}) -> {out}']
@@ -528,6 +592,12 @@ class CartesianTargetPublisher(Node):
                              f'{r.get("peak_hz", 0):.1f} Hz ({r["rate_hz"]:.0f} Hz poses); '
                              f'hand tilted {r.get("tilt_median_deg", float("nan")):.2f} deg off '
                              'the command')
+                if 'offset_mm' in r:
+                    est = (f'robot estimates {r["robot_external_force_norm_N"]:.1f} N '
+                           f'{r["robot_external_force_N"]}' if 'robot_external_force_N' in r
+                           else 'no robot_state received')
+                    lines.append(f'  {"":11s} offset {r["offset_norm_mm"]:.1f} mm {r["offset_mm"]}, '
+                                 f'spring pulling {np.linalg.norm(r["spring_force_N"]):.1f} N; {est}')
             elif 'tau_s' in r:
                 lines.append(f'  {name:11s} turn lag {r["lag_median_deg"]:.2f} deg '
                              f'(max {r["lag_max_deg"]:.2f}) at up to {r["peak_rate_deg_s"]:.1f} '
