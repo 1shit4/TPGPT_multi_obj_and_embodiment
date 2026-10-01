@@ -245,6 +245,8 @@ class TpgptExecutorNode(Node):
         # the user, 2026-10-01), and always holds at its marks before the gripper acts.
         d('follow_arm_path', True)
         d('path_pace_span', 0.02)                   # m behind the path (beyond its margin) where the clock stops
+        d('path_pacing', True)                      # false: the clock never waits for the arm
+        d('path_hold', True)                        # false: no arrival hold; the gripper acts on time
         d('path_correction', True)                  # bring an arm beside its path back
         d('path_correction_gain', 1.5)              # 1/s
         d('path_correction_max', 0.03)              # m
@@ -655,12 +657,15 @@ class TpgptExecutorNode(Node):
             from tpgpt.hardware.executor import ArmPathSettings
             arm_path = {'positions': plan.arm_path.positions, 'margin': plan.arm_margin}
             arm_settings = ArmPathSettings(
-                pace_span=float(p('path_pace_span')), correction=bool(p('path_correction')),
+                pace_span=float(p('path_pace_span')), pacing=bool(p('path_pacing')),
+                correction=bool(p('path_correction')),
                 correction_gain=float(p('path_correction_gain')),
                 correction_max=float(p('path_correction_max')),
                 bound_slack=float(p('path_bound_slack')),
                 blocked_steps=int(p('path_blocked_steps')))
-            log.info('Learned plan: following its arm path (pacing, correction, hold at the marks) '
+            on = [name for name, key in (('pacing', 'path_pacing'), ('correction', 'path_correction'),
+                                         ('hold at the marks', 'path_hold')) if p(key)]
+            log.info(f"Learned plan: following its arm path ({', '.join(on) or 'nothing added'}) "
                      "instead of the simulation's lag gate and clamp")
         elif plan.arm_path is not None:
             log.warn('Learned plan with follow_arm_path:=false: the lag gate and clamp will slow '
@@ -848,7 +853,7 @@ class TpgptExecutorNode(Node):
             self.last_cmd = cmd
             closed = cmd.gripper > 0
             if closed != gripper_closed:
-                if p('arrival_hold') or following:
+                if p('arrival_hold') or (following and p('path_hold')):
                     index = int(m['grasp_index'] if closed else m['release_index'])
                     held = self._arrive(plan, executor, index, cmd, values, dt, wait_period,
                                         writer, started,

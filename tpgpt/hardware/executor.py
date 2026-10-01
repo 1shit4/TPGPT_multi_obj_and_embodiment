@@ -129,6 +129,10 @@ class ArmPathSettings:
     """
 
     pace_span: float = 0.02
+    #: Off: the clock runs at the plan's own rate whatever the arm does (to measure what
+    #: the pacing is needed for; a blocked arm is then caught only by the correction cap
+    #: and the executor's SafetyMonitor).
+    pacing: bool = True
     correction: bool = True
     correction_gain: float = 1.5
     correction_max: float = 0.03
@@ -484,7 +488,8 @@ class HardwareExecutor:
         error = target["position"] - position                     # where it should be - where it is
         u = target["direction"]
         behind = float(error @ u) if u is not None else 0.0
-        pace = float(np.clip(1.0 - (behind - target["margin"]) / s.pace_span, 0.0, 1.0))
+        pace = (float(np.clip(1.0 - (behind - target["margin"]) / s.pace_span, 0.0, 1.0))
+                if s.pacing else 1.0)
 
         self.attractor = advance_attractor(self.attractor, velocity, self.dt, pace,
                                            law=self.law.attractor_law)

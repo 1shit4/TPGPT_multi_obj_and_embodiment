@@ -546,6 +546,12 @@ class TestFollowArmPath:
         assert ex.steps > 1.1 * self.NOMINAL and not ex.blocked
         assert deviation[60:300].max() < 0.002 + 0.02             # margin + pace_span
 
+    def test_without_pacing_the_clock_does_not_wait_for_a_slower_arm(self, follow_case):
+        ex, deviation, *_ = _follow(follow_case, tau=0.6, pacing=False)
+        assert ex.steps < 1.05 * self.NOMINAL and not ex.blocked
+        paced, paced_deviation, *_ = _follow(follow_case, tau=0.6)
+        assert deviation[60:300].max() > paced_deviation[60:300].max()   # it falls further behind
+
     def test_a_blocked_arm_stops_the_run_and_its_push_is_bounded(self, follow_case):
         s = ArmPathSettings()
         ex, _, reach, _ = _follow(follow_case, stop_at=100)
