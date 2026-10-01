@@ -134,7 +134,10 @@ Two facts that need several files to see, and that decide whether a change is fa
   (2026-10-01, audit B1 step 8; `follow_arm_path`): it is followed against the path the arm
   traced -- the clock slows when the arm is behind it, a slow capped correction brings it back
   when it is beside it, the run stops and holds only when the arm is blocked, and the arrival
-  hold aims at the plan's marks. Both guards judge normal lag by the spring model (2-6 mm), and
+  hold aims at the plan's marks; in contact (the replay's contact windows) the correction is
+  held and the release hold only waits, so the transported stiffness alone sets contact forces.
+  On the robot (mug, top_left, 2026-10-01) it was needed: without it the hand missed the grasp
+  by 15 mm and the release by 16, with it by 4 and 2. Both guards judge normal lag by the spring model (2-6 mm), and
   the learned command must lead this arm by 17-35 mm: they would slow it to 0.67 and cut it on 262
   of 488 labels. The policy query, the speed cap and the clock's update are still the shared code.
 - **Grasp selection is the simulation's rule, and sees the shelf** (since 2026-09-21,
