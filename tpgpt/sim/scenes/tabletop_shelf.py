@@ -425,6 +425,9 @@ class TabletopShelf(ManipulationEnv):
         shelf_variant="cubby",
         world=BENCHMARK,
         pick_config=None,
+        pick_pose=None,
+        object_rest_quat=None,
+        shelf_translation=(0.0, 0.0, 0.0),
         env_configuration="default",
         controller_configs=None,
         gripper_types="default",
@@ -481,6 +484,23 @@ class TabletopShelf(ManipulationEnv):
             raise ValueError(
                 f"unknown world {world!r}; expected one of {WORLDS}"
             )
+        if pick_pose is not None:
+            pick_pose = np.asarray(pick_pose, dtype=float)
+            if pick_pose.shape != (3,) or not np.isfinite(pick_pose).all():
+                raise ValueError("pick_pose must contain finite x, y, yaw-degrees")
+            if pick_config is not None or len(objects) != 1:
+                raise ValueError("pick_pose requires one object and no pick_config")
+        if object_rest_quat is not None:
+            object_rest_quat = np.asarray(object_rest_quat, dtype=float)
+            if (object_rest_quat.shape != (4,) or not np.isfinite(object_rest_quat).all()
+                    or np.linalg.norm(object_rest_quat) < 1e-9):
+                raise ValueError("object_rest_quat must be a finite nonzero wxyz quaternion")
+            if len(objects) != 1 or (pick_config is None and pick_pose is None):
+                raise ValueError("object_rest_quat requires one object with an explicit pick pose")
+            object_rest_quat = object_rest_quat / np.linalg.norm(object_rest_quat)
+        shelf_translation = np.asarray(shelf_translation, dtype=float)
+        if shelf_translation.shape != (3,) or not np.isfinite(shelf_translation).all():
+            raise ValueError("shelf_translation must contain finite x, y, z")
         if pick_config is not None:
             if world not in (REAL, YCB):
                 raise ValueError(
@@ -502,11 +522,20 @@ class TabletopShelf(ManipulationEnv):
         self.shelf_variant = shelf_variant
         self.world = world
         self.pick_config = pick_config
+        self.pick_pose = None if pick_pose is None else tuple(pick_pose)
+        self.object_rest_quat = object_rest_quat
+        self.shelf_translation = tuple(shelf_translation)
         # Every piece of geometry below is read from these, not from the module
         # constants, so the two worlds share one implementation.
         real = world in (REAL, YCB)
         self.shelf_levels = REAL_SHELF_LEVELS if real else SHELF_LEVELS
         self.shelf_slots = REAL_SHELF_SLOTS if real else SHELF_SLOTS
+        dx, dy, dz = shelf_translation
+        self.shelf_levels = tuple((name, x + dx, height + dz)
+                                 for name, x, height in self.shelf_levels)
+        self.shelf_slots = tuple((name, y + dy) for name, y in self.shelf_slots)
+        if any(height <= 0 for _, _, height in self.shelf_levels):
+            raise ValueError("shelf levels must remain above the table")
         self.shelf_board_depth = REAL_SHELF_BOARD_DEPTH if real else SHELF_BOARD_DEPTH
         self.shelf_board_width = REAL_SHELF_BOARD_WIDTH if real else SHELF_BOARD_WIDTH
         self.shelf_thickness = REAL_SHELF_THICKNESS if real else SHELF_THICKNESS
@@ -1017,7 +1046,8 @@ class TabletopShelf(ManipulationEnv):
         because a sampled placement depends on the seed and is not a condition
         anything is blocked on.
         """
-        if self.pick_config is None:
+        if (self.pick_config is None or self.pick_pose is not None or
+                self.object_rest_quat is not None or any(self.shelf_translation)):
             return None
         from pathlib import Path
         import json
@@ -1044,12 +1074,13 @@ class TabletopShelf(ManipulationEnv):
         sampler computes it, so a placed object falls the same small distance a
         sampled one does and nothing else about the scene changes.
         """
-        if self.pick_config is None:
+        if self.pick_config is None and self.pick_pose is None:
             return {obj.name: (pos, quat)
                     for pos, quat, obj in self.placement_initializer.sample().values()}
         from robosuite.utils.transform_utils import quat_multiply
 
-        x, y, yaw = self.pick_configs_for(self.world)[self.pick_config]
+        x, y, yaw = (self.pick_pose if self.pick_pose is not None else
+                     self.pick_configs_for(self.world)[self.pick_config])
         obj = self.objects[0]
         # Generous: the exact height is set by ``_seat_objects`` from the
         # object's own geometry in whatever orientation it ends up in, which
@@ -1065,7 +1096,9 @@ class TabletopShelf(ManipulationEnv):
             return np.array([q[3], q[0], q[1], q[2]])
 
         yaw_q = np.array([0.0, 0.0, np.sin(half), np.cos(half)])
-        quat = to_wxyz(quat_multiply(yaw_q, to_xyzw(rest_quat(obj.name, self.world))))
+        rest = (self.object_rest_quat if self.object_rest_quat is not None
+                else rest_quat(obj.name, self.world))
+        quat = to_wxyz(quat_multiply(yaw_q, to_xyzw(rest)))
         return {obj.name: (
             (float(self.table_offset[0]) + x, float(self.table_offset[1]) + y, z),
             quat,

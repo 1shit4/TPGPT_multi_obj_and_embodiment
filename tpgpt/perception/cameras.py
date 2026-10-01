@@ -258,6 +258,8 @@ def scene_point_cloud(
     max_points: int = MAX_CLOUD_POINTS,
     max_depth: float = 3.0,
     rng: np.random.Generator | None = None,
+    target_edge_margin_pixels: int = 0,
+    target_edge_depth_tolerance: float = 0.01,
 ) -> np.ndarray:
     """Everything the gripper must avoid, in world coordinates.
 
@@ -270,6 +272,10 @@ def scene_point_cloud(
         exclude: Instance names to drop -- the object being grasped, above all.
             The hand closes around it, so leaving it in makes every grasp
             collide with the thing it is meant to pick up.
+        target_edge_margin_pixels: Opt-in exclusion of ambiguous depth pixels
+            beside an excluded target mask. Only pixels within the depth
+            tolerance of their nearest target pixel are removed. This does not
+            fill observation holes or certify that nearby obstacles are absent.
 
     Returns:
         ``(N, 3)`` world-frame points, capped at ``max_points``.
@@ -286,6 +292,7 @@ def scene_point_cloud(
         for name in instance_names(env)
         if name in exclude or not is_obstacle(name)
     }
+    target_ids = {instance_segmentation_id(env, name) for name in exclude}
 
     clouds = []
     for camera in cameras:
@@ -296,6 +303,10 @@ def scene_point_cloud(
         metric = camera_utils.get_real_depth_map(env.sim, depth)[..., 0]
         ids = np.asarray(segmentation)[..., 0]
         mask = (~np.isin(ids, list(drop_ids))) & (metric > 0.0) & (metric < max_depth)
+        if target_edge_margin_pixels:
+            mask &= ~target_edge_mask(ids, metric, target_ids,
+                                      target_edge_margin_pixels,
+                                      target_edge_depth_tolerance)
         if not mask.any():
             continue
         clouds.append(unproject(env, camera, mask, metric, *mask.shape))
@@ -306,3 +317,23 @@ def scene_point_cloud(
     if len(points) > max_points:
         points = points[rng.choice(len(points), max_points, replace=False)]
     return points
+
+
+def target_edge_mask(ids, depth, target_ids, margin_pixels=1, depth_tolerance=0.01):
+    """Identify target-adjacent depth pixels with ambiguous instance assignment.
+
+    A distant background pixel beside a silhouette remains an obstacle sample;
+    only depth-continuous pixels are excluded. An adjacent real surface at the
+    same depth can also be excluded, so callers must record this approximation.
+    """
+    from scipy.ndimage import distance_transform_edt
+
+    if int(margin_pixels) != margin_pixels or margin_pixels < 0 or depth_tolerance < 0:
+        raise ValueError("edge margin must be a nonnegative integer and depth tolerance nonnegative")
+    target = np.isin(ids, list(target_ids))
+    if not target.any() or margin_pixels == 0:
+        return np.zeros_like(target)
+    distance, nearest = distance_transform_edt(~target, return_indices=True)
+    neighbor_depth = np.asarray(depth)[tuple(nearest)]
+    return ((distance <= margin_pixels) &
+            (np.abs(np.asarray(depth) - neighbor_depth) <= depth_tolerance))

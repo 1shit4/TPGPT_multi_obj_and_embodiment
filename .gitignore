@@ -43,3 +43,7 @@ assets/ported_grippers/*/meshes/
 assets/ycb/
 .venv/
 docs/ICRA__*
+
+# Reproduction environments and restored external asset bundle.
+.venv-reproduction/
+external/
