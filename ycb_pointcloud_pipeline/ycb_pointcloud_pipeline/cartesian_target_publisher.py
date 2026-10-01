@@ -528,7 +528,8 @@ class CartesianTargetPublisher(Node):
         quat = np.array([s[2] for s in samples])
         cmd_quat = np.array([s[6] for s in samples])
         rate = np.array([s[7] for s in samples])
-        report = {'mode': self.mode, 'translational_stiffness': g('translational_stiffness'),
+        report = {'mode': self.mode, 'controller': self.controller,
+                  'translational_stiffness': g('translational_stiffness'),
                   'stiffness_along': g('stiffness_along') if self.mode == 'directional' else None,
                   'rotational_stiffness': g('rotational_stiffness'),
                   'rotational_stiffness_applied': min(float(g('rotational_stiffness')),
@@ -584,7 +585,7 @@ class CartesianTargetPublisher(Node):
                     f.write(f'{t_ - wall0:.4f},' + ','.join(f'{v:.4f}' for v in (*fo, *to)) + '\n')
         lines = [f'Stiffness check ({self.mode}, {g("translational_stiffness"):.0f} N/m'
                  + (f' across / {g("stiffness_along"):.0f} along' if self.mode == 'directional' else '')
-                 + f', rotational {g("rotational_stiffness"):.0f}) -> {out}']
+                 + f', rotational {g("rotational_stiffness"):.0f}, {self.controller}) -> {out}']
         for name, r in report['segments'].items():
             if 'p2p_mm' in r:
                 lines.append(f'  {name:11s} jitter p95 {r["p95_mm"]:.2f} mm, peak-to-peak '
