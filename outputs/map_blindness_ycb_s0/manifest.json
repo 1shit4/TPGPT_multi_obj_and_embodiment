@@ -1,0 +1,118 @@
+{
+  "title": "Is the map blind to the object and the hand?",
+  "description": "    python -m tpgpt.experiments.map_blindness --campaign outputs/campaigns/ycb/ycb \\\n        --out outputs/map_blindness",
+  "settings": {
+    "fixed": {
+      "campaign": "outputs/campaigns/ycb_s0_gated/ycb",
+      "rotation_scale_m_per_rad": 0.1,
+      "permutations": 9999,
+      "map_distance": "RMS of phi(x)-x over the 20^3 fingerprint grid",
+      "path_distance": "RMS over the 200 transported waypoints",
+      "grasp_distance": "root-sum-square over pick and release of the SE(3) geodesic between target grasp poses"
+    },
+    "cells": 210
+  },
+  "results": {
+    "n_cells": 210,
+    "rotation_scale_m_per_rad": 0.1,
+    "permutations": 9999,
+    "fingerprint": {
+      "mantel_vs_grasp": {
+        "r": 0.758836707501741,
+        "p": 0.0001
+      },
+      "mantel_vs_grasp_translation": {
+        "r": 0.6889155948367712,
+        "p": 0.0001
+      },
+      "mantel_vs_grasp_rotation": {
+        "r": 0.3379312107683087,
+        "p": 0.0001
+      },
+      "same_object": {
+        "r_unconditioned": 0.07789500488714986,
+        "p_unconditioned": 0.0001,
+        "r_partial": -0.05097848436405046,
+        "p_partial": 0.0001
+      },
+      "same_gripper": {
+        "r_unconditioned": -0.010991161735202612,
+        "p_unconditioned": 0.032,
+        "r_partial": 0.004153200048816721,
+        "p_partial": 0.3787
+      },
+      "permanova_gripper": {
+        "F": 0.49385645095971437,
+        "variance_share": 0.014386742814166693,
+        "p": 0.9764
+      },
+      "permanova_object": {
+        "F": 5.506071402376728,
+        "variance_share": 0.09701290569146324,
+        "p": 0.0001
+      },
+      "median_distance_m": 0.22294703707788732
+    },
+    "path": {
+      "mantel_vs_grasp": {
+        "r": 0.8759834341786648,
+        "p": 0.0001
+      },
+      "mantel_vs_grasp_translation": {
+        "r": 0.9461006196667768,
+        "p": 0.0001
+      },
+      "mantel_vs_grasp_rotation": {
+        "r": 0.09828660317205985,
+        "p": 0.0001
+      },
+      "same_object": {
+        "r_unconditioned": 0.09012503810716875,
+        "p_unconditioned": 0.0001,
+        "r_partial": -0.07903067705786843,
+        "p_partial": 0.0001
+      },
+      "same_gripper": {
+        "r_unconditioned": -0.012577388363594842,
+        "p_unconditioned": 0.0218,
+        "r_partial": 0.006702816637397768,
+        "p_partial": 0.1983
+      },
+      "permanova_gripper": {
+        "F": 0.3424211404242098,
+        "variance_share": 0.010019417148117209,
+        "p": 0.9962
+      },
+      "permanova_object": {
+        "F": 7.467831587647447,
+        "variance_share": 0.12718166501942937,
+        "p": 0.0001
+      },
+      "median_distance_m": 0.15706662317432094
+    },
+    "figures": [
+      "map_vs_grasp_distance.png",
+      "map_embedding_by_gripper.png"
+    ]
+  },
+  "created": "2026-09-20T15:15:11",
+  "provenance": {
+    "commit": "1af6b487081ec1ab1eb3d8fe91060d3c84a8eeb4",
+    "commit_short": "1af6b48",
+    "branch": "main",
+    "committed": "2026-09-20T15:13:53+05:30",
+    "dirty": [],
+    "diff_stat": null,
+    "untracked_code": [],
+    "reproducible": true,
+    "python": "3.10.12",
+    "platform": "Linux-6.8.0-138-generic-x86_64-with-glibc2.35",
+    "packages": {
+      "numpy": "2.2.6",
+      "scipy": "1.15.3",
+      "mujoco": "3.7.0",
+      "robosuite": "1.5.2",
+      "similaritymeasures": "1.4.0"
+    }
+  }
+}

@@ -46,6 +46,8 @@ def make_rollout(
     final_xy=(0.22, 0.0),
     success=True,
     reach_offset=0.0,
+    push=0.0,
+    grip_force=None,
 ):
     """A trace of a run that went a particular way.
 
@@ -71,6 +73,10 @@ def make_rollout(
     x[release_step:] = final_xy[0]
     y[release_step:] = final_xy[1]
     x[close_step:release_step] = np.linspace(0.0, final_xy[0], release_step - close_step)
+    # ``push`` moves the object sideways *before* the close, as a hand that
+    # shoves it on the descent would.
+    y[:close_step] = np.linspace(0.0, push, close_step)
+    y[close_step:release_step] += push
 
     positions = np.tile(slot, (n, 1))
     positions[close_step] = slot + np.array([reach_offset, 0.0, 0.0])
@@ -91,6 +97,8 @@ def make_rollout(
             "probe": {
                 "object_x": x, "object_y": y, "object_z": z,
                 "jaw": np.zeros(n), "held": held,
+                **({"grip_force": np.full(n, float(grip_force))}
+                   if grip_force is not None else {}),
             },
         },
     )
@@ -102,6 +110,9 @@ def make_result(rollout, transported_start=(0.22, 0.0, 1.081)) -> RunResult:
     result.rollout = rollout
     result.transported = np.array([transported_start], dtype=float)
     return result
+
+
+GRASP = np.array([0.22, 0.0, 1.081])
 
 
 class TestStageAttribution:
@@ -145,6 +156,46 @@ class TestStageAttribution:
                      grasp_point=np.array([0.22, 0.0, 1.081]) + np.array([0.2, 0, 0]))
         assert d.blame == "reach"
         assert d.measurements["reach_error"] > REACH_TOLERANCE
+
+    def test_an_object_pushed_away_before_the_close_is_blamed_on_the_reach(self):
+        """The grasp was planned on a target that had left."""
+        rollout = make_rollout(held_from=None, success=False, push=0.05)
+        d = diagnose(make_result(rollout), FakeEnv(), grasp_point=GRASP)
+        assert d.blame == "reach"
+        assert d.measurements["push_before_close"] == pytest.approx(0.05, abs=1e-6)
+        assert "moved the object" in d.first_failure.detail
+
+    def test_a_brush_without_purchase_is_blamed_on_the_grasp(self):
+        """Contact at 20 N that never lifts is the fingers finding the object
+        and taking no hold, which is the grasp's fault and not the lift's."""
+        rollout = make_rollout(held_from=62, lift=0.0, success=False, grip_force=20.0)
+        d = diagnose(make_result(rollout), FakeEnv(), grasp_point=GRASP)
+        assert d.blame == "grasp"
+        assert d.measurements["peak_grip_force"] == pytest.approx(20.0)
+
+    def test_a_firm_grip_that_never_rose_is_still_the_lift(self):
+        rollout = make_rollout(held_from=62, lift=0.0, success=False, grip_force=300.0)
+        d = diagnose(make_result(rollout), FakeEnv(), grasp_point=GRASP)
+        assert d.blame == "lift"
+
+    def test_without_a_force_trace_contact_alone_passes_the_grasp(self):
+        rollout = make_rollout(held_from=62, lift=0.0, success=False)
+        d = diagnose(make_result(rollout), FakeEnv(), grasp_point=GRASP)
+        assert d.blame == "lift"
+        assert d.measurements["peak_grip_force"] is None
+
+    def test_a_sub_millimetre_budget_does_not_fail_a_hand_that_arrived(self):
+        """The YCB regression: real objects nearly fill the jaws, so the
+        closing budget is ~0 and the old verdict blamed reach on 83 of 126
+        failures. A hand 10 mm off that then dropped the object is a carry
+        failure, and the budget figure is kept only as a measurement."""
+        rollout = make_rollout(held_from=62, lift=0.30, success=False,
+                               reach_offset=0.010, final_xy=(0.0, 0.0))
+        rollout.metadata["probe"]["held"][90:] = 0.0
+        d = diagnose(make_result(rollout), FakeEnv(), grasp_point=GRASP)
+        assert d.stages[1].name == "reach" and d.stages[1].ok
+        assert d.measurements["reach_error"] == pytest.approx(0.010, abs=1e-6)
+        assert d.blame == "carry"
 
     def test_a_nudge_is_not_a_lift(self):
         rollout = make_rollout(held_from=62, lift=LIFT_HEIGHT / 4, success=False)

@@ -174,7 +174,7 @@ def figure_transported_trajectory(
     ax.quiver(*S.T, *(T - S).T, color="#999999", lw=0.6, arrow_length_ratio=0.08, alpha=0.75)
     ax.scatter(*S.T, s=14, c=SOURCE_COLOUR, depthshade=False)
     ax.scatter(*T.T, s=14, c=TARGET_COLOUR, depthshade=False)
-    if release_index is not None:
+    if release_index is not None and 0 <= int(release_index) < len(transported):
         ax.scatter(*transported[release_index], s=70, facecolors="none",
                    edgecolors="k", linewidths=1.4, label="release")
     _equal_aspect(ax, np.vstack([demonstration, transported, S, T]))

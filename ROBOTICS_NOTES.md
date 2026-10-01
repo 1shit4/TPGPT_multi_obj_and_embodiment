@@ -4171,6 +4171,262 @@ scene from the four-object one every campaign before this used -- different
 positions, different occlusions, different clouds. Nothing measured under the
 old set is cell-by-cell comparable with anything measured under the new one.
 
+### 7.43 Gating the executor on arrival, and the fingertips that were commanded through the table
+
+**Measured on a second machine** (RTX 4090 box, stock robosuite 1.5.2, MuJoCo
+3.7.0, 2026-09-20) after the reshelving gate reproduced there at 17/20 vs
+4/20 with keypoint residuals identical to the record. Everything below is on
+the **YCB world**, one condition (pick `P0`, destination `top_middle`), seven
+hands x five objects = 35 cells, the planner's candidates pinned by the grasp
+cache so every arm of a comparison executed the same candidate (35 of 35 cells,
+same `min det` to the bit). Commits `56dea29`..`d14fbda` plus the clamp below.
+
+**Why anything was changed.** `docs/ycb_grid.md` recorded 84/210 with 58 of
+126 failures "carried, then set down in the wrong place" and 51 "never
+lifted", and an attribution that blamed `reach` on 83 of 126 because the
+closing budget `(aperture - width) / 2` is sub-millimetre once the objects are
+real-sized. The executor opened the hand on the clock, 13-130 mm short of its
+release pose (7.35), and -- less noticed -- closed it on the clock too: the lag
+gate holds the clock only on *excess* lag (35 mm), so a hand up to that far
+short is told to shut.
+
+**What was changed, in order, never together with the instrument.**
+
+1. *Attribution* (`diagnose`, commit `56dea29`): the reach verdict is now
+   `push_before_close <= 20 mm` and `reach_error <= 40 mm` (the trace-based
+   tests `attribute_failures.py` had already used on the real-world grid); the
+   per-axis budget is kept as a measurement. The grasp stage additionally fails
+   a contact whose peak grip force stayed under 50 N and never lifted.
+2. *Close and release gates* (`rollout_policy`, commit `615e005`): when the
+   policy first commands the hand shut, hold it open with the attractor and the
+   clock frozen until the hand is within 10 mm of its attractor; when it first
+   commands the hand open, hold it shut until the object is supported from
+   below (`diagnose.object_supported`) or the hand has arrived. Cap 100 steps,
+   reason recorded per cell. Off by default; `--close-gate --release-gate`.
+3. *Support clamp* (`grasps.clamp_to_support`): see below.
+
+**The gates are a wash on success and a gain on precision.** Baseline 11/35,
+gated 11/35; two cells gained (`robotiq3f/mug`, `robotiq140/mug`), two lost
+(`robotiq85/sugar`, `panda/mug`), McNemar p = 1.0. On the nine cells both
+arms placed, the median placement error fell from **21.6 to 13.2 mm**
+(Wilcoxon p = 0.074, n = 9). The release gate was asked on 32 cells and
+answered "supported" immediately on 26: on a cell that gets as far as the
+release, the object is usually already on the board when the policy lets go,
+so the drop 7.35 measured is mostly on cells that fail earlier for other
+reasons. Median release-gate wait 0 steps, maximum 28.
+
+**The close gate is the finding.** It timed out on **18 of 35 cells**: the hand
+never came within 10 mm of its own attractor at the grasp. On those cells the
+attractor was on the plan (commanded error under 10 mm on 14 of 18) and the
+hand sat 12-65 mm from it -- the arm was *blocked*, not misaimed. A contact log
+on three of them says by what: `panda/hammer` was on the **table** for the
+whole 100 steps, `robotiq140/banana` on the table, `xarm/meat` pressing down on
+the **object**. Ten of the 18 were the two flat objects (hammer 33 mm, banana
+37 mm).
+
+The arithmetic behind the table contacts: the planner's contact point on the
+hammer sits 5-22 mm above the plane (`robotiq140/hammer` at -7 mm), and what
+is executed is deeper than that by the hand's `calibrated_depth` (0-22.5 mm)
+*and* by how far its finger geoms reach past the contact centroid, which had
+never been measured:
+
+| hand | finger reach past contact (mm) | calibrated depth (mm) |
+|---|---|---|
+| panda | 8.0 | 7.5 |
+| yumi | 11.0 | 7.5 |
+| xarm | 10.3 | 22.5 |
+| rethink | 19.0 | 0.0 |
+| robotiq85 | 26.1 | 15.0 |
+| robotiq140 | 36.4 | 7.5 |
+| robotiq3f_dex | 38.6 | 0.0 |
+| robotiq3f | 48.5 | 15.0 |
+
+Measured as the maximum over the registry's `finger_geoms` of the geom's
+centre-minus-contact projected on the approach plus its half-extent along it,
+at the open pose, on the default scene; stored as `finger_reach` in
+`gripper_frames.json`. So on every hammer cell the commanded fingertip was at
+or below the table -- `robotiq3f/hammer` 58 mm below it -- and the arm parked
+on the plane.
+
+`clamp_to_support` slides a candidate back along its own approach until
+`contact + approach * (depth + reach)` clears the plane by 5 mm, before the
+keypoints are built. On the 14 flat-object cells, both gates on: **3/14 to
+5/14**, close-gate timeouts 10 to 5. Not a clean pairing: the shift changed
+which candidate the path check ranked first on three banana cells, and both
+gains are there (`robotiq3f/banana`, `robotiq3f_dex/banana`, from "approach"
+failures to placed). On the 11 cells that kept their grasp the count is 3 to 3,
+and two hammer cells got *worse* (`robotiq85/hammer` lift 125 to 3 mm): with
+41 mm of reach-plus-depth, a Robotiq 85 clamped to clear the table pinches only
+the top 13 mm of a 33 mm handle. That is geometry, and it says thin objects are
+marginal for long-fingered hands whatever the executor does.
+
+**Two mechanisms remain open from this.** `panda/hammer` needs no clamp by the
+arithmetic (executed tip 6.8 mm up) and still parks on the table: its
+*attractor* drifted 36 mm below the plan (`commanded_error`), so that one is
+the integrator, not the geometry. And `xarm/meat`, `rethink/meat`,
+`rethink/sugar` press on the object for 100+ steps with the attractor on
+target -- the pinch is commanded at a depth the object's top rim refuses, which
+is a jaw-thickness-at-depth question the declared aperture cannot see.
+
+**Also measured, and worth knowing before A3 is built:** the fleet's gripper
+actuators are not commensurate. Panda, Rethink and Yumi close under
+`kp = 1000` with a 20 N per-finger force cap; the three Robotiqs under
+`kp = 20` with **no** force limit; the xArm under a 50 N cap. "Fully shut"
+means a bounded squeeze on one hand and an unbounded one on another. A
+force-limited close would have to be specified per hand on the measured grip
+force, not on the actuator.
+
+**What would make this wrong.** The 35 cells are one condition and one draw;
+the 5/14 rests on two cells that changed grasp. A three-draw run of the full
+grid, gates and clamp on, paired against the same grid with them off, is what
+settles it; until then the gates are adopted on the grounds that they cost no
+success on 35 cells and remove a measured 8 mm of drop.
+
+### 7.44 The three seeds that always failed the reshelving gate were the approach, and two more executor defects the YCB ledger named
+
+The 210-cell YCB ledger of `docs/ycb_s0_results.md` had 20 cells failing at
+`approach`: the arm started 80-225 mm from the transported start with 230 to
+570 mm to travel. `_approach` ramped its setpoint over 45 fixed steps and
+handed over wherever the arm was; those cells never ran the policy. It now
+holds its final setpoint until the wrist is within 10 mm (cap 300 extra
+steps, warned). Commit `b7f7c61`.
+
+**Re-running the regression gate with only that change: 17/20 -> 20/20,
+median placement 7.1 mm (was 9.3); affine-only 4/20 -> 5/20; Mann-Whitney
+p = 5.5e-6.** Seeds 8, 11 and 16 had failed on every measurement since
+2026-09-07, through several rounds of change to the map, the policy and the
+rollout, and were read as the method's own limit. They were the executor's
+first 45 steps. The lesson is 7.26's again in a different place: a failure
+that survives every change to the thing under test is not in the thing under
+test.
+
+The second defect from the same ledger: the release gate of 7.43 opened on
+*any* support contact, and on 19 cells the object touched the shelf's front
+edge 120-320 mm short of the slot while the arm was still short of its
+attractor, so the hand let go there. Support now counts only within 40 mm of
+the attractor (the lag gate's own tolerance, rounded).
+
+What the ledger leaves, by mechanism, on the 127 failures of the seed-0 grid:
+approach 20 (fixed above); hand blocked at the grasp 17 (hammer 9, sugar 5;
+long fingers on a thin object after the support clamp, 7.43); object pushed
+away on the descent 13 (**10 are the sugar box**, 176 mm tall and 50 mm thin,
+so the arm cutting the corner of the descent grazes it -- a selection or
+approach-shape question); no purchase 26 (Rethink 11 -- its inner jaw is
+66 mm against objects 60-93 mm across, a hand limitation to report, not to
+tune away -- and the three-finger hands on the hammer 8); released short 19
+(the gate rule above); released at the right place then dropped 80-147 mm 15
+(the plan's release height is ~10 cm above the board because the object has
+rotated or slipped in the hand during the carry, sugar 7 of 15 -- the release
+height should be re-derived from the object's measured pose in the hand after
+the lift); slipped in the carry 15.
+
+The executor-free replay of the same grid on the same cached grasps
+(`ycb_replay`) and the policy grid with both fixes are running as this is
+written; they say how much of the remainder is the executor.
+
+### 7.45 The executor is at its ceiling on the YCB grid; 85 cells fail under every executor
+
+Three runs of the same 210 cells, same cached grasps on every cell (verified
+210/210), commits `b7f7c61`-`9adf5c2`:
+
+| executor | placed |
+|---|---|
+| policy, integrate law (shipped), gates + clamp + approach hold | **91** |
+| policy, `reference` law (attractor = regressed path point) | 90 |
+| position-control replay, IK per waypoint (executor-free ceiling) | **93** |
+
+The reference law is out: 7.40's "the laws do not differ" holds here too,
+where the integrator was suspected of drifting 140-370 mm on six cells.
+
+**The replay places 93, the policy 91, and they are not the same 91.** Both
+place 59; the replay places 34 the policy fails and the policy 32 the replay
+fails; **85 fail under both**; 132 are placed by at least one of the three.
+So there are two populations. Sixty-odd cells are *marginal* -- they flip with
+any change of executor, which is why every executor change since 7.43 has come
+out +-10 with p > 0.1 -- and eighty-five are structural. The rate sits on the
+structural ones, and the replay's own ledger on them says what they are:
+
+| first failure, replay, on the 85 both-fail cells | cells |
+|---|---|
+| approach: the transported **start pose is unreachable** (IK cannot get there) | 25 |
+| reach: blocked at the grasp (thin objects, long fingers; hammer 32/42 fails even here) | 23 |
+| carry: the grip slips | 13 |
+| place / settle | 13 |
+| lift / grasp | 11 |
+
+None of these is the controller. The largest is selection: the map carries
+the demonstration's starting pose to wherever the deformation puts it, and on
+25 cells that is outside the arm's reach; the funnel checks the *path* for
+collision and never asks IK whether its first waypoint can be reached. That is
+the next fix, and it is on the selection side -- reject a candidate whose
+transported start is unreachable, or begin the plan at its first reachable
+waypoint.
+
+Per hand under the replay: xarm 21, robotiq140 19, panda 17, robotiq85 16,
+rethink 8, **robotiq3f 6, robotiq3f_dex 6** of 30 -- the three-finger hands
+are *worse* under position control than under the policy (11, 12), the
+opposite of the parallel jaws. Per object: sugar 22, meat 31, mug 17, hammer
+10, **banana 13** (28 under the policy).
+
+**What would make this wrong.** One draw; the 85 is a count on that draw and
+the marginal population will reshuffle on another. The ledger's causes are
+the trace-based attribution of 7.43 applied to the replay's own trace.
+### 7.46 The funnel falls back on two cells in three, and the middle of the path is why
+
+A selection-only tally over the 210 seed-0 YCB cells (no physics; the same
+cached candidates every time) found the path check rejecting every candidate
+and falling back on **140 of 210** cells. On 100 of those the chosen fallback's
+own fault was "the carried object hits something sideways" at waypoints
+80-120, mid-carry; across all candidates, 513 such faults against 145 in the
+approach. A contact probe in physics confirmed it: `robotiq85/sugar`,
+`xarm/hammer` and `panda/banana` all dragged the object along `shelf_top`
+during the carry, the hammer for 188 control steps.
+
+The check's own debug trace of *what* it hits, on two cells, gave two
+mechanisms, both in the map rather than in the checks:
+
+* **The transported lift is not vertical.** The source lifts straight up at
+  the pick; with keypoints only at the pick and the release, the affine part
+  of the map shears that into a slant. The carried banana had moved 180 mm
+  forward by waypoint 84 while still 50 mm below the top board, and caught
+  its front edge (x = -0.010, z = 0.994).
+* **The transfer bends.** On the way to the top-left slot the residual swung
+  the object 130 mm past the slot, into the cubby's side wall (y = 0.305).
+
+Both are the draft's stated limitation: the map is pinned at 36 points and
+nowhere else. Three things were tried against it, in order, each predicted
+by the tally before any physics:
+
+| demonstration | tally: fallbacks | grid: placed | gate |
+|---|---|---|---|
+| diagonal transfer, hover 160 mm (as recorded) | 140 | 91 | 20/20 |
+| + `clear` waypoint (lift to the goal's hover height, then translate), 160 mm | 110 | **95** | 20/20 |
+| + hover 260 mm | 88 | **66** | 19/20 |
+
+The clear waypoint is kept: it is what a careful teacher does, it costs
+nothing on the paper's setting, and it moved the grid by +4 (29 gained, 25
+lost, McNemar p = 0.68 -- noise, and 86 cells reselected their grasp under
+the new plan shape, so it is not a paired result). The 260 mm hover is
+**withdrawn**: it cleared the funnel and cost the executor far more --
+place and settle failures 35 -> 60, the Panda 16 -> 6 -- because a 260 mm
+descent into the slot is where the impedance arm lags and lets go high
+(p = 0.004). The margin the map needs cannot be bought with height. Also
+found and fixed on the way: the vertical segments' step counts were fixed
+at 25 whatever the distance, so a higher descent was a faster one and the
+source demonstration stopped picking its product up at 190 mm; and the
+scene cloud keeps a halo of the object's own outline (32 points within
+20 mm of a banana at rest), now excluded from the carried-object test --
+measured inert on this grid and kept because it is right.
+
+**Where the rate sits after all of this: 91-95 of 210 on one draw, and the
+last five executor and selection changes have each moved it by fewer cells
+than flip between any two runs.** The 85 both-fail cells of 7.45 are the
+structural population; the rest is marginal. Two of the structural buckets
+are hand limitations to state rather than fix -- the Rethink's 66 mm jaw
+against 60-93 mm objects, and three-finger hands pinching the top of a 33 mm
+handle -- and the third is the map's own middle-of-path shape against a
+real-size object in a cubby, which the draft already concedes.
+
 ## 8. Open items
 
 > **Read 7.26 first.** Every end-to-end campaign has been deleted, so the items
@@ -4266,28 +4522,35 @@ rather than the difference of two separately-minimised distances.
 
 **Also open:**
 
-- **The whole scene is scaled down and the hand is not, and the proper
-  experiment has not been run.** robosuite's benchmark meshes are 1.4 to 2.5
-  times smaller than the articles they stand for -- the cereal box is
-  30 x 100 x 150 mm against a real 80 x 200 x 300, the loaf 40 x 48 x 49 against
-  a real 200 x 110 x 110 -- while the gripper is full size. The shelf was the
-  same: a 100 mm board with 88 mm of usable depth against hands that are 83 to
-  217 mm across their jaw axis.
+- ~~**The whole scene is scaled down and the hand is not, and the proper
+  experiment has not been run.**~~ **Done, twice over, and this item was never
+  struck -- which is how "the objects are scaled down" came to be believed on
+  2026-09-20 about a scene in which nothing is scaled.** `df87edc` (2026-09-15)
+  built the `real` world: robosuite's meshes scaled *up* per axis to the real
+  articles (cereal 30 x 100 x 150 -> 190 x 80 x 300 mm) with the density solved
+  to the real mass. `a40b3ca` (2026-09-19) replaced that with the **YCB** world,
+  which is the one every campaign now runs on: the YCB scans loaded at their
+  scanned size with no `scale` attribute anywhere (`grep scale
+  assets/ycb_mjcf/*.xml` is empty), CoACD-decomposed, and `_set_mass`
+  (`tpgpt/sim/objects.py`) solving one density per object so the compiled body
+  mass equals the published value exactly:
 
-  The shelf has been deepened to 280 mm as a **clearance fix** (see
-  ``SHELF_BOARD_DEPTH``), which is not the same thing. What is still untested is
-  the case that matters for hardware: **real-sized objects admit far fewer
-  grasps**, because a 200 mm-wide cereal box can only be taken across its 80 mm
-  face by an 80 mm jaw. Every filter in the funnel is currently being exercised
-  on objects that can be grasped almost anywhere, so "the filter kept enough
-  candidates" means very little.
+  | object | scan extent (mm) | YCB mass (kg) | compiled mass (kg) |
+  |---|---|---|---|
+  | sugar | 176.0 x 94.2 x 49.5 | 0.514 | 0.514 |
+  | meat | 102.1 x 83.5 x 60.1 | 0.370 | 0.370 |
+  | mug | 117.0 x 93.1 x 81.3 | 0.118 | 0.118 |
+  | hammer | 332.7 x 182.2 x 32.9 | 0.665 | 0.665 |
+  | banana | 178.4 x 108.9 x 36.7 | 0.066 | 0.066 |
 
-  It is feasible: ``MujocoXMLObject`` takes a ``scale`` argument, which
-  robosuite's convenience classes simply do not expose. Uniform factors of
-  about 2.0 (cereal), 1.5 (milk), 1.4 (can) and 2.5 (bread) reach realistic
-  sizes. It is deliberately **a separate experiment**, because scaling changes
-  which grasps exist at all and would confound anything else measured with it,
-  and because it needs the robot placement re-verified the way `7.32` did.
+  Measured by compiling each `assets/ycb_mjcf/<name>.xml` under MuJoCo 3.7.0 and
+  reading `body_mass`; re-fetching the scans on a second machine rebuilt the
+  MJCF byte-identical to the tracked one. The commit `d3275d7 "scene resizing"`
+  changed no code or asset -- only manifests -- despite its title. The one
+  simplification that remains is that the density is **uniform over the convex
+  parts**, so the hammer's centre of mass sits mid-tool rather than in its head;
+  that is a mass-distribution question, not a scaling one, and it is open under
+  the hammer's 3/42 in `docs/ycb_grid.md`.
 - **A front-approach demonstration** for a shelf with a roof. A top-down teach
   cannot solve one by construction: the approach direction is wrong, and no
   amount of warping fixes a direction the demonstration never contained. This is

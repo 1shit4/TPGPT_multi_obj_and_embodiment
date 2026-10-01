@@ -787,14 +787,18 @@ and git.
 **Transportation (done, and validated).** All of Sec. III, Appendix A,
 uncertainty propagation, the policy refit and the Sec. V-A reshelving
 validation. One demonstration transported into 20 randomised scenes:
-**17/20 at 9.1 mm**, failing on seeds 8, 11, 16; 4/20 without the nonlinear
-stage (p = 3.3e-5).
+**20/20 at 7.1 mm median** (commit `b7f7c61`), 5/20 without the nonlinear
+stage (p = 5.5e-6). It stood at **17/20, failing seeds 8, 11 and 16**, from
+2026-09-07 until 2026-09-20, re-measured across several rounds of code change
+with the same three failing seeds every time -- and those three were the
+**approach primitive handing over before the arm had arrived** (`_approach`
+ramped its setpoint over 45 steps and stopped, wherever the arm was), not the
+map or the policy. Holding the approach until the wrist is within 10 mm fixed
+all three and changed nothing else.
 
-This is the regression gate — run it after any change to the map, the policy or
-the rollout. It survived the deletion above because it is genuinely repeatable:
-fixed seeds, no diffusion model in the loop, and it has been re-measured across
-several rounds of code change at 17/20 with the same three failing seeds every
-time.
+This is the regression gate -- run it after any change to the map, the policy or
+the rollout (`python -m tpgpt.experiments.ablate_residual`). It is genuinely
+repeatable: fixed seeds, no diffusion model in the loop.
 
 **Keypoint extraction (built; the default is defensible, the trade is not
 resolved).** A box fitted to the object's own point cloud in a frame built from

@@ -1,0 +1,6851 @@
+{
+  "title": "cell_034.npz campaign",
+  "description": "",
+  "settings": {
+    "campaign": "cell_034.npz",
+    "n_settings": 35,
+    "varied": {
+      "gripper": [
+        "xarm",
+        "robotiq3f",
+        "robotiq140",
+        "robotiq85",
+        "robotiq3f_dex",
+        "panda",
+        "rethink"
+      ],
+      "obj": [
+        "sugar",
+        "meat",
+        "mug",
+        "hammer",
+        "banana"
+      ],
+      "objects": [
+        [
+          "sugar"
+        ],
+        [
+          "meat"
+        ],
+        [
+          "mug"
+        ],
+        [
+          "hammer"
+        ],
+        [
+          "banana"
+        ]
+      ]
+    },
+    "fixed": {
+      "pick_config": "P0",
+      "seed": 0,
+      "slot": "top middle",
+      "world": "ycb"
+    },
+    "scene_objects": [
+      "milk",
+      "can",
+      "cereal",
+      "bread"
+    ],
+    "default_keypoints": [
+      "box"
+    ],
+    "max_steps": 800,
+    "rollout_kwargs": {}
+  },
+  "design": {
+    "map_fingerprint_grid": {
+      "lower": [
+        -0.35,
+        -0.35,
+        0.8
+      ],
+      "upper": [
+        0.4,
+        0.35,
+        1.35
+      ],
+      "points_per_axis": 20,
+      "order": "numpy meshgrid, indexing='ij', flattened C-order",
+      "stored": "displacement phi(x) - x, float32, shape (N, 3)"
+    },
+    "condition_block": {
+      "design": "randomised block: (gripper, object) is the treatment, the fixed condition set is the block",
+      "pick_configs": {
+        "P0": {
+          "x": -0.14,
+          "y": -0.15,
+          "yaw_deg": 0.0
+        }
+      },
+      "destinations": [
+        "top middle"
+      ],
+      "conditions": [
+        "P0+top middle"
+      ],
+      "note": "pick pose and destination are sampled once and the identical sample is used for every cell; a pick pose drawn per cell would confound the gripper with the difficulty of the pose it happened to draw, and no analysis afterwards separates them"
+    }
+  },
+  "results": {
+    "runs": 35,
+    "succeeded": 11,
+    "refused": 0,
+    "stages": {
+      "approach": 32,
+      "reach": 22,
+      "grasp": 20,
+      "lift": 18,
+      "carry": 15,
+      "place": 12,
+      "settle": 11
+    }
+  },
+  "thresholds": {
+    "reach_tolerance_m": 0.045,
+    "closing_budget_fraction": 0.25,
+    "lift_height_m": 0.02,
+    "carry_fraction": 0.6,
+    "place_tolerance_m": 0.06
+  },
+  "runs": [
+    {
+      "label": "xarm sugar top middle 0",
+      "outcome": "placed_in_the_wrong_place",
+      "detail": "ended 433 mm from the slot",
+      "blame": "reach",
+      "stages": {
+        "approach": true,
+        "reach": false,
+        "grasp": true,
+        "lift": false,
+        "carry": false,
+        "place": false,
+        "settle": false
+      },
+      "stage_detail": "failed at 'reach': the jaws closed 46 mm from the planned grasp point, at step 103 (15 mm across the closing axis against a 20 mm budget, +36 mm along the approach, 25 mm along the fingers) (the arm did not get there)",
+      "placement_error_xy": 0.43267216063210795,
+      "n_keypoints": 18,
+      "min_det": 0.7126576607325864,
+      "cloud_points": 4096,
+      "grasps_generated": 100,
+      "fallbacks": [],
+      "survivors": 5,
+      "executable_fraction": null,
+      "path_fell_back": false,
+      "path_rank_examined": 1,
+      "gripper": "xarm",
+      "object": "sugar",
+      "grasp_chosen_index": 32,
+      "steps": 279,
+      "seconds": 8.7,
+      "world": "ycb",
+      "executor": "policy",
+      "seed": 0,
+      "pick_config_id": "P0",
+      "destination": "top middle",
+      "condition_id": "P0+top middle",
+      "refused": false,
+      "refusal_reason": "",
+      "det_J_at_grasp": 1.0330112039023533,
+      "det_J_at_release": 1.0026573541844088,
+      "grasp_pose_target": [
+        [
+          -0.663770869,
+          -0.747759427,
+          0.016250345,
+          -0.236310307
+        ],
+        [
+          -0.747131364,
+          0.663907807,
+          0.031955434,
+          -0.144126757
+        ],
+        [
+          -0.034683708,
+          0.009069944,
+          -0.999357182,
+          0.972265898
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "grasp_pose_release": [
+        [
+          -0.999398339,
+          -0.000314769,
+          0.03468228,
+          0.172290945
+        ],
+        [
+          -0.0,
+          0.999958818,
+          0.009075404,
+          0.002116676
+        ],
+        [
+          -0.034683708,
+          0.009069944,
+          -0.999357182,
+          1.166265898
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "orientation_error_grasp_deg": 1.5685529455303904,
+      "orientation_error_release_deg": 0.8626223667911573,
+      "placement_error_3d_mm": 474.1689729663944,
+      "placement_error_components_mm": [
+        -409.096,
+        -140.874,
+        -193.987
+      ],
+      "release_error_3d_mm": 474.3744631234006,
+      "release_error_components_mm": [
+        -409.521,
+        -140.37,
+        -193.96
+      ],
+      "release_drop_mm": 0.6598989339154265,
+      "release_gate_steps": null,
+      "release_gate_reason": null,
+      "close_gate_steps": null,
+      "close_gate_reason": null,
+      "object_stand_off_mm": 87.5809096165745,
+      "first_failure_stage": "reach",
+      "map_fit": 0.011900762998266146,
+      "label_transport": 0.01520566100225551,
+      "policy_refit": 0.14212539800064405,
+      "survivors_per_stage": {
+        "generated": [
+          100,
+          100
+        ],
+        "visibility": [
+          100,
+          88
+        ],
+        "support": [
+          88,
+          29
+        ],
+        "place zone": [
+          29,
+          26
+        ],
+        "on target": [
+          26,
+          26
+        ],
+        "jaw width": [
+          26,
+          25
+        ],
+        "collision": [
+          25,
+          25
+        ],
+        "centred": [
+          25,
+          8
+        ],
+        "distinct": [
+          8,
+          5
+        ]
+      },
+      "funnel_fallbacks": [],
+      "m_final_phase": 0.9999812410951732,
+      "m_frozen_steps": 19,
+      "m_steps": 279,
+      "m_close_step": 103,
+      "m_close_phase": 0.24838904724898983,
+      "m_reach_error": 0.04641590191440513,
+      "m_commanded_error": 0.016290740485464094,
+      "m_lag_at_close": 0.03438465787042264,
+      "m_closest_commanded": 0.016091294349132736,
+      "m_closest_commanded_step": 107,
+      "m_closest_transported": 2.348542081593508e-07,
+      "m_reach_closing": 0.01529849897082194,
+      "m_reach_approach": 0.036173860098379224,
+      "m_reach_signed_approach": 0.036173860098379224,
+      "m_reach_jaw": 0.02473548327004501,
+      "m_closing_budget": 0.019959809897988297,
+      "m_push_before_close": 0.008669890583171792,
+      "m_closest_hand": 0.04517172529412395,
+      "m_closest_hand_step": 106,
+      "m_closed_early": false,
+      "m_reach_within_budget": true,
+      "m_drift_max": 0.04443461744603121,
+      "m_drift_median": 0.01584681441269649,
+      "m_drift_at_step": 227,
+      "m_drift_frechet": 0.050915728801227335,
+      "m_contact_steps": 51,
+      "m_lift_height": 0.0010661787210805018,
+      "m_peak_grip_force": 332.83336442151904,
+      "m_release_step": 238,
+      "m_carry_fraction": 0.2740740740740741,
+      "m_release_error_xy": 0.43290968475055397,
+      "m_final_error_xy": 0.43267216063210795,
+      "arrays": "cell_000.npz",
+      "report": "run_000/report.html"
+    },
+    {
+      "label": "xarm meat top middle 0",
+      "outcome": "placed_in_the_wrong_place",
+      "detail": "ended 434 mm from the slot",
+      "blame": "lift",
+      "stages": {
+        "approach": true,
+        "reach": true,
+        "grasp": true,
+        "lift": false,
+        "carry": false,
+        "place": false,
+        "settle": false
+      },
+      "stage_detail": "failed at 'lift': the object rose 6 mm above where it started",
+      "placement_error_xy": 0.4337703573634938,
+      "n_keypoints": 18,
+      "min_det": 0.9874631358522563,
+      "cloud_points": 4096,
+      "grasps_generated": 100,
+      "fallbacks": [],
+      "survivors": 4,
+      "executable_fraction": null,
+      "path_fell_back": false,
+      "path_rank_examined": 1,
+      "gripper": "xarm",
+      "object": "meat",
+      "grasp_chosen_index": 3,
+      "steps": 325,
+      "seconds": 9.9,
+      "world": "ycb",
+      "executor": "policy",
+      "seed": 0,
+      "pick_config_id": "P0",
+      "destination": "top middle",
+      "condition_id": "P0+top middle",
+      "refused": false,
+      "refusal_reason": "",
+      "det_J_at_grasp": 0.9983472976261458,
+      "det_J_at_release": 1.0003400164999958,
+      "grasp_pose_target": [
+        [
+          -0.884923545,
+          0.465276804,
+          0.0206837,
+          -0.230368583
+        ],
+        [
+          0.465066535,
+          0.885159988,
+          -0.014314814,
+          -0.142037504
+        ],
+        [
+          -0.024968734,
+          -0.003048219,
+          -0.999683585,
+          0.881076962
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "grasp_pose_release": [
+        [
+          -0.999688233,
+          7.6134e-05,
+          0.024968618,
+          0.180705145
+        ],
+        [
+          -0.0,
+          0.999995351,
+          -0.00304917,
+          -0.002007528
+        ],
+        [
+          -0.024968734,
+          -0.003048219,
+          -0.999683585,
+          1.075076962
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "orientation_error_grasp_deg": 0.5577223685934494,
+      "orientation_error_release_deg": 0.6067014144267091,
+      "placement_error_3d_mm": 475.17651765133877,
+      "placement_error_components_mm": [
+        -410.565,
+        -139.976,
+        -194.0
+      ],
+      "release_error_3d_mm": 475.17651765133877,
+      "release_error_components_mm": [
+        -410.565,
+        -139.976,
+        -194.0
+      ],
+      "release_drop_mm": 0.0,
+      "release_gate_steps": null,
+      "release_gate_reason": null,
+      "close_gate_steps": null,
+      "close_gate_reason": null,
+      "object_stand_off_mm": 41.61552594210083,
+      "first_failure_stage": "lift",
+      "map_fit": 0.012794408998161089,
+      "label_transport": 0.015084152997587807,
+      "policy_refit": 0.14133987899549538,
+      "survivors_per_stage": {
+        "generated": [
+          100,
+          100
+        ],
+        "visibility": [
+          100,
+          74
+        ],
+        "support": [
+          74,
+          36
+        ],
+        "place zone": [
+          36,
+          36
+        ],
+        "on target": [
+          36,
+          36
+        ],
+        "jaw width": [
+          36,
+          36
+        ],
+        "collision": [
+          36,
+          33
+        ],
+        "centred": [
+          33,
+          12
+        ],
+        "distinct": [
+          12,
+          4
+        ]
+      },
+      "funnel_fallbacks": [],
+      "m_final_phase": 0.9998301875782215,
+      "m_frozen_steps": 13,
+      "m_steps": 325,
+      "m_close_step": 74,
+      "m_close_phase": 0.2507167199725602,
+      "m_reach_error": 0.024790212352567245,
+      "m_commanded_error": 0.0007113228959112697,
+      "m_lag_at_close": 0.024238804530152272,
+      "m_closest_commanded": 0.00028631324819661165,
+      "m_closest_commanded_step": 76,
+      "m_closest_transported": 8.35969772141954e-07,
+      "m_reach_closing": 0.006113827334215553,
+      "m_reach_approach": 0.023922077528216266,
+      "m_reach_signed_approach": 0.023922077528216266,
+      "m_reach_jaw": 0.002215849966048418,
+      "m_closing_budget": 0.009040250094504217,
+      "m_push_before_close": 0.01621691967312286,
+      "m_closest_hand": 0.024790212352567245,
+      "m_closest_hand_step": 74,
+      "m_closed_early": false,
+      "m_reach_within_budget": true,
+      "m_drift_max": 0.006998198113595278,
+      "m_drift_median": 0.003118689071901155,
+      "m_drift_at_step": 176,
+      "m_drift_frechet": 0.009418947327269635,
+      "m_contact_steps": 59,
+      "m_lift_height": 0.00597507626607563,
+      "m_peak_grip_force": 406.6761123113298,
+      "m_release_step": 280,
+      "m_carry_fraction": 0.25728155339805825,
+      "m_release_error_xy": 0.4337703573634938,
+      "m_final_error_xy": 0.4337703573634938,
+      "arrays": "cell_001.npz",
+      "report": "run_001/report.html"
+    },
+    {
+      "label": "xarm mug top middle 0",
+      "outcome": "success",
+      "detail": "",
+      "blame": "success",
+      "stages": {
+        "approach": true,
+        "reach": true,
+        "grasp": true,
+        "lift": true,
+        "carry": true,
+        "place": true,
+        "settle": true
+      },
+      "stage_detail": "every stage completed",
+      "placement_error_xy": 0.022170720880050884,
+      "n_keypoints": 18,
+      "min_det": 0.9604553976261483,
+      "cloud_points": 4096,
+      "grasps_generated": 100,
+      "fallbacks": [
+        "centred"
+      ],
+      "survivors": 8,
+      "executable_fraction": null,
+      "path_fell_back": false,
+      "path_rank_examined": 3,
+      "gripper": "xarm",
+      "object": "mug",
+      "grasp_chosen_index": 14,
+      "steps": 287,
+      "seconds": 9.4,
+      "world": "ycb",
+      "executor": "policy",
+      "seed": 0,
+      "pick_config_id": "P0",
+      "destination": "top middle",
+      "condition_id": "P0+top middle",
+      "refused": false,
+      "refusal_reason": "",
+      "det_J_at_grasp": 1.0092725730280887,
+      "det_J_at_release": 0.9989376074457376,
+      "grasp_pose_target": [
+        [
+          -0.57768491,
+          0.816040525,
+          0.018921044,
+          -0.210662802
+        ],
+        [
+          0.807274504,
+          0.567742332,
+          0.161172332,
+          -0.182822965
+        ],
+        [
+          0.120780877,
+          0.1083813,
+          -0.986744888,
+          0.892320803
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "grasp_pose_release": [
+        [
+          -0.992679193,
+          0.013186927,
+          -0.12005884,
+          0.223316946
+        ],
+        [
+          0.0,
+          0.994021931,
+          0.10918059,
+          -0.009131832
+        ],
+        [
+          0.120780877,
+          0.1083813,
+          -0.986744888,
+          1.086320803
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "orientation_error_grasp_deg": 1.1910495984839151,
+      "orientation_error_release_deg": 0.7264510860095632,
+      "placement_error_3d_mm": 22.171060925630282,
+      "placement_error_components_mm": [
+        -3.784,
+        -21.845,
+        0.123
+      ],
+      "release_error_3d_mm": 11.890415342042896,
+      "release_error_components_mm": [
+        -7.202,
+        -7.731,
+        5.453
+      ],
+      "release_drop_mm": 15.469536558383808,
+      "release_gate_steps": null,
+      "release_gate_reason": null,
+      "close_gate_steps": null,
+      "close_gate_reason": null,
+      "object_stand_off_mm": 40.974554688249285,
+      "first_failure_stage": null,
+      "map_fit": 0.012759540994011331,
+      "label_transport": 0.014849671999400016,
+      "policy_refit": 0.12578392399882432,
+      "survivors_per_stage": {
+        "generated": [
+          100,
+          100
+        ],
+        "visibility": [
+          100,
+          95
+        ],
+        "support": [
+          95,
+          65
+        ],
+        "place zone": [
+          65,
+          56
+        ],
+        "on target": [
+          56,
+          56
+        ],
+        "jaw width": [
+          56,
+          8
+        ],
+        "collision": [
+          8,
+          8
+        ],
+        "centred": [
+          8,
+          8
+        ],
+        "distinct": [
+          8,
+          8
+        ]
+      },
+      "funnel_fallbacks": [
+        "centred"
+      ],
+      "m_final_phase": 0.9999919100168106,
+      "m_frozen_steps": 0,
+      "m_steps": 287,
+      "m_close_step": 72,
+      "m_close_phase": 0.25069902068419897,
+      "m_reach_error": 0.015518678256745059,
+      "m_commanded_error": 0.0005020233636866898,
+      "m_lag_at_close": 0.015133445319996644,
+      "m_closest_commanded": 9.749663885032029e-05,
+      "m_closest_commanded_step": 88,
+      "m_closest_transported": 4.671441222160943e-07,
+      "m_reach_closing": 0.009508435917610627,
+      "m_reach_approach": 0.012246908685964135,
+      "m_reach_signed_approach": 0.012246908685964135,
+      "m_reach_jaw": 0.0006574474298925519,
+      "m_closing_budget": 0.0,
+      "m_push_before_close": 4.9508440291348684e-06,
+      "m_closest_hand": 0.002041651824286284,
+      "m_closest_hand_step": 107,
+      "m_closed_early": false,
+      "m_reach_within_budget": false,
+      "m_drift_max": 0.0034820093263929616,
+      "m_drift_median": 0.0002255714480986127,
+      "m_drift_at_step": 286,
+      "m_drift_frechet": 0.00775088226456028,
+      "m_contact_steps": 172,
+      "m_lift_height": 0.34893099640848535,
+      "m_peak_grip_force": 305.1103923728869,
+      "m_release_step": 240,
+      "m_carry_fraction": 0.9642857142857143,
+      "m_release_error_xy": 0.010566199736659542,
+      "m_final_error_xy": 0.022170720880050884,
+      "arrays": "cell_002.npz",
+      "report": "run_002/report.html"
+    },
+    {
+      "label": "xarm hammer top middle 0",
+      "outcome": "arm_could_not_hold_the_pose",
+      "detail": "the arm settled 2 mm behind its target after 477 steps and stopped making progress",
+      "blame": "carry",
+      "stages": {
+        "approach": true,
+        "reach": true,
+        "grasp": true,
+        "lift": true,
+        "carry": false,
+        "place": false,
+        "settle": false
+      },
+      "stage_detail": "failed at 'carry': it was in the hand for 57% of the carry (steps 155 to 476)",
+      "placement_error_xy": 0.36152424453742144,
+      "n_keypoints": 18,
+      "min_det": 0.5652773782760468,
+      "cloud_points": 4096,
+      "grasps_generated": 100,
+      "fallbacks": [
+        "collision",
+        "centred"
+      ],
+      "survivors": 5,
+      "executable_fraction": null,
+      "path_fell_back": true,
+      "path_rank_examined": 5,
+      "gripper": "xarm",
+      "object": "hammer",
+      "grasp_chosen_index": 6,
+      "steps": 477,
+      "seconds": 13.8,
+      "world": "ycb",
+      "executor": "policy",
+      "seed": 0,
+      "pick_config_id": "P0",
+      "destination": "top middle",
+      "condition_id": "P0+top middle",
+      "refused": false,
+      "refusal_reason": "",
+      "det_J_at_grasp": 1.0535699245719583,
+      "det_J_at_release": 1.0020718111563605,
+      "grasp_pose_target": [
+        [
+          0.260943034,
+          0.913138254,
+          0.313188859,
+          -0.214143868
+        ],
+        [
+          0.952624792,
+          -0.296085944,
+          0.069563772,
+          -0.1247472
+        ],
+        [
+          0.156252161,
+          0.28019929,
+          -0.947139705,
+          0.817866724
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "grasp_pose_release": [
+        [
+          -0.987717198,
+          0.044326191,
+          -0.149832995,
+          0.174431001
+        ],
+        [
+          -3e-09,
+          0.958917904,
+          0.283683721,
+          -0.001920684
+        ],
+        [
+          0.156252161,
+          0.28019929,
+          -0.947139705,
+          1.011866724
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "orientation_error_grasp_deg": 1.6770576211089077,
+      "orientation_error_release_deg": 0.9043440236075203,
+      "placement_error_3d_mm": 410.90283224557817,
+      "placement_error_components_mm": [
+        -361.524,
+        0.498,
+        -195.298
+      ],
+      "release_error_3d_mm": 410.90283224557817,
+      "release_error_components_mm": [
+        -361.524,
+        0.498,
+        -195.298
+      ],
+      "release_drop_mm": 0.0,
+      "release_gate_steps": null,
+      "release_gate_reason": null,
+      "close_gate_steps": null,
+      "close_gate_reason": null,
+      "object_stand_off_mm": 15.927132805352961,
+      "first_failure_stage": "carry",
+      "map_fit": 0.01216823499999009,
+      "label_transport": 0.014918299006239977,
+      "policy_refit": 0.1452624610028579,
+      "survivors_per_stage": {
+        "generated": [
+          100,
+          100
+        ],
+        "visibility": [
+          100,
+          81
+        ],
+        "support": [
+          81,
+          40
+        ],
+        "place zone": [
+          40,
+          19
+        ],
+        "on target": [
+          19,
+          19
+        ],
+        "jaw width": [
+          19,
+          5
+        ],
+        "collision": [
+          5,
+          5
+        ],
+        "centred": [
+          5,
+          5
+        ],
+        "distinct": [
+          5,
+          5
+        ]
+      },
+      "funnel_fallbacks": [
+        "collision",
+        "centred"
+      ],
+      "m_final_phase": 0.6483052660065679,
+      "m_frozen_steps": 115,
+      "m_steps": 477,
+      "m_close_step": 155,
+      "m_close_phase": 0.24891350799145132,
+      "m_reach_error": 0.03417114196366323,
+      "m_commanded_error": 0.0030191117652173744,
+      "m_lag_at_close": 0.031526113911242035,
+      "m_closest_commanded": 0.002373078930599889,
+      "m_closest_commanded_step": 159,
+      "m_closest_transported": 1.503811102073233e-07,
+      "m_reach_closing": 0.007509934051822542,
+      "m_reach_approach": 0.033207939015950226,
+      "m_reach_signed_approach": 0.033207939015950226,
+      "m_reach_jaw": 0.0029156462820535464,
+      "m_closing_budget": 0.0,
+      "m_push_before_close": 0.00010956921362247871,
+      "m_closest_hand": 0.03401881192071973,
+      "m_closest_hand_step": 156,
+      "m_closed_early": false,
+      "m_reach_within_budget": false,
+      "m_drift_max": 0.05375530613116365,
+      "m_drift_median": 0.0035376376176920687,
+      "m_drift_at_step": 476,
+      "m_drift_frechet": 0.16980009462833695,
+      "m_contact_steps": 184,
+      "m_lift_height": 0.1994330275991143,
+      "m_peak_grip_force": 521.5666940906832,
+      "m_release_step": 476,
+      "m_carry_fraction": 0.5669781931464174,
+      "m_release_error_xy": 0.36152424453742144,
+      "m_final_error_xy": 0.36152424453742144,
+      "arrays": "cell_003.npz",
+      "report": "run_003/report.html"
+    },
+    {
+      "label": "xarm banana top middle 0",
+      "outcome": "placed_in_the_wrong_place",
+      "detail": "ended 111 mm from the slot",
+      "blame": "place",
+      "stages": {
+        "approach": true,
+        "reach": true,
+        "grasp": true,
+        "lift": true,
+        "carry": true,
+        "place": false,
+        "settle": false
+      },
+      "stage_detail": "failed at 'place': it was let go 119 mm from the middle of the slot",
+      "placement_error_xy": 0.1110370919785976,
+      "n_keypoints": 18,
+      "min_det": 0.9077758716483683,
+      "cloud_points": 4096,
+      "grasps_generated": 100,
+      "fallbacks": [
+        "collision"
+      ],
+      "survivors": 4,
+      "executable_fraction": null,
+      "path_fell_back": true,
+      "path_rank_examined": 4,
+      "gripper": "xarm",
+      "object": "banana",
+      "grasp_chosen_index": 42,
+      "steps": 372,
+      "seconds": 11.6,
+      "world": "ycb",
+      "executor": "policy",
+      "seed": 0,
+      "pick_config_id": "P0",
+      "destination": "top middle",
+      "condition_id": "P0+top middle",
+      "refused": false,
+      "refusal_reason": "",
+      "det_J_at_grasp": 1.014667922113298,
+      "det_J_at_release": 0.9972969516477177,
+      "grasp_pose_target": [
+        [
+          -0.851878199,
+          -0.5118295,
+          -0.111058979,
+          -0.261153469
+        ],
+        [
+          -0.497373153,
+          0.857028051,
+          -0.134621195,
+          -0.14001727
+        ],
+        [
+          0.164083759,
+          -0.059443107,
+          -0.984653765,
+          0.827997403
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "grasp_pose_release": [
+        [
+          -0.98644641,
+          -0.009887662,
+          -0.163785574,
+          0.166992697
+        ],
+        [
+          0.0,
+          0.998182724,
+          -0.060259844,
+          0.012621372
+        ],
+        [
+          0.164083759,
+          -0.059443107,
+          -0.984653765,
+          1.021997403
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "orientation_error_grasp_deg": 1.2546216014729297,
+      "orientation_error_release_deg": 0.5135861500884011,
+      "placement_error_3d_mm": 111.03720064658145,
+      "placement_error_components_mm": [
+        -108.417,
+        -23.981,
+        0.155
+      ],
+      "release_error_3d_mm": 121.29477063539547,
+      "release_error_components_mm": [
+        -114.352,
+        -31.452,
+        25.431
+      ],
+      "release_drop_mm": 27.017118451423137,
+      "release_gate_steps": null,
+      "release_gate_reason": null,
+      "close_gate_steps": null,
+      "close_gate_reason": null,
+      "object_stand_off_mm": 18.27557307076466,
+      "first_failure_stage": "place",
+      "map_fit": 0.011835733996122144,
+      "label_transport": 0.014876973997161258,
+      "policy_refit": 0.1768831700028386,
+      "survivors_per_stage": {
+        "generated": [
+          100,
+          100
+        ],
+        "visibility": [
+          100,
+          76
+        ],
+        "support": [
+          76,
+          50
+        ],
+        "place zone": [
+          50,
+          23
+        ],
+        "on target": [
+          23,
+          23
+        ],
+        "jaw width": [
+          23,
+          19
+        ],
+        "collision": [
+          19,
+          19
+        ],
+        "centred": [
+          19,
+          5
+        ],
+        "distinct": [
+          5,
+          4
+        ]
+      },
+      "funnel_fallbacks": [
+        "collision"
+      ],
+      "m_final_phase": 0.9997512408350936,
+      "m_frozen_steps": 6,
+      "m_steps": 372,
+      "m_close_step": 82,
+      "m_close_phase": 0.2501534810206571,
+      "m_reach_error": 0.01364108892490456,
+      "m_commanded_error": 0.0009211161192847246,
+      "m_lag_at_close": 0.013707813698382577,
+      "m_closest_commanded": 0.000683226665011197,
+      "m_closest_commanded_step": 115,
+      "m_closest_transported": 4.11542304107101e-07,
+      "m_reach_closing": 0.006914248007691204,
+      "m_reach_approach": 0.010365329619689426,
+      "m_reach_signed_approach": 0.010365329619689426,
+      "m_reach_jaw": 0.005552693705378341,
+      "m_closing_budget": 0.004162718316470963,
+      "m_push_before_close": 2.1189395629031746e-06,
+      "m_closest_hand": 0.01364108892490456,
+      "m_closest_hand_step": 82,
+      "m_closed_early": false,
+      "m_reach_within_budget": false,
+      "m_drift_max": 0.016689318054050908,
+      "m_drift_median": 0.0014077474464776131,
+      "m_drift_at_step": 334,
+      "m_drift_frechet": 0.1779009697406269,
+      "m_contact_steps": 240,
+      "m_lift_height": 0.2790604432764585,
+      "m_peak_grip_force": 694.7560598973105,
+      "m_release_step": 325,
+      "m_carry_fraction": 0.9670781893004116,
+      "m_release_error_xy": 0.1185987755528241,
+      "m_final_error_xy": 0.1110370919785976,
+      "arrays": "cell_004.npz",
+      "report": "run_004/report.html"
+    },
+    {
+      "label": "robotiq3f sugar top middle 0",
+      "outcome": "placed_in_the_wrong_place",
+      "detail": "ended 528 mm from the slot",
+      "blame": "reach",
+      "stages": {
+        "approach": true,
+        "reach": false,
+        "grasp": false,
+        "lift": false,
+        "carry": false,
+        "place": false,
+        "settle": false
+      },
+      "stage_detail": "failed at 'reach': the jaws closed 125 mm from the planned grasp point, at step 139 (45 mm across the closing axis against a 32 mm budget, +100 mm along the approach, 60 mm along the fingers) (the motion was aimed there wrongly)",
+      "placement_error_xy": 0.5282484104261661,
+      "n_keypoints": 18,
+      "min_det": 0.7139303297256407,
+      "cloud_points": 4096,
+      "grasps_generated": 100,
+      "fallbacks": [],
+      "survivors": 6,
+      "executable_fraction": null,
+      "path_fell_back": false,
+      "path_rank_examined": 1,
+      "gripper": "robotiq3f",
+      "object": "sugar",
+      "grasp_chosen_index": 13,
+      "steps": 320,
+      "seconds": 11.3,
+      "world": "ycb",
+      "executor": "policy",
+      "seed": 0,
+      "pick_config_id": "P0",
+      "destination": "top middle",
+      "condition_id": "P0+top middle",
+      "refused": false,
+      "refusal_reason": "",
+      "det_J_at_grasp": 1.0333492766248527,
+      "det_J_at_release": 1.002757607646645,
+      "grasp_pose_target": [
+        [
+          -0.658629677,
+          -0.752466519,
+          0.001042729,
+          -0.238243617
+        ],
+        [
+          -0.751595691,
+          0.65793286,
+          0.047204538,
+          -0.134794977
+        ],
+        [
+          -0.03620588,
+          0.030306599,
+          -0.9988847,
+          0.92751073
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "grasp_pose_release": [
+        [
+          -0.999344352,
+          -0.001097997,
+          0.036189227,
+          0.178107602
+        ],
+        [
+          0.0,
+          0.999540046,
+          0.030326482,
+          0.009727913
+        ],
+        [
+          -0.03620588,
+          0.030306599,
+          -0.9988847,
+          1.12151073
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "orientation_error_grasp_deg": 1.5880126860107047,
+      "orientation_error_release_deg": 0.8871788742032143,
+      "placement_error_3d_mm": 588.6893788396181,
+      "placement_error_components_mm": [
+        -480.217,
+        -220.086,
+        -259.825
+      ],
+      "release_error_3d_mm": 588.6907162783701,
+      "release_error_components_mm": [
+        -480.222,
+        -220.08,
+        -259.825
+      ],
+      "release_drop_mm": 0.007670134621868467,
+      "release_gate_steps": null,
+      "release_gate_reason": null,
+      "close_gate_steps": null,
+      "close_gate_reason": null,
+      "object_stand_off_mm": 87.58090961075737,
+      "first_failure_stage": "reach",
+      "map_fit": 0.012840800001868047,
+      "label_transport": 0.0244498339961865,
+      "policy_refit": 0.5672446159951505,
+      "survivors_per_stage": {
+        "generated": [
+          100,
+          100
+        ],
+        "visibility": [
+          100,
+          85
+        ],
+        "support": [
+          85,
+          26
+        ],
+        "place zone": [
+          26,
+          18
+        ],
+        "on target": [
+          18,
+          18
+        ],
+        "jaw width": [
+          18,
+          18
+        ],
+        "collision": [
+          18,
+          18
+        ],
+        "centred": [
+          18,
+          10
+        ],
+        "distinct": [
+          10,
+          6
+        ]
+      },
+      "funnel_fallbacks": [],
+      "m_final_phase": 0.9999808294282782,
+      "m_frozen_steps": 31,
+      "m_steps": 320,
+      "m_close_step": 139,
+      "m_close_phase": 0.24073787951457262,
+      "m_reach_error": 0.12488092228340528,
+      "m_commanded_error": 0.07796866863922314,
+      "m_lag_at_close": 0.06757099019022238,
+      "m_closest_commanded": 0.0769409470780837,
+      "m_closest_commanded_step": 136,
+      "m_closest_transported": 2.3998629238574094e-07,
+      "m_reach_closing": 0.044797498869968276,
+      "m_reach_approach": 0.10011657225762723,
+      "m_reach_signed_approach": 0.10011657225762723,
+      "m_reach_jaw": 0.05970848380563924,
+      "m_closing_budget": 0.03242970794935985,
+      "m_push_before_close": 0.01624245222325801,
+      "m_closest_hand": 0.11124687875754753,
+      "m_closest_hand_step": 179,
+      "m_closed_early": false,
+      "m_reach_within_budget": false,
+      "m_drift_max": 0.07259062792211639,
+      "m_drift_median": 0.04740363930475104,
+      "m_drift_at_step": 174,
+      "m_drift_frechet": 0.10785906473620592,
+      "m_contact_steps": 94,
+      "m_lift_height": 0.005474271596638158,
+      "m_peak_grip_force": 48.14918628870403,
+      "m_release_step": 277,
+      "m_carry_fraction": 0.2753623188405797,
+      "m_release_error_xy": 0.5282499278006253,
+      "m_final_error_xy": 0.5282484104261661,
+      "arrays": "cell_005.npz",
+      "report": "run_005/report.html"
+    },
+    {
+      "label": "robotiq3f meat top middle 0",
+      "outcome": "success",
+      "detail": "",
+      "blame": "success",
+      "stages": {
+        "approach": true,
+        "reach": true,
+        "grasp": true,
+        "lift": true,
+        "carry": true,
+        "place": true,
+        "settle": true
+      },
+      "stage_detail": "every stage completed",
+      "placement_error_xy": 0.009148122456584317,
+      "n_keypoints": 18,
+      "min_det": 0.932050745616798,
+      "cloud_points": 4096,
+      "grasps_generated": 100,
+      "fallbacks": [],
+      "survivors": 6,
+      "executable_fraction": null,
+      "path_fell_back": false,
+      "path_rank_examined": 3,
+      "gripper": "robotiq3f",
+      "object": "meat",
+      "grasp_chosen_index": 23,
+      "steps": 296,
+      "seconds": 11.3,
+      "world": "ycb",
+      "executor": "policy",
+      "seed": 0,
+      "pick_config_id": "P0",
+      "destination": "top middle",
+      "condition_id": "P0+top middle",
+      "refused": false,
+      "refusal_reason": "",
+      "det_J_at_grasp": 1.0084684034069702,
+      "det_J_at_release": 1.0041807506095062,
+      "grasp_pose_target": [
+        [
+          -0.790871452,
+          0.585987069,
+          0.176469549,
+          -0.229562141
+        ],
+        [
+          0.610741105,
+          0.737385637,
+          0.288544147,
+          -0.140850584
+        ],
+        [
+          0.038957028,
+          0.335978536,
+          -0.941063639,
+          0.857846897
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "grasp_pose_release": [
+        [
+          -0.999240887,
+          0.013098672,
+          -0.036688893,
+          0.181088693
+        ],
+        [
+          4e-09,
+          0.941778556,
+          0.336233775,
+          -0.000353376
+        ],
+        [
+          0.038957028,
+          0.335978536,
+          -0.941063639,
+          1.051846897
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "orientation_error_grasp_deg": 1.1121950845579938,
+      "orientation_error_release_deg": 0.8976829548723588,
+      "placement_error_3d_mm": 9.148616281200473,
+      "placement_error_components_mm": [
+        -8.524,
+        3.321,
+        0.095
+      ],
+      "release_error_3d_mm": 10.167271846025583,
+      "release_error_components_mm": [
+        -4.85,
+        1.701,
+        8.772
+      ],
+      "release_drop_mm": 9.560912945495877,
+      "release_gate_steps": null,
+      "release_gate_reason": null,
+      "close_gate_steps": null,
+      "close_gate_reason": null,
+      "object_stand_off_mm": 41.61552594210083,
+      "first_failure_stage": null,
+      "map_fit": 0.014699343002575915,
+      "label_transport": 0.015062578997458331,
+      "policy_refit": 0.18489300899818772,
+      "survivors_per_stage": {
+        "generated": [
+          100,
+          100
+        ],
+        "visibility": [
+          100,
+          79
+        ],
+        "support": [
+          79,
+          29
+        ],
+        "place zone": [
+          29,
+          24
+        ],
+        "on target": [
+          24,
+          24
+        ],
+        "jaw width": [
+          24,
+          24
+        ],
+        "collision": [
+          24,
+          19
+        ],
+        "centred": [
+          19,
+          8
+        ],
+        "distinct": [
+          8,
+          6
+        ]
+      },
+      "funnel_fallbacks": [],
+      "m_final_phase": 0.9956829907347599,
+      "m_frozen_steps": 1,
+      "m_steps": 296,
+      "m_close_step": 79,
+      "m_close_phase": 0.25058919187347023,
+      "m_reach_error": 0.01942665283000093,
+      "m_commanded_error": 0.0024397278658139323,
+      "m_lag_at_close": 0.0189037332092863,
+      "m_closest_commanded": 0.0021384581719437377,
+      "m_closest_commanded_step": 94,
+      "m_closest_transported": 4.145275287136902e-07,
+      "m_reach_closing": 0.015321398121490077,
+      "m_reach_approach": 0.01190958156621983,
+      "m_reach_signed_approach": 0.01190958156621983,
+      "m_reach_jaw": 0.0009008328072308944,
+      "m_closing_budget": 0.026043288117883714,
+      "m_push_before_close": 0.0005432698740267824,
+      "m_closest_hand": 0.005659128284375829,
+      "m_closest_hand_step": 84,
+      "m_closed_early": false,
+      "m_reach_within_budget": true,
+      "m_drift_max": 0.0037333729956965708,
+      "m_drift_median": 0.0015023244981586998,
+      "m_drift_at_step": 141,
+      "m_drift_frechet": 0.008111894427875683,
+      "m_contact_steps": 182,
+      "m_lift_height": 0.349803864877792,
+      "m_peak_grip_force": 450.28900345199395,
+      "m_release_step": 245,
+      "m_carry_fraction": 0.9819277108433735,
+      "m_release_error_xy": 0.005140225262987321,
+      "m_final_error_xy": 0.009148122456584317,
+      "arrays": "cell_006.npz",
+      "report": "run_006/report.html"
+    },
+    {
+      "label": "robotiq3f mug top middle 0",
+      "outcome": "placed_in_the_wrong_place",
+      "detail": "ended 428 mm from the slot",
+      "blame": "carry",
+      "stages": {
+        "approach": true,
+        "reach": true,
+        "grasp": true,
+        "lift": true,
+        "carry": false,
+        "place": false,
+        "settle": false
+      },
+      "stage_detail": "failed at 'carry': it was in the hand for 33% of the carry (steps 80 to 249)",
+      "placement_error_xy": 0.42754485426876987,
+      "n_keypoints": 18,
+      "min_det": 0.8677664668035502,
+      "cloud_points": 4096,
+      "grasps_generated": 100,
+      "fallbacks": [],
+      "survivors": 5,
+      "executable_fraction": null,
+      "path_fell_back": false,
+      "path_rank_examined": 5,
+      "gripper": "robotiq3f",
+      "object": "mug",
+      "grasp_chosen_index": 96,
+      "steps": 302,
+      "seconds": 11.3,
+      "world": "ycb",
+      "executor": "policy",
+      "seed": 0,
+      "pick_config_id": "P0",
+      "destination": "top middle",
+      "condition_id": "P0+top middle",
+      "refused": false,
+      "refusal_reason": "",
+      "det_J_at_grasp": 1.0225961274379667,
+      "det_J_at_release": 0.9975212106870418,
+      "grasp_pose_target": [
+        [
+          -0.205092013,
+          0.977884226,
+          -0.040984228,
+          -0.222089186
+        ],
+        [
+          0.970131459,
+          0.208651736,
+          0.123731185,
+          -0.153496781
+        ],
+        [
+          0.129546204,
+          -0.014383811,
+          -0.991469055,
+          0.849193604
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "grasp_pose_release": [
+        [
+          -0.991573387,
+          -0.001879204,
+          -0.129532574,
+          0.187516371
+        ],
+        [
+          -0.0,
+          0.999894782,
+          -0.014506048,
+          0.007579249
+        ],
+        [
+          0.129546204,
+          -0.014383811,
+          -0.991469055,
+          1.043193604
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "orientation_error_grasp_deg": 1.4556317635873484,
+      "orientation_error_release_deg": 0.6213748776063128,
+      "placement_error_3d_mm": 469.50105709072466,
+      "placement_error_components_mm": [
+        -421.776,
+        -70.0,
+        -194.002
+      ],
+      "release_error_3d_mm": 469.49986035844944,
+      "release_error_components_mm": [
+        -421.774,
+        -69.999,
+        -194.002
+      ],
+      "release_drop_mm": 0.0020963189772861836,
+      "release_gate_steps": null,
+      "release_gate_reason": null,
+      "close_gate_steps": null,
+      "close_gate_reason": null,
+      "object_stand_off_mm": 40.974554688249285,
+      "first_failure_stage": "carry",
+      "map_fit": 0.012046878000546712,
+      "label_transport": 0.023971689995960332,
+      "policy_refit": 0.18367445100011537,
+      "survivors_per_stage": {
+        "generated": [
+          100,
+          100
+        ],
+        "visibility": [
+          100,
+          78
+        ],
+        "support": [
+          78,
+          25
+        ],
+        "place zone": [
+          25,
+          16
+        ],
+        "on target": [
+          16,
+          16
+        ],
+        "jaw width": [
+          16,
+          13
+        ],
+        "collision": [
+          13,
+          10
+        ],
+        "centred": [
+          10,
+          5
+        ],
+        "distinct": [
+          5,
+          5
+        ]
+      },
+      "funnel_fallbacks": [],
+      "m_final_phase": 0.9993089839795344,
+      "m_frozen_steps": 0,
+      "m_steps": 302,
+      "m_close_step": 80,
+      "m_close_phase": 0.25062382463370747,
+      "m_reach_error": 0.015847004989169605,
+      "m_commanded_error": 0.0025875398518331216,
+      "m_lag_at_close": 0.015063148137713209,
+      "m_closest_commanded": 0.002459621303390476,
+      "m_closest_commanded_step": 83,
+      "m_closest_transported": 3.1982955798717985e-07,
+      "m_reach_closing": 0.000797283969591328,
+      "m_reach_approach": 0.014680002772589438,
+      "m_reach_signed_approach": 0.014680002772589438,
+      "m_reach_jaw": 0.005915189193854228,
+      "m_closing_budget": 0.007602866867860401,
+      "m_push_before_close": 0.00010015935059917056,
+      "m_closest_hand": 0.015060634503609347,
+      "m_closest_hand_step": 81,
+      "m_closed_early": false,
+      "m_reach_within_budget": true,
+      "m_drift_max": 0.004154764661435469,
+      "m_drift_median": 0.0026043901602405026,
+      "m_drift_at_step": 216,
+      "m_drift_frechet": 0.008052254323448195,
+      "m_contact_steps": 63,
+      "m_lift_height": 0.05850642414356633,
+      "m_peak_grip_force": 405.76751398073685,
+      "m_release_step": 249,
+      "m_carry_fraction": 0.33136094674556216,
+      "m_release_error_xy": 0.4275431575521532,
+      "m_final_error_xy": 0.42754485426876987,
+      "arrays": "cell_007.npz",
+      "report": "run_007/report.html"
+    },
+    {
+      "label": "robotiq3f hammer top middle 0",
+      "outcome": "placed_in_the_wrong_place",
+      "detail": "ended 419 mm from the slot",
+      "blame": "reach",
+      "stages": {
+        "approach": true,
+        "reach": false,
+        "grasp": true,
+        "lift": false,
+        "carry": false,
+        "place": false,
+        "settle": false
+      },
+      "stage_detail": "failed at 'reach': the jaws closed 49 mm from the planned grasp point, at step 130 (1 mm across the closing axis against a 0 mm budget, +49 mm along the approach, 0 mm along the fingers) (the arm did not get there)",
+      "placement_error_xy": 0.41899897836475736,
+      "n_keypoints": 18,
+      "min_det": 0.5086805918969617,
+      "cloud_points": 4096,
+      "grasps_generated": 100,
+      "fallbacks": [
+        "collision"
+      ],
+      "survivors": 2,
+      "executable_fraction": null,
+      "path_fell_back": true,
+      "path_rank_examined": 2,
+      "gripper": "robotiq3f",
+      "object": "hammer",
+      "grasp_chosen_index": 52,
+      "steps": 323,
+      "seconds": 11.9,
+      "world": "ycb",
+      "executor": "policy",
+      "seed": 0,
+      "pick_config_id": "P0",
+      "destination": "top middle",
+      "condition_id": "P0+top middle",
+      "refused": false,
+      "refusal_reason": "",
+      "det_J_at_grasp": 1.0581729955983465,
+      "det_J_at_release": 1.0115157734033036,
+      "grasp_pose_target": [
+        [
+          0.339240923,
+          0.81945939,
+          0.46195444,
+          -0.239543504
+        ],
+        [
+          0.936834333,
+          -0.249833327,
+          -0.244795304,
+          -0.112916609
+        ],
+        [
+          -0.085188196,
+          0.515819364,
+          -0.85245138,
+          0.805380954
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "grasp_pose_release": [
+        [
+          -0.996364879,
+          -0.044102025,
+          0.072883744,
+          0.161553829
+        ],
+        [
+          1.4e-08,
+          0.85556145,
+          0.51770127,
+          -0.029810333
+        ],
+        [
+          -0.085188196,
+          0.515819364,
+          -0.85245138,
+          0.999380954
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "orientation_error_grasp_deg": 1.6829482262420643,
+      "orientation_error_release_deg": 1.2254274700192886,
+      "placement_error_3d_mm": 461.73167951821375,
+      "placement_error_components_mm": [
+        -410.622,
+        -83.366,
+        -194.0
+      ],
+      "release_error_3d_mm": 461.73167951821375,
+      "release_error_components_mm": [
+        -410.622,
+        -83.366,
+        -194.0
+      ],
+      "release_drop_mm": 0.0,
+      "release_gate_steps": null,
+      "release_gate_reason": null,
+      "close_gate_steps": null,
+      "close_gate_reason": null,
+      "object_stand_off_mm": 15.927132805352961,
+      "first_failure_stage": "reach",
+      "map_fit": 0.011538138998730574,
+      "label_transport": 0.014902153998264112,
+      "policy_refit": 0.2302157910016831,
+      "survivors_per_stage": {
+        "generated": [
+          100,
+          100
+        ],
+        "visibility": [
+          100,
+          83
+        ],
+        "support": [
+          83,
+          39
+        ],
+        "place zone": [
+          39,
+          15
+        ],
+        "on target": [
+          15,
+          15
+        ],
+        "jaw width": [
+          15,
+          5
+        ],
+        "collision": [
+          5,
+          5
+        ],
+        "centred": [
+          5,
+          2
+        ],
+        "distinct": [
+          2,
+          2
+        ]
+      },
+      "funnel_fallbacks": [
+        "collision"
+      ],
+      "m_final_phase": 0.9952237170902393,
+      "m_frozen_steps": 12,
+      "m_steps": 323,
+      "m_close_step": 130,
+      "m_close_phase": 0.25099375053858286,
+      "m_reach_error": 0.0490275029879074,
+      "m_commanded_error": 0.010995912061035493,
+      "m_lag_at_close": 0.045782309514124216,
+      "m_closest_commanded": 0.010743872288783488,
+      "m_closest_commanded_step": 132,
+      "m_closest_transported": 1.3689760820882882e-07,
+      "m_reach_closing": 0.0007643182503104472,
+      "m_reach_approach": 0.04902014929791799,
+      "m_reach_signed_approach": 0.04902014929791799,
+      "m_reach_jaw": 0.00037038963150169343,
+      "m_closing_budget": 0.0,
+      "m_push_before_close": 0.0,
+      "m_closest_hand": 0.047589646459525355,
+      "m_closest_hand_step": 131,
+      "m_closed_early": false,
+      "m_reach_within_budget": false,
+      "m_drift_max": 0.07168192876593862,
+      "m_drift_median": 0.011448965539567283,
+      "m_drift_at_step": 245,
+      "m_drift_frechet": 0.1287553421125998,
+      "m_contact_steps": 37,
+      "m_lift_height": 0.0015707138240388385,
+      "m_peak_grip_force": 50.06388819767478,
+      "m_release_step": 279,
+      "m_carry_fraction": 0.2483221476510067,
+      "m_release_error_xy": 0.41899897836475736,
+      "m_final_error_xy": 0.41899897836475736,
+      "arrays": "cell_008.npz",
+      "report": "run_008/report.html"
+    },
+    {
+      "label": "robotiq3f banana top middle 0",
+      "outcome": "arm_could_not_hold_the_pose",
+      "detail": "the arm settled 3 mm behind its target after 334 steps and stopped making progress",
+      "blame": "approach",
+      "stages": {
+        "approach": false,
+        "reach": false,
+        "grasp": false,
+        "lift": false,
+        "carry": false,
+        "place": false,
+        "settle": false
+      },
+      "stage_detail": "failed at 'approach': started 185 mm from the transported start (it had 361 mm to travel)",
+      "placement_error_xy": 0.4332418794624147,
+      "n_keypoints": 18,
+      "min_det": 0.9302977353867399,
+      "cloud_points": 4096,
+      "grasps_generated": 100,
+      "fallbacks": [
+        "collision"
+      ],
+      "survivors": 5,
+      "executable_fraction": null,
+      "path_fell_back": true,
+      "path_rank_examined": 5,
+      "gripper": "robotiq3f",
+      "object": "banana",
+      "grasp_chosen_index": 16,
+      "steps": 334,
+      "seconds": 17.1,
+      "world": "ycb",
+      "executor": "policy",
+      "seed": 0,
+      "pick_config_id": "P0",
+      "destination": "top middle",
+      "condition_id": "P0+top middle",
+      "refused": false,
+      "refusal_reason": "",
+      "det_J_at_grasp": 1.0131542645800764,
+      "det_J_at_release": 1.000312701785891,
+      "grasp_pose_target": [
+        [
+          -0.718712523,
+          -0.63503263,
+          -0.283171093,
+          -0.26170337
+        ],
+        [
+          -0.660857858,
+          0.750489325,
+          -0.005715243,
+          -0.150821496
+        ],
+        [
+          0.216146248,
+          0.183028226,
+          -0.95905238,
+          0.80589747
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "grasp_pose_release": [
+        [
+          -0.976360998,
+          0.040518694,
+          -0.212314475,
+          0.15357921
+        ],
+        [
+          8e-09,
+          0.982272317,
+          0.187459585,
+          0.01236719
+        ],
+        [
+          0.216146248,
+          0.183028226,
+          -0.95905238,
+          0.99989747
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "orientation_error_grasp_deg": 1.202214098472067,
+      "orientation_error_release_deg": 0.6808879659448557,
+      "placement_error_3d_mm": 474.6941071937735,
+      "placement_error_components_mm": [
+        -409.998,
+        -139.999,
+        -194.0
+      ],
+      "release_error_3d_mm": 474.6941071937735,
+      "release_error_components_mm": [
+        -409.998,
+        -139.999,
+        -194.0
+      ],
+      "release_drop_mm": 0.0,
+      "release_gate_steps": null,
+      "release_gate_reason": null,
+      "close_gate_steps": null,
+      "close_gate_reason": null,
+      "object_stand_off_mm": 18.275725594477432,
+      "first_failure_stage": "approach",
+      "map_fit": 0.011060028999054339,
+      "label_transport": 0.01492351500201039,
+      "policy_refit": 0.15087712200329406,
+      "survivors_per_stage": {
+        "generated": [
+          100,
+          100
+        ],
+        "visibility": [
+          100,
+          81
+        ],
+        "support": [
+          81,
+          53
+        ],
+        "place zone": [
+          53,
+          20
+        ],
+        "on target": [
+          20,
+          20
+        ],
+        "jaw width": [
+          20,
+          18
+        ],
+        "collision": [
+          18,
+          18
+        ],
+        "centred": [
+          18,
+          5
+        ],
+        "distinct": [
+          5,
+          5
+        ]
+      },
+      "funnel_fallbacks": [
+        "collision"
+      ],
+      "m_final_phase": 0.46744693411328814,
+      "m_frozen_steps": 112,
+      "m_steps": 334,
+      "m_close_step": 83,
+      "m_close_phase": 0.24020782859240025,
+      "m_reach_error": 0.19121751140576693,
+      "m_commanded_error": 0.1886191967566397,
+      "m_lag_at_close": 0.01020044396436771,
+      "m_closest_commanded": 0.18338196199948062,
+      "m_closest_commanded_step": 0,
+      "m_closest_transported": 3.90222059710492e-07,
+      "m_reach_closing": 0.17103925919273533,
+      "m_reach_approach": 0.00932955664218111,
+      "m_reach_signed_approach": 0.00932955664218111,
+      "m_reach_jaw": 0.08498628058689375,
+      "m_closing_budget": 0.007080945809020141,
+      "m_push_before_close": 3.4927435880932915e-06,
+      "m_closest_hand": 0.16882336358483668,
+      "m_closest_hand_step": 34,
+      "m_closed_early": false,
+      "m_reach_within_budget": false,
+      "m_drift_max": 0.19390244597191456,
+      "m_drift_median": 0.19012283991127416,
+      "m_drift_at_step": 333,
+      "m_drift_frechet": 0.7096507533867374,
+      "m_contact_steps": 0,
+      "m_lift_height": 6.673126390022155e-06,
+      "m_peak_grip_force": 0.0,
+      "m_release_step": 333,
+      "m_carry_fraction": 0.0,
+      "m_release_error_xy": 0.4332418794624147,
+      "m_final_error_xy": 0.4332418794624147,
+      "arrays": "cell_009.npz",
+      "report": "run_009/report.html"
+    },
+    {
+      "label": "robotiq140 sugar top middle 0",
+      "outcome": "placed_in_the_wrong_place",
+      "detail": "ended 65 mm from the slot",
+      "blame": "reach",
+      "stages": {
+        "approach": true,
+        "reach": false,
+        "grasp": true,
+        "lift": true,
+        "carry": true,
+        "place": false,
+        "settle": false
+      },
+      "stage_detail": "failed at 'reach': the jaws closed 51 mm from the planned grasp point, at step 134 (23 mm across the closing axis against a 40 mm budget, +46 mm along the approach, 1 mm along the fingers) (the arm did not get there)",
+      "placement_error_xy": 0.06511955946525609,
+      "n_keypoints": 18,
+      "min_det": 0.5834848416028934,
+      "cloud_points": 4096,
+      "grasps_generated": 100,
+      "fallbacks": [],
+      "survivors": 6,
+      "executable_fraction": null,
+      "path_fell_back": false,
+      "path_rank_examined": 1,
+      "gripper": "robotiq140",
+      "object": "sugar",
+      "grasp_chosen_index": 27,
+      "steps": 351,
+      "seconds": 11.1,
+      "world": "ycb",
+      "executor": "policy",
+      "seed": 0,
+      "pick_config_id": "P0",
+      "destination": "top middle",
+      "condition_id": "P0+top middle",
+      "refused": false,
+      "refusal_reason": "",
+      "det_J_at_grasp": 1.0455200622237522,
+      "det_J_at_release": 0.9995118851916106,
+      "grasp_pose_target": [
+        [
+          -0.651721117,
+          -0.709049395,
+          0.269274098,
+          -0.22464889
+        ],
+        [
+          -0.757073401,
+          0.629600218,
+          -0.174480461,
+          -0.141636045
+        ],
+        [
+          -0.045819765,
+          -0.317572859,
+          -0.947126195,
+          0.939563435
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "grasp_pose_release": [
+        [
+          -0.998949723,
+          0.014566412,
+          0.043442727,
+          0.181983643
+        ],
+        [
+          -1e-09,
+          0.948121985,
+          -0.317906749,
+          -0.00507483
+        ],
+        [
+          -0.045819765,
+          -0.317572859,
+          -0.947126195,
+          1.133563435
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "orientation_error_grasp_deg": 1.6562179198220373,
+      "orientation_error_release_deg": 0.7385254817425486,
+      "placement_error_3d_mm": 65.12185087651451,
+      "placement_error_components_mm": [
+        -62.767,
+        -17.346,
+        0.546
+      ],
+      "release_error_3d_mm": 61.33516139382639,
+      "release_error_components_mm": [
+        -60.405,
+        -10.37,
+        2.394
+      ],
+      "release_drop_mm": 7.59360201767519,
+      "release_gate_steps": null,
+      "release_gate_reason": null,
+      "close_gate_steps": null,
+      "close_gate_reason": null,
+      "object_stand_off_mm": 87.5809096165745,
+      "first_failure_stage": "reach",
+      "map_fit": 0.013211224999395199,
+      "label_transport": 0.03313076699851081,
+      "policy_refit": 0.33780885400483385,
+      "survivors_per_stage": {
+        "generated": [
+          100,
+          100
+        ],
+        "visibility": [
+          100,
+          83
+        ],
+        "support": [
+          83,
+          21
+        ],
+        "place zone": [
+          21,
+          15
+        ],
+        "on target": [
+          15,
+          15
+        ],
+        "jaw width": [
+          15,
+          15
+        ],
+        "collision": [
+          15,
+          15
+        ],
+        "centred": [
+          15,
+          7
+        ],
+        "distinct": [
+          7,
+          6
+        ]
+      },
+      "funnel_fallbacks": [],
+      "m_final_phase": 0.9999811509043992,
+      "m_frozen_steps": 19,
+      "m_steps": 351,
+      "m_close_step": 134,
+      "m_close_phase": 0.2471195669498636,
+      "m_reach_error": 0.051429815820169436,
+      "m_commanded_error": 0.042665251712421415,
+      "m_lag_at_close": 0.034722006319596294,
+      "m_closest_commanded": 0.04099691031558639,
+      "m_closest_commanded_step": 148,
+      "m_closest_transported": 1.9653279536312816e-07,
+      "m_reach_closing": 0.022825929312113438,
+      "m_reach_approach": 0.046079370252514185,
+      "m_reach_signed_approach": 0.046079370252514185,
+      "m_reach_jaw": 0.0008332780293023086,
+      "m_closing_budget": 0.03985371282825169,
+      "m_push_before_close": 0.00829388225205121,
+      "m_closest_hand": 0.05104015022999255,
+      "m_closest_hand_step": 136,
+      "m_closed_early": false,
+      "m_reach_within_budget": true,
+      "m_drift_max": 0.052747682887223236,
+      "m_drift_median": 0.036403333201722926,
+      "m_drift_at_step": 304,
+      "m_drift_frechet": 0.05900598856126719,
+      "m_contact_steps": 211,
+      "m_lift_height": 0.2795852394505036,
+      "m_peak_grip_force": 54.94284262016391,
+      "m_release_step": 310,
+      "m_carry_fraction": 0.9943181818181818,
+      "m_release_error_xy": 0.061288420234341265,
+      "m_final_error_xy": 0.06511955946525609,
+      "arrays": "cell_010.npz",
+      "report": "run_010/report.html"
+    },
+    {
+      "label": "robotiq140 meat top middle 0",
+      "outcome": "success",
+      "detail": "",
+      "blame": "success",
+      "stages": {
+        "approach": true,
+        "reach": true,
+        "grasp": true,
+        "lift": true,
+        "carry": true,
+        "place": true,
+        "settle": true
+      },
+      "stage_detail": "every stage completed",
+      "placement_error_xy": 0.0068460132826112475,
+      "n_keypoints": 18,
+      "min_det": 0.9961686087515071,
+      "cloud_points": 4096,
+      "grasps_generated": 100,
+      "fallbacks": [],
+      "survivors": 10,
+      "executable_fraction": null,
+      "path_fell_back": false,
+      "path_rank_examined": 3,
+      "gripper": "robotiq140",
+      "object": "meat",
+      "grasp_chosen_index": 30,
+      "steps": 290,
+      "seconds": 9.6,
+      "world": "ycb",
+      "executor": "policy",
+      "seed": 0,
+      "pick_config_id": "P0",
+      "destination": "top middle",
+      "condition_id": "P0+top middle",
+      "refused": false,
+      "refusal_reason": "",
+      "det_J_at_grasp": 0.9969546277629671,
+      "det_J_at_release": 0.9985867275488888,
+      "grasp_pose_target": [
+        [
+          -0.895817545,
+          0.438942599,
+          -0.069572414,
+          -0.224088378
+        ],
+        [
+          0.436631693,
+          0.898446118,
+          0.046339387,
+          -0.153444502
+        ],
+        [
+          0.082847396,
+          0.011134115,
+          -0.996500045,
+          0.872153955
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "grasp_pose_release": [
+        [
+          -0.996562245,
+          0.000925614,
+          -0.082842225,
+          0.191337286
+        ],
+        [
+          0.0,
+          0.999937585,
+          0.011172523,
+          -0.009544078
+        ],
+        [
+          0.082847396,
+          0.011134115,
+          -0.996500045,
+          1.066153955
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "orientation_error_grasp_deg": 0.4473972253607638,
+      "orientation_error_release_deg": 0.48337467614726815,
+      "placement_error_3d_mm": 6.846673151660869,
+      "placement_error_components_mm": [
+        0.911,
+        -6.785,
+        0.095
+      ],
+      "release_error_3d_mm": 12.930580396505306,
+      "release_error_components_mm": [
+        8.858,
+        -8.329,
+        4.401
+      ],
+      "release_drop_mm": 9.168704514127064,
+      "release_gate_steps": null,
+      "release_gate_reason": null,
+      "close_gate_steps": null,
+      "close_gate_reason": null,
+      "object_stand_off_mm": 41.61552594210083,
+      "first_failure_stage": null,
+      "map_fit": 0.01288401399506256,
+      "label_transport": 0.01592157399863936,
+      "policy_refit": 0.2151436400017701,
+      "survivors_per_stage": {
+        "generated": [
+          100,
+          100
+        ],
+        "visibility": [
+          100,
+          81
+        ],
+        "support": [
+          81,
+          34
+        ],
+        "place zone": [
+          34,
+          24
+        ],
+        "on target": [
+          24,
+          24
+        ],
+        "jaw width": [
+          24,
+          24
+        ],
+        "collision": [
+          24,
+          24
+        ],
+        "centred": [
+          24,
+          16
+        ],
+        "distinct": [
+          16,
+          10
+        ]
+      },
+      "funnel_fallbacks": [],
+      "m_final_phase": 0.9986721737737122,
+      "m_frozen_steps": 0,
+      "m_steps": 290,
+      "m_close_step": 66,
+      "m_close_phase": 0.2494775860304267,
+      "m_reach_error": 0.026948294545820223,
+      "m_commanded_error": 0.004771247353849586,
+      "m_lag_at_close": 0.0248383064972062,
+      "m_closest_commanded": 0.003003860745865379,
+      "m_closest_commanded_step": 70,
+      "m_closest_transported": 1.0204182243932357e-06,
+      "m_reach_closing": 0.02172853110558081,
+      "m_reach_approach": 0.01590662094765225,
+      "m_reach_signed_approach": 0.01590662094765225,
+      "m_reach_jaw": 0.0010299912692386794,
+      "m_closing_budget": 0.026896151598210502,
+      "m_push_before_close": 0.0,
+      "m_closest_hand": 0.0046757131905588506,
+      "m_closest_hand_step": 76,
+      "m_closed_early": false,
+      "m_reach_within_budget": true,
+      "m_drift_max": 0.0035738044655265304,
+      "m_drift_median": 0.0011442858123326268,
+      "m_drift_at_step": 144,
+      "m_drift_frechet": 0.007542025260031977,
+      "m_contact_steps": 175,
+      "m_lift_height": 0.3436100464229993,
+      "m_peak_grip_force": 89.03915566875352,
+      "m_release_step": 238,
+      "m_carry_fraction": 0.9767441860465116,
+      "m_release_error_xy": 0.012158613208559906,
+      "m_final_error_xy": 0.0068460132826112475,
+      "arrays": "cell_011.npz",
+      "report": "run_011/report.html"
+    },
+    {
+      "label": "robotiq140 mug top middle 0",
+      "outcome": "placed_in_the_wrong_place",
+      "detail": "ended 100 mm from the slot",
+      "blame": "reach",
+      "stages": {
+        "approach": true,
+        "reach": false,
+        "grasp": true,
+        "lift": true,
+        "carry": true,
+        "place": true,
+        "settle": false
+      },
+      "stage_detail": "failed at 'reach': the hand moved the object 23 mm before the jaws closed at step 104, so the grasp was planned on a target that had left (the arm did not get there)",
+      "placement_error_xy": 0.10043707812630774,
+      "n_keypoints": 18,
+      "min_det": 0.5416106263022724,
+      "cloud_points": 4096,
+      "grasps_generated": 100,
+      "fallbacks": [],
+      "survivors": 6,
+      "executable_fraction": null,
+      "path_fell_back": false,
+      "path_rank_examined": 4,
+      "gripper": "robotiq140",
+      "object": "mug",
+      "grasp_chosen_index": 89,
+      "steps": 344,
+      "seconds": 11.2,
+      "world": "ycb",
+      "executor": "policy",
+      "seed": 0,
+      "pick_config_id": "P0",
+      "destination": "top middle",
+      "condition_id": "P0+top middle",
+      "refused": false,
+      "refusal_reason": "",
+      "det_J_at_grasp": 1.0598325385664702,
+      "det_J_at_release": 1.0061341045602363,
+      "grasp_pose_target": [
+        [
+          0.459791045,
+          0.869626903,
+          0.179836714,
+          -0.233309233
+        ],
+        [
+          0.88749894,
+          -0.443012475,
+          -0.126828934,
+          -0.143001355
+        ],
+        [
+          -0.030623946,
+          0.217919701,
+          -0.975486124,
+          0.855884034
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "grasp_pose_release": [
+        [
+          -0.999530977,
+          -0.006676693,
+          0.029887252,
+          0.183957708
+        ],
+        [
+          -1e-09,
+          0.975943864,
+          0.218021958,
+          0.001383716
+        ],
+        [
+          -0.030623946,
+          0.217919701,
+          -0.975486124,
+          1.049884034
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "orientation_error_grasp_deg": 1.7570225464269482,
+      "orientation_error_release_deg": 1.1475270024899535,
+      "placement_error_3d_mm": 173.8582970523288,
+      "placement_error_components_mm": [
+        -100.429,
+        1.295,
+        141.912
+      ],
+      "release_error_3d_mm": 55.65827165483262,
+      "release_error_components_mm": [
+        -51.216,
+        13.029,
+        17.466
+      ],
+      "release_drop_mm": 134.33743029427123,
+      "release_gate_steps": null,
+      "release_gate_reason": null,
+      "close_gate_steps": null,
+      "close_gate_reason": null,
+      "object_stand_off_mm": 40.974554688249285,
+      "first_failure_stage": "reach",
+      "map_fit": 0.012606886994035449,
+      "label_transport": 0.023983257000509184,
+      "policy_refit": 0.28373289800219936,
+      "survivors_per_stage": {
+        "generated": [
+          100,
+          100
+        ],
+        "visibility": [
+          100,
+          81
+        ],
+        "support": [
+          81,
+          15
+        ],
+        "place zone": [
+          15,
+          10
+        ],
+        "on target": [
+          10,
+          10
+        ],
+        "jaw width": [
+          10,
+          10
+        ],
+        "collision": [
+          10,
+          10
+        ],
+        "centred": [
+          10,
+          7
+        ],
+        "distinct": [
+          7,
+          6
+        ]
+      },
+      "funnel_fallbacks": [],
+      "m_final_phase": 0.9997459913656079,
+      "m_frozen_steps": 10,
+      "m_steps": 344,
+      "m_close_step": 104,
+      "m_close_phase": 0.2489878862571971,
+      "m_reach_error": 0.03335983237768194,
+      "m_commanded_error": 0.004155744659543996,
+      "m_lag_at_close": 0.02945879164053107,
+      "m_closest_commanded": 0.003122504895646895,
+      "m_closest_commanded_step": 112,
+      "m_closest_transported": 1.6501775230525252e-07,
+      "m_reach_closing": 0.011621182976896845,
+      "m_reach_approach": 0.029252191539944686,
+      "m_reach_signed_approach": 0.029252191539944686,
+      "m_reach_jaw": 0.01105151065519081,
+      "m_closing_budget": 0.00481626244469166,
+      "m_push_before_close": 0.023044680368122527,
+      "m_closest_hand": 0.02829396996556162,
+      "m_closest_hand_step": 110,
+      "m_closed_early": false,
+      "m_reach_within_budget": false,
+      "m_drift_max": 0.06135887386974139,
+      "m_drift_median": 0.003387223961281282,
+      "m_drift_at_step": 306,
+      "m_drift_frechet": 0.07552914620994045,
+      "m_contact_steps": 252,
+      "m_lift_height": 0.3359122996480072,
+      "m_peak_grip_force": 95.92810224730351,
+      "m_release_step": 298,
+      "m_carry_fraction": 1.0,
+      "m_release_error_xy": 0.05284682060283192,
+      "m_final_error_xy": 0.10043707812630774,
+      "arrays": "cell_012.npz",
+      "report": "run_012/report.html"
+    },
+    {
+      "label": "robotiq140 hammer top middle 0",
+      "outcome": "placed_in_the_wrong_place",
+      "detail": "ended 225 mm from the slot",
+      "blame": "reach",
+      "stages": {
+        "approach": true,
+        "reach": false,
+        "grasp": true,
+        "lift": true,
+        "carry": true,
+        "place": false,
+        "settle": false
+      },
+      "stage_detail": "failed at 'reach': the jaws closed 56 mm from the planned grasp point, at step 119 (0 mm across the closing axis against a 0 mm budget, +53 mm along the approach, 18 mm along the fingers) (the arm did not get there)",
+      "placement_error_xy": 0.22526709779123313,
+      "n_keypoints": 18,
+      "min_det": 0.5586616644988148,
+      "cloud_points": 4096,
+      "grasps_generated": 100,
+      "fallbacks": [
+        "collision",
+        "centred"
+      ],
+      "survivors": 13,
+      "executable_fraction": null,
+      "path_fell_back": true,
+      "path_rank_examined": 13,
+      "gripper": "robotiq140",
+      "object": "hammer",
+      "grasp_chosen_index": 3,
+      "steps": 295,
+      "seconds": 9.5,
+      "world": "ycb",
+      "executor": "policy",
+      "seed": 0,
+      "pick_config_id": "P0",
+      "destination": "top middle",
+      "condition_id": "P0+top middle",
+      "refused": false,
+      "refusal_reason": "",
+      "det_J_at_grasp": 1.0539541186717345,
+      "det_J_at_release": 1.0098175140555534,
+      "grasp_pose_target": [
+        [
+          0.188948163,
+          0.967226216,
+          0.169623226,
+          -0.145111825
+        ],
+        [
+          0.981769306,
+          -0.18242919,
+          -0.053372476,
+          -0.145575515
+        ],
+        [
+          -0.020679031,
+          0.176615508,
+          -0.984062671,
+          0.792653666
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "grasp_pose_release": [
+        [
+          -0.999786166,
+          -0.003653018,
+          0.020353814,
+          0.192030822
+        ],
+        [
+          0.0,
+          0.984273142,
+          0.176653282,
+          0.070067615
+        ],
+        [
+          -0.020679031,
+          0.176615508,
+          -0.984062671,
+          0.986653666
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "orientation_error_grasp_deg": 1.7217849711685789,
+      "orientation_error_release_deg": 1.1937020520000676,
+      "placement_error_3d_mm": 244.0050187468669,
+      "placement_error_components_mm": [
+        -216.797,
+        -61.189,
+        -93.772
+      ],
+      "release_error_3d_mm": 243.99188278086504,
+      "release_error_components_mm": [
+        -216.803,
+        -61.188,
+        -93.725
+      ],
+      "release_drop_mm": 0.04722700712920887,
+      "release_gate_steps": null,
+      "release_gate_reason": null,
+      "close_gate_steps": null,
+      "close_gate_reason": null,
+      "object_stand_off_mm": 15.927132805352961,
+      "first_failure_stage": "reach",
+      "map_fit": 0.012520516000222415,
+      "label_transport": 0.014878255002258811,
+      "policy_refit": 0.14301697599876206,
+      "survivors_per_stage": {
+        "generated": [
+          100,
+          100
+        ],
+        "visibility": [
+          100,
+          83
+        ],
+        "support": [
+          83,
+          40
+        ],
+        "place zone": [
+          40,
+          25
+        ],
+        "on target": [
+          25,
+          25
+        ],
+        "jaw width": [
+          25,
+          13
+        ],
+        "collision": [
+          13,
+          13
+        ],
+        "centred": [
+          13,
+          13
+        ],
+        "distinct": [
+          13,
+          13
+        ]
+      },
+      "funnel_fallbacks": [
+        "collision",
+        "centred"
+      ],
+      "m_final_phase": 0.9994153400041157,
+      "m_frozen_steps": 5,
+      "m_steps": 295,
+      "m_close_step": 119,
+      "m_close_phase": 0.2502927929108482,
+      "m_reach_error": 0.056382443649147365,
+      "m_commanded_error": 0.008940123694857178,
+      "m_lag_at_close": 0.05134001290135557,
+      "m_closest_commanded": 0.008655438655701323,
+      "m_closest_commanded_step": 121,
+      "m_closest_transported": 1.3325430792765808e-07,
+      "m_reach_closing": 0.000417901644558936,
+      "m_reach_approach": 0.05335131932001475,
+      "m_reach_signed_approach": 0.05335131932001475,
+      "m_reach_jaw": 0.018232993219046707,
+      "m_closing_budget": 0.0,
+      "m_push_before_close": 0.0,
+      "m_closest_hand": 0.056310778930723435,
+      "m_closest_hand_step": 120,
+      "m_closed_early": false,
+      "m_reach_within_budget": false,
+      "m_drift_max": 0.030683785912918034,
+      "m_drift_median": 0.012475519031687107,
+      "m_drift_at_step": 238,
+      "m_drift_frechet": 0.03562160776187834,
+      "m_contact_steps": 87,
+      "m_lift_height": 0.2275137722819458,
+      "m_peak_grip_force": 38.451198115092296,
+      "m_release_step": 254,
+      "m_carry_fraction": 0.6444444444444445,
+      "m_release_error_xy": 0.2252723627718643,
+      "m_final_error_xy": 0.22526709779123313,
+      "arrays": "cell_013.npz",
+      "report": "run_013/report.html"
+    },
+    {
+      "label": "robotiq140 banana top middle 0",
+      "outcome": "placed_in_the_wrong_place",
+      "detail": "ended 183 mm from the slot",
+      "blame": "place",
+      "stages": {
+        "approach": true,
+        "reach": true,
+        "grasp": true,
+        "lift": true,
+        "carry": true,
+        "place": false,
+        "settle": false
+      },
+      "stage_detail": "failed at 'place': it was let go 183 mm from the middle of the slot",
+      "placement_error_xy": 0.18348959451619,
+      "n_keypoints": 18,
+      "min_det": 0.8270867420155515,
+      "cloud_points": 4096,
+      "grasps_generated": 100,
+      "fallbacks": [
+        "centred"
+      ],
+      "survivors": 1,
+      "executable_fraction": null,
+      "path_fell_back": true,
+      "path_rank_examined": 1,
+      "gripper": "robotiq140",
+      "object": "banana",
+      "grasp_chosen_index": 48,
+      "steps": 324,
+      "seconds": 10.4,
+      "world": "ycb",
+      "executor": "policy",
+      "seed": 0,
+      "pick_config_id": "P0",
+      "destination": "top middle",
+      "condition_id": "P0+top middle",
+      "refused": false,
+      "refusal_reason": "",
+      "det_J_at_grasp": 1.0222555860426052,
+      "det_J_at_release": 1.0036156367495774,
+      "grasp_pose_target": [
+        [
+          -0.87075448,
+          -0.467545222,
+          0.152276398,
+          -0.267632906
+        ],
+        [
+          -0.470332951,
+          0.882275086,
+          0.019431621,
+          -0.138825839
+        ],
+        [
+          -0.143434833,
+          -0.054700436,
+          -0.988146907,
+          0.819664298
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "grasp_pose_release": [
+        [
+          -0.989659764,
+          0.007927924,
+          0.14321557,
+          0.163101186
+        ],
+        [
+          -1e-09,
+          0.998471337,
+          -0.055271962,
+          0.015562867
+        ],
+        [
+          -0.143434833,
+          -0.054700436,
+          -0.988146907,
+          1.013664298
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "orientation_error_grasp_deg": 1.4918020384093202,
+      "orientation_error_release_deg": 0.9463086559548068,
+      "placement_error_3d_mm": 183.7144073959541,
+      "placement_error_components_mm": [
+        -182.62,
+        -17.847,
+        -9.086
+      ],
+      "release_error_3d_mm": 183.71298123261641,
+      "release_error_components_mm": [
+        -182.618,
+        -17.847,
+        -9.083
+      ],
+      "release_drop_mm": 0.0030451410119804127,
+      "release_gate_steps": null,
+      "release_gate_reason": null,
+      "close_gate_steps": null,
+      "close_gate_reason": null,
+      "object_stand_off_mm": 18.27557307076466,
+      "first_failure_stage": "place",
+      "map_fit": 0.011917711999558378,
+      "label_transport": 0.023987016000319272,
+      "policy_refit": 0.3323840230004862,
+      "survivors_per_stage": {
+        "generated": [
+          100,
+          100
+        ],
+        "visibility": [
+          100,
+          78
+        ],
+        "support": [
+          78,
+          50
+        ],
+        "place zone": [
+          50,
+          20
+        ],
+        "on target": [
+          20,
+          20
+        ],
+        "jaw width": [
+          20,
+          19
+        ],
+        "collision": [
+          19,
+          1
+        ],
+        "centred": [
+          1,
+          1
+        ],
+        "distinct": [
+          1,
+          1
+        ]
+      },
+      "funnel_fallbacks": [
+        "centred"
+      ],
+      "m_final_phase": 0.994974899830691,
+      "m_frozen_steps": 10,
+      "m_steps": 324,
+      "m_close_step": 87,
+      "m_close_phase": 0.24907164775814422,
+      "m_reach_error": 0.03420005714345897,
+      "m_commanded_error": 0.0016524959870029934,
+      "m_lag_at_close": 0.033025188275934814,
+      "m_closest_commanded": 0.0016432223837402598,
+      "m_closest_commanded_step": 88,
+      "m_closest_transported": 3.073409320359723e-07,
+      "m_reach_closing": 0.02066806067542508,
+      "m_reach_approach": 0.02566753839031276,
+      "m_reach_signed_approach": 0.02566753839031276,
+      "m_reach_jaw": 0.009146182346092031,
+      "m_closing_budget": 0.02719263394782523,
+      "m_push_before_close": 6.837386754247945e-08,
+      "m_closest_hand": 0.030505070696602778,
+      "m_closest_hand_step": 85,
+      "m_closed_early": false,
+      "m_reach_within_budget": true,
+      "m_drift_max": 0.03165183383734456,
+      "m_drift_median": 0.014734726844708052,
+      "m_drift_at_step": 182,
+      "m_drift_frechet": 0.031656312134538414,
+      "m_contact_steps": 143,
+      "m_lift_height": 0.19987969373605807,
+      "m_peak_grip_force": 31.45342003091461,
+      "m_release_step": 285,
+      "m_carry_fraction": 0.7222222222222222,
+      "m_release_error_xy": 0.18348830279981973,
+      "m_final_error_xy": 0.18348959451619,
+      "arrays": "cell_014.npz",
+      "report": "run_014/report.html"
+    },
+    {
+      "label": "robotiq85 sugar top middle 0",
+      "outcome": "success",
+      "detail": "",
+      "blame": "success",
+      "stages": {
+        "approach": true,
+        "reach": false,
+        "grasp": true,
+        "lift": true,
+        "carry": true,
+        "place": true,
+        "settle": true
+      },
+      "stage_detail": "every stage completed",
+      "placement_error_xy": 0.03676767045267808,
+      "n_keypoints": 18,
+      "min_det": 0.8077431770050038,
+      "cloud_points": 4096,
+      "grasps_generated": 100,
+      "fallbacks": [],
+      "survivors": 5,
+      "executable_fraction": null,
+      "path_fell_back": false,
+      "path_rank_examined": 2,
+      "gripper": "robotiq85",
+      "object": "sugar",
+      "grasp_chosen_index": 62,
+      "steps": 311,
+      "seconds": 10.3,
+      "world": "ycb",
+      "executor": "policy",
+      "seed": 0,
+      "pick_config_id": "P0",
+      "destination": "top middle",
+      "condition_id": "P0+top middle",
+      "refused": false,
+      "refusal_reason": "",
+      "det_J_at_grasp": 1.0226932487249027,
+      "det_J_at_release": 1.0010170810270298,
+      "grasp_pose_target": [
+        [
+          -0.798895704,
+          -0.601347147,
+          -0.012135155,
+          -0.228567559
+        ],
+        [
+          -0.601200869,
+          0.79897927,
+          -0.013770999,
+          -0.146683905
+        ],
+        [
+          0.017976888,
+          -0.003705926,
+          -0.999831535,
+          0.959482489
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "grasp_pose_release": [
+        [
+          -0.999838403,
+          -6.6632e-05,
+          -0.017976765,
+          0.177652521
+        ],
+        [
+          0.0,
+          0.999993131,
+          -0.003706525,
+          -0.00581213
+        ],
+        [
+          0.017976888,
+          -0.003705926,
+          -0.999831535,
+          1.153482489
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "orientation_error_grasp_deg": 1.3996620365651877,
+      "orientation_error_release_deg": 0.7214686637754849,
+      "placement_error_3d_mm": 75.49498586367142,
+      "placement_error_components_mm": [
+        36.549,
+        -4.004,
+        -65.937
+      ],
+      "release_error_3d_mm": 51.73404091057176,
+      "release_error_components_mm": [
+        -51.231,
+        -4.305,
+        5.765
+      ],
+      "release_drop_mm": 113.34291076994045,
+      "release_gate_steps": null,
+      "release_gate_reason": null,
+      "close_gate_steps": null,
+      "close_gate_reason": null,
+      "object_stand_off_mm": 87.5809096165745,
+      "first_failure_stage": null,
+      "map_fit": 0.01209846400161041,
+      "label_transport": 0.015016978002677206,
+      "policy_refit": 0.19602384499739856,
+      "survivors_per_stage": {
+        "generated": [
+          100,
+          100
+        ],
+        "visibility": [
+          100,
+          84
+        ],
+        "support": [
+          84,
+          18
+        ],
+        "place zone": [
+          18,
+          12
+        ],
+        "on target": [
+          12,
+          12
+        ],
+        "jaw width": [
+          12,
+          12
+        ],
+        "collision": [
+          12,
+          12
+        ],
+        "centred": [
+          12,
+          5
+        ],
+        "distinct": [
+          5,
+          5
+        ]
+      },
+      "funnel_fallbacks": [],
+      "m_final_phase": 0.9999999999213933,
+      "m_frozen_steps": 12,
+      "m_steps": 311,
+      "m_close_step": 102,
+      "m_close_phase": 0.2491256288786976,
+      "m_reach_error": 0.04534169058139953,
+      "m_commanded_error": 0.020598423358049303,
+      "m_lag_at_close": 0.026070947457945803,
+      "m_closest_commanded": 0.02022975933986259,
+      "m_closest_commanded_step": 124,
+      "m_closest_transported": 2.9050684827952116e-07,
+      "m_reach_closing": 0.03253210433971223,
+      "m_reach_approach": 0.020395433040005122,
+      "m_reach_signed_approach": 0.020395433040005122,
+      "m_reach_jaw": 0.024115502341984736,
+      "m_closing_budget": 0.010369746677908236,
+      "m_push_before_close": 0.0012203090693597635,
+      "m_closest_hand": 0.01998151277867724,
+      "m_closest_hand_step": 116,
+      "m_closed_early": true,
+      "m_reach_within_budget": false,
+      "m_drift_max": 0.025605814079211975,
+      "m_drift_median": 0.01977738905370016,
+      "m_drift_at_step": 300,
+      "m_drift_frechet": 0.02731689834511462,
+      "m_contact_steps": 179,
+      "m_lift_height": 0.3154241835843463,
+      "m_peak_grip_force": 133.3962763226111,
+      "m_release_step": 270,
+      "m_carry_fraction": 0.9642857142857143,
+      "m_release_error_xy": 0.05141179968589471,
+      "m_final_error_xy": 0.03676767045267808,
+      "arrays": "cell_015.npz",
+      "report": "run_015/report.html"
+    },
+    {
+      "label": "robotiq85 meat top middle 0",
+      "outcome": "success",
+      "detail": "",
+      "blame": "success",
+      "stages": {
+        "approach": true,
+        "reach": true,
+        "grasp": true,
+        "lift": true,
+        "carry": true,
+        "place": true,
+        "settle": true
+      },
+      "stage_detail": "every stage completed",
+      "placement_error_xy": 0.021499827672905515,
+      "n_keypoints": 18,
+      "min_det": 0.9975296992830586,
+      "cloud_points": 4096,
+      "grasps_generated": 100,
+      "fallbacks": [],
+      "survivors": 7,
+      "executable_fraction": null,
+      "path_fell_back": false,
+      "path_rank_examined": 2,
+      "gripper": "robotiq85",
+      "object": "meat",
+      "grasp_chosen_index": 32,
+      "steps": 276,
+      "seconds": 9.2,
+      "world": "ycb",
+      "executor": "policy",
+      "seed": 0,
+      "pick_config_id": "P0",
+      "destination": "top middle",
+      "condition_id": "P0+top middle",
+      "refused": false,
+      "refusal_reason": "",
+      "det_J_at_grasp": 0.9986807203302753,
+      "det_J_at_release": 0.9975296992830586,
+      "grasp_pose_target": [
+        [
+          -0.728646776,
+          0.665849998,
+          -0.160367253,
+          -0.221895083
+        ],
+        [
+          0.679668576,
+          0.731847438,
+          -0.049497019,
+          -0.128104847
+        ],
+        [
+          0.084406774,
+          -0.145062425,
+          -0.985815596,
+          0.871652652
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "grasp_pose_release": [
+        [
+          -0.996431381,
+          -0.012288101,
+          -0.083507521,
+          0.177921865
+        ],
+        [
+          2e-09,
+          0.989346196,
+          -0.145581952,
+          0.014348698
+        ],
+        [
+          0.084406774,
+          -0.145062425,
+          -0.985815596,
+          1.065652652
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "orientation_error_grasp_deg": 0.502128711736811,
+      "orientation_error_release_deg": 0.3244412033826386,
+      "placement_error_3d_mm": 21.500037798678818,
+      "placement_error_components_mm": [
+        -21.204,
+        -3.555,
+        0.095
+      ],
+      "release_error_3d_mm": 16.135410520062972,
+      "release_error_components_mm": [
+        -14.875,
+        -3.16,
+        5.394
+      ],
+      "release_drop_mm": 8.26323694394102,
+      "release_gate_steps": null,
+      "release_gate_reason": null,
+      "close_gate_steps": null,
+      "close_gate_reason": null,
+      "object_stand_off_mm": 41.61552594210083,
+      "first_failure_stage": null,
+      "map_fit": 0.011459930996352341,
+      "label_transport": 0.014806639999733306,
+      "policy_refit": 0.14411148199724266,
+      "survivors_per_stage": {
+        "generated": [
+          100,
+          100
+        ],
+        "visibility": [
+          100,
+          80
+        ],
+        "support": [
+          80,
+          35
+        ],
+        "place zone": [
+          35,
+          34
+        ],
+        "on target": [
+          34,
+          34
+        ],
+        "jaw width": [
+          34,
+          34
+        ],
+        "collision": [
+          34,
+          34
+        ],
+        "centred": [
+          34,
+          13
+        ],
+        "distinct": [
+          13,
+          7
+        ]
+      },
+      "funnel_fallbacks": [],
+      "m_final_phase": 0.9999705413448596,
+      "m_frozen_steps": 0,
+      "m_steps": 276,
+      "m_close_step": 77,
+      "m_close_phase": 0.2505391472290133,
+      "m_reach_error": 0.01098528928430051,
+      "m_commanded_error": 0.0012679567789488629,
+      "m_lag_at_close": 0.011456889934200994,
+      "m_closest_commanded": 0.0010392727507298615,
+      "m_closest_commanded_step": 79,
+      "m_closest_transported": 1.1181526019803543e-06,
+      "m_reach_closing": 0.009357393761475511,
+      "m_reach_approach": 0.005180452257827027,
+      "m_reach_signed_approach": 0.005180452257827027,
+      "m_reach_jaw": 0.0025057350178118707,
+      "m_closing_budget": 0.009096013076803813,
+      "m_push_before_close": 0.0,
+      "m_closest_hand": 0.004494575496601711,
+      "m_closest_hand_step": 86,
+      "m_closed_early": false,
+      "m_reach_within_budget": false,
+      "m_drift_max": 0.002125616082140998,
+      "m_drift_median": 0.0009347791586463549,
+      "m_drift_at_step": 38,
+      "m_drift_frechet": 0.006543062659087672,
+      "m_contact_steps": 169,
+      "m_lift_height": 0.33486539386269254,
+      "m_peak_grip_force": 131.85371834870335,
+      "m_release_step": 231,
+      "m_carry_fraction": 0.987012987012987,
+      "m_release_error_xy": 0.015207262094784308,
+      "m_final_error_xy": 0.021499827672905515,
+      "arrays": "cell_016.npz",
+      "report": "run_016/report.html"
+    },
+    {
+      "label": "robotiq85 mug top middle 0",
+      "outcome": "placed_in_the_wrong_place",
+      "detail": "ended 298 mm from the slot",
+      "blame": "reach",
+      "stages": {
+        "approach": true,
+        "reach": false,
+        "grasp": true,
+        "lift": true,
+        "carry": false,
+        "place": false,
+        "settle": false
+      },
+      "stage_detail": "failed at 'reach': the hand moved the object 27 mm before the jaws closed at step 128, so the grasp was planned on a target that had left (the motion was aimed there wrongly)",
+      "placement_error_xy": 0.2977752301492308,
+      "n_keypoints": 18,
+      "min_det": 0.5579655503889731,
+      "cloud_points": 4096,
+      "grasps_generated": 100,
+      "fallbacks": [
+        "centred"
+      ],
+      "survivors": 5,
+      "executable_fraction": null,
+      "path_fell_back": false,
+      "path_rank_examined": 3,
+      "gripper": "robotiq85",
+      "object": "mug",
+      "grasp_chosen_index": 50,
+      "steps": 401,
+      "seconds": 12.7,
+      "world": "ycb",
+      "executor": "policy",
+      "seed": 0,
+      "pick_config_id": "P0",
+      "destination": "top middle",
+      "condition_id": "P0+top middle",
+      "refused": false,
+      "refusal_reason": "",
+      "det_J_at_grasp": 1.0518988378036491,
+      "det_J_at_release": 1.024023689430758,
+      "grasp_pose_target": [
+        [
+          -0.538698853,
+          -0.116256545,
+          0.83443871,
+          -0.265763081
+        ],
+        [
+          -0.379954302,
+          0.917517174,
+          -0.117460478,
+          -0.157848938
+        ],
+        [
+          -0.751956298,
+          -0.380324402,
+          -0.538437624,
+          0.875414263
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "grasp_pose_release": [
+        [
+          -0.659212959,
+          0.433831409,
+          0.614189371,
+          0.140575848
+        ],
+        [
+          -5.3e-08,
+          0.816788625,
+          -0.576937035,
+          0.008867116
+        ],
+        [
+          -0.751956298,
+          -0.380324402,
+          -0.538437624,
+          1.069414263
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "orientation_error_grasp_deg": 1.8912553561465373,
+      "orientation_error_release_deg": 1.61790882602518,
+      "placement_error_3d_mm": 357.3808108432598,
+      "placement_error_components_mm": [
+        -291.756,
+        -59.568,
+        -197.613
+      ],
+      "release_error_3d_mm": 357.3808108432598,
+      "release_error_components_mm": [
+        -291.756,
+        -59.568,
+        -197.613
+      ],
+      "release_drop_mm": 0.0,
+      "release_gate_steps": null,
+      "release_gate_reason": null,
+      "close_gate_steps": null,
+      "close_gate_reason": null,
+      "object_stand_off_mm": 40.974554688249285,
+      "first_failure_stage": "reach",
+      "map_fit": 0.012467139000364114,
+      "label_transport": 0.01487220900162356,
+      "policy_refit": 0.26695993499743054,
+      "survivors_per_stage": {
+        "generated": [
+          100,
+          100
+        ],
+        "visibility": [
+          100,
+          96
+        ],
+        "support": [
+          96,
+          67
+        ],
+        "place zone": [
+          67,
+          61
+        ],
+        "on target": [
+          61,
+          61
+        ],
+        "jaw width": [
+          61,
+          5
+        ],
+        "collision": [
+          5,
+          5
+        ],
+        "centred": [
+          5,
+          5
+        ],
+        "distinct": [
+          5,
+          5
+        ]
+      },
+      "funnel_fallbacks": [
+        "centred"
+      ],
+      "m_final_phase": 0.9973372130899684,
+      "m_frozen_steps": 24,
+      "m_steps": 401,
+      "m_close_step": 128,
+      "m_close_phase": 0.24318883753818765,
+      "m_reach_error": 0.05228677221974028,
+      "m_commanded_error": 0.053674041278475124,
+      "m_lag_at_close": 0.009524073945175106,
+      "m_closest_commanded": 0.04276795201927695,
+      "m_closest_commanded_step": 109,
+      "m_closest_transported": 1.5553604447691218e-07,
+      "m_reach_closing": 0.040861993695427576,
+      "m_reach_approach": 0.009715675847720102,
+      "m_reach_signed_approach": 0.009715675847720102,
+      "m_reach_jaw": 0.031141764160010313,
+      "m_closing_budget": 0.0,
+      "m_push_before_close": 0.027342940670861023,
+      "m_closest_hand": 0.044567883007445804,
+      "m_closest_hand_step": 132,
+      "m_closed_early": false,
+      "m_reach_within_budget": false,
+      "m_drift_max": 0.05458993179480678,
+      "m_drift_median": 0.014337843617134369,
+      "m_drift_at_step": 164,
+      "m_drift_frechet": 0.05483439350674034,
+      "m_contact_steps": 115,
+      "m_lift_height": 0.13780593548721565,
+      "m_peak_grip_force": 65.56290323493543,
+      "m_release_step": 332,
+      "m_carry_fraction": 0.553921568627451,
+      "m_release_error_xy": 0.2977752301492308,
+      "m_final_error_xy": 0.2977752301492308,
+      "arrays": "cell_017.npz",
+      "report": "run_017/report.html"
+    },
+    {
+      "label": "robotiq85 hammer top middle 0",
+      "outcome": "arm_could_not_hold_the_pose",
+      "detail": "the arm settled 16 mm behind its target after 361 steps and stopped making progress",
+      "blame": "reach",
+      "stages": {
+        "approach": true,
+        "reach": false,
+        "grasp": true,
+        "lift": false,
+        "carry": false,
+        "place": false,
+        "settle": false
+      },
+      "stage_detail": "failed at 'reach': the jaws closed 45 mm from the planned grasp point, at step 132 (2 mm across the closing axis against a 0 mm budget, +39 mm along the approach, 21 mm along the fingers) (the arm did not get there)",
+      "placement_error_xy": 0.4332409042149412,
+      "n_keypoints": 18,
+      "min_det": 0.37460883215679763,
+      "cloud_points": 4096,
+      "grasps_generated": 100,
+      "fallbacks": [],
+      "survivors": 1,
+      "executable_fraction": null,
+      "path_fell_back": true,
+      "path_rank_examined": 1,
+      "gripper": "robotiq85",
+      "object": "hammer",
+      "grasp_chosen_index": 6,
+      "steps": 361,
+      "seconds": 11.3,
+      "world": "ycb",
+      "executor": "policy",
+      "seed": 0,
+      "pick_config_id": "P0",
+      "destination": "top middle",
+      "condition_id": "P0+top middle",
+      "refused": false,
+      "refusal_reason": "",
+      "det_J_at_grasp": 1.070716729463068,
+      "det_J_at_release": 1.0120784675732946,
+      "grasp_pose_target": [
+        [
+          0.269967859,
+          0.672242192,
+          0.689353168,
+          -0.234109666
+        ],
+        [
+          0.962854004,
+          -0.19251925,
+          -0.189337015,
+          -0.118451612
+        ],
+        [
+          0.005433425,
+          0.714861367,
+          -0.699245096,
+          0.818484158
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "grasp_pose_release": [
+        [
+          -0.999985239,
+          0.003884171,
+          -0.003799385,
+          0.172968155
+        ],
+        [
+          -4.6e-08,
+          0.699255418,
+          0.714871919,
+          -0.022857773
+        ],
+        [
+          0.005433425,
+          0.714861367,
+          -0.699245096,
+          1.012484158
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "orientation_error_grasp_deg": 1.6476896010591404,
+      "orientation_error_release_deg": 1.3019594903871796,
+      "placement_error_3d_mm": 474.6932494621974,
+      "placement_error_components_mm": [
+        -409.987,
+        -140.028,
+        -194.0
+      ],
+      "release_error_3d_mm": 474.6932494621974,
+      "release_error_components_mm": [
+        -409.987,
+        -140.028,
+        -194.0
+      ],
+      "release_drop_mm": 0.0,
+      "release_gate_steps": null,
+      "release_gate_reason": null,
+      "close_gate_steps": null,
+      "close_gate_reason": null,
+      "object_stand_off_mm": 15.927132805352961,
+      "first_failure_stage": "reach",
+      "map_fit": 0.012778222000633832,
+      "label_transport": 0.014908413999364711,
+      "policy_refit": 0.12138353200134588,
+      "survivors_per_stage": {
+        "generated": [
+          100,
+          100
+        ],
+        "visibility": [
+          100,
+          83
+        ],
+        "support": [
+          83,
+          37
+        ],
+        "place zone": [
+          37,
+          27
+        ],
+        "on target": [
+          27,
+          27
+        ],
+        "jaw width": [
+          27,
+          14
+        ],
+        "collision": [
+          14,
+          1
+        ],
+        "centred": [
+          1,
+          1
+        ],
+        "distinct": [
+          1,
+          1
+        ]
+      },
+      "funnel_fallbacks": [],
+      "m_final_phase": 0.5863788160781994,
+      "m_frozen_steps": 154,
+      "m_steps": 361,
+      "m_close_step": 132,
+      "m_close_phase": 0.25089545553213677,
+      "m_reach_error": 0.04469799874209602,
+      "m_commanded_error": 0.0074015669762820075,
+      "m_lag_at_close": 0.04499715124610092,
+      "m_closest_commanded": 0.006758980413320988,
+      "m_closest_commanded_step": 142,
+      "m_closest_transported": 1.3000793682247724e-07,
+      "m_reach_closing": 0.0018469753604851953,
+      "m_reach_approach": 0.03949131925713066,
+      "m_reach_signed_approach": 0.03949131925713066,
+      "m_reach_jaw": 0.020855106920547865,
+      "m_closing_budget": 0.0,
+      "m_push_before_close": 0.0,
+      "m_closest_hand": 0.04015659760383656,
+      "m_closest_hand_step": 134,
+      "m_closed_early": false,
+      "m_reach_within_budget": false,
+      "m_drift_max": 0.13263312651125939,
+      "m_drift_median": 0.01155668803870837,
+      "m_drift_at_step": 360,
+      "m_drift_frechet": 0.27588442593478074,
+      "m_contact_steps": 23,
+      "m_lift_height": 0.0,
+      "m_peak_grip_force": 85.11530419776331,
+      "m_release_step": 360,
+      "m_carry_fraction": 0.10087719298245613,
+      "m_release_error_xy": 0.4332409042149412,
+      "m_final_error_xy": 0.4332409042149412,
+      "arrays": "cell_018.npz",
+      "report": "run_018/report.html"
+    },
+    {
+      "label": "robotiq85 banana top middle 0",
+      "outcome": "arm_could_not_hold_the_pose",
+      "detail": "the arm settled 2 mm behind its target after 313 steps and stopped making progress",
+      "blame": "approach",
+      "stages": {
+        "approach": false,
+        "reach": false,
+        "grasp": false,
+        "lift": false,
+        "carry": false,
+        "place": false,
+        "settle": false
+      },
+      "stage_detail": "failed at 'approach': started 164 mm from the transported start (it had 368 mm to travel)",
+      "placement_error_xy": 0.43324211662809126,
+      "n_keypoints": 18,
+      "min_det": 0.7914726305305069,
+      "cloud_points": 4096,
+      "grasps_generated": 100,
+      "fallbacks": [
+        "centred"
+      ],
+      "survivors": 1,
+      "executable_fraction": null,
+      "path_fell_back": true,
+      "path_rank_examined": 1,
+      "gripper": "robotiq85",
+      "object": "banana",
+      "grasp_chosen_index": 69,
+      "steps": 313,
+      "seconds": 10.8,
+      "world": "ycb",
+      "executor": "policy",
+      "seed": 0,
+      "pick_config_id": "P0",
+      "destination": "top middle",
+      "condition_id": "P0+top middle",
+      "refused": false,
+      "refusal_reason": "",
+      "det_J_at_grasp": 1.02322984129261,
+      "det_J_at_release": 1.0115865884020716,
+      "grasp_pose_target": [
+        [
+          -0.69257189,
+          -0.702521261,
+          -0.163731657,
+          -0.216489061
+        ],
+        [
+          -0.710399347,
+          0.624859207,
+          0.32385759,
+          -0.195055588
+        ],
+        [
+          -0.125207609,
+          0.340609525,
+          -0.931830567,
+          0.821224571
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "grasp_pose_release": [
+        [
+          -0.992130563,
+          -0.042985177,
+          0.117597704,
+          0.152386606
+        ],
+        [
+          -4e-09,
+          0.939221713,
+          0.343311191,
+          -0.04870618
+        ],
+        [
+          -0.125207609,
+          0.340609525,
+          -0.931830567,
+          1.015224571
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "orientation_error_grasp_deg": 1.405419321646973,
+      "orientation_error_release_deg": 1.0907808212143717,
+      "placement_error_3d_mm": 474.69416333732113,
+      "placement_error_components_mm": [
+        -409.999,
+        -139.999,
+        -194.0
+      ],
+      "release_error_3d_mm": 474.69416333732113,
+      "release_error_components_mm": [
+        -409.999,
+        -139.999,
+        -194.0
+      ],
+      "release_drop_mm": 0.0,
+      "release_gate_steps": null,
+      "release_gate_reason": null,
+      "close_gate_steps": null,
+      "close_gate_reason": null,
+      "object_stand_off_mm": 18.27557307076466,
+      "first_failure_stage": "approach",
+      "map_fit": 0.011660114003461786,
+      "label_transport": 0.014973498000472318,
+      "policy_refit": 0.30459095499827527,
+      "survivors_per_stage": {
+        "generated": [
+          100,
+          100
+        ],
+        "visibility": [
+          100,
+          77
+        ],
+        "support": [
+          77,
+          41
+        ],
+        "place zone": [
+          41,
+          27
+        ],
+        "on target": [
+          27,
+          27
+        ],
+        "jaw width": [
+          27,
+          23
+        ],
+        "collision": [
+          23,
+          1
+        ],
+        "centred": [
+          1,
+          1
+        ],
+        "distinct": [
+          1,
+          1
+        ]
+      },
+      "funnel_fallbacks": [
+        "centred"
+      ],
+      "m_final_phase": 0.5859434945090286,
+      "m_frozen_steps": 2,
+      "m_steps": 313,
+      "m_close_step": 84,
+      "m_close_phase": 0.24068238281186463,
+      "m_reach_error": 0.12551108562809665,
+      "m_commanded_error": 0.125172945402511,
+      "m_lag_at_close": 0.019987359679584447,
+      "m_closest_commanded": 0.12476008557967856,
+      "m_closest_commanded_step": 100,
+      "m_closest_transported": 2.010053942157277e-07,
+      "m_reach_closing": 0.09373029515863009,
+      "m_reach_approach": 0.02897507610420295,
+      "m_reach_signed_approach": 0.02897507610420295,
+      "m_reach_jaw": 0.07828223857576819,
+      "m_closing_budget": 0.0,
+      "m_push_before_close": 3.853020277710669e-06,
+      "m_closest_hand": 0.11957201438771649,
+      "m_closest_hand_step": 66,
+      "m_closed_early": false,
+      "m_reach_within_budget": false,
+      "m_drift_max": 0.12455907159693048,
+      "m_drift_median": 0.09675832095475423,
+      "m_drift_at_step": 109,
+      "m_drift_frechet": 0.33098673139434115,
+      "m_contact_steps": 0,
+      "m_lift_height": 8.627449556763978e-06,
+      "m_peak_grip_force": 0.0,
+      "m_release_step": 312,
+      "m_carry_fraction": 0.0,
+      "m_release_error_xy": 0.43324211662809126,
+      "m_final_error_xy": 0.43324211662809126,
+      "arrays": "cell_019.npz",
+      "report": "run_019/report.html"
+    },
+    {
+      "label": "robotiq3f_dex sugar top middle 0",
+      "outcome": "placed_in_the_wrong_place",
+      "detail": "ended 535 mm from the slot",
+      "blame": "reach",
+      "stages": {
+        "approach": true,
+        "reach": false,
+        "grasp": false,
+        "lift": false,
+        "carry": false,
+        "place": false,
+        "settle": false
+      },
+      "stage_detail": "failed at 'reach': the jaws closed 92 mm from the planned grasp point, at step 102 (47 mm across the closing axis against a 32 mm budget, +43 mm along the approach, 66 mm along the fingers) (the motion was aimed there wrongly)",
+      "placement_error_xy": 0.5351777903201642,
+      "n_keypoints": 18,
+      "min_det": 0.7139303297256407,
+      "cloud_points": 4096,
+      "grasps_generated": 100,
+      "fallbacks": [],
+      "survivors": 6,
+      "executable_fraction": null,
+      "path_fell_back": false,
+      "path_rank_examined": 1,
+      "gripper": "robotiq3f_dex",
+      "object": "sugar",
+      "grasp_chosen_index": 13,
+      "steps": 319,
+      "seconds": 11.3,
+      "world": "ycb",
+      "executor": "policy",
+      "seed": 0,
+      "pick_config_id": "P0",
+      "destination": "top middle",
+      "condition_id": "P0+top middle",
+      "refused": false,
+      "refusal_reason": "",
+      "det_J_at_grasp": 1.0333492766248527,
+      "det_J_at_release": 1.002757607646645,
+      "grasp_pose_target": [
+        [
+          -0.658629677,
+          -0.752466519,
+          0.001042729,
+          -0.238243617
+        ],
+        [
+          -0.751595691,
+          0.65793286,
+          0.047204538,
+          -0.134794977
+        ],
+        [
+          -0.03620588,
+          0.030306599,
+          -0.9988847,
+          0.92751073
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "grasp_pose_release": [
+        [
+          -0.999344352,
+          -0.001097997,
+          0.036189227,
+          0.178107602
+        ],
+        [
+          0.0,
+          0.999540046,
+          0.030326482,
+          0.009727913
+        ],
+        [
+          -0.03620588,
+          0.030306599,
+          -0.9988847,
+          1.12151073
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "orientation_error_grasp_deg": 1.5880126860107047,
+      "orientation_error_release_deg": 0.8871788742032143,
+      "placement_error_3d_mm": 594.9152173314241,
+      "placement_error_components_mm": [
+        -482.733,
+        -231.05,
+        -259.825
+      ],
+      "release_error_3d_mm": 594.9137415770781,
+      "release_error_components_mm": [
+        -482.729,
+        -231.056,
+        -259.824
+      ],
+      "release_drop_mm": 0.006835435512052214,
+      "release_gate_steps": null,
+      "release_gate_reason": null,
+      "close_gate_steps": null,
+      "close_gate_reason": null,
+      "object_stand_off_mm": 87.58090961075737,
+      "first_failure_stage": "reach",
+      "map_fit": 0.012930124998092651,
+      "label_transport": 0.014984830995672382,
+      "policy_refit": 0.1534948509943206,
+      "survivors_per_stage": {
+        "generated": [
+          100,
+          100
+        ],
+        "visibility": [
+          100,
+          85
+        ],
+        "support": [
+          85,
+          26
+        ],
+        "place zone": [
+          26,
+          18
+        ],
+        "on target": [
+          18,
+          18
+        ],
+        "jaw width": [
+          18,
+          18
+        ],
+        "collision": [
+          18,
+          18
+        ],
+        "centred": [
+          18,
+          10
+        ],
+        "distinct": [
+          10,
+          6
+        ]
+      },
+      "funnel_fallbacks": [],
+      "m_final_phase": 0.9949787798433126,
+      "m_frozen_steps": 21,
+      "m_steps": 319,
+      "m_close_step": 102,
+      "m_close_phase": 0.24252727158211426,
+      "m_reach_error": 0.09179423141960359,
+      "m_commanded_error": 0.06646575094119316,
+      "m_lag_at_close": 0.026971417539173807,
+      "m_closest_commanded": 0.06381256544478296,
+      "m_closest_commanded_step": 121,
+      "m_closest_transported": 2.3998629238574094e-07,
+      "m_reach_closing": 0.04729695202901202,
+      "m_reach_approach": 0.04280748345056202,
+      "m_reach_signed_approach": 0.04280748345056202,
+      "m_reach_jaw": 0.06600529716122162,
+      "m_closing_budget": 0.03242970794935985,
+      "m_push_before_close": 0.012968529417531663,
+      "m_closest_hand": 0.04445829465837372,
+      "m_closest_hand_step": 142,
+      "m_closed_early": false,
+      "m_reach_within_budget": false,
+      "m_drift_max": 0.06356944841539577,
+      "m_drift_median": 0.04154662159484089,
+      "m_drift_at_step": 274,
+      "m_drift_frechet": 0.08064464884465983,
+      "m_contact_steps": 14,
+      "m_lift_height": 0.0050060558047817505,
+      "m_peak_grip_force": 10.875851572737748,
+      "m_release_step": 277,
+      "m_carry_fraction": 0.022857142857142857,
+      "m_release_error_xy": 0.5351763076401538,
+      "m_final_error_xy": 0.5351777903201642,
+      "arrays": "cell_020.npz",
+      "report": "run_020/report.html"
+    },
+    {
+      "label": "robotiq3f_dex meat top middle 0",
+      "outcome": "success",
+      "detail": "",
+      "blame": "success",
+      "stages": {
+        "approach": true,
+        "reach": true,
+        "grasp": true,
+        "lift": true,
+        "carry": true,
+        "place": true,
+        "settle": true
+      },
+      "stage_detail": "every stage completed",
+      "placement_error_xy": 0.008136463281771528,
+      "n_keypoints": 18,
+      "min_det": 0.9874236144297637,
+      "cloud_points": 4096,
+      "grasps_generated": 100,
+      "fallbacks": [],
+      "survivors": 6,
+      "executable_fraction": null,
+      "path_fell_back": false,
+      "path_rank_examined": 6,
+      "gripper": "robotiq3f_dex",
+      "object": "meat",
+      "grasp_chosen_index": 54,
+      "steps": 248,
+      "seconds": 11.6,
+      "world": "ycb",
+      "executor": "policy",
+      "seed": 0,
+      "pick_config_id": "P0",
+      "destination": "top middle",
+      "condition_id": "P0+top middle",
+      "refused": false,
+      "refusal_reason": "",
+      "det_J_at_grasp": 1.0003199083027081,
+      "det_J_at_release": 0.9961193459715123,
+      "grasp_pose_target": [
+        [
+          -0.641218553,
+          0.680213495,
+          -0.355173716,
+          -0.23868491
+        ],
+        [
+          0.708028191,
+          0.702909223,
+          0.067931626,
+          -0.132327918
+        ],
+        [
+          0.295862889,
+          -0.207913985,
+          -0.932328765,
+          0.858636523
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "grasp_pose_release": [
+        [
+          -0.955230418,
+          -0.064397074,
+          -0.288769573,
+          0.168483044
+        ],
+        [
+          -1.2e-08,
+          0.976024996,
+          -0.217658467,
+          -0.001098692
+        ],
+        [
+          0.295862889,
+          -0.207913985,
+          -0.932328765,
+          1.052636523
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "orientation_error_grasp_deg": 0.6270918567478377,
+      "orientation_error_release_deg": 0.2030187473124722,
+      "placement_error_3d_mm": 8.137018502842453,
+      "placement_error_components_mm": [
+        3.665,
+        -7.264,
+        0.095
+      ],
+      "release_error_3d_mm": 9.419338774029898,
+      "release_error_components_mm": [
+        -5.867,
+        -5.127,
+        5.293
+      ],
+      "release_drop_mm": 11.065646735026675,
+      "release_gate_steps": null,
+      "release_gate_reason": null,
+      "close_gate_steps": null,
+      "close_gate_reason": null,
+      "object_stand_off_mm": 41.61552594210083,
+      "first_failure_stage": null,
+      "map_fit": 0.012143877997004893,
+      "label_transport": 0.014939859000151046,
+      "policy_refit": 0.2651949749997584,
+      "survivors_per_stage": {
+        "generated": [
+          100,
+          100
+        ],
+        "visibility": [
+          100,
+          79
+        ],
+        "support": [
+          79,
+          29
+        ],
+        "place zone": [
+          29,
+          24
+        ],
+        "on target": [
+          24,
+          24
+        ],
+        "jaw width": [
+          24,
+          24
+        ],
+        "collision": [
+          24,
+          19
+        ],
+        "centred": [
+          19,
+          8
+        ],
+        "distinct": [
+          8,
+          6
+        ]
+      },
+      "funnel_fallbacks": [],
+      "m_final_phase": 0.9999562899324081,
+      "m_frozen_steps": 0,
+      "m_steps": 248,
+      "m_close_step": 65,
+      "m_close_phase": 0.2513411152243422,
+      "m_reach_error": 0.012225367223542841,
+      "m_commanded_error": 0.001963880704577604,
+      "m_lag_at_close": 0.01087225704379865,
+      "m_closest_commanded": 0.0016471775763112768,
+      "m_closest_commanded_step": 66,
+      "m_closest_transported": 9.909961211474523e-07,
+      "m_reach_closing": 0.0026621276096096486,
+      "m_reach_approach": 0.009918492079813502,
+      "m_reach_signed_approach": 0.009918492079813502,
+      "m_reach_jaw": 0.006632963884321382,
+      "m_closing_budget": 0.012283170190959404,
+      "m_push_before_close": 0.00034662343464452215,
+      "m_closest_hand": 0.0032211860167684703,
+      "m_closest_hand_step": 86,
+      "m_closed_early": false,
+      "m_reach_within_budget": true,
+      "m_drift_max": 0.003265324964803908,
+      "m_drift_median": 0.0016476179676022098,
+      "m_drift_at_step": 175,
+      "m_drift_frechet": 0.006571975745302415,
+      "m_contact_steps": 153,
+      "m_lift_height": 0.33803105324718585,
+      "m_peak_grip_force": 206.6125148675057,
+      "m_release_step": 207,
+      "m_carry_fraction": 0.9929577464788732,
+      "m_release_error_xy": 0.00779155224495762,
+      "m_final_error_xy": 0.008136463281771528,
+      "arrays": "cell_021.npz",
+      "report": "run_021/report.html"
+    },
+    {
+      "label": "robotiq3f_dex mug top middle 0",
+      "outcome": "placed_in_the_wrong_place",
+      "detail": "ended 433 mm from the slot",
+      "blame": "reach",
+      "stages": {
+        "approach": true,
+        "reach": false,
+        "grasp": true,
+        "lift": false,
+        "carry": false,
+        "place": false,
+        "settle": false
+      },
+      "stage_detail": "failed at 'reach': the jaws closed 42 mm from the planned grasp point, at step 74 (4 mm across the closing axis against a 9 mm budget, +41 mm along the approach, 8 mm along the fingers); the hand did reach it later, at step 104 (the arm did not get there)",
+      "placement_error_xy": 0.43308435714669014,
+      "n_keypoints": 18,
+      "min_det": 0.988689951943171,
+      "cloud_points": 4096,
+      "grasps_generated": 100,
+      "fallbacks": [],
+      "survivors": 5,
+      "executable_fraction": null,
+      "path_fell_back": false,
+      "path_rank_examined": 3,
+      "gripper": "robotiq3f_dex",
+      "object": "mug",
+      "grasp_chosen_index": 85,
+      "steps": 253,
+      "seconds": 10.2,
+      "world": "ycb",
+      "executor": "policy",
+      "seed": 0,
+      "pick_config_id": "P0",
+      "destination": "top middle",
+      "condition_id": "P0+top middle",
+      "refused": false,
+      "refusal_reason": "",
+      "det_J_at_grasp": 1.000472613175424,
+      "det_J_at_release": 0.9991250792629204,
+      "grasp_pose_target": [
+        [
+          -0.667513155,
+          0.743480567,
+          -0.04077787,
+          -0.236708101
+        ],
+        [
+          0.744460132,
+          0.665334146,
+          -0.055763662,
+          -0.147897584
+        ],
+        [
+          -0.01432829,
+          -0.067580477,
+          -0.997610936,
+          0.867069515
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "grasp_pose_release": [
+        [
+          -0.999897345,
+          0.000968412,
+          0.014295526,
+          0.179798895
+        ],
+        [
+          0.0,
+          0.997713356,
+          -0.067587415,
+          -0.010383493
+        ],
+        [
+          -0.01432829,
+          -0.067580477,
+          -0.997610936,
+          1.061069515
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "orientation_error_grasp_deg": 0.7185332482758324,
+      "orientation_error_release_deg": 0.5673147002680706,
+      "placement_error_3d_mm": 474.55179758572524,
+      "placement_error_components_mm": [
+        -410.996,
+        -136.544,
+        -194.003
+      ],
+      "release_error_3d_mm": 474.5517755017974,
+      "release_error_components_mm": [
+        -410.995,
+        -136.549,
+        -194.002
+      ],
+      "release_drop_mm": 0.00461375312709841,
+      "release_gate_steps": null,
+      "release_gate_reason": null,
+      "close_gate_steps": null,
+      "close_gate_reason": null,
+      "object_stand_off_mm": 40.974554688249285,
+      "first_failure_stage": "reach",
+      "map_fit": 0.012118810998799745,
+      "label_transport": 0.014867278005112894,
+      "policy_refit": 0.2759799729974475,
+      "survivors_per_stage": {
+        "generated": [
+          100,
+          100
+        ],
+        "visibility": [
+          100,
+          78
+        ],
+        "support": [
+          78,
+          25
+        ],
+        "place zone": [
+          25,
+          16
+        ],
+        "on target": [
+          16,
+          16
+        ],
+        "jaw width": [
+          16,
+          13
+        ],
+        "collision": [
+          13,
+          10
+        ],
+        "centred": [
+          10,
+          5
+        ],
+        "distinct": [
+          5,
+          5
+        ]
+      },
+      "funnel_fallbacks": [],
+      "m_final_phase": 0.999999999918942,
+      "m_frozen_steps": 8,
+      "m_steps": 253,
+      "m_close_step": 74,
+      "m_close_phase": 0.24806741586851527,
+      "m_reach_error": 0.04233925459788017,
+      "m_commanded_error": 0.0052409557052591395,
+      "m_lag_at_close": 0.037364680345709445,
+      "m_closest_commanded": 0.0051015035917663905,
+      "m_closest_commanded_step": 76,
+      "m_closest_transported": 7.424153924239225e-07,
+      "m_reach_closing": 0.003915927285729595,
+      "m_reach_approach": 0.04143641376726706,
+      "m_reach_signed_approach": 0.04143641376726706,
+      "m_reach_jaw": 0.00776540875878271,
+      "m_closing_budget": 0.00878109397615797,
+      "m_push_before_close": 0.003918556178130031,
+      "m_closest_hand": 0.03871664926707432,
+      "m_closest_hand_step": 104,
+      "m_closed_early": true,
+      "m_reach_within_budget": true,
+      "m_drift_max": 0.017090182140579696,
+      "m_drift_median": 0.002995110712165605,
+      "m_drift_at_step": 252,
+      "m_drift_frechet": 0.01729665574420065,
+      "m_contact_steps": 67,
+      "m_lift_height": 0.013524294452228802,
+      "m_peak_grip_force": 162.33960049300038,
+      "m_release_step": 212,
+      "m_carry_fraction": 0.36231884057971014,
+      "m_release_error_xy": 0.43308493907884543,
+      "m_final_error_xy": 0.43308435714669014,
+      "arrays": "cell_022.npz",
+      "report": "run_022/report.html"
+    },
+    {
+      "label": "robotiq3f_dex hammer top middle 0",
+      "outcome": "placed_in_the_wrong_place",
+      "detail": "ended 434 mm from the slot",
+      "blame": "grasp",
+      "stages": {
+        "approach": true,
+        "reach": true,
+        "grasp": false,
+        "lift": false,
+        "carry": false,
+        "place": false,
+        "settle": false
+      },
+      "stage_detail": "failed at 'grasp': the hand was in contact with the object on 31 of 419 steps, from step 121, but the peak grip force was 10 N against 50 N -- touched, no purchase",
+      "placement_error_xy": 0.43379884157568316,
+      "n_keypoints": 18,
+      "min_det": 0.5115278046365219,
+      "cloud_points": 4096,
+      "grasps_generated": 100,
+      "fallbacks": [
+        "collision"
+      ],
+      "survivors": 1,
+      "executable_fraction": null,
+      "path_fell_back": true,
+      "path_rank_examined": 1,
+      "gripper": "robotiq3f_dex",
+      "object": "hammer",
+      "grasp_chosen_index": 70,
+      "steps": 419,
+      "seconds": 15.3,
+      "world": "ycb",
+      "executor": "policy",
+      "seed": 0,
+      "pick_config_id": "P0",
+      "destination": "top middle",
+      "condition_id": "P0+top middle",
+      "refused": false,
+      "refusal_reason": "",
+      "det_J_at_grasp": 1.0568669147886167,
+      "det_J_at_release": 1.0073838356512135,
+      "grasp_pose_target": [
+        [
+          0.058677923,
+          0.776334687,
+          0.627583744,
+          -0.232474963
+        ],
+        [
+          0.993588403,
+          -0.106276267,
+          0.038567361,
+          -0.111377773
+        ],
+        [
+          0.096638437,
+          0.621296877,
+          -0.777593212,
+          0.805783861
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "grasp_pose_release": [
+        [
+          -0.995319553,
+          0.060323508,
+          -0.075498754,
+          0.179656344
+        ],
+        [
+          1e-08,
+          0.78124981,
+          0.624218499,
+          -0.019521115
+        ],
+        [
+          0.096638437,
+          0.621296877,
+          -0.777593212,
+          0.999783861
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "orientation_error_grasp_deg": 1.7271265666493336,
+      "orientation_error_release_deg": 1.1559281707485398,
+      "placement_error_3d_mm": 475.20251993482134,
+      "placement_error_components_mm": [
+        -410.75,
+        -139.52,
+        -194.0
+      ],
+      "release_error_3d_mm": 475.20251993482134,
+      "release_error_components_mm": [
+        -410.75,
+        -139.52,
+        -194.0
+      ],
+      "release_drop_mm": 0.0,
+      "release_gate_steps": null,
+      "release_gate_reason": null,
+      "close_gate_steps": null,
+      "close_gate_reason": null,
+      "object_stand_off_mm": 15.927132805352961,
+      "first_failure_stage": "grasp",
+      "map_fit": 0.019549685006495565,
+      "label_transport": 0.023785744000633713,
+      "policy_refit": 0.288885713001946,
+      "survivors_per_stage": {
+        "generated": [
+          100,
+          100
+        ],
+        "visibility": [
+          100,
+          83
+        ],
+        "support": [
+          83,
+          39
+        ],
+        "place zone": [
+          39,
+          9
+        ],
+        "on target": [
+          9,
+          9
+        ],
+        "jaw width": [
+          9,
+          1
+        ],
+        "collision": [
+          1,
+          1
+        ],
+        "centred": [
+          1,
+          1
+        ],
+        "distinct": [
+          1,
+          1
+        ]
+      },
+      "funnel_fallbacks": [
+        "collision"
+      ],
+      "m_final_phase": 0.9977070971270806,
+      "m_frozen_steps": 22,
+      "m_steps": 419,
+      "m_close_step": 115,
+      "m_close_phase": 0.24659089150273594,
+      "m_reach_error": 0.03627043309250842,
+      "m_commanded_error": 0.02355829588747011,
+      "m_lag_at_close": 0.015362399539830787,
+      "m_closest_commanded": 0.020326913458406003,
+      "m_closest_commanded_step": 121,
+      "m_closest_transported": 1.5313486640621722e-07,
+      "m_reach_closing": 0.002077771701375252,
+      "m_reach_approach": 0.03499503936620711,
+      "m_reach_signed_approach": 0.03499503936620711,
+      "m_reach_jaw": 0.009304523592641176,
+      "m_closing_budget": 0.0,
+      "m_push_before_close": 0.0,
+      "m_closest_hand": 0.03611461793853555,
+      "m_closest_hand_step": 114,
+      "m_closed_early": false,
+      "m_reach_within_budget": false,
+      "m_drift_max": 0.07088718460655602,
+      "m_drift_median": 0.010338961222516256,
+      "m_drift_at_step": 418,
+      "m_drift_frechet": 0.17066897681893528,
+      "m_contact_steps": 31,
+      "m_lift_height": 0.0001271198653314265,
+      "m_peak_grip_force": 9.725999952736464,
+      "m_release_step": 371,
+      "m_carry_fraction": 0.12109375,
+      "m_release_error_xy": 0.43379884157568316,
+      "m_final_error_xy": 0.43379884157568316,
+      "arrays": "cell_023.npz",
+      "report": "run_023/report.html"
+    },
+    {
+      "label": "robotiq3f_dex banana top middle 0",
+      "outcome": "arm_could_not_hold_the_pose",
+      "detail": "the arm settled 1 mm behind its target after 405 steps and stopped making progress",
+      "blame": "approach",
+      "stages": {
+        "approach": false,
+        "reach": false,
+        "grasp": false,
+        "lift": false,
+        "carry": false,
+        "place": false,
+        "settle": false
+      },
+      "stage_detail": "failed at 'approach': started 112 mm from the transported start (it had 360 mm to travel)",
+      "placement_error_xy": 0.4332414671561641,
+      "n_keypoints": 18,
+      "min_det": 0.9302977353867399,
+      "cloud_points": 4096,
+      "grasps_generated": 100,
+      "fallbacks": [
+        "collision"
+      ],
+      "survivors": 3,
+      "executable_fraction": null,
+      "path_fell_back": true,
+      "path_rank_examined": 3,
+      "gripper": "robotiq3f_dex",
+      "object": "banana",
+      "grasp_chosen_index": 16,
+      "steps": 405,
+      "seconds": 16.9,
+      "world": "ycb",
+      "executor": "policy",
+      "seed": 0,
+      "pick_config_id": "P0",
+      "destination": "top middle",
+      "condition_id": "P0+top middle",
+      "refused": false,
+      "refusal_reason": "",
+      "det_J_at_grasp": 1.0131542645800764,
+      "det_J_at_release": 1.000312701785891,
+      "grasp_pose_target": [
+        [
+          -0.718712523,
+          -0.63503263,
+          -0.283171093,
+          -0.26170337
+        ],
+        [
+          -0.660857858,
+          0.750489325,
+          -0.005715243,
+          -0.150821496
+        ],
+        [
+          0.216146248,
+          0.183028226,
+          -0.95905238,
+          0.80589747
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "grasp_pose_release": [
+        [
+          -0.976360998,
+          0.040518694,
+          -0.212314475,
+          0.15357921
+        ],
+        [
+          8e-09,
+          0.982272317,
+          0.187459585,
+          0.01236719
+        ],
+        [
+          0.216146248,
+          0.183028226,
+          -0.95905238,
+          0.99989747
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "orientation_error_grasp_deg": 1.202214098472067,
+      "orientation_error_release_deg": 0.6808879659448557,
+      "placement_error_3d_mm": 474.6938576249988,
+      "placement_error_components_mm": [
+        -409.998,
+        -139.999,
+        -194.0
+      ],
+      "release_error_3d_mm": 474.6938576249988,
+      "release_error_components_mm": [
+        -409.998,
+        -139.999,
+        -194.0
+      ],
+      "release_drop_mm": 0.0,
+      "release_gate_steps": null,
+      "release_gate_reason": null,
+      "close_gate_steps": null,
+      "close_gate_reason": null,
+      "object_stand_off_mm": 18.275725594477432,
+      "first_failure_stage": "approach",
+      "map_fit": 0.011160116002429277,
+      "label_transport": 0.015005187997303437,
+      "policy_refit": 0.5576372400028049,
+      "survivors_per_stage": {
+        "generated": [
+          100,
+          100
+        ],
+        "visibility": [
+          100,
+          81
+        ],
+        "support": [
+          81,
+          53
+        ],
+        "place zone": [
+          53,
+          12
+        ],
+        "on target": [
+          12,
+          12
+        ],
+        "jaw width": [
+          12,
+          11
+        ],
+        "collision": [
+          11,
+          11
+        ],
+        "centred": [
+          11,
+          3
+        ],
+        "distinct": [
+          3,
+          3
+        ]
+      },
+      "funnel_fallbacks": [
+        "collision"
+      ],
+      "m_final_phase": 0.6281405325073864,
+      "m_frozen_steps": 11,
+      "m_steps": 405,
+      "m_close_step": 133,
+      "m_close_phase": 0.22841369251987023,
+      "m_reach_error": 0.2020580738684852,
+      "m_commanded_error": 0.18448953259863438,
+      "m_lag_at_close": 0.019716010678460866,
+      "m_closest_commanded": 0.1825868239033005,
+      "m_closest_commanded_step": 182,
+      "m_closest_transported": 3.90222059710492e-07,
+      "m_reach_closing": 0.10667866649009305,
+      "m_reach_approach": 0.15502304855225407,
+      "m_reach_signed_approach": 0.15502304855225407,
+      "m_reach_jaw": 0.07358663128151607,
+      "m_closing_budget": 0.007080945809020141,
+      "m_push_before_close": 2.836107939747232e-06,
+      "m_closest_hand": 0.18048911310661137,
+      "m_closest_hand_step": 160,
+      "m_closed_early": false,
+      "m_reach_within_budget": false,
+      "m_drift_max": 0.0943191990029517,
+      "m_drift_median": 0.08574152361733847,
+      "m_drift_at_step": 31,
+      "m_drift_frechet": 0.35281074135851603,
+      "m_contact_steps": 0,
+      "m_lift_height": 6.673126390022155e-06,
+      "m_peak_grip_force": 0.0,
+      "m_release_step": 404,
+      "m_carry_fraction": 0.0,
+      "m_release_error_xy": 0.4332414671561641,
+      "m_final_error_xy": 0.4332414671561641,
+      "arrays": "cell_024.npz",
+      "report": "run_024/report.html"
+    },
+    {
+      "label": "panda sugar top middle 0",
+      "outcome": "placed_in_the_wrong_place",
+      "detail": "ended 64 mm from the slot",
+      "blame": "settle",
+      "stages": {
+        "approach": true,
+        "reach": true,
+        "grasp": true,
+        "lift": true,
+        "carry": true,
+        "place": true,
+        "settle": false
+      },
+      "stage_detail": "failed at 'settle': it came to rest 64 mm from the slot centre and +22 mm from its height",
+      "placement_error_xy": 0.0644885710685432,
+      "n_keypoints": 18,
+      "min_det": 0.7508443541128841,
+      "cloud_points": 4096,
+      "grasps_generated": 100,
+      "fallbacks": [],
+      "survivors": 2,
+      "executable_fraction": null,
+      "path_fell_back": false,
+      "path_rank_examined": 1,
+      "gripper": "panda",
+      "object": "sugar",
+      "grasp_chosen_index": 24,
+      "steps": 318,
+      "seconds": 9.9,
+      "world": "ycb",
+      "executor": "policy",
+      "seed": 0,
+      "pick_config_id": "P0",
+      "destination": "top middle",
+      "condition_id": "P0+top middle",
+      "refused": false,
+      "refusal_reason": "",
+      "det_J_at_grasp": 1.0297073806521946,
+      "det_J_at_release": 1.0038175940103335,
+      "grasp_pose_target": [
+        [
+          -0.661393755,
+          -0.745406642,
+          -0.083230031,
+          -0.23591852
+        ],
+        [
+          -0.749656195,
+          0.653429371,
+          0.105098276,
+          -0.132721129
+        ],
+        [
+          -0.023956006,
+          0.131905251,
+          -0.990972812,
+          0.95852828
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "grasp_pose_release": [
+        [
+          -0.999713014,
+          -0.003160831,
+          0.023746566,
+          0.18114227
+        ],
+        [
+          -1e-09,
+          0.991257289,
+          0.131943117,
+          0.009370206
+        ],
+        [
+          -0.023956006,
+          0.131905251,
+          -0.990972812,
+          1.15252828
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "orientation_error_grasp_deg": 1.5463244228421171,
+      "orientation_error_release_deg": 0.9199115463173334,
+      "placement_error_3d_mm": 92.2279862241791,
+      "placement_error_components_mm": [
+        64.452,
+        2.171,
+        -65.933
+      ],
+      "release_error_3d_mm": 25.41872169696509,
+      "release_error_components_mm": [
+        -25.237,
+        1.028,
+        2.856
+      ],
+      "release_drop_mm": 113.03714862003903,
+      "release_gate_steps": null,
+      "release_gate_reason": null,
+      "close_gate_steps": null,
+      "close_gate_reason": null,
+      "object_stand_off_mm": 87.5809096165745,
+      "first_failure_stage": "settle",
+      "map_fit": 0.011434842999733519,
+      "label_transport": 0.014835834001132753,
+      "policy_refit": 0.3754625159999705,
+      "survivors_per_stage": {
+        "generated": [
+          100,
+          100
+        ],
+        "visibility": [
+          100,
+          79
+        ],
+        "support": [
+          79,
+          38
+        ],
+        "place zone": [
+          38,
+          30
+        ],
+        "on target": [
+          30,
+          30
+        ],
+        "jaw width": [
+          30,
+          30
+        ],
+        "collision": [
+          30,
+          29
+        ],
+        "centred": [
+          29,
+          5
+        ],
+        "distinct": [
+          5,
+          2
+        ]
+      },
+      "funnel_fallbacks": [],
+      "m_final_phase": 0.9987880334378159,
+      "m_frozen_steps": 0,
+      "m_steps": 318,
+      "m_close_step": 91,
+      "m_close_phase": 0.24968784452334902,
+      "m_reach_error": 0.02638354002025136,
+      "m_commanded_error": 0.002731789099123443,
+      "m_lag_at_close": 0.02390033853375558,
+      "m_closest_commanded": 0.001495283276924634,
+      "m_closest_commanded_step": 94,
+      "m_closest_transported": 2.5128989640742805e-07,
+      "m_reach_closing": 0.00029438772347877245,
+      "m_reach_approach": 0.024497125161553047,
+      "m_reach_signed_approach": 0.024497125161553047,
+      "m_reach_jaw": 0.009792615195835571,
+      "m_closing_budget": 0.017416052775494233,
+      "m_push_before_close": 0.00016145426146769423,
+      "m_closest_hand": 0.0023009815425001695,
+      "m_closest_hand_step": 119,
+      "m_closed_early": false,
+      "m_reach_within_budget": true,
+      "m_drift_max": 0.003030072574824247,
+      "m_drift_median": 0.0008752890821579683,
+      "m_drift_at_step": 231,
+      "m_drift_frechet": 0.007070042675333128,
+      "m_contact_steps": 191,
+      "m_lift_height": 0.33906973153574516,
+      "m_peak_grip_force": 77.39860193118125,
+      "m_release_step": 276,
+      "m_carry_fraction": 0.9675675675675676,
+      "m_release_error_xy": 0.025257757536035562,
+      "m_final_error_xy": 0.0644885710685432,
+      "arrays": "cell_025.npz",
+      "report": "run_025/report.html"
+    },
+    {
+      "label": "panda meat top middle 0",
+      "outcome": "success",
+      "detail": "",
+      "blame": "success",
+      "stages": {
+        "approach": true,
+        "reach": true,
+        "grasp": true,
+        "lift": true,
+        "carry": true,
+        "place": true,
+        "settle": true
+      },
+      "stage_detail": "every stage completed",
+      "placement_error_xy": 0.02155885533336652,
+      "n_keypoints": 18,
+      "min_det": 0.9948334306618289,
+      "cloud_points": 4096,
+      "grasps_generated": 100,
+      "fallbacks": [],
+      "survivors": 3,
+      "executable_fraction": null,
+      "path_fell_back": false,
+      "path_rank_examined": 3,
+      "gripper": "panda",
+      "object": "meat",
+      "grasp_chosen_index": 81,
+      "steps": 281,
+      "seconds": 10.5,
+      "world": "ycb",
+      "executor": "policy",
+      "seed": 0,
+      "pick_config_id": "P0",
+      "destination": "top middle",
+      "condition_id": "P0+top middle",
+      "refused": false,
+      "refusal_reason": "",
+      "det_J_at_grasp": 0.9976151835458029,
+      "det_J_at_release": 0.9988501086952265,
+      "grasp_pose_target": [
+        [
+          -0.861553477,
+          0.505975613,
+          -0.041403936,
+          -0.23752262
+        ],
+        [
+          0.504919258,
+          0.862509746,
+          0.033667222,
+          -0.150814522
+        ],
+        [
+          0.052746092,
+          0.008100468,
+          -0.998575101,
+          0.886226174
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "grasp_pose_release": [
+        [
+          -0.998607956,
+          0.000427864,
+          -0.052744356,
+          0.179002253
+        ],
+        [
+          -0.0,
+          0.999967099,
+          0.00811176,
+          -0.013141383
+        ],
+        [
+          0.052746092,
+          0.008100468,
+          -0.998575101,
+          1.080226174
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "orientation_error_grasp_deg": 0.5045289369256244,
+      "orientation_error_release_deg": 0.5085210481749933,
+      "placement_error_3d_mm": 21.55906488382579,
+      "placement_error_components_mm": [
+        21.194,
+        3.947,
+        0.095
+      ],
+      "release_error_3d_mm": 17.497018351261143,
+      "release_error_components_mm": [
+        -13.245,
+        -0.402,
+        11.426
+      ],
+      "release_drop_mm": 36.515284869174465,
+      "release_gate_steps": null,
+      "release_gate_reason": null,
+      "close_gate_steps": null,
+      "close_gate_reason": null,
+      "object_stand_off_mm": 41.61552594210083,
+      "first_failure_stage": null,
+      "map_fit": 0.011149033001856878,
+      "label_transport": 0.024313158995937556,
+      "policy_refit": 0.9601248860053602,
+      "survivors_per_stage": {
+        "generated": [
+          100,
+          100
+        ],
+        "visibility": [
+          100,
+          91
+        ],
+        "support": [
+          91,
+          46
+        ],
+        "place zone": [
+          46,
+          46
+        ],
+        "on target": [
+          46,
+          46
+        ],
+        "jaw width": [
+          46,
+          43
+        ],
+        "collision": [
+          43,
+          40
+        ],
+        "centred": [
+          40,
+          8
+        ],
+        "distinct": [
+          8,
+          3
+        ]
+      },
+      "funnel_fallbacks": [],
+      "m_final_phase": 0.995009821266197,
+      "m_frozen_steps": 11,
+      "m_steps": 281,
+      "m_close_step": 83,
+      "m_close_phase": 0.24937397563720345,
+      "m_reach_error": 0.022469789447569874,
+      "m_commanded_error": 0.0007530238017034446,
+      "m_lag_at_close": 0.02269993758924802,
+      "m_closest_commanded": 0.0005754659370496717,
+      "m_closest_commanded_step": 90,
+      "m_closest_transported": 9.543409802098445e-07,
+      "m_reach_closing": 0.003963549222193855,
+      "m_reach_approach": 0.01238031377326821,
+      "m_reach_signed_approach": 0.01238031377326821,
+      "m_reach_jaw": 0.01832783413670424,
+      "m_closing_budget": 0.007868382643782791,
+      "m_push_before_close": 0.0,
+      "m_closest_hand": 0.0007082218079125493,
+      "m_closest_hand_step": 94,
+      "m_closed_early": false,
+      "m_reach_within_budget": true,
+      "m_drift_max": 0.03927547411852467,
+      "m_drift_median": 0.0012574312469742137,
+      "m_drift_at_step": 268,
+      "m_drift_frechet": 0.04686846511889543,
+      "m_contact_steps": 162,
+      "m_lift_height": 0.3497253054270745,
+      "m_peak_grip_force": 39.92368215909006,
+      "m_release_step": 240,
+      "m_carry_fraction": 0.9745222929936306,
+      "m_release_error_xy": 0.013250791550071304,
+      "m_final_error_xy": 0.02155885533336652,
+      "arrays": "cell_026.npz",
+      "report": "run_026/report.html"
+    },
+    {
+      "label": "panda mug top middle 0",
+      "outcome": "success",
+      "detail": "",
+      "blame": "success",
+      "stages": {
+        "approach": true,
+        "reach": true,
+        "grasp": true,
+        "lift": true,
+        "carry": true,
+        "place": true,
+        "settle": true
+      },
+      "stage_detail": "every stage completed",
+      "placement_error_xy": 0.03017461730192581,
+      "n_keypoints": 18,
+      "min_det": 0.7352551109675769,
+      "cloud_points": 4096,
+      "grasps_generated": 100,
+      "fallbacks": [
+        "centred"
+      ],
+      "survivors": 11,
+      "executable_fraction": null,
+      "path_fell_back": false,
+      "path_rank_examined": 2,
+      "gripper": "panda",
+      "object": "mug",
+      "grasp_chosen_index": 5,
+      "steps": 287,
+      "seconds": 9.6,
+      "world": "ycb",
+      "executor": "policy",
+      "seed": 0,
+      "pick_config_id": "P0",
+      "destination": "top middle",
+      "condition_id": "P0+top middle",
+      "refused": false,
+      "refusal_reason": "",
+      "det_J_at_grasp": 1.0429320841053948,
+      "det_J_at_release": 0.9930367429404389,
+      "grasp_pose_target": [
+        [
+          0.135860327,
+          0.990593962,
+          -0.016296465,
+          -0.238582076
+        ],
+        [
+          0.967255376,
+          -0.129064195,
+          0.218539403,
+          -0.190751161
+        ],
+        [
+          0.214380523,
+          -0.045453678,
+          -0.975692039,
+          0.890635517
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "grasp_pose_release": [
+        [
+          -0.97675022,
+          -0.009976331,
+          -0.21414827,
+          0.228503095
+        ],
+        [
+          0.0,
+          0.998916631,
+          -0.046535621,
+          0.004512854
+        ],
+        [
+          0.214380523,
+          -0.045453678,
+          -0.975692039,
+          1.084635517
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "orientation_error_grasp_deg": 1.7994505991968734,
+      "orientation_error_release_deg": 0.6701645956533131,
+      "placement_error_3d_mm": 30.174855696039355,
+      "placement_error_components_mm": [
+        28.481,
+        -9.967,
+        0.12
+      ],
+      "release_error_3d_mm": 23.35559499678808,
+      "release_error_components_mm": [
+        22.6,
+        -4.717,
+        3.531
+      ],
+      "release_drop_mm": 8.589319719185948,
+      "release_gate_steps": null,
+      "release_gate_reason": null,
+      "close_gate_steps": null,
+      "close_gate_reason": null,
+      "object_stand_off_mm": 40.97455468824918,
+      "first_failure_stage": null,
+      "map_fit": 0.015831832999538165,
+      "label_transport": 0.01508288100012578,
+      "policy_refit": 0.13982887499878416,
+      "survivors_per_stage": {
+        "generated": [
+          100,
+          100
+        ],
+        "visibility": [
+          100,
+          98
+        ],
+        "support": [
+          98,
+          73
+        ],
+        "place zone": [
+          73,
+          61
+        ],
+        "on target": [
+          61,
+          61
+        ],
+        "jaw width": [
+          61,
+          12
+        ],
+        "collision": [
+          12,
+          11
+        ],
+        "centred": [
+          11,
+          11
+        ],
+        "distinct": [
+          11,
+          11
+        ]
+      },
+      "funnel_fallbacks": [
+        "centred"
+      ],
+      "m_final_phase": 0.9981909546610984,
+      "m_frozen_steps": 17,
+      "m_steps": 287,
+      "m_close_step": 122,
+      "m_close_phase": 0.25222076723874787,
+      "m_reach_error": 0.024464124884486748,
+      "m_commanded_error": 0.027921091209483585,
+      "m_lag_at_close": 0.04103543631187285,
+      "m_closest_commanded": 0.021390759452578935,
+      "m_closest_commanded_step": 114,
+      "m_closest_transported": 2.7061502986107733e-07,
+      "m_reach_closing": 0.022338351424899337,
+      "m_reach_approach": 0.007279055264288051,
+      "m_reach_signed_approach": 0.007279055264288051,
+      "m_reach_jaw": 0.00681958889274623,
+      "m_closing_budget": 0.0,
+      "m_push_before_close": 2.7633873753208007e-06,
+      "m_closest_hand": 0.010597342494916605,
+      "m_closest_hand_step": 143,
+      "m_closed_early": false,
+      "m_reach_within_budget": false,
+      "m_drift_max": 0.046509155734259684,
+      "m_drift_median": 0.02220552234090885,
+      "m_drift_at_step": 86,
+      "m_drift_frechet": 0.058906622864995456,
+      "m_contact_steps": 123,
+      "m_lift_height": 0.34383240426604056,
+      "m_peak_grip_force": 68.0990295445983,
+      "m_release_step": 247,
+      "m_carry_fraction": 0.952,
+      "m_release_error_xy": 0.02308716711107316,
+      "m_final_error_xy": 0.03017461730192581,
+      "arrays": "cell_027.npz",
+      "report": "run_027/report.html"
+    },
+    {
+      "label": "panda hammer top middle 0",
+      "outcome": "placed_in_the_wrong_place",
+      "detail": "ended 298 mm from the slot",
+      "blame": "carry",
+      "stages": {
+        "approach": true,
+        "reach": true,
+        "grasp": true,
+        "lift": true,
+        "carry": false,
+        "place": false,
+        "settle": false
+      },
+      "stage_detail": "failed at 'carry': it was in the hand for 49% of the carry (steps 127 to 252)",
+      "placement_error_xy": 0.2979684923889239,
+      "n_keypoints": 18,
+      "min_det": 0.6941605800057178,
+      "cloud_points": 4096,
+      "grasps_generated": 100,
+      "fallbacks": [
+        "centred"
+      ],
+      "survivors": 8,
+      "executable_fraction": null,
+      "path_fell_back": false,
+      "path_rank_examined": 1,
+      "gripper": "panda",
+      "object": "hammer",
+      "grasp_chosen_index": 5,
+      "steps": 293,
+      "seconds": 9.1,
+      "world": "ycb",
+      "executor": "policy",
+      "seed": 0,
+      "pick_config_id": "P0",
+      "destination": "top middle",
+      "condition_id": "P0+top middle",
+      "refused": false,
+      "refusal_reason": "",
+      "det_J_at_grasp": 1.040448589264254,
+      "det_J_at_release": 0.9936079835586186,
+      "grasp_pose_target": [
+        [
+          0.248415705,
+          0.934375701,
+          -0.255404945,
+          -0.19514071
+        ],
+        [
+          0.957912325,
+          -0.197810745,
+          0.208026168,
+          -0.142768422
+        ],
+        [
+          0.143852754,
+          -0.296332512,
+          -0.944189296,
+          0.822297886
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "grasp_pose_release": [
+        [
+          -0.989599103,
+          -0.043076269,
+          -0.137251775,
+          0.18890127
+        ],
+        [
+          1.1e-08,
+          0.954112927,
+          -0.299447028,
+          0.021027618
+        ],
+        [
+          0.143852754,
+          -0.296332512,
+          -0.944189296,
+          1.016297886
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "orientation_error_grasp_deg": 1.6017536626912106,
+      "orientation_error_release_deg": 0.3783920585772026,
+      "placement_error_3d_mm": 355.5576218512666,
+      "placement_error_components_mm": [
+        -225.901,
+        -194.304,
+        -194.0
+      ],
+      "release_error_3d_mm": 355.5576218512666,
+      "release_error_components_mm": [
+        -225.901,
+        -194.304,
+        -194.0
+      ],
+      "release_drop_mm": 0.0,
+      "release_gate_steps": null,
+      "release_gate_reason": null,
+      "close_gate_steps": null,
+      "close_gate_reason": null,
+      "object_stand_off_mm": 15.927132805352961,
+      "first_failure_stage": "carry",
+      "map_fit": 0.01146867700299481,
+      "label_transport": 0.014938732994778547,
+      "policy_refit": 0.3253732779994607,
+      "survivors_per_stage": {
+        "generated": [
+          100,
+          100
+        ],
+        "visibility": [
+          100,
+          84
+        ],
+        "support": [
+          84,
+          40
+        ],
+        "place zone": [
+          40,
+          18
+        ],
+        "on target": [
+          18,
+          18
+        ],
+        "jaw width": [
+          18,
+          14
+        ],
+        "collision": [
+          14,
+          8
+        ],
+        "centred": [
+          8,
+          8
+        ],
+        "distinct": [
+          8,
+          8
+        ]
+      },
+      "funnel_fallbacks": [
+        "centred"
+      ],
+      "m_final_phase": 0.9960439058657502,
+      "m_frozen_steps": 46,
+      "m_steps": 293,
+      "m_close_step": 127,
+      "m_close_phase": 0.25442417190851707,
+      "m_reach_error": 0.025828477575173415,
+      "m_commanded_error": 0.03594434513460791,
+      "m_lag_at_close": 0.04870974167234138,
+      "m_closest_commanded": 0.029402187176437573,
+      "m_closest_commanded_step": 120,
+      "m_closest_transported": 2.0883152758398282e-07,
+      "m_reach_closing": 0.02218820009384746,
+      "m_reach_approach": 0.01301942099995886,
+      "m_reach_signed_approach": 0.01301942099995886,
+      "m_reach_jaw": 0.0022997365145173833,
+      "m_closing_budget": 0.0,
+      "m_push_before_close": 3.600460758234518e-05,
+      "m_closest_hand": 0.010277374067581594,
+      "m_closest_hand_step": 152,
+      "m_closed_early": false,
+      "m_reach_within_budget": false,
+      "m_drift_max": 0.06802894727916885,
+      "m_drift_median": 0.031533729996158597,
+      "m_drift_at_step": 82,
+      "m_drift_frechet": 0.08885918702890595,
+      "m_contact_steps": 74,
+      "m_lift_height": 0.1386848091095796,
+      "m_peak_grip_force": 58.25834909643436,
+      "m_release_step": 252,
+      "m_carry_fraction": 0.488,
+      "m_release_error_xy": 0.2979684923889239,
+      "m_final_error_xy": 0.2979684923889239,
+      "arrays": "cell_028.npz",
+      "report": "run_028/report.html"
+    },
+    {
+      "label": "panda banana top middle 0",
+      "outcome": "success",
+      "detail": "",
+      "blame": "success",
+      "stages": {
+        "approach": true,
+        "reach": true,
+        "grasp": true,
+        "lift": true,
+        "carry": true,
+        "place": true,
+        "settle": true
+      },
+      "stage_detail": "every stage completed",
+      "placement_error_xy": 0.03413061396101038,
+      "n_keypoints": 18,
+      "min_det": 0.8489903781128808,
+      "cloud_points": 4096,
+      "grasps_generated": 100,
+      "fallbacks": [],
+      "survivors": 1,
+      "executable_fraction": null,
+      "path_fell_back": true,
+      "path_rank_examined": 1,
+      "gripper": "panda",
+      "object": "banana",
+      "grasp_chosen_index": 31,
+      "steps": 303,
+      "seconds": 9.7,
+      "world": "ycb",
+      "executor": "policy",
+      "seed": 0,
+      "pick_config_id": "P0",
+      "destination": "top middle",
+      "condition_id": "P0+top middle",
+      "refused": false,
+      "refusal_reason": "",
+      "det_J_at_grasp": 1.0193632171632796,
+      "det_J_at_release": 1.0023379167974373,
+      "grasp_pose_target": [
+        [
+          -0.762848046,
+          -0.637414206,
+          -0.108471142,
+          -0.256199561
+        ],
+        [
+          -0.645409723,
+          0.760757499,
+          0.068515084,
+          -0.156536071
+        ],
+        [
+          0.038847747,
+          0.122274928,
+          -0.991735698,
+          0.832255797
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "grasp_pose_release": [
+        [
+          -0.999245141,
+          0.004753696,
+          -0.038555801,
+          0.155097793
+        ],
+        [
+          2e-09,
+          0.992484884,
+          0.122367298,
+          0.002779421
+        ],
+        [
+          0.038847747,
+          0.122274928,
+          -0.991735698,
+          1.026255797
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "orientation_error_grasp_deg": 1.3645355587958041,
+      "orientation_error_release_deg": 0.810527151987069,
+      "placement_error_3d_mm": 34.13097353642861,
+      "placement_error_components_mm": [
+        34.069,
+        2.056,
+        0.157
+      ],
+      "release_error_3d_mm": 55.08534167200595,
+      "release_error_components_mm": [
+        54.863,
+        1.456,
+        4.726
+      ],
+      "release_drop_mm": 21.298940021513477,
+      "release_gate_steps": null,
+      "release_gate_reason": null,
+      "close_gate_steps": null,
+      "close_gate_reason": null,
+      "object_stand_off_mm": 18.274417912025555,
+      "first_failure_stage": null,
+      "map_fit": 0.012712414994894061,
+      "label_transport": 0.023729288004687987,
+      "policy_refit": 0.40715943300165236,
+      "survivors_per_stage": {
+        "generated": [
+          100,
+          100
+        ],
+        "visibility": [
+          100,
+          73
+        ],
+        "support": [
+          73,
+          46
+        ],
+        "place zone": [
+          46,
+          30
+        ],
+        "on target": [
+          30,
+          30
+        ],
+        "jaw width": [
+          30,
+          23
+        ],
+        "collision": [
+          23,
+          7
+        ],
+        "centred": [
+          7,
+          1
+        ],
+        "distinct": [
+          1,
+          1
+        ]
+      },
+      "funnel_fallbacks": [],
+      "m_final_phase": 0.9953890036142004,
+      "m_frozen_steps": 0,
+      "m_steps": 303,
+      "m_close_step": 71,
+      "m_close_phase": 0.24943393679656897,
+      "m_reach_error": 0.015655006892486337,
+      "m_commanded_error": 0.0019710655669497707,
+      "m_lag_at_close": 0.014639173964447267,
+      "m_closest_commanded": 0.0018209458565678607,
+      "m_closest_commanded_step": 74,
+      "m_closest_transported": 3.172090896695192e-07,
+      "m_reach_closing": 0.002271003105490172,
+      "m_reach_approach": 0.013966617203079963,
+      "m_reach_signed_approach": 0.013966617203079963,
+      "m_reach_jaw": 0.006697420013517509,
+      "m_closing_budget": 0.0,
+      "m_push_before_close": 1.0303312277957188e-06,
+      "m_closest_hand": 0.0051350890883523105,
+      "m_closest_hand_step": 73,
+      "m_closed_early": false,
+      "m_reach_within_budget": false,
+      "m_drift_max": 0.0050334065251742945,
+      "m_drift_median": 0.0018423389700476485,
+      "m_drift_at_step": 188,
+      "m_drift_frechet": 0.00881307064643667,
+      "m_contact_steps": 189,
+      "m_lift_height": 0.3580641381099472,
+      "m_peak_grip_force": 35.86416617465474,
+      "m_release_step": 250,
+      "m_carry_fraction": 0.9776536312849162,
+      "m_release_error_xy": 0.05488220855677679,
+      "m_final_error_xy": 0.03413061396101038,
+      "arrays": "cell_029.npz",
+      "report": "run_029/report.html"
+    },
+    {
+      "label": "rethink sugar top middle 0",
+      "outcome": "placed_in_the_wrong_place",
+      "detail": "ended 432 mm from the slot",
+      "blame": "lift",
+      "stages": {
+        "approach": true,
+        "reach": true,
+        "grasp": true,
+        "lift": false,
+        "carry": false,
+        "place": false,
+        "settle": false
+      },
+      "stage_detail": "failed at 'lift': the object rose 2 mm above where it started",
+      "placement_error_xy": 0.43213857229269187,
+      "n_keypoints": 18,
+      "min_det": 0.6814491974427641,
+      "cloud_points": 4096,
+      "grasps_generated": 100,
+      "fallbacks": [],
+      "survivors": 5,
+      "executable_fraction": null,
+      "path_fell_back": false,
+      "path_rank_examined": 1,
+      "gripper": "rethink",
+      "object": "sugar",
+      "grasp_chosen_index": 33,
+      "steps": 335,
+      "seconds": 10.2,
+      "world": "ycb",
+      "executor": "policy",
+      "seed": 0,
+      "pick_config_id": "P0",
+      "destination": "top middle",
+      "condition_id": "P0+top middle",
+      "refused": false,
+      "refusal_reason": "",
+      "det_J_at_grasp": 1.0365282304542227,
+      "det_J_at_release": 1.0014697734455562,
+      "grasp_pose_target": [
+        [
+          -0.636222651,
+          -0.770664922,
+          0.036004392,
+          -0.235777162
+        ],
+        [
+          -0.771312702,
+          0.636413895,
+          -0.007353187,
+          -0.134294853
+        ],
+        [
+          -0.017246852,
+          -0.032448909,
+          -0.999324579,
+          0.971641003
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "grasp_pose_release": [
+        [
+          -0.999851262,
+          0.000559725,
+          0.017237767,
+          0.180687859
+        ],
+        [
+          -0.0,
+          0.999473239,
+          -0.032453736,
+          0.008144181
+        ],
+        [
+          -0.017246852,
+          -0.032448909,
+          -0.999324579,
+          1.165641003
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "orientation_error_grasp_deg": 1.6102400349923167,
+      "orientation_error_release_deg": 0.8339278361970437,
+      "placement_error_3d_mm": 473.66801025777755,
+      "placement_error_components_mm": [
+        -408.47,
+        -141.053,
+        -193.953
+      ],
+      "release_error_3d_mm": 474.1602801415105,
+      "release_error_components_mm": [
+        -409.02,
+        -141.051,
+        -193.997
+      ],
+      "release_drop_mm": 0.5521145535962731,
+      "release_gate_steps": null,
+      "release_gate_reason": null,
+      "close_gate_steps": null,
+      "close_gate_reason": null,
+      "object_stand_off_mm": 87.58090956932595,
+      "first_failure_stage": "lift",
+      "map_fit": 0.011224140005651861,
+      "label_transport": 0.014941557004931383,
+      "policy_refit": 0.3210963230012567,
+      "survivors_per_stage": {
+        "generated": [
+          100,
+          100
+        ],
+        "visibility": [
+          100,
+          83
+        ],
+        "support": [
+          83,
+          34
+        ],
+        "place zone": [
+          34,
+          30
+        ],
+        "on target": [
+          30,
+          30
+        ],
+        "jaw width": [
+          30,
+          30
+        ],
+        "collision": [
+          30,
+          29
+        ],
+        "centred": [
+          29,
+          8
+        ],
+        "distinct": [
+          8,
+          5
+        ]
+      },
+      "funnel_fallbacks": [],
+      "m_final_phase": 0.9990305456114138,
+      "m_frozen_steps": 4,
+      "m_steps": 335,
+      "m_close_step": 95,
+      "m_close_phase": 0.24992769039352483,
+      "m_reach_error": 0.026029334636469652,
+      "m_commanded_error": 0.0012919146118051724,
+      "m_lag_at_close": 0.025224544566042364,
+      "m_closest_commanded": 0.0011892003204826912,
+      "m_closest_commanded_step": 110,
+      "m_closest_transported": 2.313251211350579e-07,
+      "m_reach_closing": 0.004841445551678126,
+      "m_reach_approach": 0.02293049752831921,
+      "m_reach_signed_approach": 0.02293049752831921,
+      "m_reach_jaw": 0.011326023397458458,
+      "m_closing_budget": 0.009216831970647543,
+      "m_push_before_close": 0.012111081194714483,
+      "m_closest_hand": 0.024556476808677574,
+      "m_closest_hand_step": 127,
+      "m_closed_early": false,
+      "m_reach_within_budget": true,
+      "m_drift_max": 0.008757983075528964,
+      "m_drift_median": 0.0013284407670726707,
+      "m_drift_at_step": 259,
+      "m_drift_frechet": 0.009992654610671668,
+      "m_contact_steps": 62,
+      "m_lift_height": 0.0015174724179252141,
+      "m_peak_grip_force": 52.19472412129881,
+      "m_release_step": 292,
+      "m_carry_fraction": 0.2893401015228426,
+      "m_release_error_xy": 0.43265815437885496,
+      "m_final_error_xy": 0.43213857229269187,
+      "arrays": "cell_030.npz",
+      "report": "run_030/report.html"
+    },
+    {
+      "label": "rethink meat top middle 0",
+      "outcome": "placed_in_the_wrong_place",
+      "detail": "ended 440 mm from the slot",
+      "blame": "grasp",
+      "stages": {
+        "approach": true,
+        "reach": true,
+        "grasp": false,
+        "lift": false,
+        "carry": false,
+        "place": false,
+        "settle": false
+      },
+      "stage_detail": "failed at 'grasp': the hand was in contact with the object on 72 of 285 steps, from step 79, but the peak grip force was 47 N against 50 N -- touched, no purchase",
+      "placement_error_xy": 0.4395483162531363,
+      "n_keypoints": 18,
+      "min_det": 0.9717923181103505,
+      "cloud_points": 4096,
+      "grasps_generated": 100,
+      "fallbacks": [],
+      "survivors": 4,
+      "executable_fraction": null,
+      "path_fell_back": true,
+      "path_rank_examined": 4,
+      "gripper": "rethink",
+      "object": "meat",
+      "grasp_chosen_index": 63,
+      "steps": 285,
+      "seconds": 9.1,
+      "world": "ycb",
+      "executor": "policy",
+      "seed": 0,
+      "pick_config_id": "P0",
+      "destination": "top middle",
+      "condition_id": "P0+top middle",
+      "refused": false,
+      "refusal_reason": "",
+      "det_J_at_grasp": 1.003604062974619,
+      "det_J_at_release": 1.0017233595878752,
+      "grasp_pose_target": [
+        [
+          -0.818239054,
+          0.568184845,
+          0.087469039,
+          -0.2422322
+        ],
+        [
+          0.571814032,
+          0.788713596,
+          0.225742279,
+          -0.141917441
+        ],
+        [
+          0.059275322,
+          0.234727173,
+          -0.970252333,
+          0.871399312
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "grasp_pose_release": [
+        [
+          -0.998241672,
+          0.013938036,
+          -0.057613322,
+          0.171038666
+        ],
+        [
+          -1e-09,
+          0.97196136,
+          0.235140627,
+          -0.008631779
+        ],
+        [
+          0.059275322,
+          0.234727173,
+          -0.970252333,
+          1.065399312
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "orientation_error_grasp_deg": 0.8922960795359484,
+      "orientation_error_release_deg": 0.7391466653427755,
+      "placement_error_3d_mm": 480.4567850712145,
+      "placement_error_components_mm": [
+        -417.92,
+        -136.182,
+        -194.0
+      ],
+      "release_error_3d_mm": 480.4567850712145,
+      "release_error_components_mm": [
+        -417.92,
+        -136.182,
+        -194.0
+      ],
+      "release_drop_mm": 0.0,
+      "release_gate_steps": null,
+      "release_gate_reason": null,
+      "close_gate_steps": null,
+      "close_gate_reason": null,
+      "object_stand_off_mm": 41.61552594210083,
+      "first_failure_stage": "grasp",
+      "map_fit": 0.011563754000235349,
+      "label_transport": 0.014882536001096014,
+      "policy_refit": 0.21812001500074985,
+      "survivors_per_stage": {
+        "generated": [
+          100,
+          100
+        ],
+        "visibility": [
+          100,
+          73
+        ],
+        "support": [
+          73,
+          42
+        ],
+        "place zone": [
+          42,
+          42
+        ],
+        "on target": [
+          42,
+          42
+        ],
+        "jaw width": [
+          42,
+          37
+        ],
+        "collision": [
+          37,
+          35
+        ],
+        "centred": [
+          35,
+          7
+        ],
+        "distinct": [
+          7,
+          4
+        ]
+      },
+      "funnel_fallbacks": [],
+      "m_final_phase": 0.9999999344566097,
+      "m_frozen_steps": 0,
+      "m_steps": 285,
+      "m_close_step": 84,
+      "m_close_phase": 0.24826772098239897,
+      "m_reach_error": 0.034534190863630035,
+      "m_commanded_error": 0.0033708441338766697,
+      "m_lag_at_close": 0.0316168079735792,
+      "m_closest_commanded": 0.0014754759472670788,
+      "m_closest_commanded_step": 136,
+      "m_closest_transported": 5.563162416785791e-07,
+      "m_reach_closing": 0.018865486244554572,
+      "m_reach_approach": 0.028529291689246363,
+      "m_reach_signed_approach": 0.028529291689246363,
+      "m_reach_jaw": 0.004773177450755671,
+      "m_closing_budget": 0.0030297292524009423,
+      "m_push_before_close": 0.012964183257493872,
+      "m_closest_hand": 0.028179293414893492,
+      "m_closest_hand_step": 100,
+      "m_closed_early": false,
+      "m_reach_within_budget": false,
+      "m_drift_max": 0.0051068876666709615,
+      "m_drift_median": 0.001283910472880264,
+      "m_drift_at_step": 284,
+      "m_drift_frechet": 0.007591208347196326,
+      "m_contact_steps": 72,
+      "m_lift_height": 0.006017509937924492,
+      "m_peak_grip_force": 47.13358147865555,
+      "m_release_step": 245,
+      "m_carry_fraction": 0.4161490683229814,
+      "m_release_error_xy": 0.4395483162531363,
+      "m_final_error_xy": 0.4395483162531363,
+      "arrays": "cell_031.npz",
+      "report": "run_031/report.html"
+    },
+    {
+      "label": "rethink mug top middle 0",
+      "outcome": "placed_in_the_wrong_place",
+      "detail": "ended 112 mm from the slot",
+      "blame": "place",
+      "stages": {
+        "approach": true,
+        "reach": true,
+        "grasp": true,
+        "lift": true,
+        "carry": true,
+        "place": false,
+        "settle": false
+      },
+      "stage_detail": "failed at 'place': it was let go 71 mm from the middle of the slot",
+      "placement_error_xy": 0.11226219787650958,
+      "n_keypoints": 18,
+      "min_det": 0.32674971125267255,
+      "cloud_points": 4096,
+      "grasps_generated": 100,
+      "fallbacks": [
+        "centred"
+      ],
+      "survivors": 5,
+      "executable_fraction": null,
+      "path_fell_back": true,
+      "path_rank_examined": 5,
+      "gripper": "rethink",
+      "object": "mug",
+      "grasp_chosen_index": 78,
+      "steps": 280,
+      "seconds": 14.9,
+      "world": "ycb",
+      "executor": "policy",
+      "seed": 0,
+      "pick_config_id": "P0",
+      "destination": "top middle",
+      "condition_id": "P0+top middle",
+      "refused": false,
+      "refusal_reason": "",
+      "det_J_at_grasp": 1.0819695351184542,
+      "det_J_at_release": 1.0122247374501254,
+      "grasp_pose_target": [
+        [
+          0.028476363,
+          0.842902069,
+          0.537312944,
+          -0.240715935
+        ],
+        [
+          0.661839163,
+          -0.418729244,
+          0.6217996,
+          -0.187469609
+        ],
+        [
+          0.749104812,
+          0.337908157,
+          -0.569789485,
+          0.877501725
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "grasp_pose_release": [
+        [
+          -0.662451493,
+          0.382108932,
+          -0.644321956,
+          0.22360901
+        ],
+        [
+          7e-09,
+          0.860122573,
+          0.510087403,
+          -0.003100787
+        ],
+        [
+          0.749104812,
+          0.337908157,
+          -0.569789485,
+          1.071501725
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "orientation_error_grasp_deg": 1.8779940035859957,
+      "orientation_error_release_deg": 1.5691724134653517,
+      "placement_error_3d_mm": 112.26226484704655,
+      "placement_error_components_mm": [
+        110.101,
+        -21.924,
+        0.123
+      ],
+      "release_error_3d_mm": 71.7703961817952,
+      "release_error_components_mm": [
+        67.199,
+        -23.67,
+        8.658
+      ],
+      "release_drop_mm": 43.77696687656417,
+      "release_gate_steps": null,
+      "release_gate_reason": null,
+      "close_gate_steps": null,
+      "close_gate_reason": null,
+      "object_stand_off_mm": 40.97455468824918,
+      "first_failure_stage": "place",
+      "map_fit": 0.02257313200243516,
+      "label_transport": 0.03269391399953747,
+      "policy_refit": 0.8972752199988463,
+      "survivors_per_stage": {
+        "generated": [
+          100,
+          100
+        ],
+        "visibility": [
+          100,
+          94
+        ],
+        "support": [
+          94,
+          62
+        ],
+        "place zone": [
+          62,
+          62
+        ],
+        "on target": [
+          62,
+          62
+        ],
+        "jaw width": [
+          62,
+          5
+        ],
+        "collision": [
+          5,
+          5
+        ],
+        "centred": [
+          5,
+          5
+        ],
+        "distinct": [
+          5,
+          5
+        ]
+      },
+      "funnel_fallbacks": [
+        "centred"
+      ],
+      "m_final_phase": 0.9953927325173244,
+      "m_frozen_steps": 0,
+      "m_steps": 280,
+      "m_close_step": 63,
+      "m_close_phase": 0.24951960503508055,
+      "m_reach_error": 0.016464107301009615,
+      "m_commanded_error": 0.003496603636107794,
+      "m_lag_at_close": 0.016380023332297048,
+      "m_closest_commanded": 0.0023541281427926814,
+      "m_closest_commanded_step": 81,
+      "m_closest_transported": 1.6231615663938615e-07,
+      "m_reach_closing": 0.007225156165579776,
+      "m_reach_approach": 0.005794240296224341,
+      "m_reach_signed_approach": 0.005794240296224341,
+      "m_reach_jaw": 0.013612154071962916,
+      "m_closing_budget": 0.0,
+      "m_push_before_close": 0.0021143631193000115,
+      "m_closest_hand": 0.004601703567380441,
+      "m_closest_hand_step": 86,
+      "m_closed_early": false,
+      "m_reach_within_budget": false,
+      "m_drift_max": 0.005297743260818523,
+      "m_drift_median": 0.001957568119116059,
+      "m_drift_at_step": 178,
+      "m_drift_frechet": 0.01076306798946785,
+      "m_contact_steps": 182,
+      "m_lift_height": 0.29715162865200884,
+      "m_peak_grip_force": 38.45776894786224,
+      "m_release_step": 230,
+      "m_carry_fraction": 0.9700598802395209,
+      "m_release_error_xy": 0.07124621405657044,
+      "m_final_error_xy": 0.11226219787650958,
+      "arrays": "cell_032.npz",
+      "report": "run_032/report.html"
+    },
+    {
+      "label": "rethink hammer top middle 0",
+      "outcome": "success",
+      "detail": "",
+      "blame": "success",
+      "stages": {
+        "approach": true,
+        "reach": true,
+        "grasp": true,
+        "lift": true,
+        "carry": true,
+        "place": true,
+        "settle": true
+      },
+      "stage_detail": "every stage completed",
+      "placement_error_xy": 0.028568793185061937,
+      "n_keypoints": 18,
+      "min_det": 0.2694178136709391,
+      "cloud_points": 4096,
+      "grasps_generated": 100,
+      "fallbacks": [
+        "centred"
+      ],
+      "survivors": 3,
+      "executable_fraction": null,
+      "path_fell_back": true,
+      "path_rank_examined": 3,
+      "gripper": "rethink",
+      "object": "hammer",
+      "grasp_chosen_index": 38,
+      "steps": 404,
+      "seconds": 14.1,
+      "world": "ycb",
+      "executor": "policy",
+      "seed": 0,
+      "pick_config_id": "P0",
+      "destination": "top middle",
+      "condition_id": "P0+top middle",
+      "refused": false,
+      "refusal_reason": "",
+      "det_J_at_grasp": 1.0846231086346536,
+      "det_J_at_release": 1.0152692230334488,
+      "grasp_pose_target": [
+        [
+          0.286753766,
+          0.78144074,
+          0.554186474,
+          -0.144426515
+        ],
+        [
+          0.880151353,
+          -0.44332384,
+          0.169698465,
+          -0.148204449
+        ],
+        [
+          0.37829337,
+          0.439106301,
+          -0.814910905,
+          0.821650388
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "grasp_pose_release": [
+        [
+          -0.92568576,
+          0.179446432,
+          -0.333023801,
+          0.168871314
+        ],
+        [
+          5e-09,
+          0.880332116,
+          0.474357845,
+          0.071742779
+        ],
+        [
+          0.37829337,
+          0.439106301,
+          -0.814910905,
+          1.015650388
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "orientation_error_grasp_deg": 1.4993630948597836,
+      "orientation_error_release_deg": 1.3893243949282559,
+      "placement_error_3d_mm": 28.569056023301265,
+      "placement_error_components_mm": [
+        -1.745,
+        -28.515,
+        0.123
+      ],
+      "release_error_3d_mm": 29.185509434799933,
+      "release_error_components_mm": [
+        -0.897,
+        -29.116,
+        1.807
+      ],
+      "release_drop_mm": 1.978849080678826,
+      "release_gate_steps": null,
+      "release_gate_reason": null,
+      "close_gate_steps": null,
+      "close_gate_reason": null,
+      "object_stand_off_mm": 15.927132805352961,
+      "first_failure_stage": null,
+      "map_fit": 0.02006917899416294,
+      "label_transport": 0.05054040899995016,
+      "policy_refit": 2.156933553000272,
+      "survivors_per_stage": {
+        "generated": [
+          100,
+          100
+        ],
+        "visibility": [
+          100,
+          78
+        ],
+        "support": [
+          78,
+          35
+        ],
+        "place zone": [
+          35,
+          16
+        ],
+        "on target": [
+          16,
+          16
+        ],
+        "jaw width": [
+          16,
+          5
+        ],
+        "collision": [
+          5,
+          4
+        ],
+        "centred": [
+          4,
+          4
+        ],
+        "distinct": [
+          4,
+          3
+        ]
+      },
+      "funnel_fallbacks": [
+        "centred"
+      ],
+      "m_final_phase": 0.999749365543227,
+      "m_frozen_steps": 21,
+      "m_steps": 404,
+      "m_close_step": 142,
+      "m_close_phase": 0.25027488844257045,
+      "m_reach_error": 0.01916588902306781,
+      "m_commanded_error": 0.007703497500210125,
+      "m_lag_at_close": 0.021913429996927344,
+      "m_closest_commanded": 0.007584107484087459,
+      "m_closest_commanded_step": 166,
+      "m_closest_transported": 9.569225743027693e-08,
+      "m_reach_closing": 0.0004958310530455371,
+      "m_reach_approach": 0.019151095508549723,
+      "m_reach_signed_approach": 0.019151095508549723,
+      "m_reach_jaw": 0.0005665508136064833,
+      "m_closing_budget": 0.0,
+      "m_push_before_close": 0.0,
+      "m_closest_hand": 0.012785185988934957,
+      "m_closest_hand_step": 145,
+      "m_closed_early": false,
+      "m_reach_within_budget": false,
+      "m_drift_max": 0.024332669154739594,
+      "m_drift_median": 0.004999264237225385,
+      "m_drift_at_step": 17,
+      "m_drift_frechet": 0.024387256258415233,
+      "m_contact_steps": 212,
+      "m_lift_height": 0.327110687361412,
+      "m_peak_grip_force": 44.34961698798281,
+      "m_release_step": 354,
+      "m_carry_fraction": 0.9764150943396226,
+      "m_release_error_xy": 0.029129530666046156,
+      "m_final_error_xy": 0.028568793185061937,
+      "arrays": "cell_033.npz",
+      "report": "run_033/report.html"
+    },
+    {
+      "label": "rethink banana top middle 0",
+      "outcome": "success",
+      "detail": "",
+      "blame": "success",
+      "stages": {
+        "approach": true,
+        "reach": true,
+        "grasp": true,
+        "lift": true,
+        "carry": true,
+        "place": true,
+        "settle": true
+      },
+      "stage_detail": "every stage completed",
+      "placement_error_xy": 0.045233125650294095,
+      "n_keypoints": 18,
+      "min_det": 0.9208441292724241,
+      "cloud_points": 4096,
+      "grasps_generated": 100,
+      "fallbacks": [],
+      "survivors": 1,
+      "executable_fraction": null,
+      "path_fell_back": true,
+      "path_rank_examined": 1,
+      "gripper": "rethink",
+      "object": "banana",
+      "grasp_chosen_index": 54,
+      "steps": 264,
+      "seconds": 8.7,
+      "world": "ycb",
+      "executor": "policy",
+      "seed": 0,
+      "pick_config_id": "P0",
+      "destination": "top middle",
+      "condition_id": "P0+top middle",
+      "refused": false,
+      "refusal_reason": "",
+      "det_J_at_grasp": 1.01936856308264,
+      "det_J_at_release": 0.9974710169566483,
+      "grasp_pose_target": [
+        [
+          -0.806331315,
+          -0.519039721,
+          -0.283597565,
+          -0.253943985
+        ],
+        [
+          -0.362928098,
+          0.812793186,
+          -0.455686769,
+          -0.134288127
+        ],
+        [
+          0.467025702,
+          -0.264508987,
+          -0.843754697,
+          0.825760117
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "grasp_pose_release": [
+        [
+          -0.884243741,
+          -0.139704134,
+          -0.445640843,
+          0.178513174
+        ],
+        [
+          -1.1e-08,
+          0.954210538,
+          -0.299135838,
+          0.011076777
+        ],
+        [
+          0.467025702,
+          -0.264508987,
+          -0.843754697,
+          1.019760117
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "orientation_error_grasp_deg": 1.3619836634503593,
+      "orientation_error_release_deg": 0.5816101083359776,
+      "placement_error_3d_mm": 45.23339514445228,
+      "placement_error_components_mm": [
+        44.328,
+        -9.004,
+        0.156
+      ],
+      "release_error_3d_mm": 41.749883536338885,
+      "release_error_components_mm": [
+        37.046,
+        -3.863,
+        18.862
+      ],
+      "release_drop_mm": 20.72077423731135,
+      "release_gate_steps": null,
+      "release_gate_reason": null,
+      "close_gate_steps": null,
+      "close_gate_reason": null,
+      "object_stand_off_mm": 18.274417912025555,
+      "first_failure_stage": null,
+      "map_fit": 0.014113687000644859,
+      "label_transport": 0.02355563300079666,
+      "policy_refit": 0.3557222300005378,
+      "survivors_per_stage": {
+        "generated": [
+          100,
+          100
+        ],
+        "visibility": [
+          100,
+          86
+        ],
+        "support": [
+          86,
+          43
+        ],
+        "place zone": [
+          43,
+          26
+        ],
+        "on target": [
+          26,
+          26
+        ],
+        "jaw width": [
+          26,
+          15
+        ],
+        "collision": [
+          15,
+          8
+        ],
+        "centred": [
+          8,
+          1
+        ],
+        "distinct": [
+          1,
+          1
+        ]
+      },
+      "funnel_fallbacks": [],
+      "m_final_phase": 0.999365704831525,
+      "m_frozen_steps": 0,
+      "m_steps": 264,
+      "m_close_step": 66,
+      "m_close_phase": 0.24916459387390438,
+      "m_reach_error": 0.013282778116723423,
+      "m_commanded_error": 0.001504993792894474,
+      "m_lag_at_close": 0.01210367647640723,
+      "m_closest_commanded": 0.0008636526389568684,
+      "m_closest_commanded_step": 68,
+      "m_closest_transported": 3.617097289738045e-07,
+      "m_reach_closing": 0.005090571437489076,
+      "m_reach_approach": 0.011964470137508149,
+      "m_reach_signed_approach": 0.011964470137508149,
+      "m_reach_jaw": 0.0027147312547310203,
+      "m_closing_budget": 0.0,
+      "m_push_before_close": 3.8085966211533407e-06,
+      "m_closest_hand": 0.009144170107082805,
+      "m_closest_hand_step": 83,
+      "m_closed_early": false,
+      "m_reach_within_budget": false,
+      "m_drift_max": 0.0025916516936687175,
+      "m_drift_median": 0.0015049067116371475,
+      "m_drift_at_step": 177,
+      "m_drift_frechet": 0.006365025174571292,
+      "m_contact_steps": 172,
+      "m_lift_height": 0.3359921898682181,
+      "m_peak_grip_force": 43.25769015169386,
+      "m_release_step": 218,
+      "m_carry_fraction": 1.0,
+      "m_release_error_xy": 0.037246406381551876,
+      "m_final_error_xy": 0.045233125650294095,
+      "arrays": "cell_034.npz",
+      "report": "run_034/report.html"
+    }
+  ],
+  "created": "2026-09-20T14:04:44",
+  "provenance": {
+    "commit": "82319e7c565a50db716a55fe049fb13b0a1d16cd",
+    "commit_short": "82319e7",
+    "branch": "main",
+    "committed": "2026-09-20T14:04:34+05:30",
+    "dirty": [],
+    "diff_stat": null,
+    "untracked_code": [],
+    "reproducible": true,
+    "python": "3.10.12",
+    "platform": "Linux-6.8.0-138-generic-x86_64-with-glibc2.35",
+    "packages": {
+      "numpy": "2.2.6",
+      "scipy": "1.15.3",
+      "mujoco": "3.7.0",
+      "robosuite": "1.5.2",
+      "similaritymeasures": "1.4.0"
+    }
+  }
+}

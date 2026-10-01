@@ -41,3 +41,9 @@ assets/ported_grippers/*/meshes/
 # The generated convex decomposition in assets/ycb_mjcf IS tracked, because a
 # campaign is only reproducible against the same collision geometry.
 assets/ycb/
+.venv/
+docs/ICRA__*
+
+# Reproduction environments and restored external asset bundle.
+.venv-reproduction/
+external/

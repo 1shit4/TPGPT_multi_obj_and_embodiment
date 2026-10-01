@@ -76,6 +76,8 @@ to roughly the right pose; here a reaching primitive does the same job.
 
 from __future__ import annotations
 
+import warnings
+
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
@@ -96,6 +98,22 @@ from tpgpt.policy.rollout import (
 )
 from tpgpt.sim.backend import FrameWriter, observation_frame
 from tpgpt.sim.controllers.cartesian_impedance import CartesianImpedanceController
+
+#: Control steps the hand is held shut at the release while it waits for the
+#: object to be supported, before opening anyway. 100 is 5 s at 20 Hz. The
+#: cap exists so that a placement the arm cannot complete -- a ledge the hand
+#: cannot enter -- produces a named drop rather than a hang; the grasp gate in
+#: :mod:`tpgpt.sim.replay` is built the same way.
+RELEASE_GATE_MAX_STEPS = 100
+
+#: The approach hands over to the policy once the wrist is within this of the
+#: transported start, metres. 10 mm: the same arrival test the close gate uses.
+APPROACH_TOLERANCE = 0.010
+
+#: Control steps the approach may hold its final setpoint waiting to arrive,
+#: on top of the ramp. 300 is 15 s at 20 Hz -- generous, so a cap firing means
+#: the start pose is unreachable rather than merely far.
+APPROACH_MAX_EXTRA_STEPS = 300
 
 
 @dataclass
@@ -147,6 +165,10 @@ def rollout_policy(
     anchor_gain: float | AnchorSchedule = 0.0,
     anchor_gated: bool = True,
     query_at: str = "attractor",
+    release_gate: Callable | None = None,
+    release_gate_max_steps: int = RELEASE_GATE_MAX_STEPS,
+    close_gate: Callable | None = None,
+    close_gate_max_steps: int = RELEASE_GATE_MAX_STEPS,
 ) -> SimRollout:
     """Run a fitted policy on the robot until its phase completes.
 
@@ -267,6 +289,31 @@ def rollout_policy(
             the object and set it down in the wrong place: both end with the
             object away from its slot. Watching the object's own height and the
             jaw opening every step tells the two apart, and nothing else does.
+        release_gate: ``release_gate(env, lag) -> bool``, asked once the
+            policy first commands the hand open. While it answers ``False``
+            the hand is held shut and the attractor and the clock are frozen,
+            so the arm can finish converging onto the release pose. Every
+            placement used to be a **drop**: the arm stops 13-130 mm short of
+            its commanded release pose and the jaws open a median 40 mm above
+            the board (section 7.35), which usually lands and is what makes
+            marginal cells flip between runs. Mirrors the contact-gated grasp
+            in :func:`~tpgpt.sim.replay.replay_labels`. ``lag`` is the
+            hand-to-attractor distance. Default ``None`` keeps every existing
+            caller's behaviour; build one with
+            :func:`~tpgpt.experiments.diagnose.release_gate`.
+        release_gate_max_steps: Cap on the hold, after which the hand opens
+            with a ``RuntimeWarning``.
+        close_gate: ``close_gate(env, lag) -> str | False``, the same thing
+            at the other end: asked when the policy first commands the hand
+            shut, and while it answers ``False`` the hand is held **open** with
+            the attractor frozen. The executor closes on the clock; the lag
+            gate holds the clock back only on *excess* lag (35 mm), so a hand
+            up to that far short is told to close, and on ``rethink/mug`` it
+            shut 45 mm from the grasp and arrived 11 steps later. The replay
+            has had this gate (on contact) since section 7.28; the executor
+            did not. Build one with
+            :func:`~tpgpt.experiments.diagnose.close_gate`.
+        close_gate_max_steps: Cap on that hold.
 
     Returns:
         A :class:`SimRollout` including the task outcome.
@@ -313,8 +360,9 @@ def rollout_policy(
         policy.labels.orientations[0] if policy.labels.orientations is not None else None
     )
     approach_gap = float(np.linalg.norm(tool_state()[0] - start_position))
+    approach_extra = 0
     if approach_steps > 0:
-        obs = _approach(
+        obs, approach_extra = _approach(
             env,
             controller,
             start_position - (
@@ -332,6 +380,62 @@ def rollout_policy(
     stalled = False
     relax_orientation, skip_index = False, None
     relaxed_steps, skipped_steps, skips = 0, 0, 0
+    release_gate_steps, release_gated, release_reason = 0, False, None
+    close_gate_steps, close_gated, close_reason = 0, False, None
+
+    def _hold(gate, cap, hold_command, what):
+        """Step physics with the attractor frozen until ``gate`` says go.
+
+        Returns ``(steps, reason)``; ``reason`` is what the gate answered, or
+        ``"timeout"`` when the cap ran out. Every step is recorded like any
+        other so the trace stays one entry per control step.
+        """
+        # The action is **torques computed from the current state**, so it is
+        # recomputed every step -- replaying one for the whole hold is
+        # open-loop torque, and it sent the arm 900 mm away in a first cut.
+        def held_action():
+            return controller.action(
+                commanded,
+                prediction.stiffness[0],
+                prediction.damping[0],
+                gripper=hold_command,
+                rotation_desired=commanded_rotation,
+                rotational_stiffness=rotational_gain,
+                rotational_damping=rotational_damping * (rotational_gain / rotational_stiffness),
+            )
+        steps = 0
+        while steps < cap:
+            lag = float(np.linalg.norm(tool_state()[0] - attractor))
+            answer = gate(env, lag)
+            if answer:
+                return steps, str(answer)
+            obs_, _, _, _ = env.step(held_action())
+            steps += 1
+            pos, _ = tool_state()
+            positions.append(pos.copy())
+            attractors.append(attractor.copy())
+            velocities.append(np.zeros(3))
+            phases.append(phase)
+            stds.append(prediction.velocity_std[0].copy())
+            grippers.append(hold_command)
+            forces.append(_contact_force(env))
+            for key, value in (
+                ("gate", 0.0), ("behind", decision.behind),
+                ("expected", decision.expected), ("max_lag", step_out.max_lag),
+                ("clamped", 0.0), ("anchor_gain", step_out.anchor_gain),
+            ):
+                traces[key].append(value)
+            if probe is not None:
+                probes.append(probe(env))
+            if writer is not None:
+                writer.append(observation_frame(obs_, camera))
+        warnings.warn(
+            f"the {what} gate never opened within {cap} control steps; "
+            f"proceeding anyway",
+            RuntimeWarning,
+            stacklevel=3,
+        )
+        return steps, "timeout"
     # What the clock would gain over the patience window with the gate fully
     # open, scaled down: anything slower than this fraction of nominal is a
     # crawl, not progress. Derived from the demonstration's own pace so it
@@ -443,6 +547,28 @@ def rollout_policy(
             rotational_stiffness=rotational_gain,
             rotational_damping=rotational_damping * (rotational_gain / rotational_stiffness),
         )
+        # --- close and release gates ---------------------------------------
+        # The first step the policy asks the hand to shut, and the first it
+        # asks it to open again. Hold the previous command, freeze the
+        # attractor and the clock, and step physics until the gate says the
+        # hand has arrived (close) or the object is supported (release).
+        if (
+            close_gate is not None and not close_gated
+            and gripper_command > 0 and (not grippers or grippers[-1] <= 0)
+        ):
+            close_gated = True
+            close_gate_steps, close_reason = _hold(
+                close_gate, close_gate_max_steps, -1.0, "close")
+            position, hand_rotation = tool_state()
+        if (
+            release_gate is not None and not release_gated
+            and gripper_command < 0 and grippers and grippers[-1] > 0
+        ):
+            release_gated = True
+            release_gate_steps, release_reason = _hold(
+                release_gate, release_gate_max_steps, 1.0, "release")
+            position, hand_rotation = tool_state()
+
         obs, _, _, _ = env.step(action)
 
         positions.append(position.copy())
@@ -497,6 +623,7 @@ def rollout_policy(
             "dt": dt,
             "approach_gap": approach_gap,
             "approach_steps": int(approach_steps),
+            "approach_extra_steps": int(approach_extra),
             "speed_limit": speed_limit,
             "attractor_integrated": attractor_law == "integrate",
             "tool_offset": offset.tolist(),
@@ -514,6 +641,12 @@ def rollout_policy(
             "final_phase": float(phase),
             "static_sag": float(watchdog.static_sag),
             "sag_rebaselines": int(watchdog.rebaselines),
+            "release_gate_steps": int(release_gate_steps),
+            "release_gated": bool(release_gate is not None),
+            "release_gate_reason": release_reason,
+            "close_gate_steps": int(close_gate_steps),
+            "close_gated": bool(close_gate is not None),
+            "close_gate_reason": close_reason,
             **law.to_dict(),
             "trace": {k: np.array(v) for k, v in traces.items()},
             "placement_error_xy": float(np.linalg.norm(offset[:2])),
@@ -607,27 +740,56 @@ def _approach(
     rotational_damping,
     writer,
     camera,
+    tolerance: float = APPROACH_TOLERANCE,
+    max_extra_steps: int = APPROACH_MAX_EXTRA_STEPS,
 ):
-    """Drive the arm to the transported start pose with the gripper open."""
+    """Drive the arm to the transported start pose with the gripper open.
+
+    The setpoint is ramped over ``n_steps`` and then **held until the wrist
+    arrives** (within ``tolerance``), up to ``max_extra_steps`` more. It used to
+    hand over the moment the ramp ended, wherever the arm was: on the YCB grid
+    that was 80-225 mm short on 20 of 210 cells with 230-570 mm to travel, and
+    those cells never ran the policy at all -- the diagnosis calls it an
+    ``approach`` failure and the policy is not to blame for it.
+
+    Returns ``(obs, extra_steps)``; a cap that fires is a ``RuntimeWarning``.
+    """
     K = np.eye(3) * stiffness
     D = np.eye(3) * (2.0 * np.sqrt(stiffness) * 0.9)
     start, _, _, _ = controller.eef_state()
     obs = env._get_observations()
-    for step in range(n_steps):
-        alpha = (step + 1) / n_steps
+
+    def step_to(target):
         action = controller.action(
-            start + alpha * (position - start),
-            K,
-            D,
-            gripper=-1.0,
-            rotation_desired=rotation,
+            target, K, D, gripper=-1.0, rotation_desired=rotation,
             rotational_stiffness=rotational_stiffness,
             rotational_damping=rotational_damping,
         )
-        obs, _, _, _ = env.step(action)
+        obs_, _, _, _ = env.step(action)
         if writer is not None:
-            writer.append(observation_frame(obs, camera))
-    return obs
+            writer.append(observation_frame(obs_, camera))
+        return obs_
+
+    for step in range(n_steps):
+        alpha = (step + 1) / n_steps
+        obs = step_to(start + alpha * (position - start))
+    extra = 0
+    while extra < max_extra_steps:
+        wrist, _, _, _ = controller.eef_state()
+        if np.linalg.norm(wrist - position) <= tolerance:
+            break
+        obs = step_to(position)
+        extra += 1
+    else:
+        wrist, _, _, _ = controller.eef_state()
+        warnings.warn(
+            f"the approach never arrived: {np.linalg.norm(wrist - position) * 1000:.0f} mm "
+            f"from the transported start after {n_steps + extra} steps; handing "
+            "over anyway",
+            RuntimeWarning,
+            stacklevel=3,
+        )
+    return obs, extra
 
 
 def _contact_force(env) -> float:

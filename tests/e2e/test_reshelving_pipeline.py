@@ -79,8 +79,12 @@ class TestTransport:
         from tpgpt.transport.labels import transport_labels
         from tpgpt.transport.maps import TransportMap
 
+        from tpgpt.sim.keypoints import carry_indices
+
         labels, source_keypoints = source
-        grasp_label, place_label = 64, 174  # ends of the grasp and release segments
+        # The close and the release, read off the gripper channel rather than
+        # hard-coded: the demonstration's waypoint list is allowed to change.
+        grasp_label, place_label = carry_indices(labels)
 
         for seed in (1, 3, 5):
             with managed_env(seed=seed) as env:

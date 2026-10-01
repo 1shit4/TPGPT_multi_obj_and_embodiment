@@ -22,7 +22,7 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
-from tpgpt.grasp.grasps import Grasp6D, contact_offset, grasp_to_eef_pose
+from tpgpt.grasp.grasps import Grasp6D, clamp_to_support, contact_offset, grasp_to_eef_pose
 from tpgpt.grasp.grippers import (
     GripperPair,
     gripper_geometry,
@@ -268,6 +268,8 @@ class FilterStage:
     entered: int
     survived: int
     fallback: bool = False
+    entered_indices: list[int] = field(default_factory=list)
+    accepted_indices: list[int] = field(default_factory=list)
 
     def describe(self) -> str:
         line = f"{self.name:<14} {self.entered:4d} -> {self.survived:4d}   {self.checks}"
@@ -284,7 +286,8 @@ class FilterFunnel:
 
     def add(self, name, checks, entered, survived_indices, fallback=False):
         self.stages.append(
-            FilterStage(name, checks, len(entered), len(survived_indices), fallback)
+            FilterStage(name, checks, len(entered), len(survived_indices), fallback,
+                        list(map(int, entered)), list(map(int, survived_indices)))
         )
         if fallback:
             self.flags[f"{name}_fell_back"] = True
@@ -1195,6 +1198,13 @@ CONTACT_DEPTH_TOLERANCE = 0.001
 #: ahead, moving the object 17.9 to 113.6 mm. Three waypoints separates the two.
 GRASP_CONTACT_WINDOW = 3
 
+#: Waypoints before the close by which the arm must have joined the transported
+#: path for a plan to count as having an approach at all. Twenty of the 200 is
+#: a tenth of the demonstration: the executor needs a stretch of free approach
+#: to settle onto the path before the descent, and joining any later than that
+#: is closing on arrival. Not tuned; stated.
+JOIN_MARGIN = 20
+
 PHASES = ("approach", "carry", "retreat")
 
 
@@ -1260,6 +1270,8 @@ def path_feasibility(
     stop_early: bool = False,
     depth_tolerance: float = CONTACT_DEPTH_TOLERANCE,
     grasp_window: int = GRASP_CONTACT_WINDOW,
+    join_margin: int = JOIN_MARGIN,
+    critical_waypoints: bool = False,
 ) -> dict:
     """Can the arm fly this whole path, and does anything hit anything it should not?
 
@@ -1330,7 +1342,8 @@ def path_feasibility(
     qpos_index = np.asarray(controller.qpos_index)
     saved = np.array(data.qpos)
 
-    indices = np.arange(0, len(positions), max(int(stride), 1))
+    indices = waypoint_indices(len(positions), stride, grasp_index, release_index,
+                               critical=critical_waypoints)
     align = alignment_rotation(pair)
     offset = contact_offset(pair)
     joint = None
@@ -1342,6 +1355,19 @@ def path_feasibility(
 
     seed, unreachable, violations, first = None, 0, 0, None
     faults: dict = {}
+    # **Where the arm can join the path.** The demonstration's starting pose
+    # carries no task content, and the map's affine part carries it wherever
+    # the deformation goes: on 25 of 210 YCB cells that was out of the arm's
+    # reach, the check fell back, and neither executor ever began (7.45). A
+    # prefix of the approach that the arm cannot reach or that collides is not
+    # a fault in the plan if the arm can join the path further along, well
+    # before the close. ``joined_at`` is the first approach waypoint that is
+    # both reachable and collision-free; waypoints before it count for
+    # nothing, and a plan whose first such waypoint is within ``join_margin``
+    # of the grasp -- or has none -- has no usable approach at all.
+    joined_at = None
+    join_limit = int(grasp_index) - int(join_margin)
+    skipped_unreachable = 0
     try:
         for k in indices:
             p = np.asarray(positions[k], dtype=float)
@@ -1351,6 +1377,9 @@ def path_feasibility(
                               seed_qpos=seed, position_tolerance=tolerance)
             if result.reachable:
                 seed = result.qpos
+            elif joined_at is None and k < join_limit:
+                skipped_unreachable += 1
+                continue
             else:
                 unreachable += 1
 
@@ -1410,6 +1439,13 @@ def path_feasibility(
                     continue
                 faults[key] = faults.get(key, 0) + 1
                 hit = True
+            if hit and joined_at is None and k < join_limit:
+                # Not joined yet: a colliding prefix is skipped like an
+                # unreachable one, and the search for a join point goes on.
+                skipped_unreachable += 1
+                continue
+            if joined_at is None:
+                joined_at = int(k)
             if hit:
                 violations += 1
                 first = k if first is None else first
@@ -1421,6 +1457,12 @@ def path_feasibility(
 
     tested = int(len(indices)) if not stop_early or first is None else int(
         len([i for i in indices if i <= first]))
+    tested -= skipped_unreachable
+    if joined_at is None:
+        # Never joined: every approach waypoint up to the margin was
+        # unreachable or in collision. That is an unreachable plan.
+        tested = max(tested, 1)
+        unreachable = tested
     return {
         "tested": tested,
         "unreachable": int(unreachable),
@@ -1429,6 +1471,8 @@ def path_feasibility(
         "violation_fraction": float(violations / tested) if tested else 0.0,
         "first_violation": None if first is None else int(first),
         "faults": faults,
+        "joined_at": joined_at,
+        "skipped_prefix": int(skipped_unreachable),
     }
 
 
@@ -1449,6 +1493,18 @@ def path_feasibility(
 CLOUD_CONTACT_RADIUS = 0.005
 
 
+def waypoint_indices(length, stride, grasp_index, release_index, critical=True):
+    """Discrete samples only; never a continuous collision certificate."""
+    if length <= 0 or stride < 1:
+        raise ValueError("nonempty path and positive stride required")
+    indices = set(range(0, length, int(stride)))
+    if critical:
+        indices.update((0, int(grasp_index), int(release_index), length - 1))
+    if any(i < 0 or i >= length for i in indices):
+        raise ValueError("critical waypoint outside path")
+    return np.array(sorted(indices), dtype=int)
+
+
 def path_feasibility_observed(
     env,
     positions: np.ndarray,
@@ -1467,17 +1523,22 @@ def path_feasibility_observed(
     stride: int = 1,
     stop_early: bool = False,
     bodies=None,
+    join_margin: int = JOIN_MARGIN,
+    debug: list | None = None,
+    critical_waypoints: bool = False,
+    validate_entry: bool = False,
+    strict_contacts: bool = False,
 ) -> dict:
     """The same question as :func:`path_feasibility`, asked with what the robot can see.
 
-    **Why there are two of these, and which is which.** A robot knows its own
-    shape exactly -- its links and its hand come from its own description file --
-    and it does *not* know the shape of the shelf or of the objects on it. All it
-    has of those is a point cloud from its cameras, one-sided and noisy. So:
+    **Why there are two of these, and which is which.** The filter uses the
+    robot's own geometry approximation and an observed scene cloud. Target points
+    are supplied by the caller; the YCB pipeline supplies a full mesh scan, not
+    only visible points. This distinction matters when interpreting its results.
 
     * this function is the **filter**. The robot's body is its own convex
-      geometry (:func:`~tpgpt.perception.obstacles.robot_bodies`); everything
-      else is observed points. It is what a real system could run;
+      geometry (:func:`~tpgpt.perception.obstacles.robot_bodies`); the scene is
+      observed and target geometry follows the caller's provenance;
     * :func:`path_feasibility` is the **diagnostic**. It uses the simulator's
       true geometry, which is a cheat, and in exchange it can say *which panel*
       the wrist went into rather than only that something was hit.
@@ -1501,7 +1562,7 @@ def path_feasibility_observed(
             and the robot subtracted** -- see
             :func:`~tpgpt.perception.obstacles.self_filtered`, without which the
             arm collides with its own reflection.
-        object_points: Observed cloud of the object being manipulated, in the
+        object_points: Target cloud (a full scan in the YCB pipeline), in the
             pose it has at the pick. It is carried with the hand from the close
             onwards.
         place_window: How many waypoints before the release count as setting
@@ -1527,13 +1588,30 @@ def path_feasibility_observed(
 
     bodies = bodies if bodies is not None else robot_bodies(env)
     scene = np.atleast_2d(np.asarray(scene_points, dtype=float))
-    scene_tree = cKDTree(scene) if len(scene) else None
     held = np.atleast_2d(np.asarray(object_points, dtype=float)) if len(
         np.asarray(object_points)) else np.empty((0, 3))
+    # **A scene point that touches the object before it moves is not an
+    # obstacle to it.** The camera-built scene cloud keeps a halo of the
+    # object's own outline -- depth-edge pixels labelled as background at the
+    # object's height; a banana at rest had 32 "scene" points within 20 mm at
+    # z = 0.80-0.837 on a table at 0.800 -- and the surface it rests on. Once
+    # the object rises a few centimetres those points sit beside it and read
+    # as a sideways collision, which is what rejected the flat objects on
+    # every hand (7.46). Points within the contact radius of the object at
+    # its initial pose are removed from what the carried object is tested
+    # against; the robot is still tested against all of them.
+    carried_scene = scene
+    if len(held) and len(scene):
+        near = cKDTree(held).query_ball_point(scene, contact_radius)
+        halo = np.array([len(n) > 0 for n in near])
+        carried_scene = scene[~halo]
+    scene_tree = cKDTree(scene) if len(scene) else None
+    carried_tree = cKDTree(carried_scene) if len(carried_scene) else None
     normal = np.asarray(support_normal, dtype=float)
     normal = normal / np.linalg.norm(normal)
 
-    indices = np.arange(0, len(positions), max(int(stride), 1))
+    indices = waypoint_indices(len(positions), stride, grasp_index, release_index,
+                               critical=critical_waypoints)
     align = alignment_rotation(pair)
     offset = contact_offset(pair)
     place_from = max(int(release_index) - int(place_window), int(grasp_index))
@@ -1547,15 +1625,30 @@ def path_feasibility_observed(
 
     seed, unreachable, violations, first = None, 0, 0, None
     faults: dict = {}
+    # Where the arm can join the path; see path_feasibility, which is the
+    # same rule on the simulator's true geometry.
+    joined_at = None
+    entry = {"checked": False, "samples": 0, "clear": None,
+             "method": "joint interpolation, maximum 0.02 rad per sample"}
+    join_limit = int(grasp_index) - int(join_margin)
+    skipped_unreachable = 0
+    checked_indices = []
+    unreachable_indices = []
     try:
         for k in indices:
+            checked_indices.append(int(k))
             p = np.asarray(positions[k], dtype=float)
             R = np.asarray(rotations[k], dtype=float).reshape(3, 3)
             wrist = R @ align
             result = solve_ik(env, p - wrist @ offset, wrist, arm=arm,
                               seed_qpos=seed, position_tolerance=tolerance)
+            if not result.reachable:
+                unreachable_indices.append(int(k))
             if result.reachable:
                 seed = result.qpos
+            elif joined_at is None and k < join_limit:
+                skipped_unreachable += 1
+                continue
             else:
                 unreachable += 1
                 # **A configuration inverse kinematics did not reach is not a
@@ -1585,19 +1678,28 @@ def path_feasibility_observed(
                     hit = True
 
             # --- the robot against the object it has not picked up yet -------
-            if len(held) and phase == "approach" and abs(
-                    int(k) - int(grasp_index)) > int(grasp_window):
-                touching = points_inside_robot(env, held, bodies, tolerance=0.0)
+            if len(held) and (strict_contacts or (phase == "approach" and abs(
+                    int(k) - int(grasp_index)) > int(grasp_window))):
+                target_world = (p + local @ R.T if phase in ("carry", "place") else
+                                positions[release_index] + local @ rotations[release_index].T
+                                if strict_contacts and phase == "retreat" else held)
+                touching = points_inside_robot(env, target_world, bodies, tolerance=0.0)
                 for name in touching["by_body"]:
-                    key = f"approach: {name} in the target's cloud"
+                    near_grasp = abs(int(k) - int(grasp_index)) <= int(grasp_window)
+                    # The palm is not a finger. Keep this correction opt-in so
+                    # the historical contact omission remains reproducible.
+                    finger = "finger" in name.lower() or "pad" in name.lower()
+                    if strict_contacts and finger and (phase != "approach" or near_grasp):
+                        continue
+                    key = f"{phase}: {name} in the target's cloud"
                     faults[key] = faults.get(key, 0) + 1
                     hit = True
 
             # --- the object it is carrying, against everything else ---------
-            if local is not None and scene_tree is not None and phase in (
+            if local is not None and carried_tree is not None and phase in (
                     "carry", "place"):
                 world = p + local @ R.T
-                near = scene_tree.query_ball_point(world, contact_radius)
+                near = carried_tree.query_ball_point(world, contact_radius)
                 touched = {int(i) for group in near for i in group}
                 if touched:
                     # **From underneath is a surface; from the side is a
@@ -1611,13 +1713,42 @@ def path_feasibility_observed(
                     centre = world.mean(axis=0)
                     lateral = [
                         i for i in touched
-                        if (scene[i] - centre) @ normal
-                        > -0.5 * float(np.linalg.norm(scene[i] - centre) + 1e-12)
+                        if (carried_scene[i] - centre) @ normal
+                        > -0.5 * float(np.linalg.norm(carried_scene[i] - centre) + 1e-12)
                     ]
                     if lateral:
                         key = f"{phase}: the carried object hits something sideways"
                         faults[key] = faults.get(key, 0) + len(lateral)
                         hit = True
+                        if debug is not None:
+                            debug.append({"waypoint": int(k), "object_centre": centre,
+                                          "object_z": (float(world[:, 2].min()), float(world[:, 2].max())),
+                                          "points": carried_scene[lateral]})
+            if hit and joined_at is None and k < join_limit:
+                skipped_unreachable += 1
+                continue
+            if joined_at is None:
+                if validate_entry:
+                    # Check the physical connection from the reset configuration,
+                    # not just the first reachable endpoint after a skipped prefix.
+                    start = saved[qpos_index]
+                    goal = np.asarray(result.qpos, dtype=float)
+                    n = max(1, int(np.ceil(np.max(np.abs(goal - start)) / 0.02)))
+                    entry.update(checked=True, clear=True)
+                    for alpha in np.linspace(0, 1, n + 1):
+                        data.qpos[qpos_index] = start + alpha * (goal - start)
+                        mujoco.mj_forward(model._model, data._data)
+                        entry["samples"] += 1
+                        obstacles = np.concatenate((scene, held), axis=0)
+                        collision = points_inside_robot(env, obstacles, bodies, tolerance=0.0)
+                        if collision["by_body"]:
+                            entry.update(clear=False, collision=collision["by_body"])
+                            faults["entry: robot in observed cloud"] = 1
+                            hit = True
+                            break
+                    data.qpos[qpos_index] = goal
+                    mujoco.mj_forward(model._model, data._data)
+                joined_at = int(k)
             if hit:
                 violations += 1
                 first = k if first is None else first
@@ -1629,14 +1760,28 @@ def path_feasibility_observed(
 
     tested = int(len(indices)) if not stop_early or first is None else int(
         len([i for i in indices if i <= first]))
+    tested -= skipped_unreachable
+    if joined_at is None:
+        # Never joined: every approach waypoint up to the margin was
+        # unreachable or in collision. That is an unreachable plan.
+        tested = max(tested, 1)
+        unreachable = tested
     return {
         "tested": tested,
+        "checked_waypoints": checked_indices,
+        "unreachable_waypoints": unreachable_indices,
+        "scheduled_waypoints": indices.tolist(),
+        "entry_connection": entry,
+        "removed_halo_points": int(len(scene) - len(carried_scene)),
+        "finger_configuration": "initial simulator qpos (not phase actuated)",
         "unreachable": int(unreachable),
         "reachable_fraction": float(1.0 - unreachable / tested) if tested else 0.0,
         "violations": int(violations),
         "violation_fraction": float(violations / tested) if tested else 0.0,
         "first_violation": None if first is None else int(first),
         "faults": faults,
+        "joined_at": joined_at,
+        "skipped_prefix": int(skipped_unreachable),
     }
 
 
@@ -1841,6 +1986,9 @@ def filter_grasps(
     centre_of_mass: np.ndarray | None = None,
     carry_rotation: np.ndarray | None = None,
     check_reachability: bool = False,
+    selection_mode: str = "legacy",
+    effective_poses: bool = False,
+    support_height: float | None = None,
 ) -> FilterFunnel:
     """Run the whole funnel, recording what each stage cost.
 
@@ -1848,9 +1996,9 @@ def filter_grasps(
     visibility and target containment are vector arithmetic, jaw width touches
     the cloud, collision builds trees, and reachability solves IK.
 
-    Every stage that would empty the set instead passes its input through and
-    raises a flag. That keeps a hard scene answering "here is the least bad
-    grasp, and here is what is wrong with it" rather than "no grasp exists".
+    Legacy mode restores a stage's input if it would empty the set and records
+    that fallback. Strict mode preserves rejection. ``effective_poses`` tests
+    the support-clamped poses used by execution without modifying the cache.
 
     Args:
         target_name: The object being picked, so the reachability stage can
@@ -1892,14 +2040,29 @@ def filter_grasps(
             does not run at all. Late because it is a tie-break among grasps
             that are already admissible, not a reason to reject one outright.
     """
+    if selection_mode not in ("legacy", "strict"):
+        raise ValueError("selection_mode must be legacy or strict")
     pair = gripper if isinstance(gripper, GripperPair) else resolve_pair(gripper)
+    if effective_poses:
+        if support_height is None:
+            raise ValueError("effective pose filtering requires support_height")
+        # Preserve cached identities and scores, but test the pose execution uses.
+        grasps = [clamp_to_support(g, support_height, pair)[0] for g in grasps]
     funnel = FilterFunnel()
+    funnel.flags["selection_mode"] = selection_mode
+    funnel.flags["pose_basis"] = "support_clamped" if effective_poses else "raw_cached"
     indices = np.arange(len(grasps))
     funnel.stages.append(FilterStage("generated", "candidates from GraspGen-X",
                                      len(grasps), len(grasps)))
 
     def stage(name, checks, survivors, current):
-        if len(survivors) == 0 and len(current) > 0:
+        # Preserve the actual rejection even when legacy restores the input.
+        funnel.flags.setdefault("stage_decisions", []).append({
+            "stage": name, "entered": list(map(int, current)),
+            "accepted": list(map(int, survivors)),
+            "restored": selection_mode == "legacy" and not len(survivors) and bool(len(current)),
+        })
+        if selection_mode == "legacy" and len(survivors) == 0 and len(current) > 0:
             return funnel.add(name, checks, current, current, fallback=True)
         return funnel.add(name, checks, current, survivors)
 

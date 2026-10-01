@@ -1,0 +1,308 @@
+{
+  "title": "cell_000.npz campaign",
+  "description": "",
+  "settings": {
+    "campaign": "cell_000.npz",
+    "n_settings": 1,
+    "varied": {},
+    "fixed": {
+      "gripper": "panda",
+      "obj": "meat",
+      "objects": [
+        "meat"
+      ],
+      "pick_config": "P0",
+      "seed": 0,
+      "slot": "top middle",
+      "world": "ycb"
+    },
+    "scene_objects": [
+      "milk",
+      "can",
+      "cereal",
+      "bread"
+    ],
+    "default_keypoints": [
+      "box"
+    ],
+    "max_steps": 800,
+    "rollout_kwargs": {
+      "release_gate": true,
+      "close_gate": true
+    }
+  },
+  "design": {
+    "map_fingerprint_grid": {
+      "lower": [
+        -0.35,
+        -0.35,
+        0.8
+      ],
+      "upper": [
+        0.4,
+        0.35,
+        1.35
+      ],
+      "points_per_axis": 20,
+      "order": "numpy meshgrid, indexing='ij', flattened C-order",
+      "stored": "displacement phi(x) - x, float32, shape (N, 3)"
+    },
+    "condition_block": {
+      "design": "randomised block: (gripper, object) is the treatment, the fixed condition set is the block",
+      "pick_configs": {
+        "P0": {
+          "x": -0.14,
+          "y": -0.15,
+          "yaw_deg": 0.0
+        }
+      },
+      "destinations": [
+        "top middle"
+      ],
+      "conditions": [
+        "P0+top middle"
+      ],
+      "note": "pick pose and destination are sampled once and the identical sample is used for every cell; a pick pose drawn per cell would confound the gripper with the difficulty of the pose it happened to draw, and no analysis afterwards separates them"
+    }
+  },
+  "results": {
+    "runs": 1,
+    "succeeded": 0,
+    "refused": 0,
+    "stages": {
+      "approach": 1,
+      "reach": 1,
+      "grasp": 0,
+      "lift": 0,
+      "carry": 0,
+      "place": 0,
+      "settle": 0
+    }
+  },
+  "thresholds": {
+    "reach_tolerance_m": 0.045,
+    "closing_budget_fraction": 0.25,
+    "lift_height_m": 0.02,
+    "carry_fraction": 0.6,
+    "place_tolerance_m": 0.06
+  },
+  "runs": [
+    {
+      "label": "panda meat top middle 0",
+      "outcome": "placed_in_the_wrong_place",
+      "detail": "ended 436 mm from the slot",
+      "blame": "grasp",
+      "stages": {
+        "approach": true,
+        "reach": true,
+        "grasp": false,
+        "lift": false,
+        "carry": false,
+        "place": false,
+        "settle": false
+      },
+      "stage_detail": "failed at 'grasp': the hand was in contact with the object on 165 of 419 steps, from step 73, but the peak grip force was 41 N against 50 N -- touched, no purchase",
+      "placement_error_xy": 0.43618576987187685,
+      "n_keypoints": 18,
+      "min_det": 0.9875325439545993,
+      "cloud_points": 4096,
+      "grasps_generated": 100,
+      "fallbacks": [],
+      "survivors": 3,
+      "executable_fraction": null,
+      "path_fell_back": false,
+      "path_rank_examined": 1,
+      "gripper": "panda",
+      "object": "meat",
+      "grasp_chosen_index": 19,
+      "steps": 419,
+      "seconds": 27.0,
+      "world": "ycb",
+      "executor": "policy",
+      "seed": 0,
+      "pick_config_id": "P0",
+      "destination": "top middle",
+      "condition_id": "P0+top middle",
+      "refused": false,
+      "refusal_reason": "",
+      "det_J_at_grasp": 0.9997795642171348,
+      "det_J_at_release": 0.999429682274251,
+      "grasp_pose_target": [
+        [
+          -0.78529019,
+          0.618371659,
+          -0.030590976,
+          -0.225094281
+        ],
+        [
+          0.617474252,
+          0.785844993,
+          0.034251923,
+          -0.132381946
+        ],
+        [
+          0.045220184,
+          0.008008559,
+          -0.998944942,
+          0.876707688
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "grasp_pose_release": [
+        [
+          -0.998977044,
+          0.000362519,
+          -0.045218731,
+          0.179359247
+        ],
+        [
+          0.0,
+          0.999967865,
+          0.00801676,
+          0.009117824
+        ],
+        [
+          0.045220184,
+          0.008008559,
+          -0.998944942,
+          1.070707688
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "orientation_error_grasp_deg": 0.626961633094375,
+      "orientation_error_release_deg": 0.5353914656402126,
+      "placement_error_3d_mm": 477.3824733258668,
+      "placement_error_components_mm": [
+        -412.412,
+        -142.036,
+        -194.0
+      ],
+      "release_error_3d_mm": 477.3824733258668,
+      "release_error_components_mm": [
+        -412.412,
+        -142.036,
+        -194.0
+      ],
+      "release_drop_mm": 0.0,
+      "release_gate_steps": 0,
+      "release_gate_reason": "supported",
+      "support_clamp_mm": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "approach_extra_steps": 300,
+      "attractor_law": "integrate",
+      "close_gate_steps": 100,
+      "close_gate_reason": "timeout",
+      "object_stand_off_mm": 41.61552594210083,
+      "first_failure_stage": "grasp",
+      "map_fit": 0.023186899998108856,
+      "label_transport": 0.028458690008847043,
+      "policy_refit": 3.996426297002472,
+      "survivors_per_stage": {
+        "generated": [
+          100,
+          100
+        ],
+        "visibility": [
+          100,
+          81
+        ],
+        "support": [
+          81,
+          45
+        ],
+        "place zone": [
+          45,
+          45
+        ],
+        "on target": [
+          45,
+          45
+        ],
+        "jaw width": [
+          45,
+          44
+        ],
+        "collision": [
+          44,
+          42
+        ],
+        "centred": [
+          42,
+          7
+        ],
+        "distinct": [
+          7,
+          3
+        ]
+      },
+      "funnel_fallbacks": [],
+      "m_final_phase": 0.9972145135596684,
+      "m_frozen_steps": 100,
+      "m_steps": 419,
+      "m_close_step": 179,
+      "m_close_phase": 0.20790739922946058,
+      "m_reach_error": 0.026986009793450352,
+      "m_commanded_error": 0.002396246764370412,
+      "m_lag_at_close": 0.025007819184117493,
+      "m_closest_commanded": 0.0006640685432059495,
+      "m_closest_commanded_step": 186,
+      "m_closest_transported": 8.240705241697413e-07,
+      "m_reach_closing": 0.003604019213690457,
+      "m_reach_approach": 0.02335731181818758,
+      "m_reach_signed_approach": 0.02335731181818758,
+      "m_reach_jaw": 0.013026576006426708,
+      "m_closing_budget": 0.010535315006124868,
+      "m_push_before_close": 0.010249636437796939,
+      "m_closest_hand": 0.02668721677983437,
+      "m_closest_hand_step": 158,
+      "m_closed_early": false,
+      "m_reach_within_budget": true,
+      "m_drift_max": 0.03393176603917442,
+      "m_drift_median": 0.00018274027723254365,
+      "m_drift_at_step": 347,
+      "m_drift_frechet": 0.049821737861075084,
+      "m_contact_steps": 165,
+      "m_lift_height": 0.005616543063940993,
+      "m_peak_grip_force": 40.9137150343536,
+      "m_release_step": 377,
+      "m_carry_fraction": 0.29797979797979796,
+      "m_release_error_xy": 0.43618576987187685,
+      "m_final_error_xy": 0.43618576987187685,
+      "arrays": "cell_000.npz",
+      "report": "run_000/report.html"
+    }
+  ],
+  "created": "2026-09-25T18:17:01",
+  "provenance": {
+    "commit": "e6d694e7f1b04782195344e4c7e6419eeac8f9be",
+    "commit_short": "e6d694e",
+    "branch": "results",
+    "committed": "2026-09-21T15:34:06+05:30",
+    "dirty": [],
+    "diff_stat": null,
+    "untracked_code": [],
+    "reproducible": true,
+    "python": "3.10.12",
+    "platform": "Linux-6.8.0-138-generic-x86_64-with-glibc2.35",
+    "packages": {
+      "numpy": "2.2.6",
+      "scipy": "1.15.3",
+      "mujoco": "3.7.0",
+      "robosuite": "1.5.2",
+      "similaritymeasures": "1.4.0"
+    }
+  }
+}

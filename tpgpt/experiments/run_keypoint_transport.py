@@ -90,6 +90,11 @@ class KeypointVariant:
     compose_contacts: bool = False
     #: Locality radius of that second stage, in metres.
     locality: float = 0.03
+    #: Keypoint families kept from the emitted set, routed exactly as
+    #: ``pipeline._select_parts`` does: ``"box"`` (centre and corners),
+    #: ``"contacts"`` (the two jaw contacts) and ``"support"`` (the footprint
+    #: centre on the support plane). The default keeps everything emitted.
+    parts: tuple[str, ...] = ("box", "contacts", "support")
 
     @property
     def aim_is_pinned(self) -> bool:
@@ -124,6 +129,24 @@ VARIANTS = (
         orientation="grasp",
         contacts=True,
         compose_contacts=True,
+    ),
+)
+
+#: The five constructions of the paper's Sec. III-D, lettered as there. All
+#: fitted to the same scenes with the grasp held fixed, so the construction is
+#: the only thing that varies. (A), (D) and (E) are the sweep's own
+#: ``0_cloud_box``, ``2_cube_grasp_pose`` and same-map contacts; (B) and (C)
+#: exist for this table. (B) is the two jaw contacts plus the support point --
+#: two points alone per block cannot fix an affine map -- and it is expected
+#: to refuse or fold on some cells, which the table counts apart from failing.
+PAPER_VARIANTS = (
+    KeypointVariant("A_object_box", parts=("box",)),
+    KeypointVariant("B_finger_contacts", contacts=True, parts=("contacts", "support")),
+    KeypointVariant("C_support_cube", box="support_cube", parts=("box",)),
+    KeypointVariant("D_grasp_cube", box="grasp_cube", orientation="grasp", parts=("box",)),
+    KeypointVariant(
+        "E_grasp_cube_contacts", box="grasp_cube", orientation="grasp",
+        contacts=True, parts=("box", "contacts"),
     ),
 )
 
@@ -910,6 +933,10 @@ def transport(
         orientation=variant.orientation,
         cube_half_extent=variant.cube_half_extent,
     )
+    if set(variant.parts) != {"box", "contacts", "support"}:
+        from tpgpt.experiments.pipeline import _select_parts
+
+        S, T = _select_parts(S, T, variant.parts)
     if variant.compose_contacts:
         # Two stages: the box carries the trajectory, the contacts are pinned by
         # a local correction on top. Determinants multiply, so each stage stays

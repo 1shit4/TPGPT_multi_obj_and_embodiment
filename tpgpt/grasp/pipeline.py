@@ -13,6 +13,8 @@ answered yet.
 
 from __future__ import annotations
 
+import hashlib
+
 import numpy as np
 
 from tpgpt.grasp.cache import cache_key, load, store
@@ -31,6 +33,7 @@ def grasps_for_cloud(
     planner: str = "diffusion",
     cache_dir=None,
     use_cache: bool = True,
+    cache_only: bool = False,
 ) -> GraspSet:
     """Ask the server for grasps on an already-extracted cloud.
 
@@ -63,6 +66,8 @@ def grasps_for_cloud(
     if cached is not None:
         poses, scores = cached
     else:
+        if cache_only:
+            raise FileNotFoundError(f"frozen candidate cache missing: {key}")
         owned = client is None
         client = client or GraspGenClient()
         try:
@@ -82,6 +87,9 @@ def grasps_for_cloud(
     return build_grasp_set(
         poses, scores, pair.graspgen, cloud.instance, len(cloud),
         metadata={
+            "candidate_sha256": hashlib.sha256(
+                np.asarray(poses, dtype="<f8").tobytes() +
+                np.asarray(scores, dtype="<f8").tobytes()).hexdigest(),
             "planner": planner,
             "num_grasps": num_grasps,
             "cameras": list(cloud.cameras),

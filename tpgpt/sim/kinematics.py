@@ -55,6 +55,32 @@ def _rotation_error(current: np.ndarray, target: np.ndarray) -> np.ndarray:
     return vector
 
 
+def initial_ik_seed(env, arm="right") -> np.ndarray:
+    """Choose a deterministic solver seed without moving the simulated arm.
+
+    The nominal seed can avoid a joint-limit basin reached from the scene's
+    hand-dependent home configuration. It changes the numerical initial guess,
+    never the simulator's initial robot state. Executed connections still need
+    their own collision and tracking checks.
+    """
+    robot = env.robots[0]
+    controller = robot.composite_controller.part_controllers[arm]
+    index = np.asarray(controller.qpos_index)
+    strategy = getattr(env, "ik_seed_strategy", "current")
+    if strategy == "current":
+        seed = np.asarray(env.sim.data.qpos[index])
+    elif strategy == "nominal":
+        seed = np.asarray(robot.init_qpos)
+    elif strategy == "middle":
+        joints = env.sim.model.jnt_qposadr.searchsorted(index)
+        seed = env.sim.model.jnt_range[joints].mean(axis=1)
+    else:
+        raise ValueError(f"unknown IK seed strategy: {strategy}")
+    if seed.shape != index.shape:
+        raise ValueError("IK seed does not match this arm's joint count")
+    return np.array(seed, dtype=float, copy=True)
+
+
 def solve_ik(
     env,
     position: np.ndarray,
@@ -100,6 +126,8 @@ def solve_ik(
 
     saved_qpos = np.array(sim.data.qpos)
     saved_qvel = np.array(sim.data.qvel)
+    if seed_qpos is None:
+        seed_qpos = initial_ik_seed(env, arm)
     if seed_qpos is not None:
         sim.data.qpos[qpos_index] = np.asarray(seed_qpos, dtype=float)
 

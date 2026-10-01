@@ -20,6 +20,7 @@ import numpy as np
 
 from tpgpt.experiments.reshelving_pipeline import record_source, transport_to_scene
 from tpgpt.metrics import rank_methods
+from tpgpt.reporting.html import _jsonable
 from tpgpt.transport.svgp import SparseGaussianProcessRegressor
 
 #: Map variants to compare. ``None`` removes the nonlinear stage entirely.
@@ -86,7 +87,9 @@ def run(
     }
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
-    (out_dir / "ablation.json").write_text(json.dumps(report, indent=2, default=float))
+    (out_dir / "ablation.json").write_text(
+        json.dumps(report, indent=2, default=_jsonable)
+    )
     print(f"\nreport written to {out_dir / 'ablation.json'}")
     return report
 

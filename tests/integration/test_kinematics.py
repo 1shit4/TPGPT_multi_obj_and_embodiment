@@ -85,6 +85,30 @@ def test_solving_leaves_the_simulation_untouched(env):
     assert np.allclose(before_qpos, np.array(env.sim.data.qpos))
 
 
+def test_nominal_seed_changes_only_the_solver_initial_guess(env):
+    from tpgpt.sim.kinematics import initial_ik_seed
+    robot = env.robots[0]
+    index = np.asarray(robot.composite_controller.part_controllers["right"].qpos_index)
+    before = {k: np.asarray(getattr(env.sim.data, k)).copy() for k in ("qpos", "qvel", "ctrl")}
+    env.ik_seed_strategy = "nominal"
+    try:
+        nominal = initial_ik_seed(env)
+        np.testing.assert_array_equal(env.sim.data.qpos, before["qpos"])
+        # Obtain the exact pose corresponding to the nominal configuration.
+        env.sim.data.qpos[index] = nominal
+        env.sim.forward()
+        position, rotation = eef_pose(env)
+        env.sim.data.qpos[:] = before["qpos"]
+        env.sim.forward()
+        result = solve_ik(env, position, rotation)
+        assert result.reachable and result.iterations == 1
+        np.testing.assert_array_equal(result.qpos, nominal)
+        for key, value in before.items():
+            np.testing.assert_array_equal(getattr(env.sim.data, key), value)
+    finally:
+        env.ik_seed_strategy = "current"
+
+
 def test_a_sequence_warm_starts_from_the_previous_solution(env):
     """A pick and place is four nearby poses, and asking whether the arm can
     move between them is a different question from whether each is reachable

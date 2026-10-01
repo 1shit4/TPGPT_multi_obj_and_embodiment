@@ -126,6 +126,7 @@ def transport_to_scene(
     max_steps: int = 600,
     residual: object = "default",
     source_placement: ObjectPlacement | None = None,
+    rollout_kwargs: dict | None = None,
 ) -> TransportResult:
     """Transport the source policy into a new scene and execute it.
 
@@ -162,7 +163,8 @@ def transport_to_scene(
         transport_map = TransportMap(residual=residual).fit(S, T)
         transported = transport_labels(transport_map, labels)
         policy = GPPolicy().fit(transported)
-        rollout = rollout_policy(env, policy, max_steps=max_steps, video_path=video_path)
+        rollout = rollout_policy(env, policy, max_steps=max_steps, video_path=video_path,
+                                 **(rollout_kwargs or {}))
 
         report = transport_map.check_diffeomorphism(labels.positions)
         epistemic = policy.predict(

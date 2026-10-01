@@ -1,0 +1,25 @@
+\documentclass[10pt]{article}
+\usepackage[margin=22mm]{geometry}
+\usepackage{graphicx}
+\title{Simulation transfer results}
+\author{}
+\date{}
+\renewcommand{\thesubsection}{\arabic{subsection}}
+\begin{document}
+\maketitle
+\input{docs/simulation_results.tex}
+\IfFileExists{outputs/paper_evaluation_v1/manuscript/results_table.tex}{
+\begin{table}[ht]
+\centering
+\resizebox{\linewidth}{!}{\input{outputs/paper_evaluation_v1/manuscript/results_table.tex}}
+\caption{Frozen prospective evaluation. Every scheduled cell enters the denominator.}
+\end{table}
+}{}
+\IfFileExists{outputs/paper_evaluation_v1/manuscript/success_matrix.pdf}{
+\begin{figure}[ht]
+\centering
+\includegraphics[width=\linewidth]{outputs/paper_evaluation_v1/manuscript/success_matrix.pdf}
+\caption{Object--gripper results over six shared, fresh pickup and shelf configurations. The executors share candidate draws and a single source demonstration.}
+\end{figure}
+}{}
+\end{document}

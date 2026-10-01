@@ -310,7 +310,8 @@ def replay_labels(
     #: kept only the one it was aiming at.
     achieved: list[np.ndarray] = []
     unreachable = 0
-    seed = np.array(env.sim.data.qpos[qpos_index])
+    from tpgpt.sim.kinematics import initial_ik_seed
+    seed = initial_ik_seed(env, arm)
 
     for i, target in enumerate(positions):
         rotation = rotations[i] if rotations is not None else None

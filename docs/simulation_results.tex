@@ -1,0 +1,137 @@
+% Completed results tied to outputs/paper_evaluation_v1/protocol.json.
+% Development, prospective evaluation and diagnostic reproductions are separate.
+\subsection{Simulation transfer protocol}
+We freeze one successful scripted Franka Panda demonstration on a single box
+and reuse its labels in every evaluation cell. The source trajectory is selected
+in development and includes a 0.10\,m hover and no commanded carry rotation.
+Evaluation changes the target object, gripper and physical pickup/shelf
+configuration. Five grippers (Panda, Robotiq 2F-85, Robotiq 2F-140, XArm and
+Rethink) remain mounted on a Panda arm. The four target assets are the YCB
+pudding box, gelatin box, foam brick and potted-meat can. These are rigid scan
+meshes with convex collision decompositions and the repository's configured
+masses; neither mesh scale nor contact parameters are adjusted during evaluation.
+
+The predeclared grid contains $5\times4\times6=120$ cells per executor.
+Six fresh configurations are drawn by stratifying pickup $x$, $y$ and yaw and
+shelf translation $x$, $y$ and $z$. Pickup coordinates span
+$[-0.23,-0.21]\times[-0.14,-0.10]$\,m, with yaw in $[50,65]$ degrees.
+Shelf translation spans $[-0.03,0]\times[-0.04,0.04]\times[-0.03,0]$\,m.
+Each configuration is crossed with every object and gripper. The destination
+is the middle slot of the upper cubby shelf, whose physical location changes
+with the shelf translation. The object rest orientations and this local
+workspace are development choices. All objects settle under physics before
+perception. This protocol measures transfer within that specified domain.
+
+The pretrained diffusion grasp generator and target keypoints use the full YCB surface scan transformed
+by the simulator object pose. Obstacle checking uses fused camera observations;
+the retained legacy place-zone filter also uses simulator geometry. The nominal
+robot configuration seeds numerical inverse kinematics, while the simulated arm
+starts in its ordinary physical home state. The scheduled path checks include the grasp, release and final waypoints;
+other path samples have stride four. Checking stops at the first rejection,
+and legacy fallback may execute a rejected candidate whose remaining waypoints
+were not checked. Fallback executions are retained and reported separately. These discrete checks provide diagnostic evidence rather than a
+continuous collision guarantee.
+
+The primary executor refits a Gaussian process to the transported labels,
+queries its reference state and phase, and tracks its predicted reference and
+orientation under joint-position control. Measured tracking error gates phase
+progress at a 30\,mm tolerance, with a phase-speed factor of 0.25 and a
+2400-step budget. The controller gains are fixed, so this experiment evaluates
+pose and gripper transfer. Direct replay of the same transported labels is the
+paired execution baseline. At 20\,Hz it holds each of the 240 label poses for
+eight control steps and requires four consecutive opposing-finger contact
+samples at grasp acquisition. The GP executor advances after its first such
+contact sample, subject to its tracking gate. This comparison therefore includes
+differences in timing and grasp confirmation as well as policy refitting.
+Both executors use the identical source, target
+scenes and cached grasp draws. Candidate, effective-pose and transported-label
+hashes check these identities.
+
+Success retains the repository's placement criterion: horizontal object-origin
+error below 60\,mm and the lowest object-geometry point within 30\,mm of the
+shelf surface. We additionally hold the final arm configuration with open jaws
+for two seconds. Throughout the final second, the object must satisfy the slot
+criterion, touch the destination board, have no robot contact, and move within
+a 2\,mm position span. This check can only downgrade an execution outcome.
+All scheduled cells enter the denominator, including refusals, setup errors and
+execution failures. The study uses MuJoCo 3.7.0 and robosuite 1.5.2, with serial
+CPU physics. Planner draws are saved in a dedicated cache; the environment seed
+is not treated as a seed for the external grasp generator.
+
+\subsection{Development evidence}
+A 55-cell development comparison of source trajectories increased position
+placement from $39/55$ with the original source to $41/55$ with the compact
+source; seven cases improved and five regressed with identical candidate
+caches. The nominal IK seed and explicit task-waypoint checks subsequently
+achieved $48/55$ with both replay and the refitted GP executor, including the
+post-release settling criterion. All 55 executor pairs had identical candidate
+caches, effective grasp poses and transported-label hashes, and identical binary
+outcomes. These development cells are excluded from the prospective evaluation.
+
+\subsection{Prospective evaluation}
+The primary GP-reference executor succeeds in $111/120$ scheduled cells
+($92.5\%$). All 120 cells execute: nine fail placement, with no refusals,
+setup errors or diagnostic errors. Conditional execution success therefore
+also equals $92.5\%$. Per-gripper counts are $23/24$ for Panda, $22/24$ for
+Robotiq 2F-85, $23/24$ for Robotiq 2F-140, $24/24$ for XArm and $19/24$ for
+Rethink. Per-object counts are $29/30$ for pudding, $28/30$ for gelatin,
+$28/30$ for the brick and $26/30$ for meat. Across the six shared configurations,
+success ranges from $17/20$ to $20/20$.
+
+Seven cells execute a legacy path fallback, of which four succeed. The remaining
+113 cells succeed in 107 cases. These results include fallback execution and
+must not be described as a strict-feasibility success rate. Among successful
+placements, final horizontal error has a median of 5.7\,mm and a 95th percentile
+of 14.8\,mm; the largest is 54.2\,mm, within the declared 60\,mm criterion.
+These are final supported, released placement errors, conditional on success.
+Ten successful primary trials and fourteen successful replay trials include
+recorded robot/gripper contact with the table or shelf during execution. Thus placement success does not imply an
+obstacle-contact-free trajectory; contact traces are reported separately.
+
+The paired replay baseline succeeds in $113/120$ cells ($94.2\%$), with seven
+execution failures and no refusals or setup/diagnostic errors. All 120 pairs
+match in source, candidate-cache hash, effective grasp pose, transported-label
+hash and initial scene. Both methods succeed in 110 cells and fail in six;
+replay succeeds in three GP failures and fails in one GP success. These paired
+results do not show a success-rate advantage for the GP-reference executor.
+The three replay-only successes correspond to GP tracking stalls, whereas the
+GP-only success is a Rethink/brick case. Replay's successful-placement XY error
+has a median of 6.4\,mm and a 95th percentile of 22.9\,mm. Neither these conditional
+error summaries nor the two-cell difference in success counts establish
+statistical superiority on a broader task distribution.
+
+\subsection{Failure analysis}
+Thirty rendered normal-selection reproductions cover all ten case pairs with a
+failure in either executor and five diverse success controls. All reproduce
+their original outcome and pinned inputs. Inspection of synchronized overview
+and side-camera sequences, together with control-step traces, separates three
+GP tracking stalls recovered by replay from failures shared by both methods.
+One Panda/gelatin fallback never acquires the object. Two Robotiq 2F-85
+fallbacks stall after lifting; one has recorded arm-to-shelf-wall contact.
+Five Rethink failures briefly contact the brick or can but leave it on the
+table while the hand completes its trajectory. In the GP-only Rethink/brick
+success, replay instead loses the carried brick while closure remains commanded.
+Because executor timing and acquisition gates differ, this comparison does not
+isolate the cause of that loss.
+
+The Robotiq 2F-140/meat GP failure occurs during approach, before target contact,
+with finger-to-shelf contact despite an accepted sampled task path. A separate
+pinned, non-executing diagnostic also accepts all 103 sampled joint-interpolation
+entry poses and restores the simulator state. Thus even that sampled entry check
+does not validate the physically executed connection. Geometry coverage and the
+difference between checked interpolation and controlled motion remain possible
+explanations, not established causes. Diagnostic reproductions and checks do
+not enter the 120-cell denominator. Opening during the final observation of a
+stalled run must not be mistaken for completion of its policy release phase.
+
+\subsection{Scope and limitations}
+The object set, rest orientations, source trajectory and workspace bounds were
+chosen during development; only the six evaluation configurations and their
+grasp draws are fresh. The 120 cells share those six configurations and therefore
+are not 120 independent draws from an unrestricted environment distribution.
+The reported rate establishes performance in this local rigid-object domain,
+with full target scans and simulator-derived object poses. It does not establish
+transfer to other robot arms, an observed-only perception pipeline, physical
+robots, or the full YCB collection. The GP-reference executor uses measured
+tracking feedback for phase progress but queries its reference state spatially;
+transported compliance is not executed by the fixed joint-position controller.

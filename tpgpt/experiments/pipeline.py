@@ -31,6 +31,7 @@ from tpgpt.experiments.run_keypoint_transport import object_centre_of_mass
 from tpgpt.grasp.filters import FilterFunnel, filter_grasps
 from tpgpt.grasp.grasps import (
     Grasp6D,
+    clamp_to_support,
     contact_offset,
     grasp_to_eef_pose,
     to_grasp_convention,
@@ -200,6 +201,8 @@ class RunResult:
     #: the denominator of every rate reported.
     REFUSALS = (
         "no_object_cloud",
+        "object_not_seen",
+        "no_grasp_generated",
         "no_grasps_generated",
         "no_grasp_survived",
         "keypoints_degenerate",
@@ -248,6 +251,9 @@ def build_scene(
     controller_config: dict | None = None,
     world: str = "benchmark",
     pick_config: str | None = None,
+    pick_pose=None,
+    object_rest_quat=None,
+    shelf_translation=(0.0, 0.0, 0.0),
 ):
     """A tabletop-shelf scene with depth, segmentation and torque control.
 
@@ -285,6 +291,9 @@ def build_scene(
         shelf_variant=shelf_variant,
         world=world,
         pick_config=pick_config,
+        pick_pose=pick_pose,
+        object_rest_quat=object_rest_quat,
+        shelf_translation=shelf_translation,
         has_offscreen_renderer=True,
         use_camera_obs=True,
         camera_names=list(SCENE_CAMERAS),
@@ -331,6 +340,24 @@ def run(
     env=None,
     rollout_kwargs: dict | None = None,
     executor: str = "policy",
+    forced_grasp_index: int | None = None,
+    selection_mode: str = "legacy",
+    path_stride: int = 4,
+    target_cloud_correction: bool = True,
+    critical_waypoints: bool = True,
+    expected_cache_hash: str | None = None,
+    expected_effective_pose=None,
+    expected_labels_hash: str | None = None,
+    cache_only: bool = False,
+    simulator_diagnostics: bool = False,
+    validate_path_entry: bool | None = None,
+    strict_target_contacts: bool | None = None,
+    simulator_place_filter: bool | None = None,
+    filter_effective_poses: bool | None = None,
+    target_edge_margin_pixels: int = 0,
+    require_task_waypoints: bool | None = None,
+    flip_target: bool = False,
+    ik_seed_strategy: str = "current",
 ) -> RunResult:
     """One end-to-end attempt.
 
@@ -349,6 +376,9 @@ def run(
             ``"replay"`` drives the arm onto each transported waypoint under
             position control -- no policy, no attractor, no lag gate -- which is
             the **executor-free ceiling**, and the comparison Experiment I is.
+            ``"joint_policy"`` queries a refitted GP and tracks its references
+            with a joint-position controller and measured-error phase gate.
+            Its fixed gains do not implement transported compliance.
 
             **Both arms of that comparison must come through this one function.**
             Running them through two drivers is what invalidated the previous
@@ -365,16 +395,26 @@ def run(
 
             The environment must be built with a matching controller:
             :func:`~tpgpt.sim.replay.make_position_controller_config` for
-            ``"replay"``. robosuite instantiates its part controllers during
+            ``"replay"`` and ``"joint_policy"``. robosuite instantiates its part controllers during
             ``__init__``, so this cannot be chosen after the fact.
     """
-    if executor not in ("policy", "replay"):
+    if executor not in ("policy", "replay", "joint_policy", "none"):
         raise ValueError(
-            f"unknown executor {executor!r}; expected 'policy' or 'replay'")
+            f"unknown executor {executor!r}; expected 'policy', 'replay', 'joint_policy' or 'none'")
+    if selection_mode not in ("legacy", "strict"):
+        raise ValueError("selection_mode must be legacy or strict")
+    if require_task_waypoints is None:
+        require_task_waypoints = selection_mode == "strict"
+    critical_waypoints = bool(critical_waypoints or require_task_waypoints)
+    if path_stride < 1:
+        raise ValueError("path_stride must be positive")
+    if ik_seed_strategy not in ("current", "nominal", "middle"):
+        raise ValueError("IK seed strategy must be current, nominal or middle")
     started = time.time()
     result = RunResult(prompt=prompt, gripper=gripper, shelf_variant=shelf_variant, seed=seed)
     owned = env is None
     env = env or build_scene(objects, gripper, shelf_variant, seed)
+    env.ik_seed_strategy = ik_seed_strategy
 
     try:
         if source is None:
@@ -442,16 +482,40 @@ def run(
                 f"only {len(cloud)} points on the {result.object_name}; it is "
                 "hidden behind something",
             )
-        scene = scene_point_cloud(env, exclude=(result.object_name,), obs=obs)
+        scene = scene_point_cloud(env, exclude=(result.object_name,), obs=obs,
+                                  target_edge_margin_pixels=target_edge_margin_pixels)
 
         # --- candidate grasps ----------------------------------------------
         from tpgpt.grasp.pipeline import grasps_for_cloud
 
-        grasp_set = grasps_for_cloud(cloud, gripper)
+        grasp_set = grasps_for_cloud(cloud, gripper, cache_only=cache_only)
         result.metrics["grasps_generated"] = len(grasp_set)
+        result.metrics.update(selection_mode=selection_mode, path_stride=path_stride,
+                              ik_seed_strategy=ik_seed_strategy,
+                              require_task_waypoints=require_task_waypoints,
+                              flip_target=bool(flip_target),
+                              target_edge_margin_pixels=target_edge_margin_pixels,
+                              target_cloud_correction=target_cloud_correction,
+                              critical_waypoints=critical_waypoints,
+                              forced_diagnostic=forced_grasp_index is not None,
+                              validate_path_entry=(selection_mode == "strict" if validate_path_entry is None else validate_path_entry),
+                              strict_target_contacts=(selection_mode == "strict" if strict_target_contacts is None else strict_target_contacts),
+                              candidate_cache=grasp_set.metadata,
+                              object_geometry_source=result.metrics["object_cloud_source"],
+                              scene_geometry_source="observed cloud; funnel raw, path robot-subtracted",
+                              simulator_place_filter=(selection_mode == "legacy" if simulator_place_filter is None
+                                                      else simulator_place_filter))
+        cache_hash = grasp_set.metadata.get("candidate_sha256")
+        if expected_cache_hash is not None and expected_cache_hash != cache_hash:
+            return _fail(result, "candidate_identity_mismatch", "candidate cache hash changed")
         if not len(grasp_set):
             return _fail(result, "no_grasp_generated", "the generator returned nothing")
 
+        result.metrics["candidate_poses"] = [
+            {"original_index": i, "original_pose": g.pose.tolist(),
+             "effective_pose": clamp_to_support(g, float(env.table_offset[2]), gripper)[0].pose.tolist()}
+            for i, g in enumerate(grasp_set.grasps)
+        ]
         target_height = float(np.ptp(cloud.points[:, 2]))
         provisional = place_pose_for(env, result.slot, grasp_set.grasps[0], gripper,
                                      target_height)
@@ -478,10 +542,16 @@ def run(
             ),
             centre_of_mass=object_centre_of_mass(env, result.object_name),
             carry_rotation=carry_transform(labels)[0],
-            target_name=result.object_name,
+            target_name=result.object_name, selection_mode=selection_mode,
+            effective_poses=(selection_mode == "strict" if filter_effective_poses is None
+                             else filter_effective_poses),
+            support_height=float(env.table_offset[2]),
+            check_place_approach=(selection_mode == "legacy" if simulator_place_filter is None
+                                  else simulator_place_filter),
         )
         result.funnel = funnel
-        if not len(funnel.survivors):
+        result.metrics["filter_decisions"] = funnel.flags
+        if not len(funnel.survivors) and forced_grasp_index is None:
             return _fail(result, "no_grasp_survived",
                          f"every candidate was rejected, mostly by {funnel.rejected_by}")
 
@@ -534,16 +604,53 @@ def run(
         )
 
         candidates = [grasp_set.grasps[i] for i in funnel.survivors[:max_candidates]]
+        # **The fingertips must clear the table.** What is executed is deeper
+        # than the planner's contact point by the hand's calibrated depth and
+        # its finger reach, and on the flat YCB objects that put the fingertips
+        # below the plane on every hand. Clamped here, before the keypoints are
+        # built, so the cube is centred on the grasp that actually runs.
+        support = float(env.table_offset[2])
+        clamped = [clamp_to_support(g, support, gripper) for g in candidates]
+        candidates = [g for g, _ in clamped]
+        result.metrics["support_clamp_mm"] = [round(s * 1000, 1) for _, s in clamped]
+        if forced_grasp_index is not None:
+            if not 0 <= forced_grasp_index < len(grasp_set.grasps):
+                return _fail(result, "forced_grasp_missing",
+                             f"candidate {forced_grasp_index} is not in this "
+                             f"cell's cached set of {len(grasp_set.grasps)}")
+            forced, shift = clamp_to_support(
+                grasp_set.grasps[forced_grasp_index], support, gripper)
+            candidates = [forced]
+            result.metrics["support_clamp_mm"] = [round(shift * 1000, 1)]
+        audit = {}
         chosen = _choose_grasp(
             env, placement, target_of, tool_labels, keypoint_parts, candidates,
             box=keypoint_box, orientation=keypoint_orientation,
             cube_half_extent=cube_half_extent,
             gripper=gripper, object_name=result.object_name,
+            stride=path_stride, selection_mode=selection_mode,
+            target_cloud_correction=target_cloud_correction,
+            critical_waypoints=critical_waypoints, audit=audit,
+            original_indices=([forced_grasp_index] if forced_grasp_index is not None
+                              else list(funnel.survivors[:max_candidates])),
+            force_diagnostic=forced_grasp_index is not None,
+            simulator_diagnostics=simulator_diagnostics,
+            validate_path_entry=validate_path_entry, strict_target_contacts=strict_target_contacts,
+            target_edge_margin_pixels=target_edge_margin_pixels,
+            require_task_waypoints=require_task_waypoints,
+            flip_target=flip_target,
         )
+        result.metrics.update(audit)
         if chosen is None:
-            return _fail(result, "map_not_a_diffeomorphism",
-                         "no surviving grasp produced a valid transportation map")
+            return _fail(result, "no_grasp_survived",
+                         "no surviving grasp produced an admissible transportation path")
         result.grasp, sets, path_flags = chosen
+        result.metrics["effective_grasp_pose"] = result.grasp.pose.tolist()
+        from tpgpt.experiments.audit_artifacts import validate_pin
+        try:
+            validate_pin(cache_hash, result.grasp.pose, expected_cache_hash, expected_effective_pose)
+        except ValueError as exc:
+            return _fail(result, "candidate_identity_mismatch", str(exc))
         # The object's width along **this grasp's own** closing axis, taken from
         # the cloud. Recorded here because this is the only place both the cloud
         # and the chosen grasp are in scope, and because ``closing_budget``
@@ -567,6 +674,11 @@ def run(
         check = path_flags.get("path_check", {})
         result.metrics["path_fell_back"] = bool(check.get("fell_back"))
         result.metrics["path_rank_examined"] = check.get("rank_examined")
+        # Where the executors join the transported path (filters.JOIN_MARGIN).
+        chosen_record = next((e for e in check.get("examined", [])
+                              if e.get("index") == check.get("chosen")), {})
+        start_index = chosen_record.get("joined_at") or 0
+        result.metrics["start_index"] = int(start_index)
         # **The index into the *raw* candidate list, not into the survivors.**
         # ``_choose_grasp`` enumerates ``candidates``, which is already filtered
         # and truncated, so its ``chosen`` is a position in the survivor list
@@ -584,6 +696,7 @@ def run(
         survivors = list(funnel.survivors[:max_candidates])
         rank = check.get("chosen")
         result.metrics["grasp_chosen_index"] = (
+            int(forced_grasp_index) if forced_grasp_index is not None else
             int(survivors[rank])
             if rank is not None and 0 <= rank < len(survivors) else None
         )
@@ -728,11 +841,51 @@ def run(
         )
         result.metrics["orientation_error_grasp_deg"] = float(errors[0])
         result.metrics["orientation_error_release_deg"] = float(errors[1])
+        # **Aim**: how close the transported fingertip path passes to the
+        # target grasp point, and to the release point, in millimetres. Pure
+        # geometry -- no physics has run yet. For a construction that makes
+        # the grasp point a keypoint this is ~0 *by construction* and is not
+        # evidence; for one that does not, it is the miss the executor then
+        # inherits. Both ends, because a roll or a support anchor can be right
+        # at one and wrong at the other.
+        path = np.asarray(transported.positions, dtype=float)
+        result.metrics["aim_grasp_mm"] = float(
+            np.linalg.norm(path - executed_p[None], axis=1).min() * 1000)
+        result.metrics["aim_release_mm"] = float(
+            np.linalg.norm(path - placed_p[None], axis=1).min() * 1000)
 
         # --- execute --------------------------------------------------------
-        if executor == "replay":
-            rollout = _replay_execution(env, result, transported, target_offset,
-                                        gripper, rollout_kwargs or {})
+        if executor == "none":
+            result.timings = timings.stages
+            result.outcome = "not_executed"
+            return result
+        # Join the path where the check said the arm can. The prefix before
+        # ``start_index`` is unreachable or in collision and carries no task
+        # content -- it is the demonstration's own starting pose, warped. The
+        # plan recorded above (aim, orientation, the map) is the whole one;
+        # what is executed and diagnosed from here on starts at the join.
+        if start_index > 0:
+            transported = transported[int(start_index):]
+            result.transported = transported.positions
+            result.transported_labels = transported
+        from tpgpt.experiments.audit_artifacts import labels_digest
+        result.metrics["transported_labels_sha256"] = labels_digest(transported)
+        if expected_labels_hash is not None and expected_labels_hash != result.metrics["transported_labels_sha256"]:
+            return _fail(result, "candidate_identity_mismatch", "transported labels changed")
+        if executor in ("replay", "joint_policy"):
+            if executor == "replay":
+                rollout = _replay_execution(env, result, transported, target_offset,
+                                            gripper, rollout_kwargs or {})
+            else:
+                from tpgpt.sim.joint_policy import rollout_joint_policy
+                from tpgpt.experiments.run_keypoint_replay import _fingers_gate
+                policy = GPPolicy().fit(transported)
+                settings = dict(tool_offset=target_offset, max_steps=max_steps,
+                                score=slot_score(result.object_name, result.slot),
+                                probe=object_probe(env, result.object_name, gripper),
+                                grasp_gate=_fingers_gate(env, gripper, result.object_name))
+                settings.update(rollout_kwargs or {})
+                rollout = rollout_joint_policy(env, policy, **settings)
             result.rollout = rollout
             result.diagnosis = diagnose(result, env)
             result.metrics.update(rollout.metadata)
@@ -741,7 +894,7 @@ def run(
             if not rollout.success:
                 return _fail(
                     result, "placed_in_the_wrong_place",
-                    "the position-controlled replay finished without leaving the "
+                    f"the {executor} executor finished without leaving the "
                     "object in its slot",
                 )
             return result
@@ -758,14 +911,28 @@ def run(
             "tool_offset": target_offset,
         }
         settings.update(rollout_kwargs or {})
+        # ``release_gate=True`` is a request, not a callable: the gate needs
+        # the object's name, which only this function knows. Built here from
+        # the same helper the diagnosis uses to detect a set-down.
+        if settings.get("release_gate") is True:
+            from tpgpt.experiments.diagnose import release_gate
+
+            settings["release_gate"] = release_gate(env, result.object_name)
+        if settings.get("close_gate") is True:
+            from tpgpt.experiments.diagnose import close_gate
+
+            settings["close_gate"] = close_gate()
         rollout = rollout_policy(env, policy, **settings)
         result.rollout = rollout
         result.diagnosis = diagnose(result, env)
         result.metrics.update(rollout.metadata)
         result.timings = timings.stages
         _record_errors(result, env, rollout)
+        # Indices into the plan *as executed*: the transported labels, which
+        # may have been joined part-way (start_index), not the source labels.
+        # The report figure indexes result.transported with this.
         _, release = carry_indices(labels)
-        result.metrics["release_index"] = release
+        result.metrics["release_index"] = int(release) - int(start_index)
 
         if not rollout.success:
             if rollout.metadata.get("blocked"):
@@ -960,6 +1127,14 @@ def executable_fraction(
             answer as 200 -- but *where* the samples fall changes what the number
             means, and the two moments that decide the task are narrow.
 
+        forced_grasp_index: Execute *this* candidate of the cached set -- the
+            index ``grasp_chosen_index`` a campaign row records -- instead of
+            letting the funnel choose. The funnel still runs, for its record,
+            but the choice is bypassed. What pins a comparison of constructions
+            to one grasp per cell (7.41).
+        executor: ``"policy"``, ``"replay"``, or ``"none"`` to stop once the
+            map is fitted and measured -- the geometry tier, milliseconds a
+            cell, no physics.
     Returns:
         The fraction of sampled poses the arm can hold, which is what a grasp
         should be chosen by.
@@ -1002,7 +1177,12 @@ def _choose_grasp(env, placement, target_of, labels, keypoint_parts, candidates,
                   cube_half_extent=GRASP_CUBE_HALF_EXTENT,
                   gripper: str = "panda", object_name: str | None = None,
                   min_reachable_fraction: float = MIN_REACHABLE_FRACTION,
-                  stride: int = 4):
+                  stride: int = 4, selection_mode="legacy",
+                  target_cloud_correction=True, critical_waypoints=True,
+                  audit=None, original_indices=None, force_diagnostic=False,
+                  simulator_diagnostics=False, validate_path_entry=None,
+                  strict_target_contacts=None, target_edge_margin_pixels=0,
+                  require_task_waypoints=None, flip_target=False):
     """Pick the candidate whose *transported motion* the arm can actually follow.
 
     Each candidate defines a slightly different keypoint frame and so a slightly
@@ -1024,7 +1204,7 @@ def _choose_grasp(env, placement, target_of, labels, keypoint_parts, candidates,
     colliding at **79 to 162** of the other 187 waypoints, so the proxy was not
     merely coarse -- it was answering a different question. Selection now walks
     the ranked list and takes the **first admissible** candidate, judged by
-    :func:`~tpgpt.grasp.filters.path_feasibility_observed` at every waypoint.
+    :func:`~tpgpt.grasp.filters.path_feasibility_observed` at discrete sampled waypoints (stride four by default).
 
     Two things about that check are deliberate. It sees only what the robot
     could: the arm's own convex geometry from its description file, and the
@@ -1044,6 +1224,8 @@ def _choose_grasp(env, placement, target_of, labels, keypoint_parts, candidates,
     from tpgpt.perception.cameras import scene_point_cloud
     from tpgpt.perception.obstacles import robot_bodies, self_filtered
 
+    if require_task_waypoints is None:
+        require_task_waypoints = selection_mode == "strict"
     pair = resolve_pair(gripper)
     # Built once. Neither the robot's own shape nor the scene changes while
     # candidates are compared, and rebuilding them per candidate would be most
@@ -1051,13 +1233,21 @@ def _choose_grasp(env, placement, target_of, labels, keypoint_parts, candidates,
     bodies = robot_bodies(env)
     scene = self_filtered(
         env, scene_point_cloud(env, exclude=(object_name,) if object_name else (),
-                               obs=None),
+                               obs=None, target_edge_margin_pixels=target_edge_margin_pixels),
         bodies,
     )
     grasp_index, release_index = carry_indices(labels)
 
     examined, fallback, degenerate = [], None, None
+    if audit is not None:
+        audit["path_check"] = {"chosen": None, "fell_back": False, "examined": examined}
+
     for index, grasp in enumerate(candidates):
+        identity = {"index": index,
+                    "original_index": int(original_indices[index]) if original_indices is not None else index,
+                    "effective_pose": grasp.pose.tolist()}
+        if audit is not None:
+            audit["path_check"]["rank_examined"] = index + 1
         target = target_of(grasp)
         sets = scene_keypoints(
             placement, target, labels,
@@ -1065,16 +1255,17 @@ def _choose_grasp(env, placement, target_of, labels, keypoint_parts, candidates,
             # contacts, so it has to be switched on for either of them.
             include_contacts=bool({"contacts", "support"} & set(keypoint_parts)),
             box=box, orientation=orientation, cube_half_extent=cube_half_extent,
+            flip_target=flip_target,
         )
         source_set, target_set = _select_parts(sets[0], sets[1], keypoint_parts)
         if source_set.is_degenerate() or target_set.is_degenerate():
-            examined.append({"index": index, "rejected": "degenerate keypoints"})
+            examined.append({**identity, "rejected": "degenerate keypoints"})
             if degenerate is None:
                 degenerate = (grasp, sets)
             continue
         transport_map = TransportMap().fit(source_set.points, target_set.points)
         if not transport_map.check_diffeomorphism(labels.positions).consistent_sign:
-            examined.append({"index": index, "rejected": "map folded"})
+            examined.append({**identity, "rejected": "map folded"})
             continue
 
         warped = transport_map.transport_positions(labels.positions)
@@ -1082,21 +1273,57 @@ def _choose_grasp(env, placement, target_of, labels, keypoint_parts, candidates,
             labels.positions, labels.orientations
         )
         feasible = path_feasibility_observed(
-            env, warped, rotations, pair, scene, placement.points,
+            env, warped, rotations, pair, scene,
+            target.points if target_cloud_correction else placement.points,
             grasp_index, release_index, bodies=bodies, stride=stride,
             # Selection is decided by the first fault, so sweeping the rest is
             # wasted here. Diagnosis wants the whole tally and asks for it.
-            stop_early=True,
+            stop_early=True, critical_waypoints=(critical_waypoints or require_task_waypoints),
+            validate_entry=(selection_mode == "strict" if validate_path_entry is None else validate_path_entry),
+            strict_contacts=(selection_mode == "strict" if strict_target_contacts is None else strict_target_contacts),
         )
         record = {
             "index": index,
+            "original_index": int(original_indices[index]) if original_indices is not None else index,
+            "effective_pose": grasp.pose.tolist(),
+            "checked_waypoint_count": len(feasible.get("checked_waypoints", [])) or feasible["tested"],
+            "checked_waypoints": feasible.get("checked_waypoints"),
+            "unreachable_waypoints": feasible.get("unreachable_waypoints"),
+            "entry_connection": feasible.get("entry_connection"),
+            "removed_halo_points": feasible.get("removed_halo_points"),
+            "skipped_prefix": feasible.get("skipped_prefix"),
             "violations": feasible["violations"],
             "first_violation": feasible["first_violation"],
             "reachable_fraction": round(feasible["reachable_fraction"], 3),
-            "faults": {k: v for k, v in list(feasible["faults"].items())[:4]},
+            "faults": feasible["faults"],
+            # Where the arm joins the path: 0 means the whole approach is
+            # followable, larger means an unreachable or colliding prefix was
+            # skipped, None means there was no usable approach.
+            "joined_at": feasible.get("joined_at"),
         }
+        if simulator_diagnostics and object_name:
+            from scipy.spatial.transform import Rotation
+            from tpgpt.grasp.filters import path_feasibility
+            obj = next(o for o in env.objects if o.name == object_name)
+            pose = np.asarray(env.sim.data.get_joint_qpos(obj.joints[0]))
+            R0 = rotations[grasp_index]
+            object_R = Rotation.from_quat(pose[[4, 5, 6, 3]]).as_matrix()
+            relative_q = Rotation.from_matrix(R0.T @ object_R).as_quat()
+            record["simulator_diagnostic"] = path_feasibility(
+                env, warped, rotations, pair, object_name, grasp_index, release_index,
+                carried_offset=(R0.T @ (pose[:3] - warped[grasp_index]),
+                                relative_q[[3, 0, 1, 2]]),
+                stride=stride, critical_waypoints=critical_waypoints, stop_early=True)
+            # Diagnostic only: the next branch deliberately uses observed results.
+        missing_task = sorted({grasp_index, release_index}.intersection(
+            feasible.get("unreachable_waypoints", [])))
+        joined_after_grasp = (feasible.get("joined_at") is not None and
+                              feasible["joined_at"] > grasp_index)
+        record["unreachable_task_waypoints"] = missing_task
         if feasible["violations"]:
             record["rejected"] = "collision"
+        elif require_task_waypoints and (missing_task or joined_after_grasp):
+            record["rejected"] = "task_pose_unreachable"
         elif feasible["reachable_fraction"] < min_reachable_fraction:
             record["rejected"] = "kinematics"
         else:
@@ -1114,6 +1341,8 @@ def _choose_grasp(env, placement, target_of, labels, keypoint_parts, candidates,
     # learned. The one that got furthest before its first fault is the one whose
     # plan is wrong latest, and on a path that ends at a shelf that is the one
     # most likely to have done the useful part of the task first.
+    if selection_mode == "strict" and not force_diagnostic:
+        return None
     if fallback is not None:
         return fallback[0], fallback[1], {"path_check": {
             "chosen": fallback[2]["index"], "rank_examined": len(examined),

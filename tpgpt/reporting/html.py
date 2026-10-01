@@ -118,6 +118,11 @@ def _setting_rows(settings) -> list:
         return [(k, v) for k, v in settings.items()]
     rows = []
     for key, values in (settings.get("varied") or {}).items():
+        if not isinstance(values, (list, tuple)):
+            # An older manifest records a scalar here; show it rather than crash
+            # the whole index over one file.
+            rows.append((f"varied: {key}", str(values)))
+            continue
         shown = ", ".join(
             "+".join(str(x) for x in v) if isinstance(v, list) else str(v)
             for v in values[:6]
