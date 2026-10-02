@@ -106,6 +106,21 @@ def _same(a, b) -> bool:
     return abs(float(a) - float(b)) < 1e-9
 
 
+def safety_monitor(p, following: bool):
+    """The executor's safety guards for a run. A learned plan followed against its arm path
+    (``following``) keeps the tracking-error guard but not the "not following" one (the
+    hand moving less than ``min_progress_ratio`` of what the command moved): a learned command
+    is meant to run ahead of the arm, by more at the start of a motion -- over the 2 s at the
+    start of the mug's retreat on 2026-10-03 the command moved 30 mm and the hand 9.4, as the
+    replay's arm had (0.30-0.31 over the same labels), and the guard stopped a run that was on
+    its path. Its job there -- an arm that does not respond -- is done by the follow mode: the
+    clock is held back and "blocked" stops the run (the user, 2026-10-03)."""
+    from tpgpt.hardware.executor import SafetyMonitor
+    return SafetyMonitor(max_tracking_error=float(p('max_tracking_error')),
+                         progress_window=int(p('progress_window')),
+                         min_progress_ratio=0.0 if following else float(p('min_progress_ratio')))
+
+
 def learned_settings(plan_dir: str, given: dict, defaults: dict) -> dict:
     """What a learned plan must run at, from its plan.json, against the parameters ``given``.
 
@@ -684,7 +699,7 @@ class TpgptExecutorNode(Node):
     def run(self):
         """Execute the plan. False if the operator cancelled at the prompt."""
         from tpgpt.hardware.end_effector import end_effector_for_plan
-        from tpgpt.hardware.executor import (ExecutorSettings, HardwareExecutor, SafetyMonitor,
+        from tpgpt.hardware.executor import (ExecutorSettings, HardwareExecutor,
                                              approach_trajectory, crisp_applied_gains,
                                              crisp_stiffness, logged_stiffness,
                                              stiffness_projection_loss)
@@ -948,9 +963,7 @@ class TpgptExecutorNode(Node):
         # --- policy ------------------------------------------------------------
         log.info('Executing the transported policy')
         self.stage = 'policy'
-        safety = SafetyMonitor(max_tracking_error=float(p('max_tracking_error')),
-                               progress_window=int(p('progress_window')),
-                               min_progress_ratio=float(p('min_progress_ratio')))
+        safety = safety_monitor(p, following)
         gripper_closed = False
         follow_log = []
         posture_log = []     # (largest joint offset from the checked posture, its joint, label)

@@ -214,9 +214,13 @@ settle and opened wherever it was.
 ## Safety guards
 
 * **Tracking error**: the hand more than 80 mm from the policy's command `a` → abort and hold.
-* **Not following**: over 40 steps the hand moved less than 30 % of what `a` moved (once `a` moved
-  a few mm) → abort and hold. It catches an arm that does not respond at all (a controller that
-  dropped out, a protective stop), which the follow mode would otherwise wait on.
+* **Not following** (taught plans only): over 40 steps the hand moved less than 30 % of what `a`
+  moved (once `a` moved 30 mm) → abort and hold. It catches an arm that does not respond at all (a
+  controller that dropped out, a protective stop) while the simulation's gate lets the clock run.
+  **Off for learned plans** since 2026-10-03: a learned command is meant to run ahead of the arm,
+  by more at the start of a motion (at the start of the retreat the command moves about 3 times
+  as far as the arm path over the same labels), and the guard stopped a mug run that was on its
+  path. There an unresponsive arm holds the clock back and then "blocked" stops the run.
 * **Time**: the policy runs longer than 300 s → abort.
 * **CRISP's own limits**: it never acts on more than 0.1 m / 0.5 rad of pose error, and limits
   the joint torques and how fast they change.

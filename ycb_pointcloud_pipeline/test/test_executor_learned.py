@@ -75,3 +75,21 @@ def test_the_node_runs_a_learned_plan_with_its_stiffness_labels(tmp_path):
             node.destroy_node()
     finally:
         rclpy.shutdown()
+
+
+def test_a_learned_plan_keeps_the_tracking_guard_but_not_the_not_following_one():
+    """2026-10-03: at the start of the retreat the learned command moved 30 mm and the hand
+    9.4 mm, as in the replay; the "not following" guard (30 %) stopped a run on its path."""
+    import numpy as np
+    ex = _module()
+    p = {'max_tracking_error': 0.08, 'progress_window': 40, 'min_progress_ratio': 0.3}.get
+    arm, command = np.zeros(3), np.zeros(3)
+    learned, taught = ex.safety_monitor(p, True), ex.safety_monitor(p, False)
+    reasons = {'learned': None, 'taught': None}
+    for k in range(60):                       # the command moves 1.5 mm a step, the arm 0.45
+        command = command + [0.0015, 0, 0]
+        arm = arm + [0.00045, 0, 0]
+        for name, mon in (('learned', learned), ('taught', taught)):
+            reasons[name] = reasons[name] or mon.check(arm, command)
+    assert reasons['learned'] is None and 'not following' in reasons['taught']
+    assert 'exceeds' in ex.safety_monitor(p, True).check(np.zeros(3), np.array([0.09, 0, 0]))
