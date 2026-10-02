@@ -133,9 +133,15 @@ Two facts that need several files to see, and that decide whether a change is fa
   fastest label speed x compliance). **A learned plan uses neither the gate nor the clamp**
   (2026-10-01, audit B1 step 8; `follow_arm_path`): it is followed against the path the arm
   traced -- the clock slows when the arm is behind it, a slow capped correction brings it back
-  when it is beside it, the run stops and holds only when the arm is blocked, and the arrival
-  hold aims at the plan's marks; in contact (the replay's contact windows) the correction is
-  held and the release hold only waits, so the transported stiffness alone sets contact forces.
+  when it is beside it (capped at 50 mm since 2026-10-03), the run stops and holds only when
+  the arm does not move while pushed as hard as allowed, and the holds at the grasp and the
+  release bring the hand onto the plan's marks (the release pushes too since 2026-10-03); in
+  contact (the replay's contact windows) the correction is frozen. **The run starts only once the
+  hand is within 4 mm of the start of its path** (`start_on_path`, 2026-10-03): the joints are
+  moved onto the posture the planner checked there with the joint controller, because a pull on
+  the hand cannot bring a nearly straight arm the last way out (the 23:28 mug start was 1.8 mm
+  inside full stretch and the arm stopped 54 mm short of its command). Full account, with the
+  equations: `docs/hardware/HOW_EXECUTION_WORKS.md`.
   What the correction took *along* the path while the clock was held is **given back once the arm
   runs ahead** (`path_unwinding`, 2026-10-02): kept, it held the mug 24-31 mm ahead after a
   stick-slip and set it down ~10 labels early. On the robot (mug, top_left, 2026-10-01) it was needed: without it the hand missed the grasp

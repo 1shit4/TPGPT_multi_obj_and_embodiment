@@ -58,14 +58,43 @@ not known. The follow mode below exists to keep the arm on that path anyway.
 3. **Approach**: a straight line from where the arm is to the plan's start (the first label of the
    learned command), at most 5 cm/s and 0.3 rad/s, at a fixed 400 N/m. The elbow's target walks
    from the posture at activation to the first checked posture.
-4. **Settle**: wait until the hand is within 200 mm of the start (`approach_settle_tolerance`,
-   at most 5 s), hold 1.5 s, measure how far off it rests. **The arm is not brought onto the
-   start**: the policy begins from wherever it rested.
-5. **Follow the plan** every 50 ms (next section) until the clock reaches the end.
-6. **At the gripper events**: the holds (below). The clock pauses while the jaws move.
-7. **End**: the last command is held 1 s; CRISP keeps holding it. The 20 Hz log
+4. **Onto the start** (`start_on_path`). The approach ends wherever friction stops the arm, often
+   a few centimetres short (a check only that it got within 200 mm, `approach_settle_tolerance`).
+   **The run does not begin until the hand is within 4 mm of the start of its path**
+   (`start_tolerance`): see "Onto the start" below.
+5. **Settle**: back on the Cartesian controller, hold the plan's first command 1.5 s and log how
+   far off the arm rests from it.
+6. **Follow the plan** every 50 ms (next section) until the clock reaches the end.
+7. **At the gripper events**: the holds (below). The clock pauses while the jaws move.
+8. **End**: the last command is held 1 s; CRISP keeps holding it. The 20 Hz log
    (`<plan>/executions/robot_<time>.csv`) and every pose and joint reading (`..._highrate.npz`)
    are saved, after an abort too.
+
+## Onto the start
+
+The Cartesian controller can only pull on the hand. Near full stretch a pull on the hand barely
+turns the joints (a lever of a few centimetres instead of the forearm's ~40), so it cannot bring
+a nearly straight arm the last way out. A joint controller turns each joint itself, so the start
+is reached in joint space:
+
+1. If the hand is already within 4 mm of the start of its path, nothing is done.
+2. Refuse, before anything moves, if any joint is more than 0.5 rad from the posture the planner
+   checked at the first label (`start_joint_max_move`): the elbow is then on another branch, and
+   the joint move would go through space the planner did not check. Re-home and re-plan.
+3. Switch to the joint controller (`joint_impedance_controller`, the one `joint_homing` uses).
+4. Move the joints from where they are onto that posture (kept 0.1 rad inside every limit), at
+   most 0.25 rad/s, on a smooth start and stop.
+5. Then a push builds, joint by joint, against whatever holds the arm back:
+
+       push ← clip( push + 1.0/s · dt · (q_goal − q) , −0.2 rad, +0.2 rad )
+       joint target = q_goal + push
+
+   until the hand is within 4 mm of the start of its path for 3 steps.
+6. It stops (the arm held by the joint controller, nothing grasped) only if every joint still off
+   its goal is pushed as hard as allowed and the hand moved less than 2 mm in 40 steps, or after
+   60 s (`start_timeout`).
+7. Switch back to the Cartesian controller. CRISP seeds its target with the measured pose on every
+   switch, so neither switch moves the arm.
 
 ## Following a learned plan, every 50 ms
 
@@ -96,7 +125,7 @@ every step (except inside a contact window, see 6):
     drive = (1 − pace) · behind · u                       the gap behind, as much as the clock is held
           + (|e_side| − m) · e_side / |e_side|            beside it, beyond the margin
     c ← c + 1.5/s · dt · drive                            7.5 % of the drive per step
-    if |c| > 30 mm:  c ← c · 30 mm / |c|                  capped at 30 mm
+    if |c| > 50 mm:  c ← c · 50 mm / |c|                  capped at 50 mm
 
 The part **beside** the path acts all the time, clock running or not. The part **behind** acts
 whenever the clock is slowed, in proportion to how much: nothing at full speed (`pace` = 1, which
@@ -105,7 +134,7 @@ waiting before it starts. How fast it grows (1.5/s means 1.5 per second: 7.5 % o
 50 ms step):
 
 * **if the arm does not move**, the gap stays the same and `c` grows by 1.5 × the gap per second,
-  in a straight line, until its cap: a 30 mm gap reaches the 30 mm cap in 0.67 s;
+  in a straight line, until its cap: a 30 mm gap reaches the 50 mm cap in 1.1 s;
 * **if the arm follows the command**, the gap shrinks as `c` grows, so it closes like a decaying
   exponential with a time constant of 1/1.5 = 0.67 s: 63 % in 0.67 s, 95 % in 2 s.
 
@@ -129,26 +158,28 @@ path is not touched.
 **5. The command sent, and the bound.**
 
     q = a + c
-    R = lead + 30 mm + 10 mm
+    R = lead + 50 mm + 10 mm
     if |q − p| > R:   q ← p + (q − p) · R / |q − p|
 
-The bound keeps the push on a held-back arm finite (at 600 N/m, R = 50-75 mm is 30-45 N). 30 mm is
-the correction's cap, 10 mm a slack. **It is measured from the arm**, so an arm already more than
-R from its command gets a command parked on the bound: the push cannot grow, however large the
-correction becomes.
+The bound keeps the push on a held-back arm finite (at 600 N/m, R = 70-95 mm is 42-57 N). 50 mm is
+the correction's cap, 10 mm a slack. It is measured from the arm, so an arm already more than R
+from its command gets a command parked on the bound: the push cannot grow, however large the
+correction becomes. (Since the run starts on its path, that can only happen mid-run.)
 
-Why 30 mm for the cap: a safety limit, not physics -- how far the command may be moved off the
-plan, and with the bound, how hard a held-back arm is pushed. It was set on 2026-10-01 from the
-offsets measured then (10-16 mm standing, up to 25-36 mm needed while moving). It trades pushing
-hard enough against friction for not pushing hard into something real; nothing derives the value.
+Why a cap: a safety limit, not physics -- how far the command may be moved off the plan, and
+with the bound, how hard a held-back arm is pushed. It trades pushing hard enough against
+friction for not pushing hard into something real; nothing derives the value. 30 mm from
+2026-10-01 (set from the offsets measured then: 10-16 mm standing, up to 25-36 mm needed while
+moving); 50 mm since 2026-10-03 (you: a 30 mm cap held a stuck start at a constant 31 N).
 
 **6. No correction in contact.** From 10 labels before to 10 after the grasp, and from 10 before to
 5 after the release, `c` is frozen (neither grown nor unwound): the transported stiffness alone
 sets the contact force.
 
-**7. Blocked: stop and hold.** Counted while the clock is stopped (`pace` < 0.05) or the correction
-is at its cap. After 40 counted steps (2 s), if the arm got no closer to its path by 1 mm **and**
-moved less than 2 mm, the run stops and the arm holds where it is. Otherwise the count restarts.
+**7. Blocked: stop and hold.** Counted while the arm is pushed as hard as allowed: the correction
+at its cap, or the command on the bound. After 40 counted steps (2 s), if the arm moved less than
+2 mm, the run stops and the arm holds where it is; otherwise the count restarts. While the push can
+still grow (the clock stopped, the correction growing) nothing is counted.
 
 **8. Stiffness and posture sent with every command.**
 
@@ -172,11 +203,10 @@ grasp mark, `q ← q + (mark − p)`, then a small push builds:
 until the hand is within 4 mm of the mark for 3 steps, or 4 s have passed. Then the jaws close,
 and the correction takes over the hold's offset so the command does not jump back.
 
-**Release.** The clock is paused. The command is held still; when the hand has moved less than
-0.5 mm over 5 steps, the jaws open. **It does not check the mark**: the hand opens wherever it
-settled. Why: the object is already set down, and pushing the hand onto the mark could slide or
-press it along the board. (Proposed by Claude on 2026-10-01; you have since said pressing down on
-the board is harmless and the hand must reach the mark. To be changed.)
+**Release.** The same, onto the release mark, before the jaws open: the hand is brought there,
+pressing the object onto its support if need be (pressing down on the board is harmless; an arm
+short of its release mark must not open there). Until 2026-10-03 it only waited for the arm to
+settle and opened wherever it was.
 
 ## Safety guards
 
@@ -192,18 +222,16 @@ On any abort the elbow's target is set to where the elbow is, and the arm holds 
 
 ## Known limits of the current design
 
-* **The start is not checked.** The policy begins wherever the approach left the arm, up to 200 mm
-  off. A gap there is carried into the run, and if it exceeds the bound (5) it cannot be pushed
-  out.
 * **The bound is measured from the arm**, not from where the arm should be (5).
-* **The correction is capped at 30 mm** (3).
-* **The release opens wherever the hand settles** (holds).
+* **The holds give up after 4 s** and let the gripper act wherever the hand is (logged as "acting
+  anyway").
 * **A stretched arm cannot be pulled outward.** Near full stretch, a pull at the hand along the
   direction of reach turns into almost no joint torque (the arm's weakest direction): the arm stops
   short and the fingertips get the rest of the way only by tilting the hand, against the turning
   spring. Across the runs so far, the more stretched the wrist at the start, the larger the gap
-  there. The planner checks that every pose is reachable, not how stretched the arm is when it
-  gets there.
+  there. The start is now reached in joint space, which does not have this problem; mid-run it
+  remains. The planner checks that every pose is reachable, not how stretched the arm is when it
+  gets there (`path_check.REACH_MARGIN`, off: its cost is being measured).
 * **The turning stiffness is soft.** A force F at the fingertips, 228 mm below the wrist, tilts the
   hand by about F × 0.228 m / 30 N·m/rad (31 N → 13°). 30 was chosen on 2026-09-30: at 60 the wrist
   vibrated (26 Hz) as joint 7 entered its limit zone during a replay; 45 has not been tried there.

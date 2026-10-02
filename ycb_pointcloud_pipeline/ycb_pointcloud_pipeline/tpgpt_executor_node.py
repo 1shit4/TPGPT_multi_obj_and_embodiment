@@ -229,6 +229,20 @@ class TpgptExecutorNode(Node):
         d('approach_max_angular_speed', 0.3)
         d('approach_settle_tolerance', 0.2)
         d('approach_settle_timeout', 5.0)
+        # The run starts only once the hand is on the start of its path (the user, 2026-10-03):
+        # the joints are moved onto the posture the planner checked there, with the joint
+        # controller, which turns each joint itself -- a pull on the hand cannot bring a
+        # nearly straight arm the last way out (path_check.REACH_MARGIN). See _start_on_path.
+        d('start_on_path', True)
+        d('start_tolerance', 0.004)                 # m, hand to the start of its path
+        d('start_joint_controller', 'joint_impedance_controller')
+        d('start_joint_controller_type', 'crisp_controllers/CartesianController')
+        d('start_joint_params_file', '')            # path INSIDE the robot container; '' = derived
+        d('start_joint_speed', 0.25)                # rad/s, peak joint speed of the move
+        d('start_joint_max_move', 0.5)              # rad: further than this, refuse (another branch)
+        d('start_joint_gain', 1.0)                  # 1/s, the push that builds once there
+        d('start_joint_max_push', 0.2)              # rad per joint, the most it may build
+        d('start_timeout', 60.0)                    # s
         d('max_tracking_error', 0.08)
         d('progress_window', 40)
         d('min_progress_ratio', 0.3)
@@ -339,6 +353,8 @@ class TpgptExecutorNode(Node):
         self.posture_start_q = None     # the measured posture at activation
         self.posture_sent = None        # the last target sent (for the log)
         self.posture_planned = None     # the checked posture it came from
+        self.start_joint_topic = f"/{p('start_joint_controller')}/target_joint"
+        self._joint_phase = False       # the joint controller is driving the arm (_start_on_path)
         self.base = p('base_frame')
 
         self._lock = threading.Lock()
@@ -369,6 +385,7 @@ class TpgptExecutorNode(Node):
             self.stiffness_pub = (self.create_publisher(Float64MultiArray, self.stiffness_topic, 1)
                                   if self.variable_stiffness else None)
             self.posture_pub = self.create_publisher(JointState, self.joint_topic, 1)
+            self.start_joint_pub = self.create_publisher(JointState, self.start_joint_topic, 1)
         self.sim_pub = self.create_publisher(PoseStamped, '/tpgpt/executor/simulated_pose', 1)
         self.marker_pub = self.create_publisher(MarkerArray, '/tpgpt/executor/markers', 1)
         self.trace_pub = self.create_publisher(Path, '/tpgpt/executor/executed_path', 1)
@@ -613,6 +630,13 @@ class TpgptExecutorNode(Node):
 
     def hold_current_pose(self):
         if self.dry:
+            return
+        if self._joint_phase:
+            # the joint controller is active: hold the joints where they are
+            q = self.measured_joints()
+            if q is not None:
+                self._send_start_joints(q)
+                self.get_logger().warn('Commanded the joint controller to hold the current joints.')
             return
         # Nothing may pull the elbow while the arm is held: the posture target goes to where
         # the arm is (publish() below would send the checked one).
@@ -905,6 +929,8 @@ class TpgptExecutorNode(Node):
             if self.dry:
                 self.simulate(start_pos, start_rot, K0, D0, dt)
             next_t = wait_period(next_t)
+        if p('start_on_path'):
+            self._start_on_path(plan, executor, dt, wait_period, writer, started)
         self.offset = self._settle_and_measure_offset(start_pos, start_rot, K0, D0, dt,
                                                       wait_period, writer, started)
         next_t = time.monotonic()
@@ -1665,6 +1691,141 @@ class TpgptExecutorNode(Node):
             self.offset = self.offset - integral
         self.stage = 'policy'
         return out
+
+    def _send_start_joints(self, q):
+        msg = JointState(name=[f'fr3_joint{k}' for k in range(1, 8)],
+                         position=[float(v) for v in q])
+        msg.header.stamp = self.get_clock().now().to_msg()
+        self.start_joint_pub.publish(msg)
+
+    def _start_on_path(self, plan, executor, dt, wait_period, writer, started):
+        """Bring the hand onto the start of its path before the run begins.
+
+        The approach ends wherever friction stops the arm, 15-54 mm short of the start on the
+        runs so far, and a run started there carries the gap in (the user, 2026-10-03: do not
+        start until it is there). The Cartesian controller can only pull on the hand, and near
+        full stretch a pull barely turns the joints; so the joints are moved directly, with
+        the joint controller ``start_joint_controller``, onto the posture the planner checked
+        at the first label (``Plan.checked_postures``), kept 0.1 rad inside every limit. Then a
+        small push builds per joint (``start_joint_gain`` x the joint's error per second, at
+        most ``start_joint_max_push``) until the hand is within ``start_tolerance`` of the start
+        of its path (the arm path's first point for a learned plan) for 3 steps. It stops only
+        if it is pushing as hard as allowed and the arm does not move (2 mm in 40 steps), or
+        after ``start_timeout``: nothing has been grasped then. It refuses before moving if the
+        arm's joints are further than ``start_joint_max_move`` from that posture (the elbow on
+        another branch, a joint move the planner did not check). Then the Cartesian controller
+        is switched back on; CRISP seeds its target with the measured pose, so neither switch
+        moves the arm.
+        """
+        p, log = self.p, self.get_logger()
+        if plan.checked_postures is None:
+            log.warn('this plan has no checked postures (made before 2026-10-02): the run starts '
+                     'where the approach left the arm; re-plan for a start on the path')
+            return
+        from tpgpt.hardware.fr3 import default_model
+        fr3 = default_model()
+        labels = np.asarray(plan.checked_postures['labels'])
+        q_goal = np.clip(np.asarray(plan.checked_postures['q'][int(np.argmin(labels))], dtype=float),
+                         fr3.lower + 0.1, fr3.upper - 0.1)
+        where = plan.arm_path if plan.arm_path is not None else plan.labels
+        R0 = np.asarray(where.orientations[0], dtype=float)
+        target = executor.tcp_from_tool(where.positions[0], R0)
+        tol = float(p('start_tolerance'))
+        if self.dry:
+            T = np.eye(4)
+            T[:3, :3], T[:3, 3] = R0, target
+            self.sim_T = T
+            log.info('dry run: the joint-space start is not simulated; the simulated arm is put '
+                     'on the start of its path')
+            return
+        q_now = self.measured_joints()
+        if q_now is None:
+            raise AbortRun(f"no fresh {p('joint_states_topic')} for the start")
+        move = np.abs(q_goal - q_now)
+        if move.max() > float(p('start_joint_max_move')):
+            raise AbortRun(f'start: joint {int(move.argmax()) + 1} is {move.max():.2f} rad from the '
+                           f'posture the planner checked at the start (start_joint_max_move '
+                           f"{float(p('start_joint_max_move')):.2f}); the elbow is on another "
+                           'branch. Re-home and re-plan.')
+        meas_p, _ = self.measured()
+        dist = float(np.linalg.norm(meas_p - target))
+        if dist <= tol:
+            log.info(f'Start: the hand is {dist * 1000:.1f} mm from the start of its path')
+            return
+        name = p('start_joint_controller')
+        try:
+            params_file = (p('start_joint_params_file')
+                           or container_config_path('joint_impedance_controller.yaml'))
+        except ValueError as exc:
+            raise AbortRun(f'{exc} (start_joint_params_file)')
+        controllers = self.cmc.ensure_loaded(name, p('start_joint_controller_type'), params_file)
+        others = other_publishers(self, self.start_joint_topic)
+        if others:
+            raise AbortRun(f'{others} other publisher(s) on {self.start_joint_topic}; CRISP '
+                           'ignores targets when more than one publisher exists')
+        log.info(f'Start: the hand is {dist * 1000:.1f} mm from the start of its path; moving the '
+                 f'joints onto the posture the planner checked there ({name}, largest joint move '
+                 f'{np.degrees(move.max()):.1f} deg)')
+        self.cmc.activate(name, controllers)
+        self._joint_phase, self.stage = True, 'start_joints'
+
+        def row(q_cmd, meas_p, dist):
+            writer.writerow([f'{time.monotonic() - started:.3f}', 'start_joints', 0, 1, dist, 0,
+                             0, -1, *meas_p, *target, *target, 0, 0, 0, 0, 0, '', '', '', '',
+                             '', '', *np.round(self.measured_joints() if self.measured_joints()
+                                               is not None else np.full(7, np.nan), 5),
+                             *np.round(q_cmd, 5)])
+
+        steps = max(int(np.ceil(max(float(move.max()) / float(p('start_joint_speed')), 1.0) / dt)), 1)
+        next_t = time.monotonic()
+        for i in range(1, steps + 1):
+            s = 0.5 - 0.5 * np.cos(np.pi * i / steps)
+            q_cmd = q_now + s * (q_goal - q_now)
+            self._send_start_joints(q_cmd)
+            meas_p, _ = self.measured()
+            row(q_cmd, meas_p, float(np.linalg.norm(meas_p - target)))
+            next_t = wait_period(next_t)
+        gain, cap = float(p('start_joint_gain')), float(p('start_joint_max_push'))
+        push = np.zeros(7)
+        inside, stuck, stuck_from = 0, 0, None
+        deadline = time.monotonic() + float(p('start_timeout'))
+        while True:
+            q = self.measured_joints()
+            meas_p, _ = self.measured()
+            if q is None:
+                raise AbortRun(f"no fresh {p('joint_states_topic')} while moving onto the start")
+            dist = float(np.linalg.norm(meas_p - target))
+            inside = inside + 1 if dist <= tol else 0
+            if inside >= 3:
+                log.info(f'Start: the hand is {dist * 1000:.1f} mm from the start of its path '
+                         f'(push {np.round(np.degrees(push), 1).tolist()} deg)')
+                break
+            err = q_goal - q
+            push = np.clip(push + gain * dt * err, -cap, cap)
+            # pushing as hard as allowed: every joint still off its goal is at its most
+            off = np.abs(err) > 0.002
+            if off.any() and np.all(np.abs(push[off]) >= 0.99 * cap):
+                if stuck == 0:
+                    stuck_from = meas_p.copy()
+                stuck += 1
+                if stuck >= 40:
+                    if float(np.linalg.norm(meas_p - stuck_from)) < 0.002:
+                        raise AbortRun(f'start: the hand stopped {dist * 1000:.0f} mm from the '
+                                       'start of its path, pushed as hard as allowed '
+                                       '(start_joint_max_push) and not moving. Nothing has been '
+                                       'grasped; the joint controller holds the arm.')
+                    stuck = 0
+            else:
+                stuck = 0
+            if time.monotonic() > deadline:
+                raise AbortRun(f"start: still {dist * 1000:.0f} mm from the start of its path after "
+                               f"{float(p('start_timeout')):.0f} s. Nothing has been grasped.")
+            q_cmd = q_goal + push
+            self._send_start_joints(q_cmd)
+            row(q_cmd, meas_p, dist)
+            next_t = wait_period(next_t)
+        self.cmc.activate(self.controller)
+        self._joint_phase = False
 
     def _open_log(self, plan_dir):
         directory = self.p('log_dir') or os.path.join(plan_dir, 'executions')

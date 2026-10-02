@@ -265,6 +265,9 @@ method:
     path_bound_slack: 0.01
     path_blocked_steps: 40
     posture_target: true              # the elbow held on the posture the path check verified
+    start_on_path: true               # no run until the hand is on the start of its path (joint controller)
+    start_tolerance: 0.004
+    start_joint_max_push: 0.2
     posture_max_error: 0.5
     require_confirmation: true        # a refusal = aborted trial, counted
     allow_replan: false               # experiment:=true only: one plan per trial, no "Re-plan?" loop
