@@ -593,3 +593,31 @@ def test_joint_7_near_its_limit_is_not_refused():
     r = _check(positions, rotations, ShelfWorld.build(None), grasp=29, release=29, fr3=fr3,
                joint_margin=pc.JOINT_MARGIN)
     assert not [k for k in r["faults"] if "of its limit" in k]
+
+
+def test_full_stretch_is_the_fr3s_and_depends_only_on_the_elbow():
+    from tpgpt.hardware.fr3 import default_model
+    fr3 = default_model()
+    q = HOME_Q.copy()
+    q[3] = np.radians(-26.7)                           # the elbow at full stretch
+    assert pc.stretch_room(fr3, q) == pytest.approx(0.0, abs=2e-4)
+    other = np.clip(q + 0.5, fr3.lower, fr3.upper)
+    other[3] = q[3]                                    # every other joint moved
+    assert pc.stretch_room(fr3, other) == pytest.approx(0.0, abs=2e-4)
+    assert pc.stretch_room(fr3, HOME_Q) > 0.15         # home: the elbow well bent
+
+
+def test_a_path_near_full_stretch_is_refused_only_when_the_margin_is_on():
+    """2026-10-02 23:28: a start 1.8 mm inside full stretch, reachable, and the arm could not
+    be pulled there. Far out and low, the wrist ends near full stretch."""
+    from tpgpt.hardware.fr3 import default_model
+    fr3 = default_model()
+    positions, rotations = _path([0.40, 0.0, 0.25], [0.80, 0.0, 0.25], n=30)
+    world = ShelfWorld.build(None)
+    off = _check(positions, rotations, world, grasp=29, release=29)
+    assert not [k for k in off["faults"] if "full stretch" in k]
+    room = [pc.stretch_room(fr3, q) for q in off["postures"]["q"]]
+    assert room[0] > 0.05 and min(room) < 0.03          # the line runs out toward the edge
+    on = _check(positions, rotations, world, grasp=29, release=29, reach_margin=0.03)
+    assert any("the wrist within 30 mm of full stretch" in k for k in on["faults"]), on["faults"]
+    assert pc.verdict(on) is not None

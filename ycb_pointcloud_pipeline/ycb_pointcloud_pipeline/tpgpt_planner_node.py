@@ -226,6 +226,9 @@ class TpgptPlannerNode(Node):
         # rad; > 0 refuses a path with joints 1-6 that close to a limit (CRISP pushes back
         # there; path_check.JOINT_MARGIN = 0.1). 0 = off.
         d('grasp_joint_margin', 0.0)
+        # m; > 0 refuses a path that brings the wrist that close to full stretch, where the arm
+        # cannot be pulled (path_check.REACH_MARGIN). 0 = off.
+        d('grasp_reach_margin', 0.0)
         d('max_centre_offset', 0.025)             # by_centre_offset on a one-sided cloud
         d('output_dir', os.path.expanduser('~/tpgpt_plans'))
         d('auto_plan', False)                     # plan as soon as n_frames arrived
@@ -543,6 +546,8 @@ class TpgptPlannerNode(Node):
             kinematic_criterion=str(p('kinematic_criterion')),
             approach_rejects=bool(p('approach_rejects_grasp')),
             joint_margin=(float(p('grasp_joint_margin')) if float(p('grasp_joint_margin')) > 0
+                          else None),
+            reach_margin=(float(p('grasp_reach_margin')) if float(p('grasp_reach_margin')) > 0
                           else None),
             allow_kinematic_fallback=bool(p('allow_kinematic_fallback')),
             max_centre_offset=float(p('max_centre_offset')),

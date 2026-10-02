@@ -140,6 +140,9 @@ class SelectionSettings:
     #: Refuse a path that puts joints 1-6 inside CRISP's joint-limit push-back zone
     #: (``path_check.JOINT_MARGIN``, rad; None = off). See path_check.JOINT_MARGIN.
     joint_margin: float | None = None
+    #: Refuse a path that brings the wrist this close to full stretch (m; None = off), where
+    #: the arm cannot be pulled (``path_check.REACH_MARGIN``).
+    reach_margin: float | None = None
     min_reachable_fraction: float = 0.60
     path_stride: int = 4
     #: With nothing admissible, execute the best candidate that failed on
@@ -630,7 +633,7 @@ def _path_verdict(result: Plan, candidate: Candidate, s: SelectionSettings,
                        start_tcp=pc.start_tcp, stop_early=True, stride=s.path_stride,
                        min_reachable_fraction=s.min_reachable_fraction,
                        criterion=s.kinematic_criterion, approach_rejects=s.approach_rejects,
-                       joint_margin=s.joint_margin)
+                       joint_margin=s.joint_margin, reach_margin=s.reach_margin)
     reason = verdict(check, s.min_reachable_fraction)
     candidate.path_check = {
         "criterion": check["criterion"],

@@ -109,6 +109,48 @@ JOINT_MARGIN = 0.1
 #: mug runs that worked (2026-10-01), harmless.
 MARGIN_JOINTS = (0, 1, 2, 3, 4, 5)
 
+#: How far inside full stretch every checked posture must keep the wrist, m, when
+#: ``reach_margin`` is on (``stretch_room``). **Why**: near full stretch the arm cannot be
+#: *pulled* the last way out. The controller pulls the hand, and the joints turn only by what
+#: that pull makes them feel; with the arm nearly straight, turning the elbow a lot moves the
+#: hand outward very little, so a pull outward turns the elbow just as little -- a lever of a few
+#: centimetres instead of the forearm's ~40 -- and joint friction wins. Measured 2026-10-02
+#: (mug into top_right, 23:28): the plan's start was 1.8 mm inside full stretch (reachable, so
+#: the IK check passed); the arm stopped 12 mm short of full stretch, 54 mm from its command,
+#: and a 31 N pull gave the elbow about 1.4 N m; the run never got going. Across 12 runs the
+#: gap at the start grew as the starts got more stretched (correlation -0.8). No default value
+#: yet: what each costs is to be measured on recorded captures first (the user, 2026-10-03).
+#: The shoulder-to-wrist distance depends only on the elbow (joint 4); full stretch is
+#: 719.4 mm at -26.7 deg.
+REACH_MARGIN = None
+
+
+def stretch_room(fr3: FR3, q) -> float:
+    """How far the wrist is inside full stretch, m: the longest shoulder-to-wrist distance
+    the elbow allows minus this posture's (fr3_link2 to fr3_link6 origins; it depends only on
+    joint 4)."""
+    return _full_stretch(fr3) - _shoulder_to_wrist(fr3, q)
+
+
+def _shoulder_to_wrist(fr3: FR3, q) -> float:
+    poses = fr3.link_poses(np.asarray(q, dtype=float))
+    return float(np.linalg.norm(poses["fr3_link6"][:3, 3] - poses["fr3_link2"][:3, 3]))
+
+
+_FULL_STRETCH: dict = {}
+
+
+def _full_stretch(fr3: FR3) -> float:
+    key = id(fr3)
+    if key not in _FULL_STRETCH:
+        q = np.asarray(HOME_Q, dtype=float).copy()
+        best = 0.0
+        for q4 in np.linspace(fr3.lower[3], fr3.upper[3], 2001):
+            q[3] = q4
+            best = max(best, _shoulder_to_wrist(fr3, q))
+        _FULL_STRETCH[key] = best
+    return _FULL_STRETCH[key]
+
 #: Robot pieces that never move, so a clearance for straying does not apply to
 #: them: the base sits 13 mm above the touched table (2026-09-26), and a larger
 #: clearance would call the bolted-down base a collision.
@@ -378,6 +420,7 @@ def path_feasibility(
     table_clearance=None,
     joint_margin=None,
     margin_joints=MARGIN_JOINTS,
+    reach_margin=None,
 ) -> dict:
     """Solve and check a transported path, waypoint by waypoint.
 
@@ -437,6 +480,10 @@ def path_feasibility(
     ``joint_margin`` (None, or rad: :data:`JOINT_MARGIN`) makes a posture with any of
     ``margin_joints`` closer than that to its limit a fault at that waypoint (``"<stage>:
     joint N within ... rad of its limit"``): reachable, but inside the controller's push-back.
+
+    ``reach_margin`` (None, or m: :data:`REACH_MARGIN`) makes a posture whose wrist is closer
+    than that to full stretch a fault (``"<stage>: the wrist within N mm of full stretch"``):
+    reachable, but the arm cannot be pulled there.
 
     ``held_shift`` (None or a base-frame vector, m) moves the object by it when the
     jaws close, before it is carried: a parallel jaw closing off-centre pushes the
@@ -635,6 +682,9 @@ def path_feasibility(
                 if room[j] < float(joint_margin):
                     add(hits, f"{label}: joint {j + 1} within {float(joint_margin):.2f} rad "
                               "of its limit")
+        if reach_margin is not None and stretch_room(fr3, q) < float(reach_margin):
+            add(hits, f"{label}: the wrist within {float(reach_margin) * 1000:.0f} mm of full "
+                      "stretch")
 
         if len(held) and stage in ("approach", "pick"):
             # The object stands where it is; only the fingers, and only at the pick.
@@ -939,7 +989,7 @@ def verdict(check: dict, min_reachable_fraction: float = MIN_REACHABLE_FRACTION)
 
 
 __all__ = [
-    "JOINT_MARGIN","BASE_BAND", "penetration", "CLOUD_CONTACT_RADIUS", "CLOUD_CONTACT_SLACK",
+    "JOINT_MARGIN", "REACH_MARGIN", "stretch_room", "BASE_BAND", "penetration", "CLOUD_CONTACT_RADIUS", "CLOUD_CONTACT_SLACK",
            "MIN_CLOUD_CONTACT_POINTS", "CONTACT_DEPTH_TOLERANCE", "GRASP_CONTACT_WINDOW",
            "MIN_REACHABLE_FRACTION", "PLACE_WINDOW", "REACH_TOLERANCE", "STRIDE",
            "check_plan", "path_feasibility", "robot_pieces", "verdict"]
