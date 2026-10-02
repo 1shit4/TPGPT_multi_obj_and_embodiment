@@ -387,6 +387,37 @@ jaws, and bottom_left 10, 2, 5 and 0 admissible. With the draw fixed, this is wh
 
 Taught -> learned with the full margin -> learned with only the margin's vertical part against the table (the check since 2026-10-01): 372 -> 318 -> 320. One cell goes to zero, **apple bottom_left**: on the taught path both of its grasps slide the apple onto the bottom board with 0.1-0.4 mm to spare before the set-down begins; the arm's path runs about 1 mm lower there and crosses the 1 mm tolerance (one of the two also puts a pad on the apple on the way down). Sub-millimetre, on a cell item 9 already called one shift away from none. The difference is not the labels getting worse: the taught check assumed the arm is where it is commanded, which it is not (pass 0 strayed 17 mm RMS). Three things account for most of it, from a per-candidate re-check of the three worst slots: the arm comes down to the grasp **4-5 mm off across the jaws** (not learned, audit B1 step 6), which puts an open pad on an object that nearly fills the 80 mm opening (apple, mug); the **run-to-run margin against the table** in the last labels before the grasp (banana top_right: 32 with it, 33 with only its vertical part, 51 without); and after the release the arm drifting 3 mm more across the jaws than the taught hand (a pad back on the placed mug). bottom_left is unchanged at 9. What would make this wrong: the arm path is pass 3's, carried by the map; that the arm strays from a transported command as it strayed from the learned one is assumed, not measured. Raw in `outputs/hardware/learned_20260930/`, logs in `~/tpgpt_coverage_logs/learned_*.log`.
 
+**11. Two checks measured before turning them on** (2026-10-03; the same fifteen captures, each
+in the slot it was planned into, 100 grasps planned per cell, the learned 18:39 bundle, the code
+of 2026-10-03 -- so the baseline is 315, not item 10's 320: the scan fit has changed since, item
+A8 of the audit). Both are off in the planner until a value is chosen.
+
+*Keep the wrist away from full stretch* (`path_check` `reach_margin`, planner
+`grasp_reach_margin`). Near full stretch a pull on the hand barely turns the arm's joints, and
+the arm stops short (the 23:28 mug start, 1.8 mm inside full stretch, never reached):
+
+| margin | off | 10 mm | 20 mm | 30 mm | 50 mm |
+|---|---|---|---|---|---|
+| executable grasps | 315 | 264 | 246 | 231 | 200 |
+| cells with none | 1 | 1 | 1 | 1 | 1 |
+
+The empty cell is apple bottom_left, empty with the check off too. No bottom_left cell changes at
+any margin; the losses are in the top slots, where the far shelf stretches the arm (mug top_right
+17 -> 8, banana top_left 56 -> 44 at 10 mm). Raw in `outputs/hardware/reach_margin_20261003/`.
+
+*Keep the hand away from the placed object once it has left it* (`path_check`
+`retreat_clearance`, planner `grasp_retreat_clearance`). The taught retreat swings the open
+fingers back past the placed object (to 0.5-8 mm on most of 33 recent plans), and on 2026-10-03
+they dragged a set-down mug:
+
+| clearance | off | 5 mm | 10 mm |
+|---|---|---|---|
+| executable grasps | 315 | 272 | 223 |
+| cells with none | 1 | 2 | 3 |
+
+5 mm empties mug bottom_left (1 -> 0); 10 mm also foam brick bottom_left (2 -> 0). The pieces that
+come back are the finger pads, nearly always. Raw in `outputs/hardware/retreat_clearance_20261003/`.
+
 ## Deviation from the simulation
 
 The simulation caches candidates per cloud (`tpgpt/grasp/cache.py`) and re-draws whenever the cloud
