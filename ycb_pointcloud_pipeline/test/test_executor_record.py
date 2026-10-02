@@ -36,10 +36,11 @@ def test_the_full_rate_record_is_saved_in_run_time(tmp_path):
                 joints = JointState()
                 joints.header.stamp.sec, joints.header.stamp.nanosec = 1000, k * 10_000_000
                 # out of order, as a JointState may come: the record is in fr3_joint1..7 order
-                joints.name = [f'fr3_joint{i}' for i in (7, 1, 2, 3, 4, 5, 6)]
-                joints.position = [7.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0]
-                joints.velocity = [0.0] * 7
-                joints.effort = [0.5] * 7
+                joints.name = [f'fr3_joint{i}' for i in (7, 1, 2, 3, 4, 5, 6)] + [
+                    'fr3_finger_joint1', 'fr3_finger_joint2']
+                joints.position = [7.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 0.02, 0.021]
+                joints.velocity = [0.0] * 9
+                joints.effort = [0.5] * 9
                 node._joint_cb(joints)
             node.save_run_record()
             assert node._run_record is None and node._highrate is None
@@ -48,6 +49,7 @@ def test_the_full_rate_record_is_saved_in_run_time(tmp_path):
             assert np.allclose(rec['pose_position'][:, 0], [0.0, 0.1, 0.2, 0.3, 0.4])
             assert np.allclose(rec['joint_position'][0], [1, 2, 3, 4, 5, 6, 7])
             assert rec['joint_effort'].shape == (5, 7) and 'pose_stamp' not in rec
+            assert np.allclose(rec['finger_position'][0], [0.02, 0.021])     # the jaws' opening
             node.save_run_record()                     # a second call (abort after end) is a no-op
         finally:
             node.destroy_node()

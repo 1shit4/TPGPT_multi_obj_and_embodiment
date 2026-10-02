@@ -442,6 +442,12 @@ class TpgptExecutorNode(Node):
                 vals = [list(getattr(m, field)) for m in rows]
                 if all(len(v) == len(rows[0].name) for v in vals):
                     out[f'joint_{field}'] = np.array(vals)[:, order]
+            # the Franka Hand's fingers (each finger's travel, m; the opening is their sum): when
+            # an object slips out of the jaws they close further (2026-10-03, a mug lost mid-carry)
+            fingers = ['fr3_finger_joint1', 'fr3_finger_joint2']
+            if all(f in rows[0].name for f in fingers) and all(m.name == rows[0].name for m in rows):
+                idx = [rows[0].name.index(f) for f in fingers]
+                out['finger_position'] = np.array([[m.position[i] for i in idx] for m in rows])
         return out
 
     def measured(self, max_age=None):
