@@ -1,189 +1,211 @@
 # How execution works, in plain words
 
-What happens between "the plan is made" and "the object is on the shelf", what every correction
-on top of the plan does, why each one exists, and where the system still has gaps. Written
-2026-10-02, after the mug runs of that evening. Code: `ycb_pointcloud_pipeline/tpgpt_executor_node.py`
-(the ROS side) and `tpgpt/hardware/executor.py` (the arithmetic, no ROS).
+How the executor runs a plan on the FR3: the steps, the rules it follows, the equations behind
+each rule, and the known limits of the design. **This file describes the current code. Change it
+in the same commit as any change to how execution runs.** It is not a log: run results belong in
+`FAITHFULNESS_AUDIT.md` and the plan folders.
 
-## The short version
-
-The plan is a list of 488 **labels**, one every 50 ms of the demonstration: where the hand should
-be, how it should be turned, how stiff the arm should be, and whether the gripper is open or
-closed. The arm is driven by a **spring**: every 50 ms we tell the controller (CRISP) a target
-pose and a stiffness, and the arm is pulled toward that target like a mass on a spring. It never
-sits exactly on the target: friction and the spring's own softness leave it behind or beside it.
-
-Everything below is about that gap: how the plan is written so the arm ends up where it should,
-and what the executor does when the arm still doesn't.
+Code: `ycb_pointcloud_pipeline/ycb_pointcloud_pipeline/tpgpt_executor_node.py` (the ROS side) and
+`tpgpt/hardware/executor.py` (the arithmetic, no ROS). Numbers are the defaults.
 
 ## The words used
 
 | word | what it means |
 |---|---|
-| **command** (or attractor) | The target pose we send to the arm every 50 ms. The spring pulls the arm toward it. |
-| **label** | One row of the plan: a pose, a stiffness, a gripper state. Label 0 is the start, 488 the end. |
-| **clock** (phase) | How far through the plan we are, 0 to 1. Each step it moves forward by one step's worth, unless something slows it. Where the clock is decides which label we are at, and so when the gripper acts. |
-| **lag** | How far the arm is from where it should be. **Behind** = short of it along the direction of motion; **beside** = off to the side. |
+| **label** | One row of the plan, one per 50 ms of the demonstration: a hand pose, a stiffness, a gripper state. The plan has 488. |
+| **command** | The target pose sent to the arm every 50 ms. The arm is pulled toward it by a spring (CRISP's Cartesian impedance controller). It never sits exactly on it. |
+| **clock** | How far through the plan we are, 0 to 1. It decides which label we are at, and so when the gripper acts. |
 | **taught path** | Where your hand moved the arm when you taught the demonstration. |
-| **arm path** | Where the arm actually went when the replay ran the learned command (below). The executor compares the arm against this. |
-| **margin** | How much the arm's path varied between two replay runs of the same command: 1.0-3.6 mm per label. Inside it, the arm counts as on its path. |
+| **learned command** | The command the replay learned so that the arm, lagging and held back by friction, ends up on the taught path. It runs ahead of the arm. |
+| **arm path** | Where the arm went under the learned command in the replay. The executor compares the arm against it. |
+| **lead** | How far the learned command is ahead of the arm path at a label: \|command label − arm path label\|. 10-16 mm when still, up to 35 mm while moving. |
+| **margin** | How much the arm path varied between two replay runs, per label (1.0-3.6 mm). Inside it the arm counts as on its path. |
 | **mark** | The taught path at the grasp and at the release: where the hand must be when the gripper acts. |
-| **stiffness** | How hard the spring pulls per mm of gap. 600 N/m means 0.6 N per mm. |
-| **null space / posture** | The FR3 has 7 joints but a hand pose fixes only 6 numbers, so the elbow can swing while the hand stays still. Which way the elbow sits is the posture. |
+| **behind / beside** | The arm's distance from where it should be, split into the part along the direction of motion and the part across it. |
+| **posture** | The FR3 has 7 joints but a hand pose fixes only 6 numbers, so the elbow can swing with the hand still. Which way it sits is the posture. |
 
-## Why the plan's command is not the taught path (the learned bundle)
+## Which plan is executed
 
-When the taught path itself was sent as the command (replay pass 0), the arm strayed from it by
-17 mm RMS, 10-15 mm sideways. The reason is the arm, not the plan: joint friction leaves it
-6-9 N short of where the spring points (10-16 mm at 600 N/m, even when standing still), and it
-lags about twice what the spring model predicts while moving.
+The planner is given a **bundle** (one demonstration, prepared). There are two kinds:
 
-So the demonstration was **replayed** on the robot and the command corrected after each pass, by
-how far the arm missed (learning by repetition, "ILC"). After 3 passes the arm followed the taught
-path to 2.7 mm RMS. What came out is the **learned bundle**
-(`~/tpgpt_demos/banana_20260925_183904/source_bundle_learned`):
+* a **taught bundle** (`source_bundle/`, `source_bundle_directional/`): its labels are the taught
+  path itself;
+* the **learned bundle** (`source_bundle_learned/`): its labels are the learned command, plus the
+  arm path, its margin, the taught labels and the marks.
 
-* the **learned command**: it runs 17-35 mm **ahead** of where the arm should be, so that friction
-  and lag leave the arm on the taught path;
-* the **arm path**: where the arm went under that command, with its **margin**;
-* the taught path's **marks** at the grasp and the release.
+Either is transported into the new scene by the same map and planned the same way; the planner
+checks the **arm path** of a learned plan (not its command), and records the joint posture it
+checked the arm in at every 4th label. **Every plan we run now is a learned plan.** Taught plans
+are run by the simulation's rules, described at the end for completeness.
 
-The planner carries all three into the new scene with the same transport map, checks the **arm
-path** (not the command) against the shelf, the table and the camera's points, and records the
-**posture** it checked the arm in at every 4th label.
+Why the learned command: sent the taught path as its command, this arm strayed 17 mm RMS from it
+(10-15 mm sideways), because joint friction leaves it 6-9 N short of where the spring points and
+it lags about twice what the spring model predicts. Three replay passes, each correcting the
+command by how far the arm missed, brought that to 2.7 mm.
 
-One demonstration, one replay: the learned bundle is used for every object and slot.
+**What the planner's check assumes:** that the transported arm path is where the arm will go in
+the new scene. That is exact only for the part of the lag a spring model explains and the map
+carries; the rest of the arm's offset depends on its posture, and how much of it carries over is
+not known. The follow mode below exists to keep the arm on that path anyway.
 
-## What happens in a run, in order
+## A run, in order
 
-1. **Load and fit** (2-3 s). The plan's labels are fitted with the policy (a smooth function that
-   gives, for any point near the path, which way to move, how to turn, how stiff, gripper).
-2. **Checks before anything moves.** The arm is within 0.6 m of the plan's start
-   (`max_start_distance`); fresh joint readings arrive; nobody else is publishing targets to the
-   controller. A summary is printed and you type `yes`.
-3. **Approach.** A straight line from where the arm is to the plan's start, at most 5 cm/s and
-   0.3 rad/s, at a fixed 400 N/m. The posture target walks the elbow from where it was at the
-   start onto the first checked posture.
-4. **Settle at the start.** The executor waits until the arm is within **200 mm** of the start
-   (`approach_settle_tolerance`; at most 5 s), then holds 1.5 s and measures how far off it rests.
-   **It does not bring the arm onto the start**: the policy begins from wherever the arm rested.
-   (For a taught plan that resting gap is then subtracted from every command; a learned plan does
-   not, since its command already includes the arm's offset.)
-5. **The policy, every 50 ms:**
-   1. read where the hand is (`/current_pose`, 250 Hz) and the joints (`/joint_states`, 30 Hz);
-   2. ask the policy what to do at the command's position: move direction and speed, turn,
-      stiffness, gripper;
-   3. move the command along by that velocity × 50 ms × **how fast the clock may go** (1 = full
-      speed, 0 = stopped; this is the gate or the pacing, below);
-   4. apply the corrections below (they differ for taught and learned plans);
-   5. send the command pose, the 3×3 stiffness and the elbow posture to CRISP;
-   6. advance the clock by the same factor;
-   7. log a row (`<plan>/executions/robot_<time>.csv`).
-6. **When the gripper is due to act**, the executor first holds: see "the holds" below. The clock is
-   paused while the jaws move.
-7. **End.** The last command is held 1 s; CRISP keeps holding it after that. The 20 Hz log and a
-   full-rate record of every pose and joint reading (`..._highrate.npz`) are saved, after an abort too.
+1. **Load and fit** (2-3 s): the plan's labels are fitted with the policy, a Gaussian-process
+   model that gives, at any point near the path, a velocity, an orientation, a stiffness and a
+   gripper command (the paper's method: transport the labels, refit a policy, execute it).
+2. **Checks before moving**: the arm within 0.6 m of the start, fresh joint readings, no other
+   publisher on the controller's topics; a summary; you type `yes`.
+3. **Approach**: a straight line from where the arm is to the plan's start (the first label of the
+   learned command), at most 5 cm/s and 0.3 rad/s, at a fixed 400 N/m. The elbow's target walks
+   from the posture at activation to the first checked posture.
+4. **Settle**: wait until the hand is within 200 mm of the start (`approach_settle_tolerance`,
+   at most 5 s), hold 1.5 s, measure how far off it rests. **The arm is not brought onto the
+   start**: the policy begins from wherever it rested.
+5. **Follow the plan** every 50 ms (next section) until the clock reaches the end.
+6. **At the gripper events**: the holds (below). The clock pauses while the jaws move.
+7. **End**: the last command is held 1 s; CRISP keeps holding it. The 20 Hz log
+   (`<plan>/executions/robot_<time>.csv`) and every pose and joint reading (`..._highrate.npz`)
+   are saved, after an abort too.
 
-## Two ways of following a plan
+## Following a learned plan, every 50 ms
 
-### A taught plan: the simulation's rules (lag gate, clamp, watchdog)
+Symbols: `p` = where the hand is (measured), `a` = the policy's command, `c` = the correction,
+`i` = where the command is along its labels (a fractional label number), `x(i)` = the arm path
+there, `u` = the arm path's direction of motion there (none when it is still), `m` = the margin,
+`lead` = the lead there, `dt` = 0.05 s.
 
-This is the code the simulation runs, shared line for line (`tpgpt/policy/rollout.py`).
+**1. How far off the arm is.**
 
-* **Lag gate.** If the arm falls behind the command by more than the spring is expected to leave it
-  (the spring model's lag, 2-6 mm here) plus a tolerance (45 mm on the robot, 35 in the sim),
-  the gate closes gradually: at 20 mm of excess the clock runs at 0.56, at 45 mm it stops. The
-  command stops advancing with it. Why: so the gripper never acts on a pose the arm has not
-  reached. In the sim, without it, the gripper closed with the arm 20-56 mm short on 8 of 8 scenes.
-* **Clamp.** The command is never allowed further than a radius from the arm (here 16 mm), so a
-  blocked arm is never pushed with an ever-growing force.
-* **Watchdog.** If the clock has not moved for 40 steps (2 s) and the arm is not closing the gap,
-  the gap is declared permanent ("static sag") and forgiven: the gate stops counting it, up to 3
-  times. Then the run is declared stalled.
-* Hardware additions for taught plans: the resting gap at the start is subtracted
-  (`offset_compensation`); after a stall the gate is switched off and the plan is followed at its
-  own speed (`on_stall: continue`); an unreachable orientation is relaxed or a stretch skipped
-  (the sim's infeasible-pose fallback).
+    e      = x(i) − p                 where it should be, minus where it is
+    behind = e · u                    along the motion; > 0 means behind
+    e_side = e − behind · u           across it (all of e when the path is still)
 
-### A learned plan: following the arm path ("follow mode")
+**2. Pacing: how fast the clock may run** (the follow mode's lag gate).
 
-The lag gate and clamp judge "normal lag" by the spring model, 2-6 mm. The learned command must
-run 17-35 mm ahead of the arm, by design. Measured on the 18:39 plan: the gate would have slowed
-the clock to 0.67 on the median step and the clamp would have cut the command on 262 of 488
-labels, undoing the learning. So a learned plan is compared against its **arm path** instead:
-"is the arm where the arm went in the replay?", not "is the arm on the command?". On top of the
-plan, these act (numbers are the defaults):
+    pace = clip( 1 − (behind − m) / 20 mm , 0, 1 )
 
-| what | what it does | why it exists (what was measured) |
-|---|---|---|
-| **Pacing** (our lag gate) | When the arm is **behind** its arm path by more than the margin, the clock and the command slow; 20 mm beyond the margin they stop. | The same job as the lag gate: the plan must not run ahead of the arm. On 2026-10-01 (mug) the clock was slowed on 36 % of steps. |
-| **Correction, beside the path** | When the arm sits **beside** its arm path beyond the margin, an offset is slowly added to the command (1.5 × the excess per second, at most **30 mm**) until the arm is back. | Waiting cannot fix a sideways offset: friction holds the arm 10-16 mm off its command even when still. Without corrections (mug, 10-01): 7-18 mm beside the path, 15 mm off at the grasp, 16 at the release; with them: 2-6 mm, 3.7 and 2.0. |
-| **Correction, behind the path, while the clock is held** | As the clock slows, the gap *behind* is handed to the same correction (all of it when the clock has stopped). | 2026-10-01 22:20: the arm rested 18-21 mm behind with the clock stopped and nothing in its way. Waiting closes lag, not a standing gap. |
-| **Unwinding** | What the correction added *along* the path is given back once the arm runs ahead of its path. | 2026-10-02 00:47: after a stick-slip the leftover correction held the mug 24-31 mm ahead and set it down ~10 labels early. With unwinding (01:45): on time, never more than 4 mm ahead. |
-| **No correction in contact** | Around the grasp (10 labels either side) and the set-down (10 before, 5 after) the correction is frozen. | The transported stiffness alone must set contact forces. Grown, the correction pushed 21 mm (12 N) into the board at a set-down (10-01). |
-| **Bound** | The command never goes further from the arm than the plan's own lead + 30 mm + 10 mm. | The clamp's job (a bounded push), without cutting the lead the plan needs. |
-| **Blocked: stop and hold** | If the clock is stopped or the correction is at its cap for 40 steps (2 s), the arm got no closer to its path (by 1 mm) **and moved less than 2 mm**, the run stops and the arm holds where it is. | A safety stop for an arm that really is stuck. It used to fire on a moving arm (22:41); since then it needs the arm not to move. |
-| **Grasp hold** | Before the jaws close: the command is walked so the **hand** lands on the grasp mark (by the arm's own error, then a small bounded push), until within 4 mm or 4 s. | The jaws must close where the plan says. Tonight's first run: 3.0 mm. |
-| **Release: wait only** | Before the jaws open: the executor only waits for the arm to settle; no push. | Your decision (10-01): pushing a set-down object onto the mark can only slide it along the board. |
-| **Posture target** | The elbow is pulled toward the posture the path check verified, label by label (within 0.5 rad of where it is, never into a joint limit). | Without it the elbow is pulled toward home; on 00:47/00:50 that swung joints 1 and 3 by 50-65° as joint 2 crossed 0 and the arm stuck. Tonight's first run: within median 7° of the checked posture. Applies to taught plans too. |
+behind by up to the margin: full speed; 10 mm more: half speed; 20 mm more: stopped. The command
+and the clock advance together, by `pace`:
 
-### Safety guards, in both modes
+    a ← a + v(a) · 0.35 · dt · pace       v = the policy's velocity at a (0.35 = speed_scale)
+    clock ← clock + (the policy's rate) · dt · pace
 
-* **Tracking error**: the hand more than 80 mm from the policy's command → abort and hold.
-* **Not following**: over 40 steps the hand moved less than 30 % of what the command moved → abort.
-* **Time**: the policy takes longer than 300 s → abort.
-* **CRISP's own limits**: it never acts on more than 0.1 m / 0.5 rad of error, and limits joint
-  torques and how fast they change.
+**3. The correction**: an offset added to the command, for what waiting cannot close. It grows
+every step (except inside a contact window, see 6):
 
-### Stiffness
+    drive = (1 − pace) · behind · u                       the gap behind, as much as the clock is held
+          + (|e_side| − m) · e_side / |e_side|            beside it, beyond the margin
+    c ← c + 1.5/s · dt · drive                            7.5 % of the drive per step
+    if |c| > 30 mm:  c ← c · 30 mm / |c|                  capped at 30 mm
 
-The labels carry a **direction-dependent** stiffness: 350 N/m along the direction of motion, 600
-across it and in every direction when the arm is still (grasp and release included), transported
-by the map with the rest of the plan and sent as a full 3×3 matrix (CRISP was patched to accept
-it). The hand's turning stiffness is 30 N·m/rad throughout (at 60 the wrist vibrated near joint 7's
-limit). The approach uses a fixed 400 N/m.
+There is no waiting before it starts: the clock slows and the correction grows at the same time,
+the correction in proportion to how much the clock is held back. On an arm that does not move, a
+gap is half taken up by the correction after 9 steps (0.45 s) and 95 % after 39 (2 s). If the gap
+was lag that would have closed by itself, the arm then runs ahead, and the unwinding takes the
+excess back.
 
-## The lag gate and the follow mode, side by side, on tonight's stuck run
+**4. Unwinding**: what the correction added along the motion is given back once the arm runs ahead.
 
-Run 23:28 (mug, top_right): the arm ended the approach **54 mm** short of the start (the wrist
-~100 mm short, the hand tilted 13.5° toward the target). The run began anyway (the 200 mm settle
-tolerance). From there:
+    ahead = −behind − m
+    if ahead > 0 and c · u > 0:   c ← c − min( c · u , 1.5/s · dt · ahead ) · u
 
-| | follow mode (what ran) | the simulation's lag gate (computed on this plan, not run) |
-|---|---|---|
-| the clock | stopped (pacing 0.00 at label 4) | stops at first (gate 0.00 at 54 mm) |
-| the push on the arm | grew to 31 N (correction at its 30 mm cap) | the clamp pulls the command back to **16 mm** from the arm: about 10 N |
-| then | the arm did not move (the hand spring and the turning spring cancelled at every joint to within 1.8 N·m, less than joint friction); after 2 s **blocked: stop and hold** | at 16 mm the gate reopens to **0.64**: the clock creeps on with the arm still stuck. The simulation's loop finishes a whole task this way with an arm that never moves, gripper schedule included (measured, `SafetyMonitor` docstring); on the robot the "not following" guard would stop it. |
+It shrinks by 7.5 % of how far ahead the arm is, per step, and stops at zero; the part across the
+path is not touched.
 
-So both stop the clock when the lag is large, which is what you want. Neither gets a stuck arm
-moving: the gate pushes *less* (its clamp), and then lets the clock run on. And on every normal
-step of a learned plan the gate would slow the clock and cut the lead the learning put there.
+**5. The command sent, and the bound.**
 
-## Tonight's two runs, in these terms
+    q = a + c
+    R = lead + 30 mm + 10 mm
+    if |q − p| > R:   q ← p + (q − p) · R / |q − p|
 
-* **23:25, mug → top_left: complete.** Rested 29 mm off at the start. Hand within 3.0 mm of the
-  grasp mark and 3.2 mm of the release. Beside the arm path median 3.3 mm, worst 20.3; the clock
-  slowed on 384 of 1479 steps (slowest 0.56); the correction reached its 30 mm cap; elbow within
-  median 7° (worst 29°) of the checked posture.
-* **23:28, mug → top_right: blocked at label 4**, as above. The posture target's share of the
-  joint torques was at most 0.07 N·m: not the cause.
+The bound keeps the push on a held-back arm finite (at 600 N/m, R = 50-75 mm is 30-45 N). 30 mm is
+the correction's cap, 10 mm a slack. **It is measured from the arm**, so an arm already more than
+R from its command gets a command parked on the bound: the push cannot grow.
 
-## What the system does not handle yet
+**6. No correction in contact.** From 10 labels before to 10 after the grasp, and from 10 before to
+5 after the release, `c` is frozen (neither grown nor unwound): the transported stiffness alone
+sets the contact force.
 
-* **The start is never checked.** The policy begins wherever the approach left the arm (up to
-  200 mm away). Over 15 runs the resting gap at the start was 15-54 mm. It does not depend on how
-  far out the start is (correlation 0.03); on the three runs with full joint records it grew with
-  the load on the shoulder joint (15 / 29 / 54 mm at 27 / 41 / 53 N·m), which suggests friction
-  rising with load. Of the mug runs, all 7 that started within 29 mm completed; none of the 4 that
-  started 35 mm or more off did (two of those were stopped by "blocked" bugs since fixed).
-* **The correction is capped at 30 mm**, so a start gap much larger than that cannot be made up
-  by the follow mode.
-* **The soft turning stiffness (30 N·m/rad)** lets the hand tilt instead of the arm reaching: a
-  31 N pull at the fingertips, 228 mm below the wrist, tilts the hand by about 13°.
-* **That the replay's corrections carry over to a new scene is assumed**, not measured: the arm's
-  offset depends on its posture, and the learning was done at the demonstration's postures.
+**7. Blocked: stop and hold.** Counted while the clock is stopped (`pace` < 0.05) or the correction
+is at its cap. After 40 counted steps (2 s), if the arm got no closer to its path by 1 mm **and**
+moved less than 2 mm, the run stops and the arm holds where it is. Otherwise the count restarts.
 
-Options discussed so far (none built): hold at the start until the arm is on its path, as the
-grasp hold does (pushes harder: up to ~50 N here; it may break free with a slip, or tilt the hand
-further); a stiffer approach (600 instead of 400 N/m); a stiffer turning spring (ruled out on
-09-30 for the wrist vibration).
+**8. Stiffness and posture sent with every command.**
+
+* Stiffness: the plan's, transported by the map (`K_new = J⊥ K J⊥ᵀ`, J⊥ the map's local rotation)
+  and sent as a full 3×3: 350 N/m along the motion and 600 across it, 600 in every direction when
+  still (grasp and release included). Turning stiffness 30 N·m/rad throughout.
+* Posture: the posture the planner checked at label `i` (interpolated between its every-4th-label
+  postures), kept 0.1 rad inside every joint limit and within 0.5 rad of the measured joints per
+  joint. CRISP pulls the elbow toward it with 2 N·m/rad per joint (at most 5 N·m), only along the
+  elbow's free swing: the part that would move the hand is removed (projected out) by CRISP. So
+  the posture and the command need not match exactly. The posture is indexed by `i`, where the
+  command is, and describes the arm on its arm path there, where it should be.
+
+## The holds at the gripper events
+
+**Grasp.** The clock is paused. The command is walked (at 5 cm/s) by the hand's own error from the
+grasp mark, `q ← q + (mark − p)`, then a small push builds:
+
+    I ← I + 1.5/s · dt · (mark − p),   |I| ≤ 30 mm,   sent: q + I
+
+until the hand is within 4 mm of the mark for 3 steps, or 4 s have passed. Then the jaws close,
+and the correction takes over the hold's offset so the command does not jump back.
+
+**Release.** The clock is paused. The command is held still; when the hand has moved less than
+0.5 mm over 5 steps, the jaws open. **It does not check the mark**: the hand opens wherever it
+settled. Why: the object is already set down, and pushing the hand onto the mark could only slide
+or press it along the board (decided 2026-10-01).
+
+## Safety guards
+
+* **Tracking error**: the hand more than 80 mm from the policy's command `a` → abort and hold.
+* **Not following**: over 40 steps the hand moved less than 30 % of what `a` moved (once `a` moved
+  a few mm) → abort and hold. It catches an arm that does not respond at all (a controller that
+  dropped out, a protective stop), which the follow mode would otherwise wait on.
+* **Time**: the policy runs longer than 300 s → abort.
+* **CRISP's own limits**: it never acts on more than 0.1 m / 0.5 rad of pose error, and limits
+  the joint torques and how fast they change.
+
+On any abort the elbow's target is set to where the elbow is, and the arm holds its current pose.
+
+## Known limits of the current design
+
+* **The start is not checked.** The policy begins wherever the approach left the arm, up to 200 mm
+  off. A gap there is carried into the run, and if it exceeds the bound (5) it cannot be pushed
+  out.
+* **The bound is measured from the arm**, not from where the arm should be (5).
+* **The correction is capped at 30 mm** (3).
+* **The release opens wherever the hand settles** (holds).
+* **The turning stiffness is soft.** A force F at the fingertips, 228 mm below the wrist, tilts
+  the hand by about F × 0.228 m / 30 N·m/rad (31 N → 13°), and a tilted hand's turning spring
+  cancels part of the push at the shoulder and elbow. 30 was chosen on 2026-09-30: at 60 the wrist
+  vibrated (26 Hz) as joint 7 entered its limit zone during a replay; 45 has not been tried there.
+  The learned bundle was learned at 30, and the executor refuses other values for it.
+* **The arm path's transfer to a new scene is assumed** (see "Which plan is executed").
+
+## Taught plans: the simulation's rules (not used now)
+
+A taught plan's command is the taught path itself. It is followed with the code the simulation
+runs (`tpgpt/policy/rollout.py`), with `a` = the command, `K, D` = the label's stiffness and damping:
+
+    expected = ‖K⁻¹D‖ · |v|                                  the lag a spring model predicts (2-6 mm here)
+    gate     = clip( 1 − (|p − a| − expected − sag) / 45 mm , 0, 1 )
+    a ← a + v · dt · gate,   clock ← clock + rate · dt · gate
+    clamp:   |a − p| ≤ min( 3 · v_max · ‖K⁻¹D‖ , expected + sag + 45 mm )     (about 16 mm here)
+    watchdog: clock still for 40 steps and the gap not closing by 2 mm → sag = |p − a| − expected
+              (forgiven), up to 3 times; then stalled
+
+What each part is for: the **gate** stops the clock while the arm is too far behind, so the gripper
+never acts on a pose not reached; the **clamp** bounds the push on a blocked arm; the **watchdog**
+stops waiting for a gap that will not close. On the robot, also: the resting gap measured at the
+start is subtracted from every command (`offset_compensation: z`, its vertical part), betting the
+arm sags the same everywhere; after a stall the gate is switched off (`on_stall: continue`); an
+unreachable orientation is relaxed or a stretch skipped (the infeasible-pose fallback).
+
+Why learned plans do not use them: they judge "normal lag" by the spring model (2-6 mm), while the
+learned command must run 17-35 mm ahead of the arm by design. On the 18:39 plan the gate would
+have run the clock at 0.67 on the median step and the clamp would have cut the command on 262 of
+488 labels. And with an arm that does not move, the clamp parks the command at its radius, which
+reopens the gate to `1 − radius/45 mm` (0.64 at 16 mm): the clock creeps on and the gripper acts on
+schedule wherever the arm is; only the "not following" guard stops it.
