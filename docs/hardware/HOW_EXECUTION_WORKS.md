@@ -200,8 +200,11 @@ grasp mark, `q ← q + (mark − p)`, then a small push builds:
 
     I ← I + 1.5/s · dt · (mark − p),   |I| ≤ 30 mm,   sent: q + I
 
-until the hand is within 4 mm of the mark for 3 steps, or 4 s have passed. Then the jaws close,
-and the correction takes over the hold's offset so the command does not jump back.
+until the hand is within 4 mm of the mark for 3 steps, or 4 s have passed. Then the jaws close
+with **40 N** (`grasp_force`; 20 N until 2026-10-03, when a mug pinched by its rim twisted out
+of the jaws as the carry turned the hand -- a pinch resists that twist only by friction, which
+grows with the squeeze; whether 40 N is too much for the banana and the foam brick is to be seen
+on their runs). The correction takes over the hold's offset so the command does not jump back.
 
 **Release.** The same, onto the release mark, before the jaws open: the hand is brought there,
 pressing the object onto its support if need be (pressing down on the board is harmless; an arm
