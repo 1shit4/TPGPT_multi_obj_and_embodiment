@@ -615,6 +615,8 @@ def path_feasibility(
     fingers_cleared = False
     placed = None                        # the object where it was set down
     last_good, last_good_q = None, None
+    #: The posture the arm was checked in at each tested waypoint (the result's ``postures``).
+    posed_labels, posed_q = [], []
 
     def check_posture(k, q, stage, point, R_ee, tag=""):
         nonlocal lifted, fingers_cleared
@@ -697,7 +699,8 @@ def path_feasibility(
                     criterion == "sim" and unreachable > max_unreachable)):
                 return _result(len(indices) if criterion == "sim" else tested, unreachable,
                                violations, first, faults, approach_in, decided_early=True,
-                               criterion=criterion, first_kinematic=first_kin, **counts)
+                               criterion=criterion, first_kinematic=first_kin,
+                               postures=(posed_labels, posed_q), **counts)
             if kind != "relaxed":
                 continue
 
@@ -730,6 +733,8 @@ def path_feasibility(
                                         "" if kind == "full" else " (relaxed)").items():
             add(hits, key, count)
         last_good, last_good_q = (point, R_ee, int(k)), seed
+        posed_labels.append(int(k))
+        posed_q.append(np.asarray(seed, dtype=float).copy())
         if hits:
             for key, count in hits.items():
                 add(faults, key, count)
@@ -738,7 +743,8 @@ def path_feasibility(
             if stop_early:
                 break
     return _result(tested, unreachable, violations, first, faults, approach_in,
-                   criterion=criterion, first_kinematic=first_kin, **counts)
+                   criterion=criterion, first_kinematic=first_kin,
+                   postures=(posed_labels, posed_q), **counts)
 
 
 def _support_at(model, table, height):
@@ -831,7 +837,8 @@ def _describe(kind: str, where: str) -> str:
 def _result(tested, unreachable, violations, first, faults, approach_in,
             decided_early: bool = False, relaxed: int = 0, relaxed_windows: int = 0,
             skipped: int = 0, gap: int = 0, criterion: str = "strict",
-            first_kinematic: int | None = None, unrefined: int = 0) -> dict:
+            first_kinematic: int | None = None, unrefined: int = 0, postures=None) -> dict:
+    labels, q = postures if postures is not None else ([], [])
     return {
         "criterion": criterion,
         "decided_early": bool(decided_early),
@@ -854,6 +861,11 @@ def _result(tested, unreachable, violations, first, faults, approach_in,
         "first_violation": None if first is None else int(first),
         "faults": faults,
         "approach_in": approach_in,
+        # The joint posture each tested waypoint was checked in (each IK seeded from the one
+        # before, from ``start_q`` through the move onto the path): what the executor sends
+        # CRISP as its posture target, so the arm holds the posture that was checked.
+        "postures": {"labels": np.asarray(labels, dtype=int),
+                     "q": np.asarray(q, dtype=float).reshape(-1, 7)},
     }
 
 

@@ -144,6 +144,11 @@ class Plan:
     #: ``orientations`` (2, 3, 3) controller frame). The executor's arrival hold aims here;
     #: the learned command at those labels is offset from it by the lead.
     marks: dict | None = None
+    #: The joint posture the whole-path check posed the arm in at each tested label
+    #: (``labels`` (n,) int, ``q`` (n, 7) rad; :func:`tpgpt.hardware.path_check.path_feasibility`
+    #: ``postures``). The executor sends it to CRISP as its posture target, so the elbow is
+    #: where the check put it (2026-10-02).
+    checked_postures: dict | None = None
 
     @property
     def dt(self) -> float:
@@ -163,6 +168,10 @@ class Plan:
         if self.marks is not None:
             np.savez(directory / "transported_marks.npz",
                      **{k: np.asarray(v, dtype=float) for k, v in self.marks.items()})
+        if self.checked_postures is not None and len(self.checked_postures["labels"]):
+            np.savez(directory / "checked_postures.npz",
+                     labels=np.asarray(self.checked_postures["labels"], dtype=int),
+                     q=np.asarray(self.checked_postures["q"], dtype=float))
         self.source_keypoints.save(directory / "source_keypoints.json")
         self.target_keypoints.save(directory / "target_keypoints.json")
         np.savez_compressed(
@@ -213,6 +222,9 @@ class Plan:
         if (directory / "transported_marks.npz").exists():
             with np.load(directory / "transported_marks.npz") as d:
                 plan.marks = {k: d[k] for k in d.files}
+        if (directory / "checked_postures.npz").exists():
+            with np.load(directory / "checked_postures.npz") as d:
+                plan.checked_postures = {"labels": d["labels"], "q": d["q"]}
         return plan
 
 

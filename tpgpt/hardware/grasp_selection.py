@@ -650,6 +650,8 @@ def _path_verdict(result: Plan, candidate: Candidate, s: SelectionSettings,
         "verdict": reason,
     }
     result.metrics["path_check"] = candidate.path_check
+    # kept on the plan, not in the summary (which goes to every candidate's JSON record)
+    result.checked_postures = check.get("postures")
     return reason, bool(reason) and not check["violations"]
 
 

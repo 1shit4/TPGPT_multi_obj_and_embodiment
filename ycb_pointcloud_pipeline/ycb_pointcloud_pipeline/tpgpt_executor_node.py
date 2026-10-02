@@ -67,6 +67,7 @@ from nav_msgs.msg import Path
 from rclpy.action import ActionClient
 from rclpy.executors import SingleThreadedExecutor
 from rclpy.node import Node
+from sensor_msgs.msg import JointState
 from std_msgs.msg import Float64MultiArray
 from visualization_msgs.msg import MarkerArray
 
@@ -168,6 +169,7 @@ class TpgptExecutorNode(Node):
         d('stiffness_controller_params_file', '')   # path INSIDE the robot container
         d('target_pose_topic', '')                  # '' -> derived from the controller
         d('target_stiffness_topic', '')
+        d('target_joint_topic', '')                 # '' -> derived from the controller
         d('current_pose_topic', '/current_pose')
         # Measured joints seed the infeasible-pose fallback's IK (executor.C3); without
         # fresh ones the fallback is off for that step and the log says how often.
@@ -251,6 +253,11 @@ class TpgptExecutorNode(Node):
         d('path_correction_gain', 1.5)              # 1/s
         d('path_correction_max', 0.03)              # m
         d('path_unwinding', True)                   # give back the along-path correction once the arm runs ahead
+        # The elbow: send CRISP the posture the path check verified, label by label, instead of
+        # leaving its null-space spring on the posture at activation (home); see
+        # tpgpt.hardware.executor.PostureTarget (2026-10-02).
+        d('posture_target', True)
+        d('posture_max_error', 0.5)                 # rad per joint: the target stays this close to the arm
         d('path_bound_slack', 0.01)                 # m, on top of the plan's lead + the correction cap
         d('path_blocked_steps', 40)                 # steps stopped or at the cap without closing in
         d('arrival_tolerance', 0.004)               # m, measured TCP to the plan's grasp/release
@@ -323,6 +330,15 @@ class TpgptExecutorNode(Node):
         self.pose_topic = p('target_pose_topic') or (
             f'/{self.controller}/target_pose' if self.variable_stiffness else '/target_pose')
         self.stiffness_topic = p('target_stiffness_topic') or f'/{self.controller}/target_stiffness'
+        self.joint_topic = p('target_joint_topic') or (
+            f'/{self.controller}/target_joint' if self.variable_stiffness else '/target_joint')
+        # The posture target (PostureTarget), set up by run(); publish() sends it with every pose.
+        self.posture = None
+        self.posture_label = None       # the label the arm is at; None during the approach
+        self.posture_fraction = 0.0     # how far along the approach
+        self.posture_start_q = None     # the measured posture at activation
+        self.posture_sent = None        # the last target sent (for the log)
+        self.posture_planned = None     # the checked posture it came from
         self.base = p('base_frame')
 
         self._lock = threading.Lock()
@@ -339,7 +355,6 @@ class TpgptExecutorNode(Node):
         self._run_record = None      # (npz path, ROS time at the run's start, s)
         self.create_subscription(PoseStamped, p('current_pose_topic'), self._pose_cb, 1)
         self._joints = None   # (monotonic, JointState) -- converted on demand
-        from sensor_msgs.msg import JointState
         self.create_subscription(JointState, p('joint_states_topic'), self._joint_cb, 1)
 
         if self.dry:
@@ -348,10 +363,12 @@ class TpgptExecutorNode(Node):
             self.stiffness_pub = (
                 self.create_publisher(Float64MultiArray, '/tpgpt/executor/commanded_stiffness', 1)
                 if self.variable_stiffness else None)
+            self.posture_pub = self.create_publisher(JointState, '/tpgpt/executor/commanded_posture', 1)
         else:
             self.pose_pub = self.create_publisher(PoseStamped, self.pose_topic, 1)
             self.stiffness_pub = (self.create_publisher(Float64MultiArray, self.stiffness_topic, 1)
                                   if self.variable_stiffness else None)
+            self.posture_pub = self.create_publisher(JointState, self.joint_topic, 1)
         self.sim_pub = self.create_publisher(PoseStamped, '/tpgpt/executor/simulated_pose', 1)
         self.marker_pub = self.create_publisher(MarkerArray, '/tpgpt/executor/markers', 1)
         self.trace_pub = self.create_publisher(Path, '/tpgpt/executor/executed_path', 1)
@@ -576,12 +593,33 @@ class TpgptExecutorNode(Node):
         self.pose_pub.publish(matrix_to_pose_stamped(position, rotation, self.base, stamp))
         if self.stiffness_pub is not None and stiffness_values is not None:
             self.stiffness_pub.publish(Float64MultiArray(data=[float(v) for v in stiffness_values]))
+        if self.posture is not None:
+            if self.posture_label is None:
+                planned = self.posture.approach(self.posture_fraction, self.posture_start_q)
+            else:
+                planned = self.posture.planned(self.posture_label)
+            self.posture_planned = planned
+            self.publish_posture(self.posture.target(planned, self.measured_joints()), stamp)
         if self.step_hook is not None:
             self.step_hook(position, rotation)
+
+    def publish_posture(self, q, stamp=None):
+        """Send CRISP's posture target (named joints, positions only)."""
+        msg = JointState(name=[f'fr3_joint{k}' for k in range(1, 8)],
+                         position=[float(v) for v in q])
+        msg.header.stamp = stamp or self.get_clock().now().to_msg()
+        self.posture_pub.publish(msg)
+        self.posture_sent = np.asarray(q, dtype=float)
 
     def hold_current_pose(self):
         if self.dry:
             return
+        # Nothing may pull the elbow while the arm is held: the posture target goes to where
+        # the arm is (publish() below would send the checked one).
+        held_posture, self.posture = self.posture, None
+        q = self.measured_joints()
+        if held_posture is not None and q is not None:
+            self.publish_posture(q)
         try:
             pos, rot = self.measured(max_age=1.0)
             self.publish(pos, rot)
@@ -701,6 +739,23 @@ class TpgptExecutorNode(Node):
         executor = HardwareExecutor(policy, dt, settings, arm_path=arm_path,
                                     arm_settings=arm_settings)
         self.policy_executor = executor
+        posture = None
+        if p('posture_target') and plan.checked_postures is not None:
+            from tpgpt.hardware.executor import PostureTarget
+            from tpgpt.hardware.fr3 import default_model
+            fr3 = default_model()
+            posture = PostureTarget(plan.checked_postures['labels'], plan.checked_postures['q'],
+                                    fr3.lower, fr3.upper, max_error=float(p('posture_max_error')))
+            log.info(f"Posture target: the elbow is pulled toward the posture the path check "
+                     f"verified ({len(posture.labels)} labels), within "
+                     f"{np.degrees(posture.max_error):.0f} deg of the arm per joint")
+        elif p('posture_target'):
+            log.warn('this plan predates the planner storing its checked postures (2026-10-02): '
+                     "CRISP's posture spring stays on the posture at activation (home); re-plan "
+                     'for a posture target')
+        # the label each step is at, for the posture target (a taught plan's from its clock)
+        label_of_phase = np.arange(len(plan.labels), dtype=float)
+        belief = np.asarray(plan.labels.time_belief, dtype=float).reshape(-1)
         start_pos, start_rot = executor.start_pose
         object_width = float(m.get('object_width_closing_m', 0.04))
 
@@ -732,10 +787,11 @@ class TpgptExecutorNode(Node):
         controllers = None
         if not self.dry:
             controllers = self.ensure_controller()
-            others = other_publishers(self, self.pose_topic)
-            if others:
-                raise AbortRun(f'{others} other publisher(s) on {self.pose_topic}; CRISP ignores '
-                               'targets when more than one publisher exists')
+            for topic in (self.pose_topic,) + ((self.joint_topic,) if posture is not None else ()):
+                others = other_publishers(self, topic)
+                if others:
+                    raise AbortRun(f'{others} other publisher(s) on {topic}; CRISP ignores '
+                                   'targets when more than one publisher exists')
             self.setup_gripper()
 
         approach_p, approach_R = approach_trajectory(
@@ -765,6 +821,15 @@ class TpgptExecutorNode(Node):
 
         if not self.dry:
             self.cmc.activate(self.controller, controllers)
+        if posture is not None:
+            # CRISP's own target at activation is the measured posture; the approach walks it
+            # onto the first checked one.
+            q0 = self.measured_joints()
+            if q0 is None:          # dry run: the posture the plan was made from
+                q0 = plan.metadata.get('joint_states_at_plan') or posture.planned(posture.labels[0])
+            self.posture_start_q = np.asarray(q0, dtype=float)
+            self.posture_label, self.posture_fraction = None, 0.0
+            self.posture = posture
         self.moving = True
         self.offset = np.zeros(3)
         if p('gripper_mode') != 'none':
@@ -776,7 +841,8 @@ class TpgptExecutorNode(Node):
                          'meas_x', 'meas_y', 'meas_z', 'cmd_x', 'cmd_y', 'cmd_z',
                          'att_x', 'att_y', 'att_z', 'k_tcp_x', 'k_tcp_y', 'k_tcp_z', 'k_rot',
                          'k_offdiag_share', 'path_index', 'path_deviation', 'path_across',
-                         'corr_x', 'corr_y', 'corr_z', 'q1', 'q2', 'q3', 'q4', 'q5', 'q6', 'q7'])
+                         'corr_x', 'corr_y', 'corr_z', 'q1', 'q2', 'q3', 'q4', 'q5', 'q6', 'q7',
+                         'qt1', 'qt2', 'qt3', 'qt4', 'qt5', 'qt6', 'qt7'])
         realtime = not self.dry or p('dry_run_realtime')
         started = time.monotonic()
         if not self.dry:     # a dry run's arm is simulated; the messages would be the idle robot
@@ -808,7 +874,8 @@ class TpgptExecutorNode(Node):
         k0 = self.fixed_stiffness if self.fixed_stiffness > 0 else 400.0
         K0 = np.eye(3) * k0
         D0 = np.eye(3) * 2.0 * np.sqrt(k0)       # CRISP's damping for d_pos: -1 (400 -> 40)
-        for pos, rot in zip(approach_p, approach_R):
+        for i, (pos, rot) in enumerate(zip(approach_p, approach_R)):
+            self.posture_fraction = (i + 1) / len(approach_p)
             self.check_workspace(pos, 'approach target')
             meas_p, _ = self.measured()
             err = float(np.linalg.norm(meas_p - pos))
@@ -826,6 +893,7 @@ class TpgptExecutorNode(Node):
             next_t = wait_period(next_t)
         settle_deadline = time.monotonic() + float(p('approach_settle_timeout'))
         self.stage = 'approach_settle'
+        self.posture_label = 0.0
         while True:
             meas_p, _ = self.measured()
             err = float(np.linalg.norm(meas_p - start_pos))
@@ -849,6 +917,7 @@ class TpgptExecutorNode(Node):
                                min_progress_ratio=float(p('min_progress_ratio')))
         gripper_closed = False
         follow_log = []
+        posture_log = []     # (largest joint offset from the checked posture, its joint, label)
         policy_deadline = (time.monotonic() + float(p('max_policy_seconds'))
                            if realtime else float('inf'))
         losses = []
@@ -885,6 +954,8 @@ class TpgptExecutorNode(Node):
             loss = stiffness_projection_loss(cmd.stiffness, meas_R)
             losses.append(loss)
             self.last_cmd = cmd
+            self.posture_label = (float(cmd.trace['path_index']) if following else
+                                  float(np.interp(cmd.phase, belief, label_of_phase)))
             closed = cmd.gripper > 0
             if closed != gripper_closed:
                 if p('arrival_hold') or (following and p('path_hold') and plan.marks is not None):
@@ -919,9 +990,14 @@ class TpgptExecutorNode(Node):
                              *cmd.attractor, *k_diag, k_rot, f'{loss:.4f}',
                              *((f"{cmd.trace['path_index']:.2f}", f"{cmd.trace['deviation']:.5f}",
                                 f"{cmd.trace['across']:.5f}",
-                                *np.round(cmd.trace['correction'], 5),
-                                *(np.round(joints, 5) if joints is not None else [''] * 7))
-                              if following else ())])
+                                *np.round(cmd.trace['correction'], 5))
+                               if following else [''] * 6),
+                             *(np.round(joints, 5) if joints is not None else [''] * 7),
+                             *(np.round(self.posture_sent, 5) if self.posture is not None
+                               and self.posture_sent is not None else [''] * 7)])
+            if posture is not None and joints is not None and self.posture_planned is not None:
+                off = np.abs(np.asarray(joints) - self.posture_planned)
+                posture_log.append((float(off.max()), int(off.argmax()), self.posture_label))
             if following:
                 follow_log.append((cmd.trace['across'], cmd.behind, cmd.gate, cmd.clamped,
                                    float(np.linalg.norm(cmd.trace['correction']))))
@@ -946,6 +1022,11 @@ class TpgptExecutorNode(Node):
                      f'{behind.max() * 1000:+.1f} mm (behind); clock slowed on {int((pace < 1).sum())} steps '
                      f'(slowest {pace.min():.2f}); correction up to {corr.max() * 1000:.1f} mm; '
                      f'command bounded on {int(bounded.sum())} steps')
+        if posture_log:
+            off, joint, at = zip(*posture_log)
+            w = int(np.argmax(off))
+            text += (f'; posture: off the checked one by median {np.degrees(np.median(off)):.1f} deg, '
+                     f'worst {np.degrees(off[w]):.1f} (joint {joint[w] + 1}, label {at[w]:.0f})')
         if self.use_stiffness and losses:
             text += (f"; stiffness off-diagonal share {'applied (full matrix)' if self.full_stiffness else 'dropped'}: "
                      f'median {np.median(losses):.2f}, max {np.max(losses):.2f}')
@@ -1514,6 +1595,7 @@ class TpgptExecutorNode(Node):
 
         p, log = self.p, self.get_logger()
         self.stage = stage
+        self.posture_label = float(index)       # the posture checked where the gripper acts
         labels = plan.labels
         if learned:
             row = 0 if stage == 'arrive_grasp' else 1

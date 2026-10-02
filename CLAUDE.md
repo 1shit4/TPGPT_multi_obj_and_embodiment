@@ -142,6 +142,14 @@ Two facts that need several files to see, and that decide whether a change is fa
   by 15 mm and the release by 16, with it by 4 and 2. Both guards judge normal lag by the spring model (2-6 mm), and
   the learned command must lead this arm by 17-35 mm: they would slow it to 0.67 and cut it on 262
   of 488 labels. The policy query, the speed cap and the clock's update are still the shared code.
+- **The elbow is held on the posture the path check verified** (2026-10-02, audit C8;
+  executor `posture_target`). The check records the posture it posed the arm in at each tested
+  label (`checked_postures.npz` in the plan) and the executor sends it as CRISP's `target_joint`
+  with every pose (within 0.5 rad of the arm, 0.1 rad inside the limits). Without it CRISP's
+  null-space spring (2 N m/rad, max 5) pulls toward the posture at activation, home -- the
+  sim's rule too -- and on the 00:47/00:50 mug runs it swung joints 1 and 3 50-65 deg as joint
+  2 crossed 0 (the hand still), the arm stuck, and the elbow ended 108-110 deg off the checked
+  posture. Plans made before 2026-10-02 have no checked postures: re-plan.
 - **Grasp selection is the simulation's rule, and sees the shelf** (since 2026-09-21,
   `docs/hardware/SHELF_AND_PATH_CHECK.md`). `grasp_selection.select_and_plan` walks survivors in
   score order and takes the first whose **whole transported path** passes

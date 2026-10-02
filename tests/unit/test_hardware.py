@@ -25,6 +25,7 @@ from tpgpt.hardware.executor import (
     ArmPathSettings,
     ExecutorSettings,
     HardwareExecutor,
+    PostureTarget,
     SafetyMonitor,
     approach_trajectory,
     bounded_stiffness,
@@ -35,6 +36,7 @@ from tpgpt.hardware.executor import (
     stiffness_projection_loss,
 )
 from tpgpt.hardware.end_effector import FRANKA_HAND
+from tpgpt.hardware.fr3 import HOME_Q
 from tpgpt.hardware.planner import (
     KEYPOINT_BOX,
     KEYPOINT_ORIENTATION,
@@ -260,6 +262,11 @@ class TestPlanner:
         assert np.allclose(loaded.labels.orientations, result.labels.orientations)
         assert loaded.metrics["min_det"] == pytest.approx(result.metrics["min_det"])
         assert np.allclose(loaded.grasp.tcp, result.grasp.tcp)
+        assert loaded.checked_postures is None              # planned without a path check
+        result.checked_postures = {"labels": np.array([0, 4, 8]), "q": np.tile(HOME_Q, (3, 1))}
+        result.save(tmp_path / "posed")
+        posed = Plan.load(tmp_path / "posed").checked_postures
+        assert list(posed["labels"]) == [0, 4, 8] and np.allclose(posed["q"], HOME_Q)
 
     # Learned labels (audit B1, step 6): the command leads the hand; the arm's path is checked.
     @staticmethod
@@ -631,6 +638,50 @@ class TestFollowArmPath:
         policy, arm_path = follow_case
         with pytest.raises(ValueError, match="one point per label"):
             HardwareExecutor(policy, DT, ExecutorSettings(), arm_path={"positions": arm_path[:-1]})
+
+
+class TestPostureTarget:
+    """CRISP's posture target: the checked posture, gently (PostureTarget)."""
+
+    @staticmethod
+    def _target(**kw):
+        from tpgpt.hardware.fr3 import default_model
+        fr3 = default_model()
+        q = np.tile(HOME_Q, (3, 1))
+        q[1, 0], q[2, 0] = 0.2, 0.4               # joint 1 turns 0 -> 0.2 -> 0.4 rad
+        return PostureTarget([0, 4, 8], q, fr3.lower, fr3.upper, **kw), fr3
+
+    def test_between_checked_labels_it_is_interpolated_and_clamped_at_the_ends(self):
+        t, _ = self._target()
+        assert t.planned(2.0)[0] == pytest.approx(0.1)
+        assert t.planned(-5.0)[0] == pytest.approx(0.0) and t.planned(50.0)[0] == pytest.approx(0.4)
+        assert np.allclose(t.planned(6.0)[1:], HOME_Q[1:])
+
+    def test_it_stays_close_to_the_arm_so_a_far_elbow_is_pulled_not_swung(self):
+        t, _ = self._target(max_error=0.5)
+        measured = HOME_Q.copy()
+        measured[0] = -1.5                          # 1.9 rad off the checked 0.4
+        sent = t.target(t.planned(8.0), measured)
+        assert sent[0] == pytest.approx(-1.0)        # 0.5 rad toward it, no more
+        assert np.allclose(t.target(t.planned(8.0), t.planned(8.0)), t.planned(8.0))
+
+    def test_it_never_pulls_into_the_joint_limit_zone(self):
+        t, fr3 = self._target()
+        q = HOME_Q.copy()
+        q[6] = fr3.upper[6]                          # checked right at joint 7's limit
+        sent = t.target(q)
+        assert sent[6] == pytest.approx(fr3.upper[6] - 0.1)
+
+    def test_the_approach_walks_it_from_the_activation_posture_onto_the_first(self):
+        t, _ = self._target()
+        start = HOME_Q + 0.3
+        assert np.allclose(t.approach(0.0, start), start)
+        assert np.allclose(t.approach(1.0, start), t.planned(0.0))
+        assert np.allclose(t.approach(0.5, start), 0.5 * (start + t.planned(0.0)))
+
+    def test_it_needs_postures(self):
+        with pytest.raises(ValueError):
+            PostureTarget([], np.zeros((0, 7)), -np.ones(7), np.ones(7))
 
 
 class TestApproachAndStiffness:

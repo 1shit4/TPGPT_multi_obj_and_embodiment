@@ -628,6 +628,67 @@ class HardwareExecutor:
 
 
 # ---------------------------------------------------------------------------
+# The elbow: CRISP's posture target
+# ---------------------------------------------------------------------------
+
+
+class PostureTarget:
+    """The joint posture CRISP's null space is pulled toward, label by label.
+
+    **Why.** A hand pose leaves the FR3 one joint motion free (7 joints, 6 numbers): the
+    elbow can swing with the hand still. CRISP fills it with a weak joint spring (2 N m/rad
+    per joint, at most 5 N m, projected so the hand task is not disturbed) toward its
+    ``target_joint`` -- which, unless something publishes one, is **the posture at
+    activation, i.e. home**. Measured 2026-10-02 (mug, top_left, runs 00:47 and 00:50): as
+    joint 2 crossed 0 deg, joints 1 and 3 lined up and that spring (+3.6 / -2.9 N m) swung
+    them 50-65 deg toward home in ~1 s with q1 + q3 constant (-21..-24 deg) -- a motion that
+    leaves the hand where it is -- and the arm stuck around it; the elbow then sat up to
+    232 mm from where the path check had posed it. In the 01:45 run joint 2 stayed at
+    -27..-40 deg, the spring pulled as hard (4.2-4.8 N m) but the hand task resisted it, and
+    the elbow stayed on the checked branch.
+
+    So the executor sends the posture the whole-path check verified at this label
+    (``Plan.checked_postures``, every ``stride``-th label, linear in joint space between).
+    Two bounds keep the pull gentle and out of other mechanisms' way:
+
+    * **Within ``max_error`` of the measured posture, per joint** (rad). On its checked branch
+      the arm is near it and nothing binds; an arm far off it is pulled by at most
+      2 x ``max_error`` N m, not swung across (the swing above ran at ~1 rad/s under 3.6 N m).
+    * **``limit_margin`` inside every joint limit**, so it never pulls into CRISP's
+      joint-limit repulsion zone (0.1 rad) against the repulsion.
+    """
+
+    def __init__(self, labels, q, lower, upper, max_error: float = 0.5,
+                 limit_margin: float = 0.1):
+        labels = np.asarray(labels, dtype=float).reshape(-1)
+        q = np.asarray(q, dtype=float).reshape(-1, 7)
+        if len(labels) == 0 or len(labels) != len(q):
+            raise ValueError("checked postures need one posture per label, and at least one")
+        order = np.argsort(labels)
+        self.labels, self.q = labels[order], q[order]
+        self.lower = np.asarray(lower, dtype=float) + limit_margin
+        self.upper = np.asarray(upper, dtype=float) - limit_margin
+        self.max_error = float(max_error)
+
+    def planned(self, label: float) -> np.ndarray:
+        """The checked posture at ``label`` (clamped to the first and last checked ones)."""
+        return np.array([np.interp(float(label), self.labels, self.q[:, j]) for j in range(7)])
+
+    def target(self, planned, measured=None) -> np.ndarray:
+        """What is sent: ``planned``, inside the limits and within ``max_error`` of ``measured``."""
+        out = np.clip(np.asarray(planned, dtype=float), self.lower, self.upper)
+        if measured is not None:
+            m = np.asarray(measured, dtype=float)
+            out = m + np.clip(out - m, -self.max_error, self.max_error)
+        return out
+
+    def approach(self, fraction: float, start_q) -> np.ndarray:
+        """Along the move onto the path: from the posture at activation to the first checked one."""
+        s = float(np.clip(fraction, 0.0, 1.0))
+        return (1.0 - s) * np.asarray(start_q, dtype=float) + s * self.planned(self.labels[0])
+
+
+# ---------------------------------------------------------------------------
 # Hardware-only safety, kept outside the execution arithmetic
 # ---------------------------------------------------------------------------
 

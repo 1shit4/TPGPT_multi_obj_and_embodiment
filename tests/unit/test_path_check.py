@@ -165,6 +165,25 @@ def test_the_move_onto_the_path_is_checked_from_the_measured_joints():
     assert "onto the path" in pc.verdict(r)
 
 
+def test_the_postures_checked_are_returned_one_per_tested_label():
+    """What the executor sends CRISP as its posture target: the posture each tested waypoint
+    was checked in, on the branch continued from the measured joints."""
+    from tpgpt.hardware.fr3 import default_model
+
+    fr3 = default_model()
+    positions, rotations = _path([0.45, 0.0, 0.45], [0.45, 0.1, 0.30])
+    r = _check(positions, rotations, ShelfWorld.build(None), start_q=HOME_Q)
+    labels, q = r["postures"]["labels"], r["postures"]["q"]
+    assert list(labels) == list(range(0, len(positions), 2))          # stride 2
+    assert q.shape == (len(labels), 7)
+    for k, qk in zip(labels, q):
+        T = fr3.tcp(qk)
+        assert np.linalg.norm(T[:3, 3] - positions[k]) < pc.POSE_TOLERANCE + 1e-4
+    # one branch, continued: no jump between neighbouring waypoints
+    assert np.abs(np.diff(q, axis=0)).max() < np.radians(5.0)
+    assert np.abs(q[0] - HOME_Q).max() < np.radians(45.0)
+
+
 def test_a_blocked_move_onto_the_path_is_reported_but_does_not_reject_the_path():
     """approach_rejects=False (user, 2026-09-29): the parked pose is not the grasp's fault."""
     shelf = _shelf(0.25)
