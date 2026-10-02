@@ -421,6 +421,7 @@ def path_feasibility(
     joint_margin=None,
     margin_joints=MARGIN_JOINTS,
     reach_margin=None,
+    retreat_clearance=None,
 ) -> dict:
     """Solve and check a transported path, waypoint by waypoint.
 
@@ -484,6 +485,14 @@ def path_feasibility(
     ``reach_margin`` (None, or m: :data:`REACH_MARGIN`) makes a posture whose wrist is closer
     than that to full stretch a fault (``"<stage>: the wrist within N mm of full stretch"``):
     reachable, but the arm cannot be pulled there.
+
+    ``retreat_clearance`` (None, or m): once the hand has got that far from the placed object
+    in the retreat, no robot piece may come back within it (``"retreat: <piece> back within N
+    mm of the placed object"``), and every retreat label is checked, not every ``stride``-th.
+    The placed object is the fitted scan, so one point is enough. Why: the taught retreat swings
+    the open fingers back past the placed object (labels ~413-424), on 33 plans of 2026-10-01..03
+    to within 0.5-8 mm of it and once 1.5 mm into it; the check above lets 2 mm through and
+    looks every 4th label, and on 2026-10-03 the fingers dragged a set-down mug.
 
     ``held_shift`` (None or a base-frame vector, m) moves the object by it when the
     jaws close, before it is carried: a parallel jaw closing off-centre pushes the
@@ -655,18 +664,21 @@ def path_feasibility(
 
     # --- the path -----------------------------------------------------------------
     indices = np.arange(0, len(positions), max(int(stride), 1))
+    if retreat_clearance is not None:          # the retreat at every label
+        indices = np.union1d(indices, np.arange(min(r + 1, len(positions)), len(positions)))
     max_unreachable = (int(np.floor((1.0 - float(min_reachable_fraction)) * len(indices)))
                        if min_reachable_fraction is not None else len(indices))
     tested, unreachable = 0, 0
     lifted = pick_support is None        # nothing to lift off from
     fingers_cleared = False
+    clear_by_margin = False              # the hand has been retreat_clearance from the placed object
     placed = None                        # the object where it was set down
     last_good, last_good_q = None, None
     #: The posture the arm was checked in at each tested waypoint (the result's ``postures``).
     posed_labels, posed_q = [], []
 
     def check_posture(k, q, stage, point, R_ee, tag=""):
-        nonlocal lifted, fingers_cleared
+        nonlocal lifted, fingers_cleared, clear_by_margin
         hits: dict = {}
         opening = closed_width if gripper[k] > 0 else MAX_OPENING
         pieces, T = robot_pieces(fr3, q, end_effector, opening)
@@ -721,6 +733,14 @@ def path_feasibility(
             for piece in touching:
                 if not _is_finger(piece.name) or fingers_cleared:
                     add(hits, f"{label}: {piece.name} in the placed object")
+            if retreat_clearance is not None:
+                near = [p for p in pieces if p.contains(placed, -float(retreat_clearance)).any()]
+                if not near:
+                    clear_by_margin = True
+                elif clear_by_margin:
+                    for piece in near:
+                        add(hits, f"{label}: {piece.name} back within "
+                                  f"{float(retreat_clearance) * 1000:.0f} mm of the placed object")
         return hits
 
     for k in indices:

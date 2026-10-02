@@ -143,6 +143,9 @@ class SelectionSettings:
     #: Refuse a path that brings the wrist this close to full stretch (m; None = off), where
     #: the arm cannot be pulled (``path_check.REACH_MARGIN``).
     reach_margin: float | None = None
+    #: Once clear of the placed object by this much in the retreat, the hand must stay that
+    #: far from it (m; None = off; ``path_check.path_feasibility``'s ``retreat_clearance``).
+    retreat_clearance: float | None = None
     min_reachable_fraction: float = 0.60
     path_stride: int = 4
     #: With nothing admissible, execute the best candidate that failed on
@@ -633,7 +636,8 @@ def _path_verdict(result: Plan, candidate: Candidate, s: SelectionSettings,
                        start_tcp=pc.start_tcp, stop_early=True, stride=s.path_stride,
                        min_reachable_fraction=s.min_reachable_fraction,
                        criterion=s.kinematic_criterion, approach_rejects=s.approach_rejects,
-                       joint_margin=s.joint_margin, reach_margin=s.reach_margin)
+                       joint_margin=s.joint_margin, reach_margin=s.reach_margin,
+                       retreat_clearance=s.retreat_clearance)
     reason = verdict(check, s.min_reachable_fraction)
     candidate.path_check = {
         "criterion": check["criterion"],

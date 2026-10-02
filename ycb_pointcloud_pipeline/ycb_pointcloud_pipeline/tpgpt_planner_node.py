@@ -229,6 +229,9 @@ class TpgptPlannerNode(Node):
         # m; > 0 refuses a path that brings the wrist that close to full stretch, where the arm
         # cannot be pulled (path_check.REACH_MARGIN). 0 = off.
         d('grasp_reach_margin', 0.0)
+        # m; > 0: once clear of the placed object by this much in the retreat, the hand must
+        # stay that far from it (path_check retreat_clearance). 0 = off.
+        d('grasp_retreat_clearance', 0.0)
         d('max_centre_offset', 0.025)             # by_centre_offset on a one-sided cloud
         d('output_dir', os.path.expanduser('~/tpgpt_plans'))
         d('auto_plan', False)                     # plan as soon as n_frames arrived
@@ -549,6 +552,8 @@ class TpgptPlannerNode(Node):
                           else None),
             reach_margin=(float(p('grasp_reach_margin')) if float(p('grasp_reach_margin')) > 0
                           else None),
+            retreat_clearance=(float(p('grasp_retreat_clearance'))
+                               if float(p('grasp_retreat_clearance')) > 0 else None),
             allow_kinematic_fallback=bool(p('allow_kinematic_fallback')),
             max_centre_offset=float(p('max_centre_offset')),
             check_visibility=self._check_visibility(),

@@ -621,3 +621,32 @@ def test_a_path_near_full_stretch_is_refused_only_when_the_margin_is_on():
     on = _check(positions, rotations, world, grasp=29, release=29, reach_margin=0.03)
     assert any("the wrist within 30 mm of full stretch" in k for k in on["faults"]), on["faults"]
     assert pc.verdict(on) is not None
+
+
+def test_a_retreat_that_comes_back_near_the_placed_object_is_refused_only_when_asked():
+    """2026-10-03: the open fingers left a set-down mug, then swung back past it and dragged it.
+    Here the hand sets a cube down, rises 60 mm, and comes back down shifted 19 mm along the jaw
+    axis, an open pad ending a few millimetres from the cube's face: allowed by the contact rule
+    (nothing inside it), refused once a 10 mm clearance is asked for, not at 5 mm."""
+    P = np.r_[np.c_[np.full(30, 0.45), np.zeros(30), np.linspace(0.40, 0.30, 30)],
+              np.c_[np.full(15, 0.45), np.zeros(15), np.linspace(0.30, 0.36, 15)],
+              np.c_[np.full(15, 0.45), np.linspace(0.0, 0.019, 15), np.linspace(0.36, 0.30, 15)]]
+    R = np.repeat(DOWN[None], 60, axis=0)
+    g = np.mgrid[-0.02:0.021:0.005, -0.015:0.0151:0.005, -0.02:0.021:0.005].reshape(3, -1).T
+    cube = P[5] + g + [0.0, 0.0, -0.02]                # held between the fingertips
+    world = ShelfWorld.build(None)
+
+    def back(clearance):
+        r = _check(P, R, world, grasp=5, release=29, object_points=cube,
+                   retreat_clearance=clearance)
+        return r, [k for k in r["faults"] if "back within" in k or "placed object" in k]
+
+    off, faults = back(None)
+    assert not faults
+    r5, faults = back(0.005)
+    assert not faults
+    r10, faults = back(0.010)
+    assert faults == ["retreat: hand_left_pad back within 10 mm of the placed object"]
+    assert pc.verdict(r10) is not None
+    # with the clearance on, every retreat label is posed (stride 2 elsewhere)
+    assert r10["tested"] == len(range(0, 30, 2)) + 30

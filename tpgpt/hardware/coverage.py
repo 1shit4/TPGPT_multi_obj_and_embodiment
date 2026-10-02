@@ -102,7 +102,8 @@ def coverage(object_name, object_pose, world, source, destination, destination_h
                                        start_q=path.start_q, criterion=s.kinematic_criterion,
                                        approach_rejects=s.approach_rejects, clearance=clearance,
                                        joint_margin=s.joint_margin,
-                                       reach_margin=s.reach_margin)
+                                       reach_margin=s.reach_margin,
+                                       retreat_clearance=s.retreat_clearance)
         unrefined += int(report.get("unrefined", 0))
         verdict = path_check.verdict(report)
         if verdict is None:
@@ -224,6 +225,9 @@ def main(argv=None):
     ap.add_argument("--reach-margin", type=float, default=None,
                     help="refuse paths whose wrist comes this close to full stretch, m "
                          "(default: off; path_check.REACH_MARGIN)")
+    ap.add_argument("--retreat-clearance", type=float, default=None,
+                    help="once clear of the placed object by this much in the retreat, stay that "
+                         "far from it, m (default: off)")
     ap.add_argument("--clearance", type=float, default=None,
                     help="a gap every path must keep from the table, the shelf and the seen "
                          "points, m (default: none, the planner's check)")
@@ -271,7 +275,8 @@ def main(argv=None):
     # centred off, no grasp offset (A5), strict reachability.
     settings = SelectionSettings(max_tilt_deg=90.0, check_centred=False, check_visibility=False,
                                  grasp_offset=(0.0, 0.0, 0.0), kinematic_criterion="strict",
-                                 joint_margin=a.joint_margin, reach_margin=a.reach_margin)
+                                 joint_margin=a.joint_margin, reach_margin=a.reach_margin,
+                                 retreat_clearance=a.retreat_clearance)
     want = list(slots) if a.slots == "all" else a.slots.split(",")
     if a.slot_depth is not None:
         shelf_model = world.model
