@@ -251,7 +251,7 @@ class TpgptExecutorNode(Node):
         d('path_hold', True)                        # false: no arrival hold; the gripper acts on time
         d('path_correction', True)                  # bring an arm beside its path back
         d('path_correction_gain', 1.5)              # 1/s
-        d('path_correction_max', 0.03)              # m
+        d('path_correction_max', 0.05)              # m (0.03 until 2026-10-03)
         d('path_unwinding', True)                   # give back the along-path correction once the arm runs ahead
         # The elbow: send CRISP the posture the path check verified, label by label, instead of
         # leaving its null-space spring on the posture at activation (home); see
@@ -1586,11 +1586,11 @@ class TpgptExecutorNode(Node):
         last commanded TCP position; for a learned plan the caller hands the residual to
         the executor's correction instead of the static offset.
 
-        At a learned plan's **release** the object is already set down, so the hold only
-        waits for the arm to settle and does not push: placement was decided at touch-down,
-        and pushing the hand onto the mark could only slide the object along its support
-        against the transported stiffness (proposed by Claude 2026-10-01; the user has since said
-        pressing down on the board is harmless and the hand must reach the mark -- to be changed).
+        The **release** is held the same way: the hand is brought onto its mark before the jaws
+        open, pressing the object onto its support if need be (the user, 2026-10-03: pressing
+        down on the board is harmless, and an arm short of its release mark must not open there).
+        From 2026-10-01 to 10-03 it only waited for the arm to settle and opened wherever it was
+        (Claude's proposal, recorded by mistake as the user's).
         """
         from tpgpt.hardware.executor import crisp_applied_gains, logged_stiffness
 
@@ -1624,23 +1624,14 @@ class TpgptExecutorNode(Node):
         step = float(p('approach_max_linear_speed')) * dt
         command = cmd.tcp_position.copy()
         goal = target_p
-        wait_only = learned and stage == 'arrive_release'
-        if wait_only:
-            goal = command                                # hold still: no walk, no integral
-        elif learned:
+        if learned:
             goal = command + (target_p - executor.tcp_from_tool(
                 executor.tool_position(*self.measured()), target_R))
-        recent = []
         while True:
             meas_p, _ = self.measured()
             error = target_p - meas_p
             dist = float(np.linalg.norm(error))
             inside = inside + 1 if dist <= tol else 0
-            recent = (recent + [meas_p.copy()])[-5:]
-            if wait_only and len(recent) == 5 and float(np.ptp(np.array(recent), axis=0).max()) < 0.0005:
-                log.info(f'{stage}: settled {dist * 1000:.1f} mm from the plan (set down: '
-                         'waiting only, no push)')
-                break
             if inside >= 3:
                 log.info(f'{stage}: within {dist * 1000:.1f} mm of the plan '
                          f'(integral {np.round(integral * 1000, 1).tolist()} mm)')
@@ -1652,7 +1643,7 @@ class TpgptExecutorNode(Node):
                 break
             delta = goal - command
             command = command + delta * min(1.0, step / max(float(np.linalg.norm(delta)), 1e-9))
-            if float(np.linalg.norm(goal - command)) < 1e-6 and not wait_only:
+            if float(np.linalg.norm(goal - command)) < 1e-6:
                 integral = integral + gain * dt * error
                 if np.linalg.norm(integral) > limit:
                     integral *= limit / np.linalg.norm(integral)

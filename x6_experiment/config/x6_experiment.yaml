@@ -260,7 +260,7 @@ method:
     path_hold: true
     path_correction: true
     path_correction_gain: 1.5
-    path_correction_max: 0.03
+    path_correction_max: 0.05
     path_unwinding: true
     path_bound_slack: 0.01
     path_blocked_steps: 40

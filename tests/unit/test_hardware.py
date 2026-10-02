@@ -612,10 +612,10 @@ class TestFollowArmPath:
         assert ex.forgivals >= 1 and not ex.blocked and ex.finished
 
     def test_a_moving_arm_is_not_blocked_when_the_correction_runs_out(self, follow_case):
-        """45 mm beside its path, more than the 30 mm cap (2026-10-01 22:41): the
-        correction stays at its cap, the arm keeps moving, the run goes on."""
+        """65 mm beside its path, more than the 50 mm cap (2026-10-01 22:41, then at a 30 mm
+        cap): the correction stays at its cap, the arm keeps moving, the run goes on."""
         s = ArmPathSettings()
-        ex, deviation, *_ = _follow(follow_case, offset=(0.0, 0.045, 0.0))
+        ex, deviation, *_ = _follow(follow_case, offset=(0.0, 0.065, 0.0))
         assert not ex.blocked and ex.finished
         assert abs(np.linalg.norm(ex.correction) - s.correction_max) < 1e-6
         assert 0.010 < np.median(deviation[150:300]) < 0.020    # the 15 mm it cannot take

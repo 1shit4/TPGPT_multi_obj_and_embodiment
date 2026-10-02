@@ -138,14 +138,20 @@ class ArmPathSettings:
       the arm then slipped 33 mm in 0.6 s to 26 mm ahead, and the 17-20 mm left along kept
       it 24-31 mm ahead, so the mug met the board at label ~365 where the plan arrives at
       ~375).
-    * **Blocked** means the arm does not move: the clock held back or the correction at its
-      cap for ``blocked_steps`` steps, and the arm itself moved less than
-      ``blocked_motion`` in them. Then the run stops and holds. An arm that keeps moving
-      is not blocked, however far the correction falls short (2026-10-01 22:41, the mug:
-      the plan needed 25-36 mm, the correction stopped at its 30 mm cap with the arm 10 mm
-      off its path and moving on, and "blocked" fired). With the correction off, a gap
-      behind that is not closing is forgiven as sag (as the simulation's watchdog does),
-      up to ``max_forgiven`` times.
+    * **Blocked** means the arm does not move while pushed as hard as allowed: the
+      correction at its cap or the command on the bound for ``blocked_steps`` steps, and the
+      arm moved less than ``blocked_motion`` in them (the user, 2026-10-03: only the arm not
+      moving counts). Then the run stops and holds. While the push can still grow -- the clock
+      stopped and the correction growing -- it is not blocked; nor is an arm that keeps moving,
+      however far the correction falls short (2026-10-01 22:41, the mug: the plan needed
+      25-36 mm, the correction stopped at its then 30 mm cap with the arm 10 mm off its path
+      and moving on, and "blocked" fired). With the correction off, a gap behind that is not
+      closing is forgiven as sag (as the simulation's watchdog does), up to ``max_forgiven``
+      times, then blocked.
+    * **The cap** (``correction_max``) is a safety limit, not physics: how far the command may
+      be moved off the plan, and with the bound how hard a held-back arm is pushed. 30 mm until
+      2026-10-03 (set from the offsets measured on 10-01); 50 mm since (the user: a 30 mm cap
+      held a stuck start at a constant 31 N).
 
     The velocity cap (``speed_limit``), the policy query and the clock's update stay
     the simulation's. Values are starting points: how far the arm strays on a new
@@ -159,7 +165,8 @@ class ArmPathSettings:
     pacing: bool = True
     correction: bool = True
     correction_gain: float = 1.5
-    correction_max: float = 0.03
+    #: m. 0.03 until 2026-10-03; raised (the user) so a held-back arm can be pushed harder.
+    correction_max: float = 0.05
     bound_slack: float = 0.01
     blocked_steps: int = 40
     blocked_progress: float = 0.001
@@ -507,6 +514,13 @@ class HardwareExecutor:
         )
 
 
+    def _block(self, moved, deviation, target, why) -> None:
+        s = self.arm["settings"]
+        self.blocked, self.finished = True, True
+        self.blocked_reason = (f"the arm has moved {moved * 1000:.1f} mm in {s.blocked_steps} steps "
+                               f"while pushed as hard as allowed ({why}), {deviation * 1000:.0f} mm "
+                               f"from its path at label {target['index']:.0f}")
+
     def _follow_step(self, position, tcp_rotation) -> Command:
         """One step of a learned plan, against its arm path (:class:`ArmPathSettings`)."""
         cfg, a = self.settings, self.arm
@@ -568,29 +582,30 @@ class HardwareExecutor:
                                    cfg.belief_correction)
         self.steps += 1
 
-        # Blocked: correcting at the cap and not getting closer. (Without the correction a
-        # stopped clock that is not getting closer forgives the gap as sag, then blocks.)
+        # Blocked: pushed as hard as allowed (the correction at its cap, or the command on the
+        # bound) and the arm does not move (the user, 2026-10-03). While the push can still grow
+        # it is not blocked. (Without the correction a stopped clock that is not getting closer
+        # forgives the gap as sag, then blocks.)
         deviation = float(np.linalg.norm(error))
         saturated = s.correction and float(np.linalg.norm(self.correction)) >= 0.99 * s.correction_max
+        at_limit = s.correction and (saturated or bounded)
         stopped = (not s.correction) and pace < 0.05
-        held = pace < 0.05 or saturated
-        if held or stopped:
+        if at_limit or stopped:
             if self._stuck_steps == 0:
                 self._stuck_ref, self._stuck_from = deviation, np.asarray(position).copy()
             self._stuck_steps += 1
             if self._stuck_steps >= s.blocked_steps:
                 moved = float(np.linalg.norm(np.asarray(position) - self._stuck_from))
-                if self._stuck_ref - deviation < s.blocked_progress:
-                    if stopped and self.forgivals < s.max_forgiven:
-                        self.forgiven = max(behind - target["margin"], 0.0)
-                        self.forgivals += 1
-                    elif moved < s.blocked_motion:
-                        self.blocked, self.finished = True, True
-                        self.blocked_reason = (
-                            f"the arm has moved {moved * 1000:.1f} mm in {s.blocked_steps} steps, "
-                            f"{deviation * 1000:.0f} mm from its path at label "
-                            f"{target['index']:.0f} ("
-                            + ("correction at its cap" if saturated else "clock stopped") + ")")
+                if stopped:
+                    if self._stuck_ref - deviation < s.blocked_progress:
+                        if self.forgivals < s.max_forgiven:
+                            self.forgiven = max(behind - target["margin"], 0.0)
+                            self.forgivals += 1
+                        elif moved < s.blocked_motion:
+                            self._block(moved, deviation, target, "clock stopped")
+                elif moved < s.blocked_motion:
+                    self._block(moved, deviation, target,
+                                "command on the bound" if bounded else "correction at its cap")
                 self._stuck_steps = 0
         else:
             self._stuck_steps = 0
