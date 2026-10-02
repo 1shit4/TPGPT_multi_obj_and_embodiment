@@ -1589,7 +1589,8 @@ class TpgptExecutorNode(Node):
         At a learned plan's **release** the object is already set down, so the hold only
         waits for the arm to settle and does not push: placement was decided at touch-down,
         and pushing the hand onto the mark could only slide the object along its support
-        against the transported stiffness (the user, 2026-10-01).
+        against the transported stiffness (proposed by Claude 2026-10-01; the user has since said
+        pressing down on the board is harmless and the hand must reach the mark -- to be changed).
         """
         from tpgpt.hardware.executor import crisp_applied_gains, logged_stiffness
 

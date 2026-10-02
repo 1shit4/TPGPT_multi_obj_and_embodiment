@@ -98,11 +98,25 @@ every step (except inside a contact window, see 6):
     c ← c + 1.5/s · dt · drive                            7.5 % of the drive per step
     if |c| > 30 mm:  c ← c · 30 mm / |c|                  capped at 30 mm
 
-There is no waiting before it starts: the clock slows and the correction grows at the same time,
-the correction in proportion to how much the clock is held back. On an arm that does not move, a
-gap is half taken up by the correction after 9 steps (0.45 s) and 95 % after 39 (2 s). If the gap
-was lag that would have closed by itself, the arm then runs ahead, and the unwinding takes the
-excess back.
+The part **beside** the path acts all the time, clock running or not. The part **behind** acts
+whenever the clock is slowed, in proportion to how much: nothing at full speed (`pace` = 1, which
+means the arm is within the margin), all of the gap once the clock has stopped. There is no
+waiting before it starts. How fast it grows (1.5/s means 1.5 per second: 7.5 % of the gap per
+50 ms step):
+
+* **if the arm does not move**, the gap stays the same and `c` grows by 1.5 × the gap per second,
+  in a straight line, until its cap: a 30 mm gap reaches the 30 mm cap in 0.67 s;
+* **if the arm follows the command**, the gap shrinks as `c` grows, so it closes like a decaying
+  exponential with a time constant of 1/1.5 = 0.67 s: 63 % in 0.67 s, 95 % in 2 s.
+
+1.5/s is slower than the arm's own response (its lag time constant is 0.15-0.3 s) on purpose: a
+correction faster than the arm can follow overshoots. At 3.0/s (tried on 2026-10-02, same plan)
+the release came closer (5.7 against 11.2 mm) but the carry swung more. If the gap was lag that
+would have closed by itself, the arm then runs ahead and the unwinding takes the excess back.
+
+**When the clock restarts**: there is no separate rule. `pace` is recomputed every step from the
+current gap, so as the arm closes in the clock speeds up by itself, and runs at full speed once
+the arm is within the margin.
 
 **4. Unwinding**: what the correction added along the motion is given back once the arm runs ahead.
 
@@ -120,7 +134,13 @@ path is not touched.
 
 The bound keeps the push on a held-back arm finite (at 600 N/m, R = 50-75 mm is 30-45 N). 30 mm is
 the correction's cap, 10 mm a slack. **It is measured from the arm**, so an arm already more than
-R from its command gets a command parked on the bound: the push cannot grow.
+R from its command gets a command parked on the bound: the push cannot grow, however large the
+correction becomes.
+
+Why 30 mm for the cap: a safety limit, not physics -- how far the command may be moved off the
+plan, and with the bound, how hard a held-back arm is pushed. It was set on 2026-10-01 from the
+offsets measured then (10-16 mm standing, up to 25-36 mm needed while moving). It trades pushing
+hard enough against friction for not pushing hard into something real; nothing derives the value.
 
 **6. No correction in contact.** From 10 labels before to 10 after the grasp, and from 10 before to
 5 after the release, `c` is frozen (neither grown nor unwound): the transported stiffness alone
@@ -154,8 +174,9 @@ and the correction takes over the hold's offset so the command does not jump bac
 
 **Release.** The clock is paused. The command is held still; when the hand has moved less than
 0.5 mm over 5 steps, the jaws open. **It does not check the mark**: the hand opens wherever it
-settled. Why: the object is already set down, and pushing the hand onto the mark could only slide
-or press it along the board (decided 2026-10-01).
+settled. Why: the object is already set down, and pushing the hand onto the mark could slide or
+press it along the board. (Proposed by Claude on 2026-10-01; you have since said pressing down on
+the board is harmless and the hand must reach the mark. To be changed.)
 
 ## Safety guards
 
@@ -177,9 +198,14 @@ On any abort the elbow's target is set to where the elbow is, and the arm holds 
 * **The bound is measured from the arm**, not from where the arm should be (5).
 * **The correction is capped at 30 mm** (3).
 * **The release opens wherever the hand settles** (holds).
-* **The turning stiffness is soft.** A force F at the fingertips, 228 mm below the wrist, tilts
-  the hand by about F × 0.228 m / 30 N·m/rad (31 N → 13°), and a tilted hand's turning spring
-  cancels part of the push at the shoulder and elbow. 30 was chosen on 2026-09-30: at 60 the wrist
+* **A stretched arm cannot be pulled outward.** Near full stretch, a pull at the hand along the
+  direction of reach turns into almost no joint torque (the arm's weakest direction): the arm stops
+  short and the fingertips get the rest of the way only by tilting the hand, against the turning
+  spring. Across the runs so far, the more stretched the wrist at the start, the larger the gap
+  there. The planner checks that every pose is reachable, not how stretched the arm is when it
+  gets there.
+* **The turning stiffness is soft.** A force F at the fingertips, 228 mm below the wrist, tilts the
+  hand by about F × 0.228 m / 30 N·m/rad (31 N → 13°). 30 was chosen on 2026-09-30: at 60 the wrist
   vibrated (26 Hz) as joint 7 entered its limit zone during a replay; 45 has not been tried there.
   The learned bundle was learned at 30, and the executor refuses other values for it.
 * **The arm path's transfer to a new scene is assumed** (see "Which plan is executed").

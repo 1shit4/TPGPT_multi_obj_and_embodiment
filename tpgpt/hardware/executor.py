@@ -118,7 +118,8 @@ class ArmPathSettings:
       at most ``correction_max``. **Held, not grown, where the hand is in contact**
       (``arm_path["contact"]``, the replay's contact windows): there the transported
       stiffness alone must set the force -- grown, it pushed through it (21 mm at the
-      set-down of the 2026-10-01 mug run, 12 N at 600 N/m; the user, 2026-10-01).
+      set-down of the 2026-10-01 mug run, 12 N at 600 N/m; proposed by Claude 2026-10-01 and
+      tested; the user has since said pressing down is harmless -- under review).
     * **Bound**: the command is kept within the plan's own lead at this label plus
       ``correction_max`` plus ``bound_slack`` of the arm (the force cap the clamp
       gave, without cutting what the plan needs).
