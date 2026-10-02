@@ -604,6 +604,8 @@ The planner's support height is: its `support_height` parameter, else the calibr
 - `ycb_pointcloud_pipeline/INSPIRE_HAND.md` — the Inspire RH56 hand: mounting, side grasp, caveats.
 - `docs/hardware/hardware_integration.md` — the operating manual of the bridge: frames, verifying the
   cloud, **teaching a demonstration (keys, order, refusals)**, planning, execution.
+- `docs/hardware/HOW_EXECUTION_WORKS.md` — execution in plain words: the run step by step, the
+  learned bundle, the sim's lag gate vs the follow mode, every path correction and why it exists.
 - `docs/sim/dynamics_execution.md` — why the executor's law and gates are what they are.
 - `docs/sim/SIM_CLAUDE.md` — the simulation's own guide (reference, not instructions).
 
