@@ -293,8 +293,9 @@ ros2 run --prefix python3 ycb_pointcloud_pipeline tpgpt_pick_place --ros-args \
     -p object_name:=foam_brick -p destination_name:=top_left \
     -p dry_run:=false -p gripper_mode:=franka_grasp -p grasp_force:=15.0
 ```
-`gripper_mode`: `franka_grasp` (default) | `gripper_command` | `inspire` | `none`. `none` runs the
-motion without touching the gripper, which is the safer first move on a new plan.
+`gripper_mode`: `auto` (default: the plan's hand) | `franka_grasp` | `gripper_command` | `inspire` |
+`none`. `none` runs the motion without touching the gripper, which is the safer first move on a
+new plan.
 The grip force is the object's, from `config/grasp_forces.yaml` (the run logs `grip force N N`);
 `-p grasp_force:=N` overrides it for one run (as above: 15 N against the brick's 20).
 
@@ -325,11 +326,29 @@ Guards, and what they mean when they fire:
 
 ```bash
 ros2 run --prefix python3 ycb_pointcloud_pipeline tpgpt_pick_place --ros-args \
-    -p experiment:=true -p trial_id:=0031 -p hand:=inspire \
-    -p object_name:=apple -p destination_name:=top_shelf
+    -p experiment:=true -p trial_id:=0001 -p hand:=panda \
+    -p object_name:=apple -p destination_name:=top_left
 ```
 X6 overrides some selection defaults from its frozen `method:` block; see
-`x6_experiment/RUNNING_THE_EXPERIMENT.md`. The config still predates the 2026-09-21 move.
+`x6_experiment/RUNNING_THE_EXPERIMENT.md`. The Inspire hand's trials (ids 0025-0048) wait on its
+measurements (`ycb_pointcloud_pipeline/INSPIRE_HAND.md`).
+
+### The Inspire hand
+
+Bring-up, measurements, grasp tests and transport: `ycb_pointcloud_pipeline/INSPIRE_HAND.md`. The
+usual ones:
+```bash
+sudo insmod ~/ch341/ch341.ko                                    # once per boot: /dev/ttyUSB0
+ros2 launch ycb_pointcloud_pipeline inspire_hand.launch.py      # the hand, its own terminal
+# a grasp on its own (dry_run true by default)
+ros2 run --prefix python3 ycb_pointcloud_pipeline tpgpt_pick_place --ros-args \
+    -p end_effector:=inspire -p task:=grasp_test -p object_name:=apple
+# transport
+ros2 run --prefix python3 ycb_pointcloud_pipeline tpgpt_pick_place --ros-args \
+    -p end_effector:=inspire -p object_name:=apple -p destination_name:=top_left \
+    -p source_bundle_dir:=$HOME/tpgpt_demos/banana_20260925_183904/source_bundle_learned
+```
+The executor drives the plan's hand by itself (`gripper_mode` auto).
 
 ## 8. Utilities
 

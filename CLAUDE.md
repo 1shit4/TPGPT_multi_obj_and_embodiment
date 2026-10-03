@@ -82,18 +82,22 @@ Robot and run commands are in `docs/hardware/commands.md`.
 
 ```bash
 cd ~/thor_ws/src/ycb_point_cloud/TPGPT_multi_obj_and_embodiment
-# ROS package (no robot, no ROS graph needed)
-(cd ycb_pointcloud_pipeline && ~/venvs/tpgpt/bin/python -m pytest test/ -q)
+# ROS package (no robot, no ROS graph; ROS sourced: the executor's tests import rclpy)
+(source /opt/ros/jazzy/setup.bash && cd ycb_pointcloud_pipeline && ~/venvs/tpgpt/bin/python -m pytest test/ -q)
 # The method. test_gripper_actuation.py errors at COLLECTION (robosuite lacks UMIGripper),
 # which aborts the whole run unless ignored. testpaths = tests, so the ROS tests are not collected.
 ~/venvs/tpgpt/bin/python -m pytest tests/ -q --ignore=tests/integration/test_gripper_actuation.py
 # Just the hardware bridge (fast, ~10 s, and what most changes touch)
 ~/venvs/tpgpt/bin/python -m pytest tests/unit/test_hardware.py tests/unit/test_end_effector.py \
     tests/unit/test_grasp_selection.py tests/integration/test_hardware_grasp_selection.py \
-    tests/unit/test_fr3.py tests/unit/test_shelf.py tests/unit/test_path_check.py -q
+    tests/unit/test_fr3.py tests/unit/test_shelf.py tests/unit/test_path_check.py \
+    tests/unit/test_franka_regression.py tests/unit/test_inspire_model.py \
+    tests/unit/test_inspire_mount.py tests/unit/test_grasp_test.py -q
 ```
 `test_hardware_grasp_selection.py` needs a running GraspGen-X server and skips without one.
 `test_fr3.py` checks FK against 40 at-rest samples of the real arm (`tests/data/`).
+`test_franka_regression.py` pins the Franka Hand's grasp screening as it was before the Inspire
+hand changed shared code (2026-10-04): if it fails, a Franka-path change was not intended.
 
 **Offline ROS dry runs** go on another domain so nothing reaches the robot (`ROS_DOMAIN_ID=88`,
 without `host_ros_env.sh`), with fake `/ycb_pointclouds/<obj>`, `/ycb_scene_cloud` and
@@ -644,7 +648,8 @@ The planner's support height is: its `support_height` parameter, else the calibr
 - `docs/hardware/HARDWARE_EXPERIMENT.md` + `docs/hardware/HANDOVER_PROMPT.md` — the X6 experiment
   brief and its rules (one demonstration, no per-hand tuning, never force a grasp rank, clean tree).
 - `x6_experiment/RUNNING_THE_EXPERIMENT.md` — operating the X6 harness.
-- `ycb_pointcloud_pipeline/INSPIRE_HAND.md` — the Inspire RH56 hand: mounting, side grasp, caveats.
+- `ycb_pointcloud_pipeline/INSPIRE_HAND.md` — the Inspire RH56DFX-2R (a right hand): GraspGen-X
+  grasps on a model of the hand, the mount, the measurements M0-M9, grasp tests, transport.
 - `docs/hardware/hardware_integration.md` — the operating manual of the bridge: frames, verifying the
   cloud, **teaching a demonstration (keys, order, refusals)**, planning, execution.
 - `docs/hardware/HOW_EXECUTION_WORKS.md` — execution in plain words: the run step by step, the
@@ -652,7 +657,34 @@ The planner's support height is: its `support_height` parameter, else the calibr
 - `docs/sim/dynamics_execution.md` — why the executor's law and gates are what they are.
 - `docs/sim/SIM_CLAUDE.md` — the simulation's own guide (reference, not instructions).
 
-## Current state (2026-09-26)
+## Current state (2026-10-04): the Inspire hand
+
+- **The Franka Hand runs are done; the Inspire RH56DFX-2R is mounted** -- a **right** hand (the
+  2026-09-15 notes said left: wrong). Plan: `~/.claude/plans/this-repo-is-executing-calm-trinket.md`;
+  run guide `ycb_pointcloud_pipeline/INSPIRE_HAND.md`; deviations `FAITHFULNESS_AUDIT.md` section D.
+- **The scripted side grasp is gone.** The Inspire hand takes GraspGen-X's `inspire_hand` grasps,
+  judged on a model of the hand from GraspGen-X's own URDF (`tpgpt/hardware/inspire_model.py`:
+  26-DOP per link, the URDF's palm boxes, the adapter) by `grasp_selection.judge_hand`; the plan
+  records where its fingers stop (`hand_closed_q`). An asymmetric hand keeps the generator's grasp:
+  the demonstrating jaw takes the half turn instead (`plan.metrics["roll"]`, audit D3).
+- **Not measured yet** (all in `config/inspire_hand.yaml`, `measured: false`): the mount (yaw -45,
+  adapter 12 mm: estimates; `inspire_touch` + `python -m tpgpt.hardware.inspire_mount fit`), the
+  register map (the manual's ranges solved on the URDF; the real hand closes further than the
+  URDF's limits), the grasp depth (`calibrated_depth_m` 0), the close mode and per-object force
+  (`grasp_forces.yaml` `inspire_grasp`), Desk's payload. **Nothing has run on the robot.**
+- **Grasp-only tests come first**: `-p task:=grasp_test` (`tpgpt/hardware/grasp_test.py`), with
+  `grasp_test_constructed`, `grasp_test_library_index` and `grasp_test_depth_offset` for the frame
+  check and the depth sweep. Dry-run tested offline end to end (`scripts/fake_scene.py`).
+- **Coverage, first numbers** (estimated mount, shipped description, 10-03 captures): about half
+  of the Inspire grasps approach from below; the table kills most of the rest -- **every banana
+  grasp** (the open/closed hand reaches 15/26 mm below a top-down grasp point) and 838 of 930 for
+  the foam brick; reach kills the transport (10 planned per slot: apple 1/0, mug 0/3, the others
+  0/0, top_left/top_right). A lift refinement like the jaw's is the user's call, after the depth
+  sweep.
+- **Fixed in the Franka path too**: the executor read the object's name from `plan.metrics`, so the
+  per-object grip force (8cfb576) would never have applied (no run used it yet).
+
+## State (2026-09-26)
 
 - **All five objects plan live into all three slots** (2026-09-26, 16:42-17:38; plans in
   `~/tpgpt_plans/*_20260926_16*`/`_17*`): banana, apple, mug, pudding box (on its long side),
