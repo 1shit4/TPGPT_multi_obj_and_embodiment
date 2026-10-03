@@ -4,10 +4,11 @@ This is ``tpgpt.experiments.pipeline.run``'s grasp choice -- ``filter_grasps``
 followed by ``_choose_grasp`` -- on a measured cloud, a measured shelf and the
 real arm. Three steps:
 
-1. **Generate.** GraspGen-X samples 6-DoF grasps for the Franka Hand
-   (``franka_panda``, the same hand: identical pad geometry and 0.1034 m
-   fingertip depth, see :mod:`tpgpt.hardware.hand`), each with its
-   discriminator score.
+1. **Generate.** GraspGen-X samples 6-DoF grasps for the hand on the flange,
+   each with its discriminator score: ``franka_panda`` for the Franka Hand (the
+   same hand: identical pad geometry and 0.1034 m fingertip depth, see
+   :mod:`tpgpt.hardware.hand`), ``inspire_hand`` for the Inspire RH56DFX-2R (the
+   same right hand, :mod:`tpgpt.hardware.inspire_model`; 0.15 m).
 2. **Screen** (:func:`screen_candidates`), cheapest first, every rejection
    named. Two kinds of stage, and the difference is deliberate:
 
@@ -15,7 +16,11 @@ real arm. Three steps:
      ``max_tilt_deg`` from straight down -- ``filters.by_support_approach``'s
      rule); the jaws, :func:`tpgpt.hardware.hand.check_jaws`, after
      :func:`refine_grasp` (``too_wide``, ``collides``, ``empty``, ``shallow``);
-     ``hits_support``; ``duplicate``. These were built on real one-camera
+     ``hits_support``; ``duplicate``. A modelled hand has its own hard stage
+     instead of the jaws, ``hand`` (:func:`judge_hand`: ``hits_support``,
+     ``collides``, ``lands_on_object``, ``empty``, ``no_opposition``), and
+     ``duplicate`` keeps a grasp and its half turn apart when the hand is not
+     symmetric. The jaw stages were built on real one-camera
      clouds, where GraspGen-X stops short of the object (its training meshes
      are complete): measured on the real banana and a rendered partial cup,
      the pads engaged a median 2-3 mm before refinement against 11 mm on a
@@ -67,11 +72,16 @@ from dataclasses import dataclass, field, replace
 import numpy as np
 
 from tpgpt.hardware import hand
+from tpgpt.hardware.end_effector import FRANKA_HAND
 from tpgpt.hardware.planner import Plan, PlanningError, TargetScene, default_grasp, plan
 from tpgpt.sim.keypoints import GraspFrame
 
-#: GraspGen-X gripper model of the FR3's Franka Hand.
+#: GraspGen-X gripper model of the FR3's Franka Hand (``EndEffector.graspgen`` names
+#: each hand's).
 GRASPGEN_GRIPPER = "franka_panda"
+#: A modelled hand's grasp must have this many object points in its sweep boxes
+#: (the jaw's ``hand.MIN_POINTS_BETWEEN``).
+MIN_POINTS_IN_POCKET = 8
 
 
 @dataclass
@@ -164,6 +174,9 @@ class Candidate:
     grasp: GraspFrame
     tilt_deg: float
     jaw: hand.JawCheck | None = None
+    #: A modelled hand's verdict (:func:`judge_hand`): points in its pocket, where its
+    #: fingers stop, which touch the object.
+    hand: dict | None = None
     support_clearance: float = float("nan")
     rejected: str | None = None     # reason, or None while still admissible
     plan_metrics: dict | None = None
@@ -183,6 +196,7 @@ class Candidate:
             "jaw_width_m": self.jaw.width if self.jaw else None,
             "jaw_points": self.jaw.n_between if self.jaw else None,
             "jaw_engagement_m": self.jaw.engagement if self.jaw else None,
+            "hand": self.hand,
             "support_clearance_m": self.support_clearance,
             "refined_depth_m": self.refined_depth,
             "refined_centre_m": self.refined_centre,
@@ -198,7 +212,7 @@ class Selection:
     plan: Plan
     chosen: Candidate
     candidates: list[Candidate]
-    source: str                     # "graspgenx", "top_down" or "side"
+    source: str                     # "graspgenx" or "top_down"
     notes: list[str] = field(default_factory=list)
     #: The screening funnel: ``[name, entered, survived, fell_back]`` per stage.
     stages: list = field(default_factory=list)
@@ -214,20 +228,23 @@ class Selection:
 
     def describe(self) -> str:
         c = self.chosen
+        tally = ", ".join(f"{k} {v}" for k, v in sorted(self.rejection_counts().items()))
+        tail = f"; {len(self.candidates)} candidates: {tally}" if self.candidates else ""
+        if c.jaw is None and c.hand is not None:
+            touching = ", ".join(k for k, v in c.hand["contact"].items() if v) or "nothing"
+            return (f"grasp from {self.source}: score {c.score:.3f}, tilt {c.tilt_deg:.0f} deg "
+                    f"from vertical, {c.hand['points_in_pocket']} pts in the pocket, the "
+                    f"fingers stop on {touching}, the hand "
+                    f"{c.support_clearance * 1000:.0f} mm above the table" + tail)
         if c.jaw is None:
-            side = self.plan.metadata.get("side_grasp", {})
-            return (f"grasp from {self.source}: palm point {np.round(c.grasp.tcp, 3).tolist()}, "
-                    f"approach {np.round(c.grasp.approach, 2).tolist()}, object radius "
-                    f"{side.get('radius_m', float('nan')) * 1000:.0f} mm, "
-                    f"{side.get('grasp_height_above_support_m', float('nan')) * 1000:.0f} mm "
-                    "above the support")
+            return (f"grasp from {self.source}: grasp point {np.round(c.grasp.tcp, 3).tolist()}, "
+                    f"approach {np.round(c.grasp.approach, 2).tolist()}" + tail)
         head = (f"grasp from {self.source}: score {c.score:.3f}, tilt {c.tilt_deg:.0f} deg from "
                 f"vertical, jaw width {c.jaw.width * 1000:.0f} mm ({c.jaw.n_between} pts between "
                 f"pads, {c.jaw.engagement * 1000:.0f} mm of pad engaged), refined "
                 f"{c.refined_depth * 1000:.0f} mm deeper / {c.refined_centre * 1000:+.0f} mm "
                 f"to centre")
-        tally = ", ".join(f"{k} {v}" for k, v in sorted(self.rejection_counts().items()))
-        return head + (f"; {len(self.candidates)} candidates: {tally}" if self.candidates else "")
+        return head + tail
 
 
 def rejection_counts(candidates: list[Candidate]) -> dict:
@@ -387,15 +404,94 @@ def horizontal_centre(points: np.ndarray) -> np.ndarray:
     return np.array([centre_xy[0], centre_xy[1], z])
 
 
-def _as_grasp6d(c: Candidate, tcp_depth: float):
-    """A candidate as the simulation's ``Grasp6D`` (a pose at the gripper base)."""
+def _as_grasp6d(c: Candidate, tcp_depth: float, ee=FRANKA_HAND):
+    """A candidate as the simulation's ``Grasp6D``: a pose at the gripper base **as the
+    hand will be executed** -- for a modelled hand ``calibrated_depth`` deeper than
+    GraspGen-X put it, so the funnel's held point and hand sample sit where the real
+    hand will."""
     from tpgpt.grasp.grasps import Grasp6D
 
     pose = np.eye(4)
     pose[:3, :3] = c.grasp.rotation
-    pose[:3, 3] = c.grasp.tcp - c.grasp.approach * float(tcp_depth)
+    pose[:3, 3] = c.grasp.tcp - c.grasp.approach * (float(tcp_depth) - ee.calibrated_depth)
     return Grasp6D(pose=pose, score=float(c.score) if np.isfinite(c.score) else 0.0,
-                   gripper=GRASPGEN_GRIPPER, width=hand.MAX_OPENING)
+                   gripper=ee.graspgen,
+                   width=hand.MAX_OPENING if ee.is_parallel_jaw else 0.0)
+
+
+def funnel_pair(ee=FRANKA_HAND):
+    """The simulation's gripper pair the funnel stages use for this hand.
+
+    The Franka Hand: the registry's ``panda`` (unchanged). A modelled hand: an
+    **unregistered** pair of its GraspGen-X description -- not the registry's
+    ``inspire``, which is robosuite's ``InspireRightHand`` with that model's measured
+    grip-site frame (-80 deg, 131 mm off the axis). Unregistered, its alignment is
+    the identity and its contact offset zero, so the funnel's held point is
+    GraspGen-X's own grasp point, and its hand sample is the description's
+    ``points.json`` -- this hand, in GraspGen-X's frame.
+    """
+    from tpgpt.grasp.grippers import GripperPair, resolve_pair
+
+    if ee.is_parallel_jaw:
+        return resolve_pair("panda")
+    return GripperPair(f"hardware_{ee.name}", ee.graspgen, (), closing_angle=0.0)
+
+
+def judge_hand(points: np.ndarray, grasp: GraspFrame, support_height: float, ee,
+               min_support_clearance: float = 0.003) -> tuple[str | None, dict]:
+    """A modelled hand's physical verdict on one grasp, cheapest test first.
+
+    * ``hits_support`` -- the open hand, or the hand at any point of its close
+      onto the object, comes within ``min_support_clearance`` of the support;
+    * ``collides`` -- a body piece (wrist, palm, knuckles, thumb base, adapter) holds
+      :data:`~tpgpt.hardware.inspire_model.CONTACT_POINTS` points
+      :data:`~tpgpt.hardware.inspire_model.CONTACT_DEPTH` deep;
+    * ``lands_on_object`` -- an open finger does, before it has closed at all;
+    * ``empty`` -- fewer than :data:`MIN_POINTS_IN_POCKET` points in the
+      description's sweep boxes, the volume between thumb and fingers;
+    * ``no_opposition`` -- closing each finger onto the points
+      (:meth:`~tpgpt.hardware.inspire_model.InspireHandModel.closed_onto`), the
+      thumb and at least one finger do not both reach the object.
+
+    Returns ``(reason or None, record)``.
+    """
+    from tpgpt.hardware.inspire_model import CONTACT_DEPTH, CONTACT_POINTS
+
+    model = ee.model
+    R, t = grasp.rotation, grasp.tcp
+    local = (np.atleast_2d(np.asarray(points, dtype=float)) - t) @ R
+    record: dict = {}
+    open_low = ee.lowest_point(t, R, "open") - float(support_height)
+    record["open_clearance_m"] = open_low
+    if open_low < min_support_clearance:
+        return f"hits_support: the open hand {open_low * 1000:.0f} mm above the table", record
+    hits = [b.name for b in ee.boxes("open")
+            if b.name.startswith("body") and int(b.contains(local, -CONTACT_DEPTH).sum())
+            >= CONTACT_POINTS]
+    if hits:
+        return f"collides: {', '.join(hits)} in the object", record
+    landed = [b.name for b in model.pieces("open", chains=("thumb", "index", "middle", "ring",
+                                                             "pinky"))
+              if int(b.contains(local, -CONTACT_DEPTH).sum()) >= CONTACT_POINTS]
+    if landed:
+        return f"lands_on_object: the open {', '.join(landed)} in the object", record
+    in_pocket = np.zeros(len(local), dtype=bool)
+    for lo, hi in model.sweep_boxes():
+        in_pocket |= np.all((local >= lo) & (local <= hi), axis=1)
+    record["points_in_pocket"] = int(in_pocket.sum())
+    if record["points_in_pocket"] < MIN_POINTS_IN_POCKET:
+        return f"empty: {record['points_in_pocket']} points between thumb and fingers", record
+    closed = model.closed_onto(local)
+    record.update(closed.as_dict())
+    if not closed.opposed:
+        touching = ", ".join(k for k, v in closed.contact.items() if v) or "nothing"
+        return f"no_opposition: closing, the hand reaches only {touching}", record
+    low = min(ee.lowest_point(t, R, model.open_q + f * (closed.q - model.open_q))
+              for f in (0.25, 0.5, 0.75, 1.0)) - float(support_height)
+    record["closing_clearance_m"] = low
+    if low < min_support_clearance:
+        return f"hits_support: closing, the hand {low * 1000:.0f} mm above the table", record
+    return None, record
 
 
 def _soft_stage(stages: list, alive: list, name: str, checks: str, keep) -> list:
@@ -413,7 +509,8 @@ def _soft_stage(stages: list, alive: list, name: str, checks: str, keep) -> list
     return survivors
 
 
-def _release_positions(alive: list, points: np.ndarray, support: float, ctx: ScreenContext):
+def _release_positions(alive: list, points: np.ndarray, support: float, ctx: ScreenContext,
+                       ee=FRANKA_HAND):
     """Where each candidate's fingertip point is when the object is set down.
 
     The object is rigid in the hand from the close, so the grasp point keeps
@@ -428,7 +525,10 @@ def _release_positions(alive: list, points: np.ndarray, support: float, ctx: Scr
          else np.asarray(ctx.carry_rotation, dtype=float).reshape(3, 3))
     dest = np.array([float(ctx.destination[0]), float(ctx.destination[1]),
                      float(ctx.destination_height)])
-    return np.array([dest + R @ (c.grasp.tcp - base) for c in alive])
+    # The funnel places the hand from these by GraspGen-X's depth; a modelled hand runs
+    # calibrated_depth deeper (_as_grasp6d), so its release point is that much further on.
+    return np.array([dest + R @ (c.grasp.tcp - base + c.grasp.approach * ee.calibrated_depth)
+                     for c in alive])
 
 
 def screen_candidates(
@@ -437,10 +537,15 @@ def screen_candidates(
     scores: np.ndarray,
     support_height: float,
     settings: SelectionSettings | None = None,
-    tcp_depth: float = hand.TCP_OFFSET,
+    tcp_depth: float | None = None,
     context: ScreenContext | None = None,
+    end_effector=None,
 ) -> Screened:
     """Judge every generated grasp before any is planned.
+
+    ``end_effector``: the hand on the flange (default the Franka Hand). It decides the
+    grasp-point depth (``tcp_depth`` default: the hand's description's), the funnel's
+    gripper (:func:`funnel_pair`) and the hard stage -- the jaws, or :func:`judge_hand`.
 
     Returns every candidate, best score first; admissible ones have
     ``rejected is None``. ``.stages`` tallies each stage. Stage order: the
@@ -451,6 +556,9 @@ def screen_candidates(
     """
     s = settings or SelectionSettings()
     ctx = context or ScreenContext()
+    ee = end_effector or FRANKA_HAND
+    if tcp_depth is None:
+        tcp_depth = ee.fingertip_depth
     points = np.atleast_2d(np.asarray(points, dtype=float))
     poses = np.asarray(poses, dtype=float).reshape(-1, 4, 4)
     scores = np.asarray(scores, dtype=float).reshape(-1)
@@ -474,12 +582,11 @@ def screen_candidates(
                               or s.check_place_zone or s.check_centred)
     if need_filters:
         from tpgpt.grasp import filters
-        from tpgpt.grasp.grippers import resolve_pair
 
-        pair = resolve_pair("panda")
+        pair = funnel_pair(ee)
 
     def g6(group):
-        return [_as_grasp6d(c, tcp_depth) for c in group], np.arange(len(group))
+        return [_as_grasp6d(c, tcp_depth, ee) for c in group], np.arange(len(group))
 
     # --- visibility (soft) -----------------------------------------------------
     if alive and s.check_visibility and ctx.camera_position is not None:
@@ -497,9 +604,22 @@ def screen_candidates(
                             f"the held point is more than {filters.MAX_TARGET_DISTANCE * 100:.0f} "
                             "cm from the cloud", keep)
 
+    # --- a modelled hand and the table (hard) --------------------------------------
+    if not ee.is_parallel_jaw:
+        entered, passed = len(alive), []
+        for c in alive:
+            c.rejected, c.hand = judge_hand(points, c.grasp, support_height, ee,
+                                            s.min_support_clearance)
+            c.support_clearance = float(c.hand.get("closing_clearance_m",
+                                                   c.hand.get("open_clearance_m", np.nan)))
+            if c.rejected is None:
+                passed.append(c)
+        alive = passed
+        stages.append(["hand", entered, len(alive), False])
+
     # --- the jaws and the table (hard) ------------------------------------------
     entered, passed = len(alive), []
-    for c in alive:
+    for c in (alive if ee.is_parallel_jaw else ()):
         if s.refine:
             c.grasp, c.refined_depth, c.refined_centre = refine_grasp(points, c.grasp,
                                                                       support_height, s)
@@ -515,8 +635,9 @@ def screen_candidates(
             c.rejected = f"hits_support: hand {c.support_clearance * 1000:.0f} mm above the table"
             continue
         passed.append(c)
-    alive = passed
-    stages.append(["jaws", entered, len(alive), False])
+    if ee.is_parallel_jaw:
+        alive = passed
+        stages.append(["jaws", entered, len(alive), False])
 
     world = ctx.world
     # --- collision with the shelf, at the grasp and along its approach (soft) ----
@@ -534,7 +655,7 @@ def screen_candidates(
             and ctx.destination is not None and ctx.destination_height is not None):
         grasps, idx = g6(alive)
         keep, blocked = filters.by_place_approach(
-            grasps, idx, None, pair, _release_positions(alive, points, support_height, ctx),
+            grasps, idx, None, pair, _release_positions(alive, points, support_height, ctx, ee),
             obstacles=list(world.model.boxes), carry_rotation=ctx.carry_rotation)
         tally = ", ".join(f"{k} {v}" for k, v in sorted(blocked.items()))
         alive = _soft_stage(stages, alive, "place_zone",
@@ -550,13 +671,15 @@ def screen_candidates(
                             "cloud's box centre", keep)
 
     # --- distinct (hard) --------------------------------------------------------
+    # A half turn about the approach is the same grasp only for a symmetric hand.
     entered, kept = len(alive), []
     cos_dup = np.cos(np.radians(s.duplicate_angle_deg))
+    same_roll = (lambda d: abs(d)) if ee.symmetric else (lambda d: d)
     for c in alive:
         grasp = c.grasp
         if any(np.linalg.norm(grasp.tcp - k.grasp.tcp) < s.duplicate_position
                and float(grasp.approach @ k.grasp.approach) > cos_dup
-               and abs(float(grasp.closing @ k.grasp.closing)) > cos_dup for k in kept):
+               and same_roll(float(grasp.closing @ k.grasp.closing)) > cos_dup for k in kept):
             c.rejected = "duplicate"
             continue
         kept.append(c)
@@ -668,7 +791,7 @@ def select_and_plan(
     poses: np.ndarray | None,
     scores: np.ndarray | None,
     settings: SelectionSettings | None = None,
-    tcp_depth: float = hand.TCP_OFFSET,
+    tcp_depth: float | None = None,
     unavailable_reason: str | None = None,
     context: ScreenContext | None = None,
     path: PathContext | None = None,
@@ -690,7 +813,9 @@ def select_and_plan(
         context: Inputs of the screening funnel's stages.
         path: The shelf world, the hand and the measured joint angles for the
             whole-path check. ``None`` checks kinematics only, from home, and
-            says so in the notes.
+            says so in the notes. Its ``end_effector`` (else ``plan_kwargs``'s,
+            else the Franka Hand) is the hand everything is judged for: the
+            screening, :func:`~tpgpt.hardware.planner.plan` and the path check.
         plan_kwargs: Forwarded to :func:`tpgpt.hardware.planner.plan`.
 
     Raises:
@@ -700,6 +825,9 @@ def select_and_plan(
     s = settings or SelectionSettings()
     ctx = context or ScreenContext()
     pc = path or PathContext()
+    ee = pc.end_effector or plan_kwargs.get("end_effector") or FRANKA_HAND
+    pc = replace(pc, end_effector=ee)
+    plan_kwargs["end_effector"] = ee
     points = np.atleast_2d(np.asarray(scene.points, dtype=float))
     support = (float(scene.support_height) if scene.support_height is not None
                else float(np.percentile(points[:, 2], 1.0)))
@@ -721,7 +849,7 @@ def select_and_plan(
 
     fallback = None
     if poses is not None and len(poses):
-        candidates = screen_candidates(points, poses, scores, support, s, tcp_depth, ctx)
+        candidates = screen_candidates(points, poses, scores, support, s, tcp_depth, ctx, ee)
         stages = candidates.stages
         admissible = [c for c in candidates if c.rejected is None]
         limit = max(int(s.max_plans), 0)
@@ -752,7 +880,10 @@ def select_and_plan(
 
     tally = rejection_counts(candidates)
     top_down = None
-    if s.fallback_top_down:
+    if s.fallback_top_down and not ee.is_parallel_jaw:
+        notes.append(f"no top-down fallback for the {ee.name} hand: the scripted grasp is a "
+                     "parallel jaw's")
+    elif s.fallback_top_down:
         grasp = default_grasp(points, support, plan_kwargs.get("grasp_depth_below_top", 0.03))
         top_down = Candidate(index=-1, score=float("nan"), grasp=grasp,
                              tilt_deg=_tilt_deg(grasp.approach),
@@ -775,65 +906,6 @@ def select_and_plan(
     raise error
 
 
-def plan_side_grasp(
-    source,
-    scene: TargetScene,
-    end_effector,
-    settings: SelectionSettings | None = None,
-    side_settings=None,
-    path: PathContext | None = None,
-    **plan_kwargs,
-) -> Selection:
-    """Plan the scripted side grasp for a wrapping hand; no generator, one candidate.
-
-    The grasp comes from :func:`tpgpt.hardware.side_grasp.side_grasp` on the
-    cloud, then goes through the same :func:`plan`, the same acceptance checks
-    and the same whole-path check as a GraspGen-X candidate, with this hand's
-    envelope as the hand. ``grasp_offset`` is applied as for every other grasp.
-
-    Raises:
-        PlanningError: the side grasp could not be placed or its plan was refused.
-    """
-    from tpgpt.hardware.side_grasp import side_grasp
-
-    s = settings or SelectionSettings()
-    pc = replace(path or PathContext(), end_effector=end_effector)
-    points = np.atleast_2d(np.asarray(scene.points, dtype=float))
-    support = (float(scene.support_height) if scene.support_height is not None
-               else float(np.percentile(points[:, 2], 1.0)))
-    try:
-        grasp, info = side_grasp(points, support, end_effector.handedness or "left", side_settings)
-    except ValueError as exc:
-        error = PlanningError(f"no_executable_grasp: side grasp: {exc}")
-        error.candidates, error.fallback, error.stages = [], None, []
-        raise error from exc
-    candidate = Candidate(index=-1, score=float("nan"), grasp=grasp,
-                          tilt_deg=_tilt_deg(grasp.approach))
-    candidate.support_clearance = end_effector.lowest_point(grasp.tcp, grasp.rotation) - support
-    kwargs = {k: v for k, v in plan_kwargs.items() if k != "grasp_depth_below_top"}
-    kwargs["end_effector"] = end_effector
-    result = _try_plan(source, scene, candidate, s, kwargs)
-    notes = list(info.notes)
-    fell_back = False
-    if result is not None and s.check_path:
-        reason, kinematic_only = _path_verdict(result, candidate, s, pc)
-        if reason is not None and kinematic_only and s.allow_kinematic_fallback:
-            notes.append(f"the side grasp clears the shelf but the arm reaches only "
-                         f"{candidate.path_check['reachable_fraction'] * 100:.0f} % of its path")
-            fell_back = True
-        elif reason is not None:
-            candidate.rejected = reason
-            result = None
-    if result is None:
-        error = PlanningError(f"no_executable_grasp: the side grasp was rejected: "
-                              f"{candidate.rejected}")
-        error.candidates, error.fallback, error.stages = [], candidate, []
-        raise error
-    result.metadata["side_grasp"] = info.as_dict()
-    return Selection(result, candidate, [], "side", notes, rank_examined=1, fell_back=fell_back,
-                     world=pc.world.to_dict() if pc.world is not None else None)
-
-
 __all__ = [
     "GRASPGEN_GRIPPER",
     "Candidate",
@@ -842,8 +914,9 @@ __all__ = [
     "Screened",
     "Selection",
     "SelectionSettings",
+    "funnel_pair",
     "horizontal_centre",
-    "plan_side_grasp",
+    "judge_hand",
     "pose_to_grasp_frame",
     "refine_grasp",
     "request_candidates",

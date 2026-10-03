@@ -470,8 +470,8 @@ class InspireHandModel:
         return values
 
     def link_poses(self, q) -> dict:
-        """``link -> T_G<-link`` (4x4) for driven angles ``q``."""
-        values = self.joint_values(q)
+        """``link -> T_G<-link`` (4x4) for driven angles ``q`` (or ``"open"``/``"close"``)."""
+        values = self.joint_values(self._resolve(q))
         T = {self.description.world_link: np.eye(4)}
         T[self.description.world_link][2, 3] = -float(self.tool_depth)
         for j in self.description.joints:

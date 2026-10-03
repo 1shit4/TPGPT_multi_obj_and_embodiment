@@ -298,8 +298,9 @@ class Trial:
             # The trial captures its own n_frames (outcome.capture_timeout_s) and feeds them
             # in; the planner must not wait for more on a subscription it is not spinning.
             'frames_wait': 0.0,
-            'graspgen_gripper': str(self.hand.get('graspgen_gripper') or 'franka_panda'),
-            # Hand on the flange. inspire: scripted side grasp, GraspGen-X is never called.
+            # '' = the hand's own GraspGen-X description (the planner refuses another's).
+            'graspgen_gripper': str(self.hand.get('graspgen_gripper') or ''),
+            # Hand on the flange: panda or inspire, both GraspGen-X.
             'end_effector': str(self.hand.get('end_effector', self.hand_name)),
             'end_effector_config': xc.expand(self.hand['end_effector_config'])
             if self.hand.get('end_effector_config') else '',

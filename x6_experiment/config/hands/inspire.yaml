@@ -1,35 +1,34 @@
 # Inspire RH56DFX-2R (a RIGHT hand: user, 2026-10-04) on the FR3. The physical description of
-# the hand only. Being reworked for GraspGen-X grasps (2026-10-04): the side-grasp notes below
-# are the 2026-09-15 integration's.
-# Integrated 2026-09-15 (code; not yet run on the robot). Fields marked MEASURE are
-# estimates until someone takes a caliper to the mounted hand -- fill them in BEFORE
-# this hand's first trial, then never change them.
+# the hand only. Reworked 2026-10-04 for GraspGen-X grasps; not yet run on the robot. Fields
+# marked TO_FILL are measured on the mounted hand (plan M1-M5) and copied here BEFORE this
+# hand's first trial, then never changed. The numbers the planner uses are the ones in
+# end_effector_config (inspire_hand.yaml); these record them for the paper.
 #
 # How this hand differs from the Franka Hand in the pipeline (INSPIRE_HAND.md):
-#   * no GraspGen-X: the planner uses the scripted SIDE grasp for an upright round
-#     object (palm first, radial from the robot base), tpgpt.hardware.side_grasp;
-#   * the plan's grasp point is the PALM point, not a fingertip centre; the offset
-#     from fr3_hand_tcp comes from the mount block of end_effector_config and is
-#     recorded in every plan (metadata.end_effector);
-#   * the fingers are one fixed open/close through inspire_hand_node (Trigger services),
-#     each finger stopping on its force threshold.
+#   * GraspGen-X grasps for its own description (inspire_hand, the same right hand), judged
+#     on a model of the hand (tpgpt.hardware.inspire_model) instead of the jaw checks;
+#   * the plan's grasp point is GraspGen-X's for this hand (between thumb and fingers), its
+#     offset from fr3_hand_tcp composed from the mount in end_effector_config and recorded in
+#     every plan (metadata.end_effector);
+#   * the fingers close through inspire_hand_node (Trigger services), each stopping on its
+#     force threshold, and the close reports what each touched.
 hand:
   name: inspire
   integrated: true
   end_effector: inspire                         # tpgpt_planner_node end_effector parameter
   end_effector_config: ~/thor_ws/src/ycb_point_cloud/TPGPT_multi_obj_and_embodiment/ycb_pointcloud_pipeline/config/inspire_hand.yaml
   morphology: five_finger_right                 # 6 DOF, 12 joints; thumb opposed for the grasp
-  graspgen_gripper: null                        # not used: side grasp
-  geometry_model: tpgpt.hardware.end_effector.inspire_end_effector   # envelope box + palm frame
+  graspgen_gripper: inspire_hand                # = end_effector_config graspgenx.gripper
+  geometry_model: tpgpt.hardware.inspire_model.InspireHandModel   # 26-DOP per link + palm boxes
   ee_frame: fr3_hand_tcp                        # controller frame (virtual; robot launched unchanged)
   grasp_to_ee_rotation: tpgpt.hardware.end_effector.EndEffector.grasp_to_ee (from the mount)
-  tool_offset: [0.0, 0.0, 0.0]                  # executor correction ADDED to the plan's palm offset
+  tool_offset: [0.0, 0.0, 0.0]                  # executor correction ADDED to the plan's offset
 
-  measured:                                     # caliper, not datasheet
-    adapter_thickness_mm: TO_FILL               # flange face -> hand mounting face
-    palm_along_axis_mm: TO_FILL                 # hand mounting face -> palm centre
-    palm_normal_offset_mm: TO_FILL              # hand axis -> palm surface
-    mount_yaw_deg: -45                          # palm faces fr3_hand_tcp +X (user, 2026-09-15)
+  measured:                                     # caliper and robot touches, not datasheet
+    adapter_thickness_mm: TO_FILL               # flange face -> the hand's wrist face (M2/M3)
+    lateral_mm: TO_FILL                         # wrist face centre off the flange axis (M3)
+    mount_yaw_deg: TO_FILL                      # palm normal = Rz(yaw) fr3_link8 +X (M1/M3)
+    calibrated_depth_mm: TO_FILL                # grasp-depth correction (M6)
     measured_by: TO_FILL
     measured_on: TO_FILL
 
@@ -42,9 +41,9 @@ hand:
     mode: inspire                               # tpgpt_executor_node gripper_mode
     namespace: /inspire_hand                    # inspire_hand_node services ~/open, ~/close
     open_command: /inspire_hand/open            # fingers straight, then thumb opposed
-    close_command: /inspire_hand/close          # fingers wrap, then thumb bends; stop on force
+    close_command: /inspire_hand/close          # close_mode; each DOF stops on force
     timeout_s: 20.0
-    state_topic: /inspire_hand/joint_states     # position = closure 0..1 per DOF
+    state_topic: /inspire_hand/joint_states     # URDF joints, rad; effort = grams
     width_topic: null                           # no jaw width; x6 gripper_width stays empty
 
   mount_check:

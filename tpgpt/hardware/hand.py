@@ -88,6 +88,10 @@ class HandBox:
         signs = np.array([[x, y, z] for x in (-1, 1) for y in (-1, 1) for z in (-1, 1)])
         return self.centre + (signs * self.half) @ self.rotation.T
 
+    def edges(self) -> list:
+        """Index pairs into :meth:`corners` of the box's 12 edges, for drawing."""
+        return [(i, j) for i in range(8) for j in range(i + 1, 8) if bin(i ^ j).count("1") == 1]
+
 
 def hand_boxes(opening: float = MAX_OPENING) -> list[HandBox]:
     """The hand's collision boxes with the fingers ``opening`` apart, grasp frame.

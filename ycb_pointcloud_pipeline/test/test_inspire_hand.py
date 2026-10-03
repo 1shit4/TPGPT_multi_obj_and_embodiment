@@ -174,9 +174,13 @@ def test_config_builds_the_mount():
     assert cfg["handedness"] == "right"
     assert cfg["serial"]["hand_id"] == 2
     ee_mod = pytest.importorskip("tpgpt.hardware.end_effector")
-    ee = ee_mod.inspire_from_config(cfg)
+    try:
+        ee = ee_mod.inspire_from_config(cfg)
+    except FileNotFoundError as exc:                       # no GraspGen-X checkout
+        pytest.skip(str(exc))
     assert ee.controller_frame == "fr3_hand_tcp"
-    assert not ee.is_parallel_jaw
+    assert ee.kind == "multi_finger" and ee.graspgen == "inspire_hand"
+    assert not ee.model_spec["mount_measured"]             # until M1-M3
 
 
 # --------------------------------------------------------------------------- close

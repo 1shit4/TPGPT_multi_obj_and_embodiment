@@ -182,9 +182,11 @@ class _Piece:
     radius: float
 
 
-def robot_pieces(fr3: FR3, q, end_effector, opening: float) -> tuple[list[_Piece], np.ndarray]:
-    """Every robot piece at configuration ``q``: the arm's hulls and the hand's boxes.
+def robot_pieces(fr3: FR3, q, end_effector, opening) -> tuple[list[_Piece], np.ndarray]:
+    """Every robot piece at configuration ``q``: the arm's hulls and the hand's pieces.
 
+    ``opening`` is the hand's state, as :meth:`EndEffector.boxes` takes it: an opening
+    in metres for the Franka Hand, ``"open"`` or six joint angles for a modelled hand.
     Returns ``(pieces, T_tcp)``.
     """
     poses = fr3.link_poses(q)
@@ -396,11 +398,11 @@ POSE_ITERATIONS = 100
 def _is_finger(name: str) -> bool:
     """Pieces allowed to touch the object at the pick, the place and early in the retreat.
 
-    The Franka Hand's finger boxes. A hand described by one envelope (the
-    Inspire hand) cannot tell its fingers from its palm, and its side grasp holds
-    the object inside that envelope, so the envelope counts as fingers.
+    Every hand piece except the body: the Franka Hand's finger boxes (its body box
+    is ``hand_body``); the Inspire hand's finger links (its wrist, palm, knuckles,
+    thumb base and adapter are ``hand_body_*``).
     """
-    return name.startswith("hand_") and name != "hand_body"
+    return name.startswith("hand_") and not name.startswith("hand_body")
 
 
 def path_feasibility(
@@ -417,6 +419,7 @@ def path_feasibility(
     start_tcp: np.ndarray | None = None,
     fr3: FR3 | None = None,
     stride: int = STRIDE,
+    closed_state=None,
     tolerance: float = REACH_TOLERANCE,
     depth_tolerance: float = CONTACT_DEPTH_TOLERANCE,
     contact_radius: float = CLOUD_CONTACT_RADIUS,
@@ -541,7 +544,14 @@ def path_feasibility(
         ``decided_early`` and ``unrefined`` (postures checked where the solver
         stopped, not at the waypoint).
     """
-    from tpgpt.hardware.hand import MAX_OPENING
+    # The hand open, and closed on the object: the Franka Hand's jaws at ``closed_width``;
+    # a modelled hand at ``closed_state`` (its fingers stopped on the object, the plan's
+    # ``hand_closed_q``), else fully closed.
+    open_state = end_effector.open_state
+    if end_effector.is_parallel_jaw:
+        closed = float(closed_width)
+    else:
+        closed = "close" if closed_state is None else np.asarray(closed_state, dtype=float)
 
     if criterion not in ("strict", "sim"):
         raise ValueError(f"criterion must be 'strict' or 'sim', not {criterion!r}")
@@ -653,7 +663,7 @@ def path_feasibility(
                     continue
                 result = position_only
             seed = result.qpos
-            pieces, T = robot_pieces(fr3, seed, end_effector, MAX_OPENING)
+            pieces, T = robot_pieces(fr3, seed, end_effector, open_state)
             for key, count in _robot_faults(pieces, world, "approach_in", depth_tolerance,
                                             check_self, gap[0], swing[0], grasp_point(T),
                                             None if table_gap is None else table_gap[0]).items():
@@ -694,8 +704,7 @@ def path_feasibility(
     def check_posture(k, q, stage, point, R_ee, tag=""):
         nonlocal lifted, fingers_cleared, clear_by_margin
         hits: dict = {}
-        opening = closed_width if gripper[k] > 0 else MAX_OPENING
-        pieces, T = robot_pieces(fr3, q, end_effector, opening)
+        pieces, T = robot_pieces(fr3, q, end_effector, closed if gripper[k] > 0 else open_state)
         label = stage + tag
         for key, count in _robot_faults(pieces, world, label, depth_tolerance, check_self,
                                         gap[k], swing[k], grasp_point(T),
@@ -986,7 +995,8 @@ def check_plan(plan, world, end_effector, start_q=None, start_tcp=None, fr3: FR3
         path.positions, path.orientations, path.gripper, end_effector,
         world, plan.target_points, int(m["grasp_index"]), int(m["release_index"]),
         closed_width=float(m.get("object_width_closing_m", 0.0)), start_q=start_q,
-        start_tcp=start_tcp, fr3=fr3, stop_early=stop_early, **kwargs)
+        start_tcp=start_tcp, fr3=fr3, stop_early=stop_early,
+        closed_state=None if end_effector.is_parallel_jaw else m.get("hand_closed_q"), **kwargs)
 
 
 def verdict(check: dict, min_reachable_fraction: float = MIN_REACHABLE_FRACTION) -> str | None:

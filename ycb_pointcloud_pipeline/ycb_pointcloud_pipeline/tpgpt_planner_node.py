@@ -40,18 +40,16 @@ Published (latched / transient-local, fixed frame `base`):
                                saved as <plan>/overlay.png. The cloud is drawn in its real
                                colours on /tpgpt/plan/target_cloud.
 
-Inspire hand (end_effector:=inspire): no GraspGen-X. The grasp is the scripted SIDE
-grasp for an upright round object (tpgpt.hardware.side_grasp): a circle fitted to the
-cloud gives the object's axis, the palm approaches horizontally and radially from the
-robot base, and stops `side_grasp.standoff_m` in front of the surface at
-`side_grasp.height_fraction` of the object's height. Mount geometry and those settings
-come from config/inspire_hand.yaml (end_effector_config); the plan records them in
-metadata['end_effector'], which is where the executor reads the palm offset from.
+Inspire RH56DFX-2R (end_effector:=inspire): GraspGen-X grasps for its own description
+(config graspgenx.gripper, `inspire_hand`; graspgen_gripper follows the hand), judged on
+a model of the hand (tpgpt.hardware.inspire_model) mounted as config/inspire_hand.yaml
+says (end_effector_config). The plan records the hand in metadata['end_effector'],
+which is where the executor reads the grasp point's offset from.
 
     ros2 run --prefix python3 ycb_pointcloud_pipeline tpgpt_planner_node --ros-args \
-        -p end_effector:=inspire -p object_name:=tomato_soup_can -p destination:="[0.55, 0.25, 0.02]"
+        -p end_effector:=inspire -p object_name:=apple -p destination_name:=top_left
 
-Uses the GraspGen-X server (grasp_source:=graspgenx, the default) for the Franka Hand. If it is not
+Uses the GraspGen-X server (grasp_source:=graspgenx, the default). If it is not
 running, the node starts it on the GPU (graspgen_autostart:=true, ~5 s). By hand:
     ~/thor_ws/src/ycb_point_cloud/TPGPT_multi_obj_and_embodiment/ycb_pointcloud_pipeline/scripts/run_graspgenx_server.sh --daemon
 
@@ -83,8 +81,9 @@ from ycb_pointcloud_pipeline import camera_calibration as cc
 from ycb_pointcloud_pipeline.camera_tf_publisher import default_calibration_yaml
 from ycb_pointcloud_pipeline.ros_utils import (
     CalibrationProvider, axes_markers, box_marker, colors_for, cylinder_marker, fuse_clouds,
-    gripper_segments, line_list_marker, line_strip_marker, matrix_to_pose_stamped,
-    pointcloud2_to_xyzrgb, sphere_list_marker, text_marker, xyz_to_pointcloud2,
+    gripper_segments, hand_axis_segments, line_list_marker, line_strip_marker,
+    matrix_to_pose_stamped, piece_segments, pointcloud2_to_xyzrgb, sphere_list_marker,
+    text_marker, xyz_to_pointcloud2,
 )
 
 NAN = float('nan')
@@ -146,14 +145,16 @@ class TpgptPlannerNode(Node):
         d('destination_height', NAN)              # surface height there; NaN -> destination z
         d('grasp_depth_below_top', 0.03)          # top-down fallback grasp only
         # Grasp selection
-        # Hand on the flange: panda (Franka Hand, GraspGen-X / top-down) | inspire (side grasp)
+        # Hand on the flange: panda (Franka Hand) | inspire (Inspire RH56DFX-2R); both GraspGen-X
         d('end_effector', 'panda')
         d('end_effector_config', '')              # '' -> installed config/inspire_hand.yaml
-        d('grasp_source', 'graspgenx')            # graspgenx | top_down (panda); side is implied by inspire
+        d('grasp_source', 'graspgenx')            # graspgenx | top_down (panda only)
         d('top_down_grasp', False)                # true: scripted top-down grasp only, GraspGen-X never called
         d('graspgen_host', '127.0.0.1')
         d('graspgen_port', 5556)
-        d('graspgen_gripper', 'franka_panda')     # GraspGen-X model of the Franka Hand
+        # GraspGen-X description: '' = the hand's own (franka_panda; the Inspire config's
+        # graspgenx.gripper). Set it only to the same name: another hand's grasps are refused.
+        d('graspgen_gripper', '')
         d('graspgen_planner', 'diffusion')        # diffusion | graspmoe
         # GraspGen-X is a diffusion sampler: every call returns a different set, so the
         # number asked for decides how reliable planning is, not just how good the best
@@ -240,11 +241,22 @@ class TpgptPlannerNode(Node):
         d('camera_info_topic', '/camera/camera/color/camera_info')
 
         p = lambda n: self.get_parameter(n).value  # noqa: E731
-        self.end_effector, self.side_settings, self.side_offset = load_end_effector(
-            p('end_effector'), p('end_effector_config'))
+        self.end_effector = load_end_effector(p('end_effector'), p('end_effector_config'))
+        if p('graspgen_gripper') and p('graspgen_gripper') != self.end_effector.graspgen:
+            raise SystemExit(f"graspgen_gripper {p('graspgen_gripper')!r} is not the "
+                             f"{self.end_effector.name} hand's description "
+                             f"({self.end_effector.graspgen!r}): its grasps would be another "
+                             "hand's")
+        self.gripper = self.end_effector.graspgen
         self.get_logger().info(f'Hand on the flange: {self.end_effector.name} '
-                               f'(controller frame {self.end_effector.controller_frame}, grasp point '
+                               f'(GraspGen-X {self.gripper}, controller frame '
+                               f'{self.end_effector.controller_frame}, grasp point '
                                f'{[round(v * 1000, 1) for v in self.end_effector.tool_offset]} mm)')
+        if not self.end_effector.is_parallel_jaw and not self.end_effector.model_spec.get(
+                'mount_measured'):
+            self.get_logger().warning('the Inspire mount in end_effector_config is NOT measured '
+                                      '(mount.measured: false): plans put the hand where the '
+                                      'estimated mount says')
         from tpgpt.hardware.source_bundle import SourceBundle
         self.source = SourceBundle.load(p('source_bundle_dir'))
         self.get_logger().info(f"Source bundle {p('source_bundle_dir')}: "
@@ -526,11 +538,7 @@ class TpgptPlannerNode(Node):
             support_height=self._support_height(points),
         )
         t0 = time.monotonic()
-        side = not self.end_effector.is_parallel_jaw
-        if side:
-            poses, scores, unavailable = None, None, f'{self.end_effector.name} uses the side grasp'
-        else:
-            poses, scores, unavailable = self._grasp_candidates(points)
+        poses, scores, unavailable = self._grasp_candidates(points)
         info['timing_s']['grasp_generation'] = time.monotonic() - t0
         info.update({'poses': poses, 'scores': scores, 'unavailable': unavailable,
                      'scene': scene})
@@ -540,10 +548,7 @@ class TpgptPlannerNode(Node):
             min_determinant=float(p('min_determinant')),
             min_path_clearance=float(p('grasp_min_path_clearance')),
             fallback_top_down=bool(p('grasp_fallback_top_down')) or bool(p('top_down_grasp')),
-            # grasp_offset was tuned on the Franka Hand's grasps; the side grasp has its
-            # own (config side_grasp.grasp_offset_m, default zero).
-            grasp_offset=(tuple(float(v) for v in self.side_offset) if side else
-                          tuple(float(v) for v in p('grasp_offset'))),
+            grasp_offset=tuple(float(v) for v in p('grasp_offset')),
             check_path=bool(p('check_path')),
             min_reachable_fraction=float(p('min_reachable_fraction')),
             kinematic_criterion=str(p('kinematic_criterion')),
@@ -590,15 +595,10 @@ class TpgptPlannerNode(Node):
         info['world'] = world.to_dict()
         t_sel = time.monotonic()
         try:
-            if side:
-                from tpgpt.hardware.grasp_selection import plan_side_grasp
-                selection = plan_side_grasp(self.source, scene, self.end_effector, settings,
-                                            self.side_settings, path=path_ctx)
-            else:
-                selection = select_and_plan(
-                    self.source, scene, poses, scores, settings, unavailable_reason=unavailable,
-                    context=context, path=path_ctx,
-                    grasp_depth_below_top=float(p('grasp_depth_below_top')))
+            selection = select_and_plan(
+                self.source, scene, poses, scores, settings, unavailable_reason=unavailable,
+                context=context, path=path_ctx,
+                grasp_depth_below_top=float(p('grasp_depth_below_top')))
         except PlanningError as exc:
             info['timing_s']['selection_total'] = time.monotonic() - t_sel
             info['error'] = str(exc)
@@ -657,8 +657,7 @@ class TpgptPlannerNode(Node):
                                       and not self.shelf_model.measured),
             'joint_states_at_plan': None if joints is None else joints.tolist(),
             'allow_missing_joint_states': bool(p('allow_missing_joint_states')),
-            'end_effector_config': (self.end_effector.details.get('config_file')
-                                    if side else None),
+            'end_effector_config': self.end_effector.details.get('config_file'),
             'graspgen': {n: self.get_parameter(n).value for n in (
                 'graspgen_gripper', 'graspgen_planner', 'graspgen_num_grasps', 'graspgen_topk',
                 'grasp_max_tilt_deg', 'grasp_max_plans', 'grasp_min_path_clearance',
@@ -693,7 +692,7 @@ class TpgptPlannerNode(Node):
             self.latest_colors = self._fused_colors
             self.latest_overlay = overlay
         m = result.metrics
-        grasp_text = (f'{selection.describe()}' if side else
+        grasp_text = (f'{selection.describe()}' if not self.end_effector.is_parallel_jaw else
                       f'grasp {selection.source} (score {selection.chosen.score:.3f}, tilt '
                       f'{m["grasp_tilt_deg"]:.0f} deg, {m["jaw_points_between_pads"]} pts between pads)')
         text = (f'Plan saved to {out} [{self.end_effector.name}]: {grasp_text}, '
@@ -880,7 +879,7 @@ class TpgptPlannerNode(Node):
         try:
             poses, scores = request_candidates(
                 points, host=p('graspgen_host'), port=int(p('graspgen_port')),
-                gripper=p('graspgen_gripper'), num_grasps=int(p('graspgen_num_grasps')),
+                gripper=self.gripper, num_grasps=int(p('graspgen_num_grasps')),
                 topk=int(p('graspgen_topk')), planner=p('graspgen_planner'),
                 timeout_ms=int(float(p('graspgen_timeout')) * 1000))
         except GraspGenUnavailable as exc:
@@ -901,7 +900,7 @@ class TpgptPlannerNode(Node):
         p = lambda n: self.get_parameter(n).value  # noqa: E731
         log = self.get_logger()
         fit = self.object_fit
-        size, gripper = int(p('grasp_library_size')), p('graspgen_gripper')
+        size, gripper = int(p('grasp_library_size')), self.gripper
         try:
             from tpgpt.hardware.grasp_library import cached, library, placed
             on_disk = cached(fit.name, gripper=gripper, size=size, planner=p('graspgen_planner'))
@@ -1096,12 +1095,10 @@ class TpgptPlannerNode(Node):
             if not ok.all():
                 continue
             c2 = c2.astype(int)
-            for i in range(8):
-                for j in range(i + 1, 8):
-                    if bin(i ^ j).count('1') == 1:
-                        cv2.line(img, tuple(c2[i]), tuple(c2[j]),
-                                 (255, 0, 255) if box.name != 'body' else (200, 0, 200), 1,
-                                 cv2.LINE_AA)
+            body = box.name == 'body' or box.name.startswith('body_')
+            for i, j in box.edges():
+                cv2.line(img, tuple(c2[i]), tuple(c2[j]),
+                         (200, 0, 200) if body else (255, 0, 255), 1, cv2.LINE_AA)
         tcp_uv, ok = project(g.tcp)
         if ok[0]:
             cv2.drawMarker(img, tuple(tcp_uv[0].astype(int)), (0, 0, 255), cv2.MARKER_CROSS, 16, 2)
@@ -1142,21 +1139,26 @@ class TpgptPlannerNode(Node):
         limit = int(self.get_parameter('grasp_markers_max').value)
         others = [c for c in selection.candidates if c is not chosen][:max(limit, 0)]
         refused, screened = [], []
+        ee = self.end_effector
+        # The Franka Hand: a jaw wireframe each. A modelled hand: an approach stem and a
+        # thumb-side tick for the candidates, the hand's own pieces (open) for the chosen one.
+        outline = (gripper_segments if ee.is_parallel_jaw else hand_axis_segments)
         for c in others:
-            segs = gripper_segments(c.grasp.tcp, c.grasp.approach, c.grasp.closing)
+            segs = outline(c.grasp.tcp, c.grasp.approach, c.grasp.closing)
             (refused if c.plan_metrics is not None else screened).append(segs)
+        chosen_segs = (outline(chosen.grasp.tcp, chosen.grasp.approach, chosen.grasp.closing)
+                       if ee.is_parallel_jaw else
+                       piece_segments(ee.boxes('open'), chosen.grasp.rotation, chosen.grasp.tcp))
         markers = []
         for mid, (segs, color, width) in enumerate((
                 (screened, (1.0, 0.2, 0.2, 0.25), 0.001),
                 (refused, (1.0, 0.6, 0.0, 0.9), 0.002),
-                ([gripper_segments(chosen.grasp.tcp, chosen.grasp.approach, chosen.grasp.closing)],
-                 (0.1, 1.0, 0.2, 1.0), 0.004))):
+                ([chosen_segs], (0.1, 1.0, 0.2, 1.0), 0.002 if not ee.is_parallel_jaw else 0.004))):
             m = line_list_marker('grasp_candidates', mid,
                                  np.concatenate(segs) if segs else np.zeros((0, 2, 3)),
                                  self.base, stamp, color=color, width=width)
             markers.append(m)
         label = (f"{selection.source} score {chosen.score:.2f}" if selection.source == 'graspgenx'
-                 else 'side grasp (palm point)' if selection.source == 'side'
                  else 'top-down fallback')
         markers.append(text_marker('grasp_candidates', 3, chosen.grasp.tcp - chosen.grasp.approach * 0.12,
                                    label, self.base, stamp, color=(0.1, 1.0, 0.2)))
@@ -1164,33 +1166,20 @@ class TpgptPlannerNode(Node):
 
 
 def load_end_effector(name, config_file=''):
-    """(EndEffector, SideGraspSettings or None, side grasp offset) for `end_effector`."""
+    """The EndEffector for `end_effector`: the Franka Hand, or the Inspire hand from
+    config/inspire_hand.yaml (its mount, GraspGen-X description and joint map)."""
     from tpgpt.hardware.end_effector import FRANKA_HAND, inspire_from_config
     name = str(name).strip().lower()
     if name in ('panda', 'franka', 'franka_hand'):
-        return FRANKA_HAND, None, (0.0, 0.0, 0.0)
+        return FRANKA_HAND
     if name != 'inspire':
         raise SystemExit(f"end_effector must be 'panda' or 'inspire', not {name!r}")
     import dataclasses
 
-    from tpgpt.hardware.side_grasp import SideGraspSettings
-
     from ycb_pointcloud_pipeline.inspire_hand import load_config
     cfg = load_config(config_file or None)
     ee = inspire_from_config(cfg)
-    ee = dataclasses.replace(ee, details={**ee.details, 'config_file': cfg['_path']})
-    sg = cfg.get('side_grasp', {})
-    defaults = SideGraspSettings()
-    side = SideGraspSettings(
-        standoff=float(sg.get('standoff_m', defaults.standoff)),
-        height_fraction=float(sg.get('height_fraction', defaults.height_fraction)),
-        min_height_above_support=float(sg.get('min_height_above_support_m',
-                                              defaults.min_height_above_support)),
-        max_below_top=float(sg.get('max_below_top_m', defaults.max_below_top)),
-        thumb_up=bool(sg.get('thumb_up', defaults.thumb_up)),
-        base_xy=tuple(float(v) for v in sg.get('base_xy', defaults.base_xy)),
-    )
-    return ee, side, tuple(float(v) for v in sg.get('grasp_offset_m', (0.0, 0.0, 0.0)))
+    return dataclasses.replace(ee, details={**ee.details, 'config_file': cfg['_path']})
 
 
 def default_config_path(name):

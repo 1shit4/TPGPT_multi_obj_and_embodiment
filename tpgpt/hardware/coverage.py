@@ -32,7 +32,7 @@ import numpy as np
 
 def coverage(object_name, object_pose, world, source, destination, destination_height,
              support_height, camera_position, start_q, end_effector, settings=None,
-             plan_budget: int = 40, gripper: str = "franka_panda", library_size=None,
+             plan_budget: int = 40, gripper: str | None = None, library_size=None,
              cloud=None, poses=None, scores=None, clearance=None):
     """Walk an object's whole grasp library against one destination.
 
@@ -44,6 +44,10 @@ def coverage(object_name, object_pose, world, source, destination, destination_h
         plan_budget: how many screened survivors are planned and path-checked,
             in score order. The screening is cheap and covers the library; the
             path check is ~1 s each, so this bounds the run.
+        end_effector: the hand judged (the Franka Hand, or the Inspire's
+            :func:`~tpgpt.hardware.end_effector.inspire_from_config`).
+        gripper: the GraspGen-X library to walk; ``None`` = the hand's own
+            description (``end_effector.graspgen``).
         cloud, poses, scores: the object's points (base frame) and the grasps to
             walk, already placed. Given, they replace the scan and its library --
             for a capture whose fit was refused, where the planner works from the
@@ -67,6 +71,7 @@ def coverage(object_name, object_pose, world, source, destination, destination_h
         model = ObjectModel.load(object_name)
         points, _ = model.sample(FULL_CLOUD_POINTS, 1)
         cloud = points @ np.asarray(rotation).T + np.asarray(position)
+    gripper = gripper or end_effector.graspgen
     if poses is None:
         poses, scores = library(object_name, gripper=gripper,
                                 **({} if library_size is None else {"size": int(library_size)}))
@@ -80,7 +85,8 @@ def coverage(object_name, object_pose, world, source, destination, destination_h
                             destination=np.asarray(destination)[:2],
                             destination_height=float(destination_height),
                             carry_rotation=carry_transform(source.demonstration_labels)[0])
-    screened = screen_candidates(cloud, poses, scores, float(support_height), s, context=context)
+    screened = screen_candidates(cloud, poses, scores, float(support_height), s, context=context,
+                                 end_effector=end_effector)
     survivors = [c for c in screened if c.rejected is None]      # Screened is a list of candidates
 
     scene = TargetScene(points=cloud, destination=np.asarray(destination, dtype=float),
@@ -94,7 +100,7 @@ def coverage(object_name, object_pose, world, source, destination, destination_h
         # The selection's own plan-and-verify, so that a candidate counted here is
         # one `select_and_plan` would have taken -- the transport map, its
         # determinant, the aim at the grasp, the workspace box and the clearances.
-        result = _try_plan(source, scene, candidate, s, {})
+        result = _try_plan(source, scene, candidate, s, {"end_effector": end_effector})
         if result is None:
             reasons[str(candidate.rejected).split(":")[0]] += 1
             continue
@@ -120,6 +126,8 @@ def coverage(object_name, object_pose, world, source, destination, destination_h
             faults.update({group(fault) for fault in (report.get("faults") or {})})
     return {
         "object": object_name,
+        "hand": end_effector.name,
+        "gripper": gripper,
         "library": len(poses),
         "stages": screened.stages,
         "screened_survivors": len(survivors),
@@ -239,17 +247,25 @@ def main(argv=None):
         "~/thor_ws/install/ycb_pointcloud_pipeline/share/ycb_pointcloud_pipeline/config"),
         help="where shelf.yaml and camera_calibration.yaml are read (the installed copy, "
              "which is what the planner reads)")
+    ap.add_argument("--hand", choices=["panda", "inspire"], default="panda",
+                    help="the hand judged; inspire reads --hand-config")
+    ap.add_argument("--hand-config", default=None,
+                    help="inspire_hand.yaml (default: the one in --config-dir)")
     ap.add_argument("--json", default=None, help="write the full reports here")
     a = ap.parse_args(argv)
 
     from tpgpt.hardware import shelf as shelf_mod
-    from tpgpt.hardware.end_effector import FRANKA_HAND
+    from tpgpt.hardware.end_effector import FRANKA_HAND, inspire_from_config
     from tpgpt.hardware.fr3 import HOME_Q
     from tpgpt.hardware.grasp_selection import SelectionSettings
     from tpgpt.hardware.object_model import FULL_CLOUD_POINTS, ObjectModel, _rot_z, fit_object
     from tpgpt.hardware.shelf import ShelfModel, ShelfWorld
     from tpgpt.hardware.source_bundle import SourceBundle
 
+    hand = FRANKA_HAND
+    if a.hand == "inspire":
+        hand = inspire_from_config(yaml.safe_load(open(os.path.expanduser(
+            a.hand_config or os.path.join(a.config_dir, "inspire_hand.yaml")))))
     cfg = yaml.safe_load(open(os.path.join(a.config_dir, "shelf.yaml")))
     cal = yaml.safe_load(open(os.path.join(a.config_dir, "camera_calibration.yaml")))
     table = float(cfg["shelf"]["anchors"]["table"])
@@ -293,6 +309,8 @@ def main(argv=None):
     print(f"{name}: {how}")
     print(f"  scene {os.path.basename(capture)}: {len(obstacles)} obstacle points, "
           f"table {table:+.4f}")
+    print(f"  hand {hand.name} (GraspGen-X {hand.graspgen}, tool offset "
+          f"{np.round(hand.tool_offset * 1000, 1).tolist()} mm)")
     print(f"  demo {a.demo}, library {a.size}, plan budget {a.budget}, clearance "
           f"{'none' if a.clearance is None else f'{a.clearance * 1000:.0f} mm'}", flush=True)
     out = {}
@@ -301,7 +319,7 @@ def main(argv=None):
         t0 = time.monotonic()
         start = HOME_Q if a.start_q is None else np.asarray(a.start_q, dtype=float)
         report = coverage(name, (rotation, position), world, source, xyz, xyz[2], table, camera,
-                          start, FRANKA_HAND, settings=settings, plan_budget=a.budget,
+                          start, hand, settings=settings, plan_budget=a.budget,
                           library_size=a.size, clearance=a.clearance)
         print(f"--- {slot} [{xyz[0]:.3f}, {xyz[1]:.3f}, {xyz[2]:.3f}]  "
               f"({time.monotonic() - t0:.0f} s)")

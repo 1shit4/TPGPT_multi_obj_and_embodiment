@@ -537,8 +537,10 @@ def robot_mask(points: np.ndarray, q, fr3, end_effector=None, opening: float = 0
     """Which observed points are the robot itself, at joint configuration ``q``.
 
     ``perception.obstacles.self_filtered`` for the real arm: each link's hull and
-    the hand's boxes, grown by ``margin``. It must be the configuration the cloud
-    was captured in.
+    the hand's pieces, grown by ``margin``. It must be the configuration the cloud
+    was captured in. The Franka Hand is taken at ``opening``; a modelled hand (the
+    Inspire), whose fingers' state at capture is not known here, at every state from
+    open to closed (five along the way), so a half-curled finger is erased too.
     """
     points = np.atleast_2d(np.asarray(points, dtype=float))
     hit = np.zeros(len(points), dtype=bool)
@@ -554,8 +556,15 @@ def robot_mask(points: np.ndarray, q, fr3, end_effector=None, opening: float = 0
         g_R = end_effector.grasp_from_ee(T[:3, :3])
         g_p = T[:3, 3] + T[:3, :3] @ end_effector.tool_offset
         local = (points - g_p) @ g_R
-        for box in end_effector.boxes(opening):
-            hit |= box.contains(local, margin=abs(margin))
+        if end_effector.is_parallel_jaw:
+            states = [opening]
+        else:
+            model = end_effector.model
+            states = [model.open_q + f * (model.close_q - model.open_q)
+                      for f in (0.0, 0.25, 0.5, 0.75, 1.0)]
+        for state in states:
+            for box in end_effector.boxes(state):
+                hit |= box.contains(local, margin=abs(margin))
     return hit
 
 

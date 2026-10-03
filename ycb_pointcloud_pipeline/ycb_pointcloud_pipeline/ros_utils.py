@@ -206,6 +206,24 @@ def gripper_segments(tcp, approach, closing, opening=0.08, finger=0.045, stem=0.
                      [tcp - c * 0.004, tcp + c * 0.004]])
 
 
+def piece_segments(pieces, R, p):
+    """Wireframe of a hand's pieces (``corners()`` and ``edges()``, grasp frame) placed at
+    rotation ``R`` and position ``p``: ``(n, 2, 3)`` segments in the base frame."""
+    out = []
+    for piece in pieces:
+        corners = np.asarray(piece.corners()) @ np.asarray(R).T + np.asarray(p)
+        out.extend([corners[i], corners[j]] for i, j in piece.edges())
+    return np.asarray(out, dtype=float).reshape(-1, 2, 3)
+
+
+def hand_axis_segments(tcp, approach, closing, stem=0.10, tick=0.04):
+    """A multi-finger hand's grasp, for many candidates at once: the approach as a stem
+    back from the grasp point, and the closing direction (towards the thumb) as a tick.
+    (2, 2, 3)."""
+    tcp, a, c = (np.asarray(v, dtype=float) for v in (tcp, approach, closing))
+    return np.array([[tcp, tcp - a * stem], [tcp, tcp + c * tick]])
+
+
 def text_marker(ns, mid, position, text, frame_id, stamp, height=0.025, color=(1, 1, 1)):
     m = _marker(ns, mid, Marker.TEXT_VIEW_FACING, frame_id, stamp)
     m.pose.position = _pt(position)

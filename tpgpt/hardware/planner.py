@@ -17,9 +17,23 @@ with the simulated perception replaced by a measured cloud:
    for the Franka Hand).
 
 The Franka Hand's jaw-width and collision checks apply only to a parallel jaw.
-For the Inspire hand the grasp is a scripted side grasp
-(:mod:`tpgpt.hardware.side_grasp`), and the hand is judged by its envelope box
-against the table and the destination along the path.
+A modelled hand (the Inspire RH56DFX-2R, :mod:`tpgpt.hardware.inspire_model`) takes
+its grasp from GraspGen-X like the jaw; the plan records where its fingers stop on
+the object (``hand_closed_q``), which is its carried state in the path check.
+
+**The roll of an asymmetric hand** (plan of 2026-10-04, user). The sim's
+``scene_keypoints`` turns the target grasp a half turn about its approach when its
+closing axis opposes the demonstration's -- the same grip for a parallel jaw. For the
+Inspire hand that is a different grasp, one GraspGen-X never proposed (thumb and
+fingers swapped, the wrist on the far side). The turn is taken instead on the side
+where it means nothing: the demonstrating Franka jaw, whose closing sign is only a
+convention (``frames.GRASP_TO_FR3_TCP`` already differs from GraspGen-X's own Panda
+frame by it). Describing the whole demonstration -- every label, pick and place
+alike -- with its jaw frame turned (``R J``, ``J = diag(-1, -1, 1)``) pairs the same
+keypoints, so the map, ``min det`` and every transported position are the sim's,
+and the transported orientations are the sim's times ``J``: the Inspire hand runs
+the generator's grasp. The object, rigid in the hand, moves identically
+(``H(t) J (H(g) J)^-1 = H(t) H(g)^-1``).
 
 Nothing here knows about ROS or cameras. The cloud must already be in the robot
 **base** frame, and that transform is the single most important input: every
@@ -304,8 +318,8 @@ def plan(
     )
     ee = end_effector or FRANKA_HAND
     if scene.grasp is None and not ee.is_parallel_jaw:
-        raise PlanningError(f"no_grasp: the {ee.name} hand needs an explicit grasp "
-                            "(tpgpt.hardware.side_grasp); the top-down default is a parallel jaw's")
+        raise PlanningError(f"no_grasp: the {ee.name} hand needs an explicit grasp (GraspGen-X's, "
+                            "through grasp_selection); the top-down default is a parallel jaw's")
     grasp = scene.grasp or default_grasp(points, support_height, grasp_depth_below_top)
 
     jaw = None
@@ -338,13 +352,27 @@ def plan(
         destination_height=float(scene.destination_height),
     )
     tool_labels = source.tool_labels
+    # The roll (module docstring): an asymmetric target hand executes its own grasp. With
+    # a symmetric source the half turn goes to the source's jaw after the keypoints; with
+    # an asymmetric one too, no turn is taken at all and the map's own gate decides.
+    source_symmetric = _source_symmetric(source)
+    keep_target_roll = not ee.symmetric and not source_symmetric
+    flip_target = keep_target_roll and float(
+        np.asarray(grasp.closing) @ np.asarray(source.placement.grasp.closing)) < 0.0
     # What the object did is read off the labels at the grasp and the release; for learned
     # labels those lead the hand, so the taught ones say it (SourceBundle.demonstration_labels).
     source_set, target_set, diagnostics = scene_keypoints(
         source.placement, target, source.demonstration_labels,
         include_contacts=False, box=box, orientation=orientation,
-        cube_half_extent=cube_half_extent,
+        cube_half_extent=cube_half_extent, flip_target=flip_target,
     )
+    rolled = bool(diagnostics["target_grasp_rolled"])
+    jaw_turned = rolled and not ee.symmetric and source_symmetric
+
+    def unrolled(rotations):
+        """Grasp-convention orientations of the demonstration with its jaw turned."""
+        R = np.asarray(rotations, dtype=float)
+        return R @ JAW_TURN if jaw_turned else R
     if source_set.is_degenerate() or target_set.is_degenerate():
         raise PlanningError(
             f"keypoints_degenerate: {len(source_set)} keypoints do not span three dimensions"
@@ -360,7 +388,7 @@ def plan(
         )
 
     transported = transport_labels(transport_map, tool_labels)
-    grasp_orientations = transported.orientations
+    grasp_orientations = unrolled(transported.orientations)
     transported = transported.replace(orientations=ee.ee_from_grasp(grasp_orientations))
     # Learned labels (audit B1, step 6): the labels are an attractor that leads the arm, so they
     # are not where the arm goes. The path the arm traced when they were learned, carried by the
@@ -378,18 +406,23 @@ def plan(
             positions=np.asarray(source.arm_path["positions"], dtype=float),
             orientations=np.asarray(source.arm_path["rotations"], dtype=float),
             gripper=tool_labels.gripper))
-        grasp_orientations = arm.orientations
-        arm = arm.replace(orientations=ee.ee_from_grasp(arm.orientations))
+        grasp_orientations = unrolled(arm.orientations)
+        arm = arm.replace(orientations=ee.ee_from_grasp(grasp_orientations))
         # Where the hand should be when the jaws act: the taught path, carried by the same map.
         gi, ri = carry_indices(tool_labels)
         taught = transport_labels(transport_map, source.demonstration_labels)
         marks = {"positions": np.asarray(taught.positions)[[gi, ri]],
-                 "orientations": ee.ee_from_grasp(np.asarray(taught.orientations)[[gi, ri]])}
+                 "orientations": ee.ee_from_grasp(unrolled(
+                     np.asarray(taught.orientations)[[gi, ri]]))}
     geometry = arm if arm is not None else transported
 
     # --- geometric checks -----------------------------------------------------
     executed = diagnostics["target_grasp"]
     place_grasp = diagnostics["target_place_grasp"]
+    if jaw_turned:
+        executed, place_grasp = _turned(executed), _turned(place_grasp)
+    # A modelled hand: where its fingers stop on the object, from the executed grasp.
+    closed = None if ee.is_parallel_jaw else ee.closed_state(points, executed)
     grasp_index, release_index = carry_indices(tool_labels)
     aim_grasp = float(np.linalg.norm(geometry.positions[grasp_index] - executed.tcp))
     aim_release = float(np.linalg.norm(geometry.positions[release_index] - place_grasp.tcp))
@@ -404,10 +437,10 @@ def plan(
     # plus the hand around it; beyond that the hand is past the board (docstring).
     horizontal = np.linalg.norm(points[:, :2] - np.median(points[:, :2], axis=0), axis=1).max()
     clearance_pick, clearance_place = _hand_clearance(
-        geometry, grasp_index, release_index, width, support_height,
-        float(target.destination_height), ee,
+        geometry, grasp_index, release_index, width if closed is None else closed.q,
+        support_height, float(target.destination_height), ee,
         destination_xy=target.destination[:2],
-        footprint_radius=float(horizontal) + PLACE_FOOTPRINT_MARGIN,
+        footprint_radius=float(horizontal) + ee.footprint_margin,
     )
     metrics = {
         "n_cloud_points": int(len(points)),
@@ -433,7 +466,16 @@ def plan(
         "orientation_error_release_deg": orient_release,
         "grasp_index": int(grasp_index),
         "release_index": int(release_index),
-        "target_grasp_rolled": bool(diagnostics["target_grasp_rolled"]),
+        "target_grasp_rolled": rolled,
+        # which half turn the plan took (module docstring): "target" (the sim's, a
+        # symmetric target), "source_jaw_turned" (an asymmetric target keeps its grasp),
+        # or "none"
+        "roll": ("source_jaw_turned" if jaw_turned else "target" if rolled else "none"),
+        # a modelled hand: its fingers stopped on the object (DOF order, rad), which
+        # touch it, and whether the thumb opposes a finger
+        "hand_closed_q": None if closed is None else closed.q.tolist(),
+        "hand_contacts_predicted": None if closed is None else closed.contact,
+        "hand_opposed_predicted": None if closed is None else bool(closed.opposed),
         "path_min_xyz": path.min(axis=0).tolist(),
         "path_max_xyz": path.max(axis=0).tolist(),
         "path_min_height_above_support_m": float(path[:, 2].min() - support_height),
@@ -463,8 +505,9 @@ def plan(
             "control_freq": int(source.metadata.get("control_freq", 20)),
             "frame": "base",
             "position_reference": ("fingertip centre (grasp point)" if ee.is_parallel_jaw
-                                   else "palm grasp point (end_effector.tool_offset from the "
-                                        "controller frame)"),
+                                   else "the hand's grasp point: GraspGen-X's fingertip depth "
+                                        "less calibrated_depth (end_effector.tool_offset from "
+                                        "the controller frame)"),
             "orientation_convention": ee.controller_frame,
             "grasp_to_fr3_tcp": ee.grasp_to_ee.tolist(),
             "end_effector": ee.to_dict(),
@@ -486,8 +529,24 @@ def plan(
     )
 
 
+def _source_symmetric(source) -> bool:
+    """Whether the demonstrating hand is symmetric under a half turn about its approach:
+    a parallel jaw (every demonstration so far, the Franka Hand)."""
+    ee = (source.metadata or {}).get("end_effector") or {}
+    return ee.get("kind", "parallel_jaw") == "parallel_jaw"
+
+
+#: The half turn about the approach, in the grasp convention.
+JAW_TURN = np.diag([-1.0, -1.0, 1.0])
+
+
+def _turned(grasp: GraspFrame) -> GraspFrame:
+    """``grasp`` half-turned about its approach (``R J``)."""
+    return GraspFrame(tcp=grasp.tcp, approach=grasp.approach, closing=-np.asarray(grasp.closing))
+
+
 def _hand_clearance(labels: PolicyLabels, grasp_index: int, release_index: int,
-                    closed_width: float, support_height: float,
+                    closed_width, support_height: float,
                     destination_height: float,
                     end_effector: EndEffector | None = None,
                     destination_xy: np.ndarray | None = None,
@@ -495,9 +554,10 @@ def _hand_clearance(labels: PolicyLabels, grasp_index: int, release_index: int,
     """Lowest corner of the hand along the path, above the surface **under it**.
 
     Labels up to the grasp are measured against the support, labels from the
-    release on against the destination surface. A Franka Hand is open where the
-    labels are open and closed to the measured jaw width where they are closed;
-    an Inspire hand is its fixed envelope box. Negative means the hand dips
+    release on against the destination surface. The hand is open where the labels
+    are open and closed where they are closed: the Franka Hand to the measured jaw
+    width (``closed_width``, m), a modelled hand to its fingers stopped on the object
+    (``closed_width`` is then its six joint angles). Negative means the hand dips
     below that surface.
 
     The support is a table and effectively unbounded, so the pick side is every
@@ -518,7 +578,7 @@ def _hand_clearance(labels: PolicyLabels, grasp_index: int, release_index: int,
 
     def lowest(indices):
         return min(ee.lowest_point(labels.positions[k], rotations[k],
-                                   closed_width if labels.gripper[k] > 0 else MAX_OPENING)
+                                   closed_width if labels.gripper[k] > 0 else ee.open_state)
                    for k in indices)
 
     place_labels = range(release_index, len(labels.positions))

@@ -147,8 +147,6 @@ def candidates_document(selection, raw_poses, raw_scores):
         'wrist_convention_frame': (f"{ee.controller_frame if ee else 'fr3_hand_tcp'} (commanded "
                                    'end-effector frame)'),
         'end_effector': ee.name if ee else None,
-        'side_grasp': (getattr(selection, 'plan').metadata.get('side_grasp')
-                       if selection is not None and selection.source == 'side' else None),
         'generator_score': (None if chosen is None or scripted else float(chosen.score)),
         'fell_back': bool(fell_back),
         'fallback_kind': fallback_kind,
@@ -310,7 +308,7 @@ def render_plan_overlay(bgr, K, T_base_optical, plan, selection, destination_xyz
 
     Cloud (green dots), transported TCP path (blue open / red closed, thicker
     when closer to the camera is not attempted), the hand's boxes (Franka Hand
-    collision boxes, or the Inspire hand's envelope) at the chosen grasp (magenta), TCP axes at grasp and release (x red, y green,
+    collision boxes, or the Inspire hand's pieces) at the chosen grasp (magenta), TCP axes at grasp and release (x red, y green,
     z blue), the commanded destination (yellow ring), and a text box.
     """
     import cv2
@@ -360,10 +358,8 @@ def render_plan_overlay(bgr, K, T_base_optical, plan, selection, destination_xyz
         if not cok.all():
             continue
         c2 = c2.astype(int)
-        for i in range(8):
-            for j in range(i + 1, 8):
-                if bin(i ^ j).count('1') == 1:
-                    cv2.line(img, tuple(c2[i]), tuple(c2[j]), (255, 0, 255), 1, cv2.LINE_AA)
+        for i, j in box.edges():
+            cv2.line(img, tuple(c2[i]), tuple(c2[j]), (255, 0, 255), 1, cv2.LINE_AA)
 
     gi, ri = int(plan.metrics['grasp_index']), int(plan.metrics['release_index'])
     for idx in (gi, ri):
@@ -474,15 +470,17 @@ def render_trajectory_3d(path, trace, plan=None, title=''):
         ax.plot(*np.asarray(labels.positions, dtype=float).T, '--', c='tab:gray', lw=1,
                 label='planned TCP path')
         everything.append(np.asarray(labels.positions, dtype=float))
-        edges = [(i, j) for i in range(8) for j in range(i + 1, 8) if bin(i ^ j).count('1') == 1]
         gi, ri = int(plan.metrics['grasp_index']), int(plan.metrics['release_index'])
+        hand = plan_end_effector(plan)
+        # The labels' orientations are the controller frame's; the boxes are in the grasp frame.
         poses = [('grasp', plan.grasp.tcp, plan.grasp.rotation, 'tab:purple'),
-                 ('release', labels.positions[ri], labels.orientations[ri], 'tab:orange')]
+                 ('release', labels.positions[ri], hand.grasp_from_ee(labels.orientations[ri]),
+                  'tab:orange')]
         for name, tcp, R, color in poses:
             R, tcp = np.asarray(R, dtype=float), np.asarray(tcp, dtype=float)
-            for k, box in enumerate(plan_end_effector(plan).boxes()):
+            for k, box in enumerate(hand.boxes()):
                 c = box.corners() @ R.T + tcp
-                for e, (i, j) in enumerate(edges):
+                for e, (i, j) in enumerate(box.edges()):
                     ax.plot(*np.stack([c[i], c[j]]).T, c=color, lw=0.8,
                             label=f'gripper at {name} (plan)' if k == 0 and e == 0 else None)
                 everything.append(c)
