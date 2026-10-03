@@ -1,5 +1,11 @@
 # Inspire RH56 left hand on the FR3
 
+> **Status 2026-10-04 -- being replaced.** The hand on the robot is an **RH56DFX-2R, a right
+> hand** (the box, and the thumb is on your right with the palm facing you, fingers up); this
+> document's "left hand" is wrong. The scripted side grasp, the one-box envelope and the
+> estimated mount below are being replaced by GraspGen-X grasps on a measured model of the hand
+> and a measured mount. Until the rewrite, read this file as the 2026-09-15 record only.
+
 What was built (2026-09-15), how to mount the hand, where the gripper is switched,
 and how to run teaching, planning, execution and X6 trials with it. **None of this
 has run on the robot yet.** Only the hand's open/close grasp was tested on the real

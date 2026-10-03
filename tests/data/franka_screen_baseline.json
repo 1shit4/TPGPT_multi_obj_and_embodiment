@@ -1,0 +1,2012 @@
+{
+ "bare": {
+  "stages": [
+   [
+    "from_below",
+    60,
+    43,
+    false
+   ],
+   [
+    "on_target",
+    43,
+    40,
+    false
+   ],
+   [
+    "jaws",
+    40,
+    5,
+    false
+   ],
+   [
+    "centred",
+    5,
+    5,
+    true
+   ],
+   [
+    "distinct",
+    5,
+    5,
+    false
+   ]
+  ],
+  "candidates": [
+   {
+    "index": 36,
+    "rejected": "too_wide: width 33 mm, 18 mm of pad engaged (right_diagonal, right_pad)",
+    "tcp": [
+     0.450201,
+     -0.029214,
+     -0.064253
+    ],
+    "closing": [
+     -0.188974,
+     -0.911402,
+     0.365561
+    ],
+    "refined_depth": 0.0,
+    "refined_centre": 0.0
+   },
+   {
+    "index": 32,
+    "rejected": "on_target: the held point is more than 4 cm from the cloud",
+    "tcp": [
+     0.422384,
+     0.020462,
+     0.029131
+    ],
+    "closing": [
+     0.727034,
+     0.351148,
+     -0.590015
+    ],
+    "refined_depth": 0.0,
+    "refined_centre": 0.0
+   },
+   {
+    "index": 0,
+    "rejected": "empty: width 0 mm, 0 mm of pad engaged",
+    "tcp": [
+     0.422119,
+     -0.036997,
+     0.02433
+    ],
+    "closing": [
+     -0.844017,
+     0.528021,
+     -0.093965
+    ],
+    "refined_depth": 0.0,
+    "refined_centre": 0.0
+   },
+   {
+    "index": 45,
+    "rejected": "from_below: approach 88 deg from vertical",
+    "tcp": [
+     0.391336,
+     0.068132,
+     0.003639
+    ],
+    "closing": [
+     0.402828,
+     -0.409837,
+     0.818391
+    ],
+    "refined_depth": 0.0,
+    "refined_centre": 0.0
+   },
+   {
+    "index": 27,
+    "rejected": "too_wide: width 65 mm, 18 mm of pad engaged (left_diagonal, left_pad)",
+    "tcp": [
+     0.384743,
+     0.033546,
+     -0.064542
+    ],
+    "closing": [
+     0.695869,
+     0.510569,
+     0.505061
+    ],
+    "refined_depth": 0.0,
+    "refined_centre": 0.0
+   },
+   {
+    "index": 59,
+    "rejected": "from_below: approach 109 deg from vertical",
+    "tcp": [
+     0.45527,
+     -0.000228,
+     -0.09076
+    ],
+    "closing": [
+     -0.366357,
+     0.910319,
+     -0.19262
+    ],
+    "refined_depth": 0.0,
+    "refined_centre": 0.0
+   },
+   {
+    "index": 41,
+    "rejected": "too_wide: width 6 mm, 18 mm of pad engaged (body, right_screw_mount, right_sledge)",
+    "tcp": [
+     0.422093,
+     0.07959,
+     -0.078682
+    ],
+    "closing": [
+     0.142559,
+     0.989548,
+     -0.021733
+    ],
+    "refined_depth": 0.0,
+    "refined_centre": 0.0
+   },
+   {
+    "index": 8,
+    "rejected": "too_wide: width 8 mm, 18 mm of pad engaged (body, left_diagonal, left_pad, right_screw_mount, right_sledge, right_pad)",
+    "tcp": [
+     0.423722,
+     0.029385,
+     -0.067965
+    ],
+    "closing": [
+     0.465751,
+     -0.806597,
+     -0.363975
+    ],
+    "refined_depth": 0.0,
+    "refined_centre": 0.0
+   },
+   {
+    "index": 58,
+    "rejected": "too_wide: width 30 mm, 9 mm of pad engaged (right_pad)",
+    "tcp": [
+     0.381108,
+     0.059328,
+     0.007547
+    ],
+    "closing": [
+     -0.982849,
+     -0.115071,
+     0.144106
+    ],
+    "refined_depth": 0.0,
+    "refined_centre": 0.0
+   },
+   {
+    "index": 30,
+    "rejected": "too_wide: width 17 mm, 18 mm of pad engaged (body, left_screw_mount, left_pad)",
+    "tcp": [
+     0.423599,
+     0.026351,
+     -0.08031
+    ],
+    "closing": [
+     0.491475,
+     -0.438281,
+     0.75257
+    ],
+    "refined_depth": 0.0,
+    "refined_centre": 0.0
+   },
+   {
+    "index": 43,
+    "rejected": "from_below: approach 104 deg from vertical",
+    "tcp": [
+     0.459671,
+     -0.016304,
+     -0.03266
+    ],
+    "closing": [
+     0.163357,
+     0.884689,
+     -0.436623
+    ],
+    "refined_depth": 0.0,
+    "refined_centre": 0.0
+   },
+   {
+    "index": 10,
+    "rejected": "from_below: approach 87 deg from vertical",
+    "tcp": [
+     0.433701,
+     0.014522,
+     0.007842
+    ],
+    "closing": [
+     0.828199,
+     0.111128,
+     0.549306
+    ],
+    "refined_depth": 0.0,
+    "refined_centre": 0.0
+   },
+   {
+    "index": 24,
+    "rejected": "too_wide: width 3 mm, 7 mm of pad engaged (body, left_screw_mount, left_sledge, left_diagonal, left_pad, right_diagonal, right_pad)",
+    "tcp": [
+     0.424613,
+     0.024113,
+     -0.056143
+    ],
+    "closing": [
+     0.139875,
+     0.852361,
+     0.5039
+    ],
+    "refined_depth": 0.0,
+    "refined_centre": 0.0
+   },
+   {
+    "index": 28,
+    "rejected": null,
+    "tcp": [
+     0.46211,
+     0.016099,
+     -0.021474
+    ],
+    "closing": [
+     -0.950251,
+     -0.162522,
+     0.265725
+    ],
+    "refined_depth": 0.0,
+    "refined_centre": -0.000703
+   },
+   {
+    "index": 31,
+    "rejected": "from_below: approach 97 deg from vertical",
+    "tcp": [
+     0.41242,
+     -0.017409,
+     -0.056111
+    ],
+    "closing": [
+     0.506335,
+     -0.799514,
+     0.323112
+    ],
+    "refined_depth": 0.0,
+    "refined_centre": 0.0
+   },
+   {
+    "index": 17,
+    "rejected": "too_wide: width 56 mm, 18 mm of pad engaged (body, left_diagonal, left_pad)",
+    "tcp": [
+     0.390277,
+     -0.006794,
+     -0.089285
+    ],
+    "closing": [
+     0.927283,
+     -0.207777,
+     -0.311409
+    ],
+    "refined_depth": 0.0,
+    "refined_centre": 0.0
+   },
+   {
+    "index": 2,
+    "rejected": null,
+    "tcp": [
+     0.395673,
+     -0.003175,
+     -0.014321
+    ],
+    "closing": [
+     -0.957051,
+     -0.273063,
+     0.097412
+    ],
+    "refined_depth": 0.0,
+    "refined_centre": 0.01
+   },
+   {
+    "index": 25,
+    "rejected": "from_below: approach 104 deg from vertical",
+    "tcp": [
+     0.409456,
+     0.01198,
+     -0.038368
+    ],
+    "closing": [
+     -0.116457,
+     -0.280126,
+     0.952873
+    ],
+    "refined_depth": 0.0,
+    "refined_centre": 0.0
+   },
+   {
+    "index": 35,
+    "rejected": "too_wide: width 40 mm, 18 mm of pad engaged (body, right_screw_mount, right_diagonal, right_pad)",
+    "tcp": [
+     0.427806,
+     0.069667,
+     -0.081533
+    ],
+    "closing": [
+     -0.507414,
+     0.84656,
+     0.160833
+    ],
+    "refined_depth": 0.0,
+    "refined_centre": 0.0
+   },
+   {
+    "index": 42,
+    "rejected": "too_wide: width 74 mm, 18 mm of pad engaged (right_pad)",
+    "tcp": [
+     0.395989,
+     0.046955,
+     -0.025772
+    ],
+    "closing": [
+     -0.808889,
+     -0.522494,
+     0.269625
+    ],
+    "refined_depth": 0.0,
+    "refined_centre": 0.0
+   },
+   {
+    "index": 29,
+    "rejected": "too_wide: width 26 mm, 15 mm of pad engaged (body, right_screw_mount)",
+    "tcp": [
+     0.447299,
+     0.013233,
+     -0.032112
+    ],
+    "closing": [
+     0.467367,
+     -0.071849,
+     0.881139
+    ],
+    "refined_depth": 0.0,
+    "refined_centre": 0.0
+   },
+   {
+    "index": 53,
+    "rejected": "too_wide: width 0 mm, 2 mm of pad engaged (body, left_screw_mount, left_sledge)",
+    "tcp": [
+     0.431371,
+     0.044293,
+     -0.000859
+    ],
+    "closing": [
+     -0.32456,
+     -0.605274,
+     -0.726846
+    ],
+    "refined_depth": 0.0,
+    "refined_centre": 0.0
+   },
+   {
+    "index": 5,
+    "rejected": "too_wide: width 24 mm, 18 mm of pad engaged (body, right_pad)",
+    "tcp": [
+     0.367181,
+     0.03095,
+     -0.052747
+    ],
+    "closing": [
+     -0.696138,
+     0.037405,
+     0.716933
+    ],
+    "refined_depth": 0.0,
+    "refined_centre": 0.0
+   },
+   {
+    "index": 48,
+    "rejected": "collides: width 68 mm, 18 mm of pad engaged (body)",
+    "tcp": [
+     0.433138,
+     0.057879,
+     -0.065051
+    ],
+    "closing": [
+     0.874926,
+     -0.465075,
+     0.134942
+    ],
+    "refined_depth": 0.0,
+    "refined_centre": 0.0
+   },
+   {
+    "index": 39,
+    "rejected": "too_wide: width 5 mm, 4 mm of pad engaged (right_pad)",
+    "tcp": [
+     0.460154,
+     -0.000646,
+     0.022709
+    ],
+    "closing": [
+     0.727077,
+     0.497019,
+     0.473636
+    ],
+    "refined_depth": 0.0,
+    "refined_centre": 0.0
+   },
+   {
+    "index": 21,
+    "rejected": "too_wide: width 0 mm, 0 mm of pad engaged (right_diagonal)",
+    "tcp": [
+     0.397312,
+     -0.007461,
+     0.023436
+    ],
+    "closing": [
+     -0.116983,
+     -0.905352,
+     0.408232
+    ],
+    "refined_depth": 0.0,
+    "refined_centre": 0.0
+   },
+   {
+    "index": 47,
+    "rejected": "from_below: approach 93 deg from vertical",
+    "tcp": [
+     0.451483,
+     -0.014308,
+     -0.000442
+    ],
+    "closing": [
+     0.732434,
+     0.341584,
+     -0.588949
+    ],
+    "refined_depth": 0.0,
+    "refined_centre": 0.0
+   },
+   {
+    "index": 22,
+    "rejected": "too_wide: width 0 mm, 0 mm of pad engaged (right_pad)",
+    "tcp": [
+     0.419861,
+     0.029853,
+     0.020208
+    ],
+    "closing": [
+     -0.88103,
+     0.154403,
+     0.447154
+    ],
+    "refined_depth": 0.0,
+    "refined_centre": 0.0
+   },
+   {
+    "index": 33,
+    "rejected": "too_wide: width 40 mm, 4 mm of pad engaged (left_diagonal, left_pad)",
+    "tcp": [
+     0.400728,
+     0.046137,
+     -8.2e-05
+    ],
+    "closing": [
+     0.35821,
+     0.223414,
+     -0.906516
+    ],
+    "refined_depth": 0.0,
+    "refined_centre": 0.0
+   },
+   {
+    "index": 38,
+    "rejected": "collides: width 12 mm, 18 mm of pad engaged (body)",
+    "tcp": [
+     0.371406,
+     -0.014223,
+     -0.07134
+    ],
+    "closing": [
+     0.642063,
+     0.758296,
+     -0.112881
+    ],
+    "refined_depth": 0.0,
+    "refined_centre": 0.0
+   },
+   {
+    "index": 44,
+    "rejected": "on_target: the held point is more than 4 cm from the cloud",
+    "tcp": [
+     0.420162,
+     0.020973,
+     -0.003285
+    ],
+    "closing": [
+     0.925456,
+     0.195248,
+     0.324669
+    ],
+    "refined_depth": 0.0,
+    "refined_centre": 0.0
+   },
+   {
+    "index": 9,
+    "rejected": null,
+    "tcp": [
+     0.446189,
+     -0.022256,
+     -0.021194
+    ],
+    "closing": [
+     -0.693375,
+     -0.483994,
+     -0.533836
+    ],
+    "refined_depth": 0.010265,
+    "refined_centre": -0.000354
+   },
+   {
+    "index": 34,
+    "rejected": "from_below: approach 92 deg from vertical",
+    "tcp": [
+     0.391927,
+     0.036328,
+     -0.094588
+    ],
+    "closing": [
+     -0.167049,
+     -0.111083,
+     -0.979671
+    ],
+    "refined_depth": 0.0,
+    "refined_centre": 0.0
+   },
+   {
+    "index": 50,
+    "rejected": "collides: width 18 mm, 18 mm of pad engaged (body)",
+    "tcp": [
+     0.381815,
+     0.059602,
+     -0.076635
+    ],
+    "closing": [
+     -0.68947,
+     0.486806,
+     -0.536331
+    ],
+    "refined_depth": 0.0,
+    "refined_centre": 0.0
+   },
+   {
+    "index": 54,
+    "rejected": "from_below: approach 89 deg from vertical",
+    "tcp": [
+     0.398579,
+     0.018487,
+     -0.076267
+    ],
+    "closing": [
+     -0.12484,
+     0.188566,
+     0.974093
+    ],
+    "refined_depth": 0.0,
+    "refined_centre": 0.0
+   },
+   {
+    "index": 57,
+    "rejected": "too_wide: width 51 mm, 18 mm of pad engaged (body, left_screw_mount, left_sledge, left_pad)",
+    "tcp": [
+     0.397482,
+     0.032396,
+     -0.096268
+    ],
+    "closing": [
+     0.053673,
+     0.792407,
+     0.607627
+    ],
+    "refined_depth": 0.0,
+    "refined_centre": 0.0
+   },
+   {
+    "index": 16,
+    "rejected": "from_below: approach 85 deg from vertical",
+    "tcp": [
+     0.448949,
+     0.042229,
+     -0.092446
+    ],
+    "closing": [
+     -0.022222,
+     -0.180514,
+     -0.983321
+    ],
+    "refined_depth": 0.0,
+    "refined_centre": 0.0
+   },
+   {
+    "index": 6,
+    "rejected": "too_wide: width 80 mm, 18 mm of pad engaged (body, left_screw_mount, left_diagonal, left_pad, right_pad)",
+    "tcp": [
+     0.410087,
+     0.020954,
+     -0.066311
+    ],
+    "closing": [
+     0.35478,
+     0.910971,
+     0.210389
+    ],
+    "refined_depth": 0.0,
+    "refined_centre": 0.0
+   },
+   {
+    "index": 55,
+    "rejected": "too_wide: width 29 mm, 18 mm of pad engaged (body, right_screw_mount, right_sledge, right_diagonal, right_pad)",
+    "tcp": [
+     0.477083,
+     0.006411,
+     -0.0978
+    ],
+    "closing": [
+     0.535058,
+     0.234565,
+     -0.811598
+    ],
+    "refined_depth": 0.0,
+    "refined_centre": 0.0
+   },
+   {
+    "index": 37,
+    "rejected": null,
+    "tcp": [
+     0.440595,
+     -0.002356,
+     -0.008275
+    ],
+    "closing": [
+     -0.725432,
+     -0.675387,
+     -0.132669
+    ],
+    "refined_depth": 0.017625,
+    "refined_centre": 0.000733
+   },
+   {
+    "index": 7,
+    "rejected": "too_wide: width 67 mm, 18 mm of pad engaged (body, right_screw_mount, right_diagonal, right_pad)",
+    "tcp": [
+     0.384051,
+     0.00966,
+     -0.076537
+    ],
+    "closing": [
+     -0.161252,
+     -0.563329,
+     -0.810344
+    ],
+    "refined_depth": 0.0,
+    "refined_centre": 0.0
+   },
+   {
+    "index": 19,
+    "rejected": "from_below: approach 89 deg from vertical",
+    "tcp": [
+     0.434964,
+     -0.012205,
+     -0.011286
+    ],
+    "closing": [
+     -0.619621,
+     0.775193,
+     -0.123068
+    ],
+    "refined_depth": 0.0,
+    "refined_centre": 0.0
+   },
+   {
+    "index": 51,
+    "rejected": "too_wide: width 36 mm, 17 mm of pad engaged (right_pad)",
+    "tcp": [
+     0.382329,
+     -0.021985,
+     -0.073974
+    ],
+    "closing": [
+     0.130056,
+     -0.987699,
+     0.086811
+    ],
+    "refined_depth": 0.0,
+    "refined_centre": 0.0
+   },
+   {
+    "index": 49,
+    "rejected": "from_below: approach 107 deg from vertical",
+    "tcp": [
+     0.416357,
+     0.018645,
+     -0.047879
+    ],
+    "closing": [
+     0.550771,
+     -0.831188,
+     -0.076015
+    ],
+    "refined_depth": 0.0,
+    "refined_centre": 0.0
+   },
+   {
+    "index": 20,
+    "rejected": "empty: width 0 mm, 0 mm of pad engaged",
+    "tcp": [
+     0.435593,
+     -0.005225,
+     0.008083
+    ],
+    "closing": [
+     -0.204783,
+     0.884281,
+     -0.419655
+    ],
+    "refined_depth": 0.0,
+    "refined_centre": 0.0
+   },
+   {
+    "index": 23,
+    "rejected": "from_below: approach 93 deg from vertical",
+    "tcp": [
+     0.430162,
+     -0.005506,
+     -0.06723
+    ],
+    "closing": [
+     -0.327047,
+     0.94449,
+     -0.031288
+    ],
+    "refined_depth": 0.0,
+    "refined_centre": 0.0
+   },
+   {
+    "index": 15,
+    "rejected": "collides: width 26 mm, 17 mm of pad engaged (body)",
+    "tcp": [
+     0.460048,
+     -0.01727,
+     -0.030158
+    ],
+    "closing": [
+     0.913267,
+     -0.226855,
+     -0.338349
+    ],
+    "refined_depth": 0.0,
+    "refined_centre": 0.0
+   },
+   {
+    "index": 11,
+    "rejected": "too_wide: width 43 mm, 18 mm of pad engaged (body, left_screw_mount)",
+    "tcp": [
+     0.434881,
+     0.020382,
+     -0.092175
+    ],
+    "closing": [
+     -0.864826,
+     0.066211,
+     0.497687
+    ],
+    "refined_depth": 0.0,
+    "refined_centre": 0.0
+   },
+   {
+    "index": 12,
+    "rejected": "too_wide: width 77 mm, 18 mm of pad engaged (body, right_screw_mount, right_sledge, right_diagonal, right_pad)",
+    "tcp": [
+     0.419992,
+     0.022298,
+     -0.084729
+    ],
+    "closing": [
+     -0.079778,
+     -0.869809,
+     -0.486897
+    ],
+    "refined_depth": 0.0,
+    "refined_centre": 0.0
+   },
+   {
+    "index": 26,
+    "rejected": "too_wide: width 0 mm, 0 mm of pad engaged (body, left_sledge, left_pad, right_pad)",
+    "tcp": [
+     0.421313,
+     0.019565,
+     -0.060699
+    ],
+    "closing": [
+     0.403974,
+     0.90431,
+     0.137942
+    ],
+    "refined_depth": 0.0,
+    "refined_centre": 0.0
+   },
+   {
+    "index": 14,
+    "rejected": "from_below: approach 106 deg from vertical",
+    "tcp": [
+     0.416762,
+     0.021835,
+     -0.049423
+    ],
+    "closing": [
+     -0.653034,
+     0.012054,
+     -0.757232
+    ],
+    "refined_depth": 0.0,
+    "refined_centre": 0.0
+   },
+   {
+    "index": 1,
+    "rejected": "from_below: approach 102 deg from vertical",
+    "tcp": [
+     0.418517,
+     0.022397,
+     0.015394
+    ],
+    "closing": [
+     0.140956,
+     0.562384,
+     0.814773
+    ],
+    "refined_depth": 0.0,
+    "refined_centre": 0.0
+   },
+   {
+    "index": 13,
+    "rejected": "on_target: the held point is more than 4 cm from the cloud",
+    "tcp": [
+     0.408695,
+     0.030805,
+     0.029827
+    ],
+    "closing": [
+     0.641731,
+     0.017098,
+     0.766739
+    ],
+    "refined_depth": 0.0,
+    "refined_centre": 0.0
+   },
+   {
+    "index": 3,
+    "rejected": "from_below: approach 88 deg from vertical",
+    "tcp": [
+     0.408658,
+     0.017143,
+     -0.089648
+    ],
+    "closing": [
+     -0.47826,
+     -0.008381,
+     -0.878178
+    ],
+    "refined_depth": 0.0,
+    "refined_centre": 0.0
+   },
+   {
+    "index": 4,
+    "rejected": "from_below: approach 90 deg from vertical",
+    "tcp": [
+     0.420662,
+     0.021557,
+     -0.072565
+    ],
+    "closing": [
+     0.133991,
+     0.470319,
+     0.872265
+    ],
+    "refined_depth": 0.0,
+    "refined_centre": 0.0
+   },
+   {
+    "index": 56,
+    "rejected": "collides: width 27 mm, 18 mm of pad engaged (body)",
+    "tcp": [
+     0.364037,
+     0.019408,
+     -0.014439
+    ],
+    "closing": [
+     -0.785306,
+     0.394949,
+     0.47677
+    ],
+    "refined_depth": 0.0,
+    "refined_centre": 0.0
+   },
+   {
+    "index": 52,
+    "rejected": "collides: width 24 mm, 18 mm of pad engaged (body)",
+    "tcp": [
+     0.455413,
+     0.000883,
+     -0.085392
+    ],
+    "closing": [
+     -0.383347,
+     0.813681,
+     0.437
+    ],
+    "refined_depth": 0.0,
+    "refined_centre": 0.0
+   },
+   {
+    "index": 46,
+    "rejected": "too_wide: width 75 mm, 18 mm of pad engaged (right_diagonal, right_pad)",
+    "tcp": [
+     0.426616,
+     0.062972,
+     -0.032578
+    ],
+    "closing": [
+     -0.31996,
+     0.218689,
+     0.921846
+    ],
+    "refined_depth": 0.0,
+    "refined_centre": 0.0
+   },
+   {
+    "index": 18,
+    "rejected": "too_wide: width 38 mm, 18 mm of pad engaged (body, right_screw_mount, right_sledge)",
+    "tcp": [
+     0.445944,
+     0.055887,
+     -0.087524
+    ],
+    "closing": [
+     -0.285521,
+     -0.35979,
+     -0.888273
+    ],
+    "refined_depth": 0.0,
+    "refined_centre": 0.0
+   },
+   {
+    "index": 40,
+    "rejected": null,
+    "tcp": [
+     0.435692,
+     0.052928,
+     0.006512
+    ],
+    "closing": [
+     0.520902,
+     -0.503355,
+     0.689416
+    ],
+    "refined_depth": 0.017874,
+    "refined_centre": -0.01
+   }
+  ]
+ },
+ "camera_and_shelf": {
+  "stages": [
+   [
+    "from_below",
+    60,
+    43,
+    false
+   ],
+   [
+    "visibility",
+    43,
+    35,
+    false
+   ],
+   [
+    "on_target",
+    35,
+    33,
+    false
+   ],
+   [
+    "jaws",
+    33,
+    5,
+    false
+   ],
+   [
+    "grasp_collision",
+    5,
+    4,
+    false
+   ],
+   [
+    "place_zone",
+    4,
+    4,
+    true
+   ],
+   [
+    "centred",
+    4,
+    4,
+    true
+   ],
+   [
+    "distinct",
+    4,
+    4,
+    false
+   ]
+  ],
+  "candidates": [
+   {
+    "index": 36,
+    "rejected": "too_wide: width 33 mm, 18 mm of pad engaged (right_diagonal, right_pad)",
+    "tcp": [
+     0.450201,
+     -0.029214,
+     -0.064253
+    ],
+    "closing": [
+     -0.188974,
+     -0.911402,
+     0.365561
+    ],
+    "refined_depth": 0.0,
+    "refined_centre": 0.0
+   },
+   {
+    "index": 32,
+    "rejected": "on_target: the held point is more than 4 cm from the cloud",
+    "tcp": [
+     0.422384,
+     0.020462,
+     0.029131
+    ],
+    "closing": [
+     0.727034,
+     0.351148,
+     -0.590015
+    ],
+    "refined_depth": 0.0,
+    "refined_centre": 0.0
+   },
+   {
+    "index": 0,
+    "rejected": "empty: width 0 mm, 0 mm of pad engaged",
+    "tcp": [
+     0.422119,
+     -0.036997,
+     0.02433
+    ],
+    "closing": [
+     -0.844017,
+     0.528021,
+     -0.093965
+    ],
+    "refined_depth": 0.0,
+    "refined_centre": 0.0
+   },
+   {
+    "index": 45,
+    "rejected": "from_below: approach 88 deg from vertical",
+    "tcp": [
+     0.391336,
+     0.068132,
+     0.003639
+    ],
+    "closing": [
+     0.402828,
+     -0.409837,
+     0.818391
+    ],
+    "refined_depth": 0.0,
+    "refined_centre": 0.0
+   },
+   {
+    "index": 27,
+    "rejected": "too_wide: width 65 mm, 18 mm of pad engaged (left_diagonal, left_pad)",
+    "tcp": [
+     0.384743,
+     0.033546,
+     -0.064542
+    ],
+    "closing": [
+     0.695869,
+     0.510569,
+     0.505061
+    ],
+    "refined_depth": 0.0,
+    "refined_centre": 0.0
+   },
+   {
+    "index": 59,
+    "rejected": "from_below: approach 109 deg from vertical",
+    "tcp": [
+     0.45527,
+     -0.000228,
+     -0.09076
+    ],
+    "closing": [
+     -0.366357,
+     0.910319,
+     -0.19262
+    ],
+    "refined_depth": 0.0,
+    "refined_centre": 0.0
+   },
+   {
+    "index": 41,
+    "rejected": "visibility: approaches more than 100 deg away from the camera's view",
+    "tcp": [
+     0.422093,
+     0.07959,
+     -0.078682
+    ],
+    "closing": [
+     0.142559,
+     0.989548,
+     -0.021733
+    ],
+    "refined_depth": 0.0,
+    "refined_centre": 0.0
+   },
+   {
+    "index": 8,
+    "rejected": "too_wide: width 8 mm, 18 mm of pad engaged (body, left_diagonal, left_pad, right_screw_mount, right_sledge, right_pad)",
+    "tcp": [
+     0.423722,
+     0.029385,
+     -0.067965
+    ],
+    "closing": [
+     0.465751,
+     -0.806597,
+     -0.363975
+    ],
+    "refined_depth": 0.0,
+    "refined_centre": 0.0
+   },
+   {
+    "index": 58,
+    "rejected": "too_wide: width 30 mm, 9 mm of pad engaged (right_pad)",
+    "tcp": [
+     0.381108,
+     0.059328,
+     0.007547
+    ],
+    "closing": [
+     -0.982849,
+     -0.115071,
+     0.144106
+    ],
+    "refined_depth": 0.0,
+    "refined_centre": 0.0
+   },
+   {
+    "index": 30,
+    "rejected": "visibility: approaches more than 100 deg away from the camera's view",
+    "tcp": [
+     0.423599,
+     0.026351,
+     -0.08031
+    ],
+    "closing": [
+     0.491475,
+     -0.438281,
+     0.75257
+    ],
+    "refined_depth": 0.0,
+    "refined_centre": 0.0
+   },
+   {
+    "index": 43,
+    "rejected": "from_below: approach 104 deg from vertical",
+    "tcp": [
+     0.459671,
+     -0.016304,
+     -0.03266
+    ],
+    "closing": [
+     0.163357,
+     0.884689,
+     -0.436623
+    ],
+    "refined_depth": 0.0,
+    "refined_centre": 0.0
+   },
+   {
+    "index": 10,
+    "rejected": "from_below: approach 87 deg from vertical",
+    "tcp": [
+     0.433701,
+     0.014522,
+     0.007842
+    ],
+    "closing": [
+     0.828199,
+     0.111128,
+     0.549306
+    ],
+    "refined_depth": 0.0,
+    "refined_centre": 0.0
+   },
+   {
+    "index": 24,
+    "rejected": "too_wide: width 3 mm, 7 mm of pad engaged (body, left_screw_mount, left_sledge, left_diagonal, left_pad, right_diagonal, right_pad)",
+    "tcp": [
+     0.424613,
+     0.024113,
+     -0.056143
+    ],
+    "closing": [
+     0.139875,
+     0.852361,
+     0.5039
+    ],
+    "refined_depth": 0.0,
+    "refined_centre": 0.0
+   },
+   {
+    "index": 28,
+    "rejected": null,
+    "tcp": [
+     0.46211,
+     0.016099,
+     -0.021474
+    ],
+    "closing": [
+     -0.950251,
+     -0.162522,
+     0.265725
+    ],
+    "refined_depth": 0.0,
+    "refined_centre": -0.000703
+   },
+   {
+    "index": 31,
+    "rejected": "from_below: approach 97 deg from vertical",
+    "tcp": [
+     0.41242,
+     -0.017409,
+     -0.056111
+    ],
+    "closing": [
+     0.506335,
+     -0.799514,
+     0.323112
+    ],
+    "refined_depth": 0.0,
+    "refined_centre": 0.0
+   },
+   {
+    "index": 17,
+    "rejected": "too_wide: width 56 mm, 18 mm of pad engaged (body, left_diagonal, left_pad)",
+    "tcp": [
+     0.390277,
+     -0.006794,
+     -0.089285
+    ],
+    "closing": [
+     0.927283,
+     -0.207777,
+     -0.311409
+    ],
+    "refined_depth": 0.0,
+    "refined_centre": 0.0
+   },
+   {
+    "index": 2,
+    "rejected": null,
+    "tcp": [
+     0.395673,
+     -0.003175,
+     -0.014321
+    ],
+    "closing": [
+     -0.957051,
+     -0.273063,
+     0.097412
+    ],
+    "refined_depth": 0.0,
+    "refined_centre": 0.01
+   },
+   {
+    "index": 25,
+    "rejected": "from_below: approach 104 deg from vertical",
+    "tcp": [
+     0.409456,
+     0.01198,
+     -0.038368
+    ],
+    "closing": [
+     -0.116457,
+     -0.280126,
+     0.952873
+    ],
+    "refined_depth": 0.0,
+    "refined_centre": 0.0
+   },
+   {
+    "index": 35,
+    "rejected": "visibility: approaches more than 100 deg away from the camera's view",
+    "tcp": [
+     0.427806,
+     0.069667,
+     -0.081533
+    ],
+    "closing": [
+     -0.507414,
+     0.84656,
+     0.160833
+    ],
+    "refined_depth": 0.0,
+    "refined_centre": 0.0
+   },
+   {
+    "index": 42,
+    "rejected": "too_wide: width 74 mm, 18 mm of pad engaged (right_pad)",
+    "tcp": [
+     0.395989,
+     0.046955,
+     -0.025772
+    ],
+    "closing": [
+     -0.808889,
+     -0.522494,
+     0.269625
+    ],
+    "refined_depth": 0.0,
+    "refined_centre": 0.0
+   },
+   {
+    "index": 29,
+    "rejected": "visibility: approaches more than 100 deg away from the camera's view",
+    "tcp": [
+     0.447299,
+     0.013233,
+     -0.032112
+    ],
+    "closing": [
+     0.467367,
+     -0.071849,
+     0.881139
+    ],
+    "refined_depth": 0.0,
+    "refined_centre": 0.0
+   },
+   {
+    "index": 53,
+    "rejected": "too_wide: width 0 mm, 2 mm of pad engaged (body, left_screw_mount, left_sledge)",
+    "tcp": [
+     0.431371,
+     0.044293,
+     -0.000859
+    ],
+    "closing": [
+     -0.32456,
+     -0.605274,
+     -0.726846
+    ],
+    "refined_depth": 0.0,
+    "refined_centre": 0.0
+   },
+   {
+    "index": 5,
+    "rejected": "too_wide: width 24 mm, 18 mm of pad engaged (body, right_pad)",
+    "tcp": [
+     0.367181,
+     0.03095,
+     -0.052747
+    ],
+    "closing": [
+     -0.696138,
+     0.037405,
+     0.716933
+    ],
+    "refined_depth": 0.0,
+    "refined_centre": 0.0
+   },
+   {
+    "index": 48,
+    "rejected": "collides: width 68 mm, 18 mm of pad engaged (body)",
+    "tcp": [
+     0.433138,
+     0.057879,
+     -0.065051
+    ],
+    "closing": [
+     0.874926,
+     -0.465075,
+     0.134942
+    ],
+    "refined_depth": 0.0,
+    "refined_centre": 0.0
+   },
+   {
+    "index": 39,
+    "rejected": "too_wide: width 5 mm, 4 mm of pad engaged (right_pad)",
+    "tcp": [
+     0.460154,
+     -0.000646,
+     0.022709
+    ],
+    "closing": [
+     0.727077,
+     0.497019,
+     0.473636
+    ],
+    "refined_depth": 0.0,
+    "refined_centre": 0.0
+   },
+   {
+    "index": 21,
+    "rejected": "visibility: approaches more than 100 deg away from the camera's view",
+    "tcp": [
+     0.397312,
+     -0.007461,
+     0.023436
+    ],
+    "closing": [
+     -0.116983,
+     -0.905352,
+     0.408232
+    ],
+    "refined_depth": 0.0,
+    "refined_centre": 0.0
+   },
+   {
+    "index": 47,
+    "rejected": "from_below: approach 93 deg from vertical",
+    "tcp": [
+     0.451483,
+     -0.014308,
+     -0.000442
+    ],
+    "closing": [
+     0.732434,
+     0.341584,
+     -0.588949
+    ],
+    "refined_depth": 0.0,
+    "refined_centre": 0.0
+   },
+   {
+    "index": 22,
+    "rejected": "too_wide: width 0 mm, 0 mm of pad engaged (right_pad)",
+    "tcp": [
+     0.419861,
+     0.029853,
+     0.020208
+    ],
+    "closing": [
+     -0.88103,
+     0.154403,
+     0.447154
+    ],
+    "refined_depth": 0.0,
+    "refined_centre": 0.0
+   },
+   {
+    "index": 33,
+    "rejected": "too_wide: width 40 mm, 4 mm of pad engaged (left_diagonal, left_pad)",
+    "tcp": [
+     0.400728,
+     0.046137,
+     -8.2e-05
+    ],
+    "closing": [
+     0.35821,
+     0.223414,
+     -0.906516
+    ],
+    "refined_depth": 0.0,
+    "refined_centre": 0.0
+   },
+   {
+    "index": 38,
+    "rejected": "collides: width 12 mm, 18 mm of pad engaged (body)",
+    "tcp": [
+     0.371406,
+     -0.014223,
+     -0.07134
+    ],
+    "closing": [
+     0.642063,
+     0.758296,
+     -0.112881
+    ],
+    "refined_depth": 0.0,
+    "refined_centre": 0.0
+   },
+   {
+    "index": 44,
+    "rejected": "on_target: the held point is more than 4 cm from the cloud",
+    "tcp": [
+     0.420162,
+     0.020973,
+     -0.003285
+    ],
+    "closing": [
+     0.925456,
+     0.195248,
+     0.324669
+    ],
+    "refined_depth": 0.0,
+    "refined_centre": 0.0
+   },
+   {
+    "index": 9,
+    "rejected": null,
+    "tcp": [
+     0.446189,
+     -0.022256,
+     -0.021194
+    ],
+    "closing": [
+     -0.693375,
+     -0.483994,
+     -0.533836
+    ],
+    "refined_depth": 0.010265,
+    "refined_centre": -0.000354
+   },
+   {
+    "index": 34,
+    "rejected": "from_below: approach 92 deg from vertical",
+    "tcp": [
+     0.391927,
+     0.036328,
+     -0.094588
+    ],
+    "closing": [
+     -0.167049,
+     -0.111083,
+     -0.979671
+    ],
+    "refined_depth": 0.0,
+    "refined_centre": 0.0
+   },
+   {
+    "index": 50,
+    "rejected": "collides: width 18 mm, 18 mm of pad engaged (body)",
+    "tcp": [
+     0.381815,
+     0.059602,
+     -0.076635
+    ],
+    "closing": [
+     -0.68947,
+     0.486806,
+     -0.536331
+    ],
+    "refined_depth": 0.0,
+    "refined_centre": 0.0
+   },
+   {
+    "index": 54,
+    "rejected": "from_below: approach 89 deg from vertical",
+    "tcp": [
+     0.398579,
+     0.018487,
+     -0.076267
+    ],
+    "closing": [
+     -0.12484,
+     0.188566,
+     0.974093
+    ],
+    "refined_depth": 0.0,
+    "refined_centre": 0.0
+   },
+   {
+    "index": 57,
+    "rejected": "too_wide: width 51 mm, 18 mm of pad engaged (body, left_screw_mount, left_sledge, left_pad)",
+    "tcp": [
+     0.397482,
+     0.032396,
+     -0.096268
+    ],
+    "closing": [
+     0.053673,
+     0.792407,
+     0.607627
+    ],
+    "refined_depth": 0.0,
+    "refined_centre": 0.0
+   },
+   {
+    "index": 16,
+    "rejected": "from_below: approach 85 deg from vertical",
+    "tcp": [
+     0.448949,
+     0.042229,
+     -0.092446
+    ],
+    "closing": [
+     -0.022222,
+     -0.180514,
+     -0.983321
+    ],
+    "refined_depth": 0.0,
+    "refined_centre": 0.0
+   },
+   {
+    "index": 6,
+    "rejected": "too_wide: width 80 mm, 18 mm of pad engaged (body, left_screw_mount, left_diagonal, left_pad, right_pad)",
+    "tcp": [
+     0.410087,
+     0.020954,
+     -0.066311
+    ],
+    "closing": [
+     0.35478,
+     0.910971,
+     0.210389
+    ],
+    "refined_depth": 0.0,
+    "refined_centre": 0.0
+   },
+   {
+    "index": 55,
+    "rejected": "too_wide: width 29 mm, 18 mm of pad engaged (body, right_screw_mount, right_sledge, right_diagonal, right_pad)",
+    "tcp": [
+     0.477083,
+     0.006411,
+     -0.0978
+    ],
+    "closing": [
+     0.535058,
+     0.234565,
+     -0.811598
+    ],
+    "refined_depth": 0.0,
+    "refined_centre": 0.0
+   },
+   {
+    "index": 37,
+    "rejected": null,
+    "tcp": [
+     0.440595,
+     -0.002356,
+     -0.008275
+    ],
+    "closing": [
+     -0.725432,
+     -0.675387,
+     -0.132669
+    ],
+    "refined_depth": 0.017625,
+    "refined_centre": 0.000733
+   },
+   {
+    "index": 7,
+    "rejected": "visibility: approaches more than 100 deg away from the camera's view",
+    "tcp": [
+     0.384051,
+     0.00966,
+     -0.076537
+    ],
+    "closing": [
+     -0.161252,
+     -0.563329,
+     -0.810344
+    ],
+    "refined_depth": 0.0,
+    "refined_centre": 0.0
+   },
+   {
+    "index": 19,
+    "rejected": "from_below: approach 89 deg from vertical",
+    "tcp": [
+     0.434964,
+     -0.012205,
+     -0.011286
+    ],
+    "closing": [
+     -0.619621,
+     0.775193,
+     -0.123068
+    ],
+    "refined_depth": 0.0,
+    "refined_centre": 0.0
+   },
+   {
+    "index": 51,
+    "rejected": "too_wide: width 36 mm, 17 mm of pad engaged (right_pad)",
+    "tcp": [
+     0.382329,
+     -0.021985,
+     -0.073974
+    ],
+    "closing": [
+     0.130056,
+     -0.987699,
+     0.086811
+    ],
+    "refined_depth": 0.0,
+    "refined_centre": 0.0
+   },
+   {
+    "index": 49,
+    "rejected": "from_below: approach 107 deg from vertical",
+    "tcp": [
+     0.416357,
+     0.018645,
+     -0.047879
+    ],
+    "closing": [
+     0.550771,
+     -0.831188,
+     -0.076015
+    ],
+    "refined_depth": 0.0,
+    "refined_centre": 0.0
+   },
+   {
+    "index": 20,
+    "rejected": "empty: width 0 mm, 0 mm of pad engaged",
+    "tcp": [
+     0.435593,
+     -0.005225,
+     0.008083
+    ],
+    "closing": [
+     -0.204783,
+     0.884281,
+     -0.419655
+    ],
+    "refined_depth": 0.0,
+    "refined_centre": 0.0
+   },
+   {
+    "index": 23,
+    "rejected": "from_below: approach 93 deg from vertical",
+    "tcp": [
+     0.430162,
+     -0.005506,
+     -0.06723
+    ],
+    "closing": [
+     -0.327047,
+     0.94449,
+     -0.031288
+    ],
+    "refined_depth": 0.0,
+    "refined_centre": 0.0
+   },
+   {
+    "index": 15,
+    "rejected": "collides: width 26 mm, 17 mm of pad engaged (body)",
+    "tcp": [
+     0.460048,
+     -0.01727,
+     -0.030158
+    ],
+    "closing": [
+     0.913267,
+     -0.226855,
+     -0.338349
+    ],
+    "refined_depth": 0.0,
+    "refined_centre": 0.0
+   },
+   {
+    "index": 11,
+    "rejected": "too_wide: width 43 mm, 18 mm of pad engaged (body, left_screw_mount)",
+    "tcp": [
+     0.434881,
+     0.020382,
+     -0.092175
+    ],
+    "closing": [
+     -0.864826,
+     0.066211,
+     0.497687
+    ],
+    "refined_depth": 0.0,
+    "refined_centre": 0.0
+   },
+   {
+    "index": 12,
+    "rejected": "too_wide: width 77 mm, 18 mm of pad engaged (body, right_screw_mount, right_sledge, right_diagonal, right_pad)",
+    "tcp": [
+     0.419992,
+     0.022298,
+     -0.084729
+    ],
+    "closing": [
+     -0.079778,
+     -0.869809,
+     -0.486897
+    ],
+    "refined_depth": 0.0,
+    "refined_centre": 0.0
+   },
+   {
+    "index": 26,
+    "rejected": "too_wide: width 0 mm, 0 mm of pad engaged (body, left_sledge, left_pad, right_pad)",
+    "tcp": [
+     0.421313,
+     0.019565,
+     -0.060699
+    ],
+    "closing": [
+     0.403974,
+     0.90431,
+     0.137942
+    ],
+    "refined_depth": 0.0,
+    "refined_centre": 0.0
+   },
+   {
+    "index": 14,
+    "rejected": "from_below: approach 106 deg from vertical",
+    "tcp": [
+     0.416762,
+     0.021835,
+     -0.049423
+    ],
+    "closing": [
+     -0.653034,
+     0.012054,
+     -0.757232
+    ],
+    "refined_depth": 0.0,
+    "refined_centre": 0.0
+   },
+   {
+    "index": 1,
+    "rejected": "from_below: approach 102 deg from vertical",
+    "tcp": [
+     0.418517,
+     0.022397,
+     0.015394
+    ],
+    "closing": [
+     0.140956,
+     0.562384,
+     0.814773
+    ],
+    "refined_depth": 0.0,
+    "refined_centre": 0.0
+   },
+   {
+    "index": 13,
+    "rejected": "visibility: approaches more than 100 deg away from the camera's view",
+    "tcp": [
+     0.408695,
+     0.030805,
+     0.029827
+    ],
+    "closing": [
+     0.641731,
+     0.017098,
+     0.766739
+    ],
+    "refined_depth": 0.0,
+    "refined_centre": 0.0
+   },
+   {
+    "index": 3,
+    "rejected": "from_below: approach 88 deg from vertical",
+    "tcp": [
+     0.408658,
+     0.017143,
+     -0.089648
+    ],
+    "closing": [
+     -0.47826,
+     -0.008381,
+     -0.878178
+    ],
+    "refined_depth": 0.0,
+    "refined_centre": 0.0
+   },
+   {
+    "index": 4,
+    "rejected": "from_below: approach 90 deg from vertical",
+    "tcp": [
+     0.420662,
+     0.021557,
+     -0.072565
+    ],
+    "closing": [
+     0.133991,
+     0.470319,
+     0.872265
+    ],
+    "refined_depth": 0.0,
+    "refined_centre": 0.0
+   },
+   {
+    "index": 56,
+    "rejected": "collides: width 27 mm, 18 mm of pad engaged (body)",
+    "tcp": [
+     0.364037,
+     0.019408,
+     -0.014439
+    ],
+    "closing": [
+     -0.785306,
+     0.394949,
+     0.47677
+    ],
+    "refined_depth": 0.0,
+    "refined_centre": 0.0
+   },
+   {
+    "index": 52,
+    "rejected": "visibility: approaches more than 100 deg away from the camera's view",
+    "tcp": [
+     0.455413,
+     0.000883,
+     -0.085392
+    ],
+    "closing": [
+     -0.383347,
+     0.813681,
+     0.437
+    ],
+    "refined_depth": 0.0,
+    "refined_centre": 0.0
+   },
+   {
+    "index": 46,
+    "rejected": "too_wide: width 75 mm, 18 mm of pad engaged (right_diagonal, right_pad)",
+    "tcp": [
+     0.426616,
+     0.062972,
+     -0.032578
+    ],
+    "closing": [
+     -0.31996,
+     0.218689,
+     0.921846
+    ],
+    "refined_depth": 0.0,
+    "refined_centre": 0.0
+   },
+   {
+    "index": 18,
+    "rejected": "too_wide: width 38 mm, 18 mm of pad engaged (body, right_screw_mount, right_sledge)",
+    "tcp": [
+     0.445944,
+     0.055887,
+     -0.087524
+    ],
+    "closing": [
+     -0.285521,
+     -0.35979,
+     -0.888273
+    ],
+    "refined_depth": 0.0,
+    "refined_centre": 0.0
+   },
+   {
+    "index": 40,
+    "rejected": "grasp_collision: the hand or its approach meets the shelf",
+    "tcp": [
+     0.435692,
+     0.052928,
+     0.006512
+    ],
+    "closing": [
+     0.520902,
+     -0.503355,
+     0.689416
+    ],
+    "refined_depth": 0.017874,
+    "refined_centre": -0.01
+   }
+  ]
+ }
+}

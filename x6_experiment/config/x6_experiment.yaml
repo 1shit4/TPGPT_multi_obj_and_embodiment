@@ -78,7 +78,9 @@ hands:
   # Only the Franka Hand has planned since the 2026-09-26 move. The Inspire hand is kept so
   # its trial ids are reserved; it has not been re-validated on this setup, and this block
   # is revisited when the other grippers work (user, 2026-09-29).
-  mounted: panda
+  # The Inspire hand is on the flange since 2026-10-04 (free_drive's gripper_type auto and
+  # the X6 trial's default hand read this).
+  mounted: inspire
   order: [panda, inspire]             # complete one hand before re-mounting
   files:
     panda: hands/panda.yaml

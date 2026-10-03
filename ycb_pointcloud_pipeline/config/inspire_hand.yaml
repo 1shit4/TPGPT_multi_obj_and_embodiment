@@ -1,4 +1,8 @@
-# Inspire RH56 LEFT hand on the FR3 -- the single description every node reads.
+# Inspire RH56DFX-2R -- a RIGHT hand -- on the FR3: the single description every node reads.
+# Handedness checked 2026-10-04 (user): the box says RH56DFX-2R, and with the palm facing you,
+# fingers up, the thumb is on your right. The 2026-09-15 notes called it a left hand; they were
+# wrong. This file is being reworked for GraspGen-X grasps (plan of 2026-10-04); the side-grasp
+# and envelope blocks below are the 09-15 integration's, to be replaced.
 #
 # Read by: inspire_hand_node (serial, grasp), tpgpt_planner_node / tpgpt_pick_place
 # (-p end_effector:=inspire: mount geometry + side grasp), tpgpt_teach_node
@@ -13,14 +17,15 @@
 #                 mounted it is just a fixed virtual point in front of the flange.
 #   palm frame    grasp convention: +Z palm normal (out of the palm), +X wrist ->
 #                 fingertips (the "closing" axis), +Y = Z x X across the palm (towards
-#                 the thumb on a left hand). Origin = the grasp point on the palm.
+#                 the thumb on a left hand, away from it on this right hand). Origin = the
+#                 grasp point on the palm.
 #
 # Lengths marked MEASURE are estimates from the RH56 manual drawing (217.8 mm
 # mount face -> fingertip, 80.7 mm palm width). Measure them with a caliper before
 # the first run: an error here moves where the palm stops by the same amount.
 # After changing this file: colcon build --packages-select ycb_pointcloud_pipeline.
 inspire_hand:
-  handedness: left
+  handedness: right             # RH56DFX-2R (user, 2026-10-04)
 
   serial:
     port: /dev/ttyUSB0          # CH340 USB-RS485 adapter (1a86:7523), needs the ch341 driver
@@ -46,7 +51,7 @@ inspire_hand:
     adapter_thickness_m: 0.012  # MEASURE: flange face -> hand mounting face
     palm_along_axis_m: 0.095    # MEASURE: hand mounting face -> palm centre, along the hand axis
     palm_normal_offset_m: 0.020 # MEASURE: hand axis -> palm surface, along the palm normal
-    palm_lateral_offset_m: 0.0  # palm centre off the axis, towards the little finger (left hand)
+    palm_lateral_offset_m: 0.0  # palm centre off the axis, towards the little finger
 
   envelope:                     # one box around the open hand, palm frame, for clearance
     lo_m: [-0.115, -0.045, -0.045]   # behind the palm point (wrist) / palm width / back of hand

@@ -142,7 +142,7 @@ def test_contact_and_closure_helpers():
 def test_config_builds_the_mount():
     cfg = ih.load_config(os.path.join(os.path.dirname(__file__), "..", "config",
                                       "inspire_hand.yaml"))
-    assert cfg["handedness"] == "left"
+    assert cfg["handedness"] == "right"
     assert cfg["serial"]["hand_id"] == 2
     ee_mod = pytest.importorskip("tpgpt.hardware.end_effector")
     ee = ee_mod.inspire_from_config(cfg)

@@ -1,4 +1,6 @@
-# Inspire RH56 LEFT hand on the FR3. The physical description of the hand only.
+# Inspire RH56DFX-2R (a RIGHT hand: user, 2026-10-04) on the FR3. The physical description of
+# the hand only. Being reworked for GraspGen-X grasps (2026-10-04): the side-grasp notes below
+# are the 2026-09-15 integration's.
 # Integrated 2026-09-15 (code; not yet run on the robot). Fields marked MEASURE are
 # estimates until someone takes a caliper to the mounted hand -- fill them in BEFORE
 # this hand's first trial, then never change them.
@@ -16,7 +18,7 @@ hand:
   integrated: true
   end_effector: inspire                         # tpgpt_planner_node end_effector parameter
   end_effector_config: ~/thor_ws/src/ycb_point_cloud/TPGPT_multi_obj_and_embodiment/ycb_pointcloud_pipeline/config/inspire_hand.yaml
-  morphology: five_finger_left                  # 6 DOF, 12 joints; thumb opposed for the grasp
+  morphology: five_finger_right                 # 6 DOF, 12 joints; thumb opposed for the grasp
   graspgen_gripper: null                        # not used: side grasp
   geometry_model: tpgpt.hardware.end_effector.inspire_end_effector   # envelope box + palm frame
   ee_frame: fr3_hand_tcp                        # controller frame (virtual; robot launched unchanged)
