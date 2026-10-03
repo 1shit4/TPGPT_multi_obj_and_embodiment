@@ -60,7 +60,8 @@ ros2 launch realsense2_camera rs_launch.py \
 ```
 ```bash
 source ~/venvs/ycb/bin/activate
-ros2 launch ycb_pointcloud_pipeline ycb_pipeline.launch.py launch_camera:=false
+ros2 launch ycb_pointcloud_pipeline ycb_pipeline.launch.py launch_camera:=false \
+    save_frames:=misses save_frames_dir:=~/ycb_detection_frames
 ```
 - **`launch_camera:=false` matters.** The pipeline launch starts its own camera otherwise, and two
   drivers fight over the D435: `xioctl(VIDIOC_S_FMT) failed, errno=16 ... Device or resource busy`.
@@ -288,9 +289,9 @@ ros2 run ycb_pointcloud_pipeline joint_homing        # only when the path to hom
 # plan and execute, with the first-run guards
 source ~/venvs/tpgpt/bin/activate
 ros2 run --prefix python3 ycb_pointcloud_pipeline tpgpt_pick_place --ros-args \
-    -p source_bundle_dir:=$HOME/tpgpt_demos/<demo>/source_bundle \
-    -p object_name:=banana -p destination_name:=top_left \
-    -p dry_run:=false -p on_stall:=abort -p gripper_mode:=franka_grasp
+    -p source_bundle_dir:=$HOME/tpgpt_demos/banana_20260925_183904/source_bundle_learned \
+    -p object_name:=foam_brick -p destination_name:=top_left \
+    -p dry_run:=false -p gripper_mode:=franka_grasp -p grasp_force:=15.0
 ```
 `gripper_mode`: `franka_grasp` (default) | `gripper_command` | `inspire` | `none`. `none` runs the
 motion without touching the gripper, which is the safer first move on a new plan.
