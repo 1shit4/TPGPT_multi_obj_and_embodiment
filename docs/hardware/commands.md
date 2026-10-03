@@ -280,7 +280,7 @@ A dry run really executes the policy against a model of the arm, in real time, s
 as the real motion (~116 s at `speed_scale` 0.35) and shows `/tpgpt/executor/simulated_pose`.
 
 ```bash
-# park the arm near the plan's start first (max_start_distance is 0.6 m)
+# the arm must not move between planning and execution (else the start may be at most 0.6 m away)
 ros2 run ycb_pointcloud_pipeline free_drive          # Ctrl-C when done
 # or
 ros2 run ycb_pointcloud_pipeline joint_homing        # only when the path to home is clear
@@ -313,7 +313,7 @@ Guards, and what they mean when they fire:
 
 | abort | meaning |
 |---|---|
-| `the TCP is X m from the plan start (max_start_distance 0.6)` | park the arm nearer, or raise it for a dry-run preview |
+| `the TCP is X m from the plan start (max_start_distance 0.6) and the arm has moved since the plan was made` | re-plan from where the arm is |
 | `max_policy_seconds exceeded` | the policy is longer than the guard (300 s); check `speed_scale` |
 | `execution watchdog declared the arm stuck` | the lag gate; `on_stall:=abort` stops, `continue` (default) switches the gate off for the rest of the run (audit C1) |
 | `... outside the workspace box` | only with `workspace_check:=true`; off by default |

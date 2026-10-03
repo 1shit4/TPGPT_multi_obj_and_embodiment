@@ -240,6 +240,7 @@ method:
     workspace_min: [0.15, -0.6, -0.25]
     workspace_max: [0.85, 0.6, 0.7]
     max_start_distance: 0.6
+    plan_joint_tolerance: 0.05
     approach_max_linear_speed: 0.05
     approach_max_angular_speed: 0.3
     approach_settle_tolerance: 0.2

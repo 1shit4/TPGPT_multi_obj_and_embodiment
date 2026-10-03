@@ -256,8 +256,10 @@ The planner's support height is: its `support_height` parameter, else the calibr
 - **Selection stays in GraspGen-X's score order** (user, 2026-09-29): near-upright grasps are not
   moved ahead, even though steep ones fold more often and cost planning time.
 - **Other executor guards still apply**, and they are not the box: `max_start_distance` (0.6 m
-  from the plan's first label -- park the arm nearer, or raise it for a dry-run preview),
-  `max_tracking_error`, the stall watchdog and `max_policy_seconds`.
+  from the plan's first label, **only when the arm has moved since planning**: the planner checks
+  the move onto the path from the joints it planned from, so with every joint within
+  `plan_joint_tolerance` (0.05 rad) of them any distance is fine; 2026-10-03, a homed arm was
+  refused at 0.602 m), `max_tracking_error`, the stall watchdog and `max_policy_seconds`.
 - **The robot's CRISP takes the full 3×3 translational stiffness** (2026-09-29, audit B2 step 1):
   `~/THOR_DOCKER_SETUP`, `patches/crisp-full-stiffness.patch`, in image `docker-thor:local`; the
   previous image is kept as `docker-thor:pre-full-stiffness`

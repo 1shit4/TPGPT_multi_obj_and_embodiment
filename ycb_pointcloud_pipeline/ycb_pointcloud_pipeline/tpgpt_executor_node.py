@@ -121,6 +121,33 @@ def safety_monitor(p, following: bool):
                          min_progress_ratio=0.0 if following else float(p('min_progress_ratio')))
 
 
+def start_distance_refusal(gap: float, q_plan, q_now, max_distance: float,
+                           tolerance: float) -> str | None:
+    """Why the run must not start from ``gap`` metres from the plan's start, or None.
+
+    The planner checks the straight move from the arm's joints at planning time onto the
+    path's start (``path_check`` phase ``approach_in``: reach, self-collision, the table, the
+    shelf, the seen points) and stops with ``approach_blocked`` when it is not clear. So when
+    the arm is still where it was planned from (every joint within ``tolerance`` of
+    ``joint_states_at_plan``), the move the executor makes is the one that was checked, at any
+    distance. Only otherwise does ``max_distance`` apply (2026-10-03: a homed arm was refused
+    at 0.602 m from a plan made from that very pose)."""
+    if q_plan is not None and q_now is not None:
+        drift = float(np.max(np.abs(np.asarray(q_now, dtype=float)[:7]
+                                    - np.asarray(q_plan, dtype=float)[:7])))
+        if drift <= tolerance:
+            return None
+        why = (f'the arm has moved since the plan was made (a joint by {np.degrees(drift):.1f} '
+               'deg), so the planner did not check the move from here')
+    else:
+        why = ('the plan has no joints from planning time' if q_plan is None
+               else 'there are no fresh joint angles')
+    if gap <= max_distance:
+        return None
+    return (f'the TCP is {gap:.3f} m from the plan start (max_start_distance {max_distance}) and '
+            f'{why}: re-plan from here, or move the arm closer first')
+
+
 def learned_settings(plan_dir: str, given: dict, defaults: dict) -> dict:
     """What a learned plan must run at, from its plan.json, against the parameters ``given``.
 
@@ -239,7 +266,9 @@ class TpgptExecutorNode(Node):
         d('workspace_check', False)
         d('workspace_min', [0.15, -0.6, -0.25])     # base frame box for commanded TCP, m
         d('workspace_max', [0.85, 0.6, 0.7])
-        d('max_start_distance', 0.6)                # m, current TCP to plan start
+        d('max_start_distance', 0.6)                # m, current TCP to plan start, when the arm
+        #                                             has moved since planning (start_distance_refusal)
+        d('plan_joint_tolerance', 0.05)             # rad: the arm is still where it was planned from
         d('approach_max_linear_speed', 0.05)
         d('approach_max_angular_speed', 0.3)
         d('approach_settle_tolerance', 0.2)
@@ -834,9 +863,12 @@ class TpgptExecutorNode(Node):
             self.sim_T = T_now.copy()
         cur_pos, cur_rot = T_now[:3, 3], T_now[:3, :3]
         gap = float(np.linalg.norm(cur_pos - start_pos))
-        if gap > p('max_start_distance'):
-            raise AbortRun(f'the TCP is {gap:.3f} m from the plan start (max_start_distance '
-                           f"{p('max_start_distance')}); move the arm closer first")
+        refusal = start_distance_refusal(gap, m.get('joint_states_at_plan'), self.measured_joints(),
+                                         float(p('max_start_distance')),
+                                         float(p('plan_joint_tolerance')))
+        if refusal:
+            raise AbortRun(refusal)
+        log.info(f'the TCP is {gap:.3f} m from the plan start')
 
         # --- controller and gripper -------------------------------------------
         controllers = None

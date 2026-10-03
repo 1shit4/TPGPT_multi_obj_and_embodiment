@@ -222,6 +222,13 @@ settle and opened wherever it was.
 
 ## Safety guards
 
+* **Distance to the start**, before anything moves. The planner has already checked the straight
+  move from where the arm was at planning time onto the path's start (reach, the arm against
+  itself, the table, the shelf, what the camera sees) and stops with `approach_blocked` if it is
+  not clear. So if every joint is still within 0.05 rad of where it was planned from
+  (`plan_joint_tolerance`), the run starts at any distance: the move it makes is the move that
+  was checked. If the arm has moved since, or no joints were recorded, the start may be at most
+  0.6 m away (`max_start_distance`) and the refusal says to re-plan.
 * **Tracking error**: the hand more than 80 mm from the policy's command `a` → abort and hold.
 * **Not following** (taught plans only): over 40 steps the hand moved less than 30 % of what `a`
   moved (once `a` moved 30 mm) → abort and hold. It catches an arm that does not respond at all (a
@@ -247,7 +254,8 @@ On any abort the elbow's target is set to where the elbow is, and the arm holds 
   spring. Across the runs so far, the more stretched the wrist at the start, the larger the gap
   there. The start is now reached in joint space, which does not have this problem; mid-run it
   remains. The planner checks that every pose is reachable, not how stretched the arm is when it
-  gets there (`path_check.REACH_MARGIN`, off: its cost is being measured).
+  gets there beyond keeping the wrist 20 mm inside full stretch (`path_check.REACH_MARGIN`, on
+  since 2026-10-03).
 * **The turning stiffness is soft.** A force F at the fingertips, 228 mm below the wrist, tilts the
   hand by about F × 0.228 m / 30 N·m/rad (31 N → 13°). 30 was chosen on 2026-09-30: at 60 the wrist
   vibrated (26 Hz) as joint 7 entered its limit zone during a replay; 45 has not been tried there.
