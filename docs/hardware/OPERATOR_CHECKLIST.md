@@ -40,6 +40,7 @@ Put it in the pick area on the table in front of the robot, one object at a time
 | object | how it is set down | why |
 |---|---|---|
 | banana | **stem on the table** | its two faces look alike to the camera, and fitted the wrong way up the jaws cross it ~40 deg off. Grip it harder than 30 N (`grasp_force`) |
+| apple | **upright, stem axis vertical** | it is nearly round: the camera cannot tell how it is turned, so the fit assumes upright |
 | mug | **opening up, handle visible to the camera** | upright and upside down look alike from this camera; a hidden handle cannot be fitted |
 | pudding box | **on its long narrow side (the 88 x 35 mm face), 70 mm tall** -- not on its end, not flat | the planner's model is this box (88 x 70 x 35, not the YCB one). Stood on its end the fit is refused ("standing another way?") when its top reads high, as the silver face does |
 | foam brick | on any face | -- |

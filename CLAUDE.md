@@ -430,7 +430,8 @@ The planner's support height is: its `support_height` parameter, else the calibr
   Both are the fit's needs, measured: (1) from this camera an upright and an upside-down mug differ
   only inside the cup, and the fit chose upside-down on 15 of 20 live frames, so the fit only tries
   the protocol poses (`object_model.PROTOCOL_RESTS`: mug 0; pudding box 1 or 3, on its 88 x 35 face; banana 0, stem
-  on the table -- its two faces fit within 0.03 on 42 of 51 captures, at headings up to 41 deg apart);
+  on the table -- its two faces fit within 0.03 on 42 of 51 captures, at headings up to 41 deg apart;
+  apple 0, upright -- nearly round, so the camera cannot tell how it is turned);
   (2) the D435's infrared bounces inside the glossy cup and puts 15-30 % of the mug's cloud ~80 mm
   too far, behind the mug near the table, and the fit turned the handle onto those points (and
   leaned the mug 13 deg). For the mug (`OPEN_VESSELS`) the fit now has no rest tilt and is run a
@@ -484,7 +485,11 @@ The planner's support height is: its `support_height` parameter, else the calibr
   median 0.75 on its 15 captures (0.60 before), tonight's first admissible grasp at rank 0-1. The
   generator's top-rated grasps close nearer the centre (top 50: median 12 mm; ranks 200-400: 17).
   The camera sees round objects narrower than they are (60-65 mm for this apple): the rim is lost
-  to the edge filters.
+  to the edge filters. **And it is fitted upright and flat** (`PROTOCOL_RESTS` 0, `FLAT_RESTING`,
+  2026-10-03): the free fit had its stem axis a median 75 deg from vertical over 17 captures (0.75
+  explained; upright 0.95), and none of the apple's runs had executed a good grasp. Where the pads
+  touch, the surface now slopes 9-12 deg from the closing direction on the 21:54 capture's chosen
+  grasps; the 20:24 cap grasp sloped 41-42 deg, past what the rubber holds.
 - **Destinations have names**: `destination_name:=top_left|top_right|bottom_left|bottom_right`,
   resolved from the touched slot marks (`config/shelf.yaml`, `slots:`, `shelf.slots()`).
 - **`bottom_right` is abandoned** (user, 2026-09-25). Measured: every object scored 0 admissible of

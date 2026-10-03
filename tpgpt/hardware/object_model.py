@@ -105,10 +105,15 @@ MEASURED_EXTENTS = {"apple": (0.070, 0.070, 0.072)}
 #: the camera cannot tell the two apart -- on 42 of its 51 captures the two fits explain
 #: within 0.03 of each other, at headings up to 41 deg apart (19:56: 238 vs 197 deg, 0.92
 #: each), so a banana lying the other way had its jaws planned across it 40 deg off.
+#: The apple stands upright (rest 0, its stem axis vertical; user, 2026-10-03). It is
+#: nearly round, so the camera cannot tell how it is turned: on its 17 captures the free
+#: fit (12 hull rests, plus the rest tilt) put its stem axis a median 75 deg from vertical
+#: -- on its side -- explaining a median 0.75, while upright and flat it explains 0.95,
+#: as much as any pose does (0.96). Upside down it is the same shape to within the dimples.
 #: An object not listed may rest any way. Indices are into
 #: :meth:`ObjectModel._resting_orientations`, which is deterministic for a given scan;
 #: ``test_object_model`` pins them.
-PROTOCOL_RESTS = {"mug": (0,), "pudding_box": (1, 3), "banana": (0,)}
+PROTOCOL_RESTS = {"mug": (0,), "pudding_box": (1, 3), "banana": (0,), "apple": (0,)}
 #: A protocol object whose camera cloud reaches this far above the fitted pose's top
 #: is refused: the fit may only use the protocol poses, so it cannot refuse the
 #: wrong one on its own, and a box stood on its end would be planned as a box on
@@ -150,7 +155,7 @@ OPEN_VESSELS = ("mug",)
 #: brick leaned 19.5 and 19.3 deg on two of three runs (resting on an edge, as it
 #: looked), the upright pudding box 11.7 and 12.0 deg on both of its plans into
 #: bottom_left, and the mug 11-22 deg. The tilt stays for what can really rest
-#: rolled or leaning: the apple, the can. (On a synthetic box with no artefacts the
+#: rolled or leaning: the can. (On a synthetic box with no artefacts the
 #: tilt search was worth 2.5 mm of fit against 5.5 -- the live fits are the evidence
 #: that counts.) **The banana since 2026-10-03.** Rolled about its long axis it lifted
 #: its middle off the table, which a banana on its side cannot do: on its 49 recorded
@@ -159,7 +164,7 @@ OPEN_VESSELS = ("mug",)
 #: explains as much or more on 48 (median 0.68 -> 0.81, the other 0.73 vs 0.72). On
 #: 10-03 19:33 the plan centred the jaws on the lifted middle, 10 mm above the real
 #: banana, and they closed on air with the arm at the planned grasp to 2 mm.
-FLAT_RESTING = ("mug", "pudding_box", "foam_brick", "banana")
+FLAT_RESTING = ("mug", "pudding_box", "foam_brick", "banana", "apple")
 #: The occlusion test is a depth image of the placed scan: :data:`OCCLUSION_POINTS`
 #: on its surface, the nearest per angular bin of :data:`OCCLUSION_BIN_DEG` (1.5 mm
 #: at 1.1 m), each camera point compared with its own bin only. A neighbourhood

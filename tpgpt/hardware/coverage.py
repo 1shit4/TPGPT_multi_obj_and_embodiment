@@ -87,7 +87,7 @@ def coverage(object_name, object_pose, world, source, destination, destination_h
                         destination_height=float(destination_height),
                         support_height=float(support_height))
     path = PathContext(world=world, end_effector=end_effector, start_q=start_q)
-    planned, admissible, first_rank, unrefined = 0, 0, None, 0
+    planned, admissible, first_rank, unrefined, first_grasp = 0, 0, None, 0, None
     reasons, faults, detail = collections.Counter(), collections.Counter(), collections.Counter()
     for rank, candidate in enumerate(survivors[:int(plan_budget)]):
         planned += 1
@@ -108,7 +108,8 @@ def coverage(object_name, object_pose, world, source, destination, destination_h
         verdict = path_check.verdict(report)
         if verdict is None:
             admissible += 1
-            first_rank = rank if first_rank is None else first_rank
+            if first_rank is None:              # what the planner would execute
+                first_rank, first_grasp = rank, candidate.as_dict()
         else:
             reasons[verdict.split("(")[0].split(":")[0].strip()] += 1
             # What touched what, counted once per candidate (a candidate with the
@@ -125,6 +126,7 @@ def coverage(object_name, object_pose, world, source, destination, destination_h
         "planned": planned,
         "admissible": admissible,
         "first_rank": first_rank,
+        "first_grasp": first_grasp,
         "clearance": clearance,
         "postures_not_at_their_waypoint": unrefined,
         "why_the_planned_ones_failed": dict(reasons),

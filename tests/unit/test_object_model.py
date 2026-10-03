@@ -297,3 +297,17 @@ def test_the_apple_is_the_one_on_the_bench():
     ring = (np.linalg.norm(q[:, :2], axis=1) > 0.014) & (np.linalg.norm(q[:, :2], axis=1) < 0.020)
     for sign in (1.0, -1.0):          # the surface dips toward the stem at both ends of z
         assert np.max(sign * q[ring, 2]) - np.max(sign * q[on_axis & (sign * q[:, 2] > 0), 2]) > 0.003
+
+
+def test_the_apple_of_21_54_stands_upright():
+    """The capture of 2026-10-03 21:54 (apple, top_right). The free fit stood the nearly round
+    apple on a hull rest 35 deg off upright (81 mm tall) and planned on it; across its 17
+    captures it had the stem axis a median 75 deg from vertical. Upright and flat it explains
+    more (0.89 against 0.84)."""
+    from pathlib import Path
+    rec = np.load(Path(__file__).resolve().parents[1] / "data" / "apple_20261003_215427.npz")
+    apple = ObjectModel.load("apple")
+    fit = fit_object(apple, rec["observed"].astype(float), float(rec["table"]), rec["camera"])
+    assert fit.accepted, fit.reason
+    assert fit.explained > 0.85
+    assert (fit.rotation @ [0.0, 0.0, 1.0])[2] > np.cos(np.radians(1.0))     # stem axis vertical
