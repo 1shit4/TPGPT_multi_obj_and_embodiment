@@ -436,7 +436,9 @@ tall and the full-size scan on its side (89.7) seemed to fit.
 Why it mattered: the camera's box was 30-40 mm shorter than the model on every capture, the fit
 put the missing length at whichever end scored better, and on 17:32 that was the end facing the
 camera, where nothing was; the jaws closed on air beside the real box. Bottom_left is no longer
-run (the user, 2026-10-03).
+run (the user, 2026-10-03). **The apple too**: 70 x 72 mm against the scan's 75.4 x 74.9 x 71.9
+(`MEASURED_EXTENTS`), so a new library; with the scan, grasps across its middle were too wide for
+the 80 mm open hand and selection fell to one on its cap.
 
 ## Deviation from the simulation
 

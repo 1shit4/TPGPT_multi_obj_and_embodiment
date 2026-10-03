@@ -284,3 +284,16 @@ def test_the_banana_lies_stem_down():
     moved = 0 if abs(a1 - a0) > abs(b1 - b0) else 1      # the stem: the end that moves
     assert (a0, b0)[moved] < 0.001                        # on the table in the protocol rest
     assert (a1, b1)[moved] > 0.008                        # in the air when flipped
+
+
+def test_the_apple_is_the_one_on_the_bench():
+    """About 70 mm across and 72 tall (user, 2026-10-03); the YCB scan is 75.4 x 74.9 x 71.9.
+    z is the scan's stem axis: its two ends have the dimples."""
+    apple = ObjectModel.load("apple")
+    assert np.ptp(apple.vertices, axis=0) == pytest.approx([0.070, 0.070, 0.072], abs=1e-4)
+    pts = apple.sample(40000, 1)[0]
+    q = pts - (pts.min(axis=0) + pts.max(axis=0)) / 2.0
+    on_axis = np.linalg.norm(q[:, :2], axis=1) < 0.006
+    ring = (np.linalg.norm(q[:, :2], axis=1) > 0.014) & (np.linalg.norm(q[:, :2], axis=1) < 0.020)
+    for sign in (1.0, -1.0):          # the surface dips toward the stem at both ends of z
+        assert np.max(sign * q[ring, 2]) - np.max(sign * q[on_axis & (sign * q[:, 2] > 0), 2]) > 0.003

@@ -84,6 +84,16 @@ YCB_SCANS = {
 #: the end facing the camera, where the camera saw nothing, the plan put the jaws 20 mm
 #: inside that end, and the jaws closed on air beside the real box.
 MEASURED_EDGES = {"pudding_box": (0.088, 0.070, 0.035)}
+#: The same for an object without flat faces: its extents along the scan's own x, y and z,
+#: metres, scaled about the middle of the scan's box. The apple (user, 2026-10-03) is about
+#: 70 mm across and 72 mm tall against the YCB scan's 75.4 x 74.9 x 71.9; z is the scan's
+#: stem axis (5-6 mm dimples at both ends of it, none along x or y). The camera agreed
+#: before the user's careful measurement did: on its 15 captures a 70 x 67 apple explained a
+#: median 0.76 of the cloud against 0.60 for the scan, and an 80 x 75 one 0.57. The YCB
+#: apple left 2.5 mm each side in the 80 mm open hand, so grasps across its middle were
+#: refused as too wide (32 of the 352 refused ahead of 10-03 20:24's chosen grasp, which
+#: closed 25 mm off the apple's centre, on its cap, and pushed it away).
+MEASURED_EXTENTS = {"apple": (0.070, 0.070, 0.072)}
 
 #: Resting poses the experiment's protocol allows (user, 2026-09-25): the mug is set
 #: down opening-up (rest 0; rest 2 is the same shape upside down, and from this
@@ -303,6 +313,10 @@ class ObjectModel:
         vertices, faces = read_stl_faces(path)
         if name in MEASURED_EDGES:
             vertices = _scaled_to_edges(vertices, faces, MEASURED_EDGES[name])
+        if name in MEASURED_EXTENTS:
+            middle = (vertices.min(axis=0) + vertices.max(axis=0)) / 2.0
+            vertices = middle + (vertices - middle) * (np.asarray(MEASURED_EXTENTS[name])
+                                                       / np.ptp(vertices, axis=0))
         model = cls(name=name, vertices=vertices, faces=faces,
                     centre_of_mass=_volume_centroid(vertices, faces))
         model.rests = model._resting_orientations()

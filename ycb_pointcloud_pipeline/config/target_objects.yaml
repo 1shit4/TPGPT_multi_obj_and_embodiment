@@ -49,7 +49,7 @@ target_objects:
   - name: apple
     prompt: red apple
     threshold: 0.48           # absent up to 0.47 ("red apple" on the mug and the pudding box's logo)
-    max_size: 0.085
+    max_size: 0.082           # the measured apple (70 x 72 mm, 2026-10-03), not its YCB scan (0.085)
   # - name: cracker_box
   #   prompt: small red box      # "cracker box" scored < 0.2 in the full caption, this 0.67
   # - bleach_cleanser

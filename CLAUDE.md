@@ -476,6 +476,15 @@ The planner's support height is: its `support_height` parameter, else the calibr
   only when its top reads high too. **Every pudding-box number before 2026-10-03 was for the
   full-size scan** (coverage, bottom_left, "a lying box is not graspable": flat, at 88 x 70, it fits
   the 80 mm opening across 70 -- unmeasured). The brick's prompt can take the box for the brick.
+- **Our apple is 70 x 72 mm, not the YCB scan's 75 x 72** (user, 2026-10-03, between two flat
+  faces -- "80" by eye was wrong; `object_model.MEASURED_EXTENTS`, scaled in the scan's own axes,
+  z its stem axis). The 75 mm model left 2.5 mm each side in the 80 mm open hand, so grasps across
+  its middle were refused as too wide and selection fell to the 353rd (score 0.61), which closed
+  25 mm off the centre, on the cap, and pushed the apple away (20:24). Measured apple: explained
+  median 0.75 on its 15 captures (0.60 before), tonight's first admissible grasp at rank 0-1. The
+  generator's top-rated grasps close nearer the centre (top 50: median 12 mm; ranks 200-400: 17).
+  The camera sees round objects narrower than they are (60-65 mm for this apple): the rim is lost
+  to the edge filters.
 - **Destinations have names**: `destination_name:=top_left|top_right|bottom_left|bottom_right`,
   resolved from the touched slot marks (`config/shelf.yaml`, `slots:`, `shelf.slots()`).
 - **`bottom_right` is abandoned** (user, 2026-09-25). Measured: every object scored 0 admissible of
