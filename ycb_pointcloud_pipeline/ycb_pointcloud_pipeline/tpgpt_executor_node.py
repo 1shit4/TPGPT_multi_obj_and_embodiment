@@ -1252,7 +1252,45 @@ class TpgptExecutorNode(Node):
             self.publish(cmd.tcp_position - self.offset, cmd.tcp_rotation, values)
             time.sleep(dt)
         self.save_run_record()
+        if plan.metadata.get('task') == 'grasp_test' and not self.dry:
+            self.record_grasp_outcome(plan, log_path)
         return True
+
+    def record_grasp_outcome(self, plan, log_path):
+        """After a grasp test (tpgpt.hardware.grasp_test) on the robot: what happened, from
+        the person watching, kept with the hand's close report in <log>_outcome.json."""
+        choices = {'h': 'held through the lift', 'd': 'dropped during the lift or hold',
+                   'n': 'not picked up (closed on air or slipped off at once)',
+                   'p': 'pushed or knocked the object before closing'}
+        answer = ''
+        while answer not in choices:
+            try:
+                answer = input('Grasp test outcome? ' + ', '.join(f'[{k}] {v}' for k, v in
+                                                                  choices.items()) + ': ')
+            except EOFError:
+                answer = 'unrecorded'
+                break
+            answer = answer.strip().lower()[:1]
+        note = ''
+        try:
+            note = input('Note (optional, Enter to skip): ').strip()
+        except EOFError:
+            pass
+        closes = [r for r in self.hand_reports if r['label'] == 'CLOSE']
+        record = {
+            'outcome': choices.get(answer, answer), 'outcome_key': answer, 'note': note,
+            'object_name': plan.metadata.get('object_name'),
+            'grasp_test': plan.metadata.get('grasp_test'),
+            'library_index': plan.metrics.get('library_index'),
+            'grasp_score': plan.metrics.get('grasp_score'),
+            'close_report': closes[-1]['report'] if closes else None,
+            'predicted_contacts': plan.metrics.get('hand_contacts_predicted'),
+            'end_effector': plan.metadata.get('end_effector', {}).get('name'),
+        }
+        path = log_path.replace('.csv', '_outcome.json')
+        with open(path, 'w') as f:
+            json.dump(record, f, indent=1, default=str)
+        self.get_logger().info(f'grasp test outcome: {record["outcome"]} -> {path}')
 
     # ------------------------------------------------------------------ replay
     def run_replay(self):

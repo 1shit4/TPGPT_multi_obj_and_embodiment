@@ -144,6 +144,13 @@ class TpgptPlannerNode(Node):
         d('destination_name', '')
         d('destination_height', NAN)              # surface height there; NaN -> destination z
         d('grasp_depth_below_top', 0.03)          # top-down fallback grasp only
+        # transport: the demonstration carried to the destination. grasp_test: the grasp on its
+        # own -- approach, close, lift 10 cm, set down, release, retreat (tpgpt.hardware.grasp_test;
+        # the destination is not used). For making GraspGen-X's grasps work on a new hand.
+        d('task', 'transport')
+        d('grasp_test_depth_offset', 0.0)         # m: the hand this much further along its approach
+        d('grasp_test_library_index', -1)         # >= 0: test only this candidate (a depth sweep)
+        d('grasp_test_constructed', False)        # a grasp built by hand (straight down), not GraspGen-X's
         # Grasp selection
         # Hand on the flange: panda (Franka Hand) | inspire (Inspire RH56DFX-2R); both GraspGen-X
         d('end_effector', 'panda')
@@ -594,11 +601,32 @@ class TpgptPlannerNode(Node):
         info['screen_context'] = context
         info['world'] = world.to_dict()
         t_sel = time.monotonic()
+        task = str(p('task'))
         try:
-            selection = select_and_plan(
-                self.source, scene, poses, scores, settings, unavailable_reason=unavailable,
-                context=context, path=path_ctx,
-                grasp_depth_below_top=float(p('grasp_depth_below_top')))
+            if task == 'grasp_test':
+                from tpgpt.hardware import grasp_test as gt
+                support = float(scene.support_height if scene.support_height is not None
+                                else np.percentile(points[:, 2], 1.0))
+                if p('grasp_test_constructed'):
+                    selection = gt.constructed_grasp_test(
+                        points, support, settings, path_ctx, self.end_effector,
+                        p('object_name'), float(p('grasp_test_depth_offset')))
+                elif poses is None or not len(poses):
+                    raise PlanningError(f'no_executable_grasp: no GraspGen-X candidates '
+                                        f'({unavailable})')
+                else:
+                    index = int(p('grasp_test_library_index'))
+                    selection = gt.select_grasp_test(
+                        points, poses, scores, support, settings, context, path_ctx,
+                        self.end_effector, p('object_name'), float(p('grasp_test_depth_offset')),
+                        None if index < 0 else index)
+            elif task == 'transport':
+                selection = select_and_plan(
+                    self.source, scene, poses, scores, settings, unavailable_reason=unavailable,
+                    context=context, path=path_ctx,
+                    grasp_depth_below_top=float(p('grasp_depth_below_top')))
+            else:
+                raise PlanningError(f"task must be transport or grasp_test, not {task!r}")
         except PlanningError as exc:
             info['timing_s']['selection_total'] = time.monotonic() - t_sel
             info['error'] = str(exc)
@@ -667,10 +695,12 @@ class TpgptPlannerNode(Node):
                 'workspace_min', 'workspace_max', 'executor_workspace_min',
                 'executor_workspace_max', 'voxel_size', 'destination',
                 'destination_height', 'support_height', 'grasp_depth_below_top',
-                'min_determinant', 'n_frames')},
+                'min_determinant', 'n_frames', 'task', 'grasp_test_depth_offset',
+                'grasp_test_library_index', 'grasp_test_constructed')},
         })
         out = os.path.join(p('output_dir'),
-                           f"{p('object_name')}_{time.strftime('%Y%m%d_%H%M%S')}")
+                           f"{p('object_name')}_{time.strftime('%Y%m%d_%H%M%S')}"
+                           + ('_grasptest' if task == 'grasp_test' else ''))
         result.save(out)
         # The camera's own cloud and the obstacles, as a refused plan keeps them: a plan
         # that worked is as much evidence as one that did not, and without these its fit
