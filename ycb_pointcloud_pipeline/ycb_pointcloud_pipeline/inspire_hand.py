@@ -1,24 +1,40 @@
 #!/usr/bin/env python3
-"""Inspire RH56 hand over RS485: protocol, the fixed open/close grasp, and a CLI.
+"""Inspire RH56 hand over RS485: protocol, the open/close grasp, and a CLI.
 
 No ROS in here, so the same code runs from a terminal and inside
 ``inspire_hand_node`` (the ROS 2 wrapper the pipeline uses).
 
-The grasp (verified on the real hand, 2026-09-15, gripping round objects from
-the side with the object close to the palm) is ONE fixed open and ONE fixed
-close, in ANGLE_SET register values (0-1000, 1000 = straight/open, 0 = bent)::
+The hand on the FR3 is an **RH56DFX-2R, a right hand** (2026-10-04). Commands are
+ANGLE_SET register values (0-1000, 1000 = straight/open, 0 = bent)::
 
     dof            open    close
     little..index  1000    0      the force threshold stops each finger on contact
-    thumb bend     1000    0      bends last, locking the object against the fingers
+    thumb bend     1000    0      the force threshold stops it on contact
     thumb rotation 0       0      opposed: pointing out of the palm, facing the fingers
 
-Sequences (the order is what keeps the thumb out of the index finger):
+**open**: fingers and thumb bend straighten first (thumb rotation held), then the
+straight thumb swings into opposition over the open palm (the order keeps the
+thumb out of the index finger).
 
-* **open**: fingers and thumb bend straighten first (thumb rotation held), then
-  the straight thumb swings into opposition over the open palm.
-* **close**: thumb rotation confirmed opposed, the four fingers wrap and push the
-  object against the straight thumb, then the thumb bends to lock it.
+**close**, two ways (``close_mode``; which one holds better is measured on the
+robot, not assumed):
+
+* ``sequential`` (verified on the hand 2026-09-15, round objects near the palm):
+  thumb rotation confirmed opposed, the four fingers wrap and push the object
+  against the straight thumb, then the thumb bends to lock it.
+* ``simultaneous``: thumb rotation confirmed opposed, then the four fingers and
+  the thumb bend together -- how GraspGen-X's description closes the hand
+  (``close`` drives the thumb pitch and the fingers in one pose).
+
+Either returns a :class:`CloseReport`: which DOFs stopped on their force threshold
+(**contact**), which closed all the way (**on air**), which were still moving at the
+timeout, and the actuator errors. A close that touches nothing is not a success.
+
+Each DOF's angle in the URDF joint the hand model uses comes from the ``joint_map``
+block of config/inspire_hand.yaml (:func:`joint_map_from_config`,
+:func:`register_to_joint`): linear per DOF, ``q = q_at_0 + (q_at_1000 - q_at_0) * u /
+1000``. ``tpgpt.hardware.inspire_model`` reads the same block; a test keeps the two
+in agreement.
 
 Register convention (RH56 manual, section 2.4): six shorts per group in the
 order little, ring, middle, index, thumb bend, thumb rotation. ``-1`` = leave
@@ -38,18 +54,22 @@ CLI (the hand in this lab answers on ID 2 at 115200; ``scan`` finds it)::
     ros2 run ycb_pointcloud_pipeline inspire_hand status
     ros2 run ycb_pointcloud_pipeline inspire_hand --speed 300 open
     ros2 run ycb_pointcloud_pipeline inspire_hand --speed 300 --force 400 close
+    ros2 run ycb_pointcloud_pipeline inspire_hand --close-mode simultaneous close
     ros2 run ycb_pointcloud_pipeline inspire_hand cycle --hold 3
     ros2 run ycb_pointcloud_pipeline inspire_hand --dry-run close   # print frames only
 
-Needs only ``pyserial``.
+Port, ID, baud, speed, force and close mode default to config/inspire_hand.yaml
+(installed copy; ``--config`` for another). Needs ``pyserial`` and ``pyyaml``.
 """
 
 from __future__ import annotations
 
 import argparse
+import json
 import struct
 import sys
 import time
+from dataclasses import asdict, dataclass, field
 
 # --- register map (manual section 2.4) ---------------------------------------
 HAND_ID_REG = 1000  # register ADDRESS of the ID (1 byte, value default 1, range 1-254);
@@ -67,6 +87,13 @@ STATUS = 1612
 TEMP = 1618
 
 DOF_NAMES = ("little", "ring", "middle", "index", "thumb_bend", "thumb_rot")
+FINGERS = DOF_NAMES[:4]
+BENDING = DOF_NAMES[:5]                # the DOFs that close onto an object
+#: The URDF joint each DOF drives (GraspGen-X's ``inspire_hand`` description).
+URDF_JOINTS = ("pinky_proximal_joint", "ring_proximal_joint", "middle_proximal_joint",
+               "index_proximal_joint", "thumb_proximal_pitch_joint",
+               "thumb_proximal_yaw_joint")
+CLOSE_MODES = ("sequential", "simultaneous")
 STATUS_TEXT = {
     0: "opening", 1: "closing", 2: "at target", 3: "stopped on force",
     5: "current limit", 6: "locked rotor", 7: "actuator fault",
@@ -81,6 +108,7 @@ DEFAULT_PORT = "/dev/ttyUSB0"
 DEFAULT_ID = 2          # this lab's hand (factory default is 1)
 DEFAULT_SPEED = 500     # 0-1000, 1000 = 0.8 s full stroke
 DEFAULT_FORCE = 400     # grams per finger before it stops
+DEFAULT_CLOSE_MODE = "sequential"
 
 # --- the fixed grasp ------------------------------------------------------------
 # Thumb rotation (manual 2.4.11, top view): 1000 = beta 165 deg, thumb swung out
@@ -89,6 +117,102 @@ DEFAULT_FORCE = 400     # grams per finger before it stops
 THUMB_OPPOSED = 0
 OPEN_POSE = [1000, 1000, 1000, 1000, 1000, THUMB_OPPOSED]   # wide C-shape
 CLOSE_POSE = [0, 0, 0, 0, 0, THUMB_OPPOSED]                 # stops on contact
+
+#: Register -> URDF angle before measurement: the URDF limits, reversed (register
+#: 1000 = straight = joint 0). UNVERIFIED -- the manual's ranges do not match the
+#: URDF's for the thumb bend (-13..53.6 deg against 0..0.6 rad); measured on the
+#: hand (M4) and then written into config/inspire_hand.yaml ``joint_map``.
+DEFAULT_JOINT_MAP = {
+    "little": (1.47, 0.0), "ring": (1.47, 0.0), "middle": (1.47, 0.0),
+    "index": (1.47, 0.0), "thumb_bend": (0.6, 0.0), "thumb_rot": (1.308, 0.0),
+}
+
+
+def joint_map_from_config(cfg: dict | None) -> dict:
+    """``{dof: (q_at_0, q_at_1000, verified)}`` from the config's ``joint_map`` block.
+
+    Missing DOFs take :data:`DEFAULT_JOINT_MAP`, flagged unverified.
+    """
+    block = (cfg or {}).get("joint_map", {}) or {}
+    out = {}
+    for name in DOF_NAMES:
+        entry = block.get(name)
+        if entry is None:
+            q0, q1000 = DEFAULT_JOINT_MAP[name]
+            out[name] = (float(q0), float(q1000), False)
+        else:
+            out[name] = (float(entry["q_at_0"]), float(entry["q_at_1000"]),
+                         bool(entry.get("verified", False)))
+    return out
+
+
+def register_to_joint(values, joint_map: dict) -> list[float]:
+    """Register values (0-1000, DOF order) -> URDF joint angles, rad (DOF order)."""
+    return [joint_map[n][0] + (joint_map[n][1] - joint_map[n][0]) * float(u) / 1000.0
+            for n, u in zip(DOF_NAMES, values)]
+
+
+def joint_to_register(angles, joint_map: dict) -> list[int]:
+    """URDF joint angles, rad (DOF order) -> register values, clipped to 0-1000."""
+    out = []
+    for n, q in zip(DOF_NAMES, angles):
+        q0, q1000 = joint_map[n][0], joint_map[n][1]
+        u = 1000.0 * (float(q) - q0) / (q1000 - q0)
+        out.append(int(round(min(max(u, 0.0), 1000.0))))
+    return out
+
+
+@dataclass
+class CloseReport:
+    """What a close did, DOF by DOF (names from :data:`DOF_NAMES`).
+
+    Each DOF is judged at the end of the step that last commanded it to move, since
+    a later step that holds it may report its status differently.
+    """
+
+    mode: str
+    contact: list = field(default_factory=list)    # stopped on the force threshold
+    on_air: list = field(default_factory=list)     # reached the close target untouched
+    timed_out: list = field(default_factory=list)  # still moving at the step's timeout
+    errors: str = ""
+    angles: list = field(default_factory=list)     # ANGLE_ACT after the close
+    forces_g: list = field(default_factory=list)   # FORCE_ACT after the close
+    status: list = field(default_factory=list)     # STATUS per DOF, from its own step
+    force_set_g: list = field(default_factory=list)
+    speed: int = DEFAULT_SPEED
+
+    @property
+    def fingers_in_contact(self) -> list:
+        return [n for n in FINGERS if n in self.contact]
+
+    @property
+    def opposed(self) -> bool:
+        """The thumb and at least one finger stopped on the object."""
+        return "thumb_bend" in self.contact and bool(self.fingers_in_contact)
+
+    @property
+    def ok(self) -> bool:
+        """No actuator error and nothing left moving."""
+        return not self.errors and not self.timed_out
+
+    def as_dict(self) -> dict:
+        d = asdict(self)
+        d["opposed"] = self.opposed
+        return d
+
+    def to_json(self) -> str:
+        return json.dumps(self.as_dict())
+
+    def summary(self) -> str:
+        contact = ", ".join(self.contact) or "nothing"
+        text = f"{self.mode} close: contact on {contact}"
+        if self.on_air:
+            text += f"; closed on air: {', '.join(self.on_air)}"
+        if self.timed_out:
+            text += f"; still moving at the timeout: {', '.join(self.timed_out)}"
+        if self.errors:
+            text += f"; actuator error ({self.errors})"
+        return text
 
 
 # --- protocol ------------------------------------------------------------------
@@ -159,8 +283,12 @@ class InspireHand:
     def set_speed(self, speed: int):
         self.write(SPEED_SET, shorts([speed] * 6))
 
-    def set_force(self, grams: int):
-        self.write(FORCE_SET, shorts([grams] * 6))
+    def set_force(self, grams):
+        """One threshold (grams) for every DOF, or six, in DOF order."""
+        values = list(grams) if isinstance(grams, (list, tuple)) else [grams] * 6
+        if len(values) != 6 or not all(0 <= int(v) <= 1000 for v in values):
+            raise ValueError(f"force must be one value or six, each 0-1000 g: {grams!r}")
+        self.write(FORCE_SET, shorts(values))
 
     def set_angles(self, angles: list[int]):
         angles = list(angles)
@@ -184,43 +312,105 @@ class InspireHand:
             "voltage_raw": struct.unpack("<h", self.read(VOLTAGE, 2))[0],
         }
 
-    def wait(self, timeout: float) -> dict:
-        """Poll until no DOF is still moving (STATUS 0/1) or timeout."""
+    def wait(self, timeout: float, on_status=None) -> dict:
+        """Poll until no DOF is still moving (STATUS 0/1) or ``timeout`` passes.
+
+        Returns the last status, with ``"timed_out"``: the DOFs still moving when the
+        time ran out (empty when everything stopped). ``on_status`` is called with
+        every status read, so a caller can publish the hand while it moves.
+        """
         if self.dry_run:
             return {}
         end = time.monotonic() + timeout
         time.sleep(0.05)
         while True:
             st = self.status()
-            if not any(s in (0, 1) for s in st["status"]) or time.monotonic() > end:
+            if on_status is not None:
+                on_status(st)
+            moving = [n for n, s in zip(DOF_NAMES, st["status"]) if s in (0, 1)]
+            if not moving:
+                st["timed_out"] = []
+                return st
+            if time.monotonic() > end:
+                st["timed_out"] = moving
                 return st
 
-    def move(self, label: str, angles: list[int], timeout: float, verbose: bool = True) -> dict:
+    def move(self, label: str, angles: list[int], timeout: float, verbose: bool = True,
+             on_status=None) -> dict:
         if verbose:
             self.log(f"{label}: ANGLE_SET {dict(zip(DOF_NAMES, angles))}")
         self.set_angles(angles)
-        st = self.wait(timeout)
+        st = self.wait(timeout, on_status)
         if verbose:
             print_status(st, self.log)
         return st
 
-    # the fixed grasp
-    def grasp_open(self, speed: int = DEFAULT_SPEED, force: int = DEFAULT_FORCE,
-                   timeout: float = 3.0, verbose: bool = True) -> dict:
+    # the grasp
+    def grasp_open(self, speed: int = DEFAULT_SPEED, force=DEFAULT_FORCE,
+                   timeout: float = 3.0, verbose: bool = True, on_status=None) -> dict:
         """Fingers and thumb bend straight (thumb rotation held), then thumb opposed."""
         self.set_speed(speed)
         self.set_force(force)
-        self.move("open fingers + thumb bend", [1000] * 5 + [HOLD], timeout, verbose)
-        return self.move("open (thumb opposed)", OPEN_POSE, timeout, verbose)
+        self.move("open fingers + thumb bend", [1000] * 5 + [HOLD], timeout, verbose, on_status)
+        return self.move("open (thumb opposed)", OPEN_POSE, timeout, verbose, on_status)
 
-    def grasp_close(self, speed: int = DEFAULT_SPEED, force: int = DEFAULT_FORCE,
-                    timeout: float = 3.0, verbose: bool = True) -> dict:
-        """Thumb opposed, four fingers wrap, then the thumb bends. Stops on contact."""
+    def close(self, mode: str = DEFAULT_CLOSE_MODE, speed: int = DEFAULT_SPEED,
+              force=DEFAULT_FORCE, timeout: float = 3.0, verbose: bool = True,
+              on_status=None) -> CloseReport:
+        """Close onto an object, ``sequential`` or ``simultaneous`` (module docstring).
+
+        Every bending DOF stops on its force threshold. Returns the :class:`CloseReport`;
+        raises IOError on a serial failure only.
+        """
+        if mode not in CLOSE_MODES:
+            raise ValueError(f"close mode must be one of {CLOSE_MODES}, not {mode!r}")
         self.set_speed(speed)
         self.set_force(force)
-        self.move("thumb rotation opposed", [HOLD] * 5 + [THUMB_OPPOSED], timeout, verbose)
-        self.move("close: fingers", CLOSE_POSE[:4] + [HOLD, THUMB_OPPOSED], timeout, verbose)
-        return self.move("close: thumb", [HOLD] * 4 + CLOSE_POSE[4:], timeout, verbose)
+        forces = list(force) if isinstance(force, (list, tuple)) else [int(force)] * 6
+        report = CloseReport(mode=mode, force_set_g=[int(f) for f in forces], speed=int(speed))
+        if self.dry_run:
+            self.move("thumb rotation opposed", [HOLD] * 5 + [THUMB_OPPOSED], timeout, verbose)
+            if mode == "sequential":
+                self.move("close: fingers", CLOSE_POSE[:4] + [HOLD, THUMB_OPPOSED], timeout,
+                          verbose)
+                self.move("close: thumb", [HOLD] * 4 + CLOSE_POSE[4:], timeout, verbose)
+            else:
+                self.move("close: fingers and thumb", CLOSE_POSE, timeout, verbose)
+            return report
+        if mode == "sequential":
+            steps = [("thumb rotation opposed", [HOLD] * 5 + [THUMB_OPPOSED], ("thumb_rot",)),
+                     ("close: fingers", CLOSE_POSE[:4] + [HOLD, THUMB_OPPOSED], FINGERS),
+                     ("close: thumb", [HOLD] * 4 + CLOSE_POSE[4:], ("thumb_bend",))]
+        else:
+            steps = [("thumb rotation opposed", [HOLD] * 5 + [THUMB_OPPOSED], ("thumb_rot",)),
+                     ("close: fingers and thumb", CLOSE_POSE, BENDING)]
+        status = [None] * 6
+        st = {}
+        for label, angles, moved in steps:
+            st = self.move(label, angles, timeout, verbose, on_status)
+            for name in moved:
+                k = DOF_NAMES.index(name)
+                status[k] = st["status"][k]
+                if name in st.get("timed_out", []):
+                    report.timed_out.append(name)
+        report.status = [s if s is not None else st["status"][k] for k, s in enumerate(status)]
+        report.angles = list(st["angle"])
+        report.forces_g = list(st["force_g"])
+        report.errors = error_text(st)
+        for k, name in enumerate(BENDING):
+            if name in report.timed_out:
+                continue
+            if report.status[k] == STATUS_STOPPED_ON_FORCE:
+                report.contact.append(name)
+            elif report.status[k] == 2:
+                report.on_air.append(name)
+        return report
+
+    def grasp_close(self, speed: int = DEFAULT_SPEED, force=DEFAULT_FORCE,
+                    timeout: float = 3.0, verbose: bool = True) -> dict:
+        """The sequential close, returning the final status (the 2026-09-15 interface)."""
+        self.close("sequential", speed, force, timeout, verbose)
+        return {} if self.dry_run else self.status()
 
 
 def default_config_path() -> str:
@@ -259,7 +449,12 @@ def contact_dofs(st: dict) -> list[str]:
 
 
 def closure(st: dict) -> list[float]:
-    """0 = straight, 1 = fully bent, per DOF, from ANGLE_ACT."""
+    """Per DOF from ANGLE_ACT, ``(1000 - a) / 1000`` clipped to 0..1.
+
+    For the five bending DOFs that is 0 = straight, 1 = fully bent. For thumb
+    rotation (index 5) it is **opposition**, 1 = opposed (beta 90 deg), 0 = swung
+    out (beta 165 deg) -- not a closure: an open hand reads 1 there too.
+    """
     if not st:
         return [0.0] * 6
     return [min(max((1000.0 - a) / 1000.0, 0.0), 1.0) for a in st["angle"]]
@@ -331,12 +526,31 @@ def list_ports():
         print(f"{p.device:<16} {p.description}  [{p.hwid}]")
 
 
+def _config_defaults(argv) -> dict:
+    """Port, ID, baud, speed, force and close mode from the config file, if readable."""
+    pre = argparse.ArgumentParser(add_help=False)
+    pre.add_argument("--config", default=None)
+    known, _ = pre.parse_known_args(argv)
+    try:
+        cfg = load_config(known.config)
+    except Exception:  # noqa: BLE001 - no yaml installed / no config: built-in defaults
+        return {}
+    serial, grasp = cfg.get("serial", {}), cfg.get("grasp", {})
+    return {k: v for k, v in {
+        "port": serial.get("port"), "id": serial.get("hand_id"), "baud": serial.get("baud"),
+        "speed": grasp.get("speed"), "force": grasp.get("force_g"),
+        "close_mode": grasp.get("close_mode"),
+        "timeout": grasp.get("step_timeout_s")}.items() if v is not None}
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("command", choices=["ports", "scan", "status", "open", "close", "cycle",
                                         "thumb", "home", "clear-error",
                                         "round-open", "round-close", "round-cycle"],
                     help="round-* are aliases of open/close/cycle")
+    ap.add_argument("--config", default=None,
+                    help="config/inspire_hand.yaml to take defaults from (default: installed)")
     ap.add_argument("--port", default=DEFAULT_PORT)
     ap.add_argument("--id", type=int, default=DEFAULT_ID,
                     help=f"HAND_ID (factory 1; this lab's hand answers on {DEFAULT_ID}, see `scan`)")
@@ -345,11 +559,13 @@ def main(argv=None) -> int:
     ap.add_argument("--speed", type=int, default=DEFAULT_SPEED, help="0-1000, 1000 = 0.8 s stroke")
     ap.add_argument("--force", type=int, default=DEFAULT_FORCE,
                     help="per-finger stop threshold in grams, 0-1000")
+    ap.add_argument("--close-mode", choices=CLOSE_MODES, default=DEFAULT_CLOSE_MODE)
     ap.add_argument("--thumb-rot", type=int, default=THUMB_OPPOSED,
                     help="thumb: rotation value to swing to and back from 1000")
     ap.add_argument("--hold", type=float, default=2.0, help="cycle: seconds closed")
     ap.add_argument("--timeout", type=float, default=3.0, help="motion wait per step, s")
     ap.add_argument("--dry-run", action="store_true", help="print frames only")
+    ap.set_defaults(**_config_defaults(argv))
     args = ap.parse_args(argv)
     command = args.command.replace("round-", "")
 
@@ -397,11 +613,11 @@ def main(argv=None) -> int:
             if command == "cycle":
                 hand.grasp_open(args.speed, args.force, args.timeout)
                 time.sleep(args.hold)
-            st = hand.grasp_close(args.speed, args.force, args.timeout)
-            if st:
-                held = contact_dofs(st)
-                print("contact on: " + (", ".join(held) if held else
-                                        "nothing (no object, every finger closed fully)"))
+            report = hand.close(args.close_mode, args.speed, args.force, args.timeout)
+            if not args.dry_run:
+                print(report.summary())
+                print("opposed (thumb + a finger on the object): "
+                      + ("yes" if report.opposed else "NO"))
             if command == "cycle":
                 time.sleep(args.hold)
                 hand.move("release", OPEN_POSE, args.timeout)

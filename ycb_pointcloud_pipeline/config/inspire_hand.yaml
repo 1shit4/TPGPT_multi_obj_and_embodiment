@@ -32,11 +32,30 @@ inspire_hand:
     baud: 115200
     hand_id: 2                  # found with `inspire_hand scan`; factory default is 1
 
-  grasp:                        # the fixed open/close, verified on the hand 2026-09-15
+  grasp:                        # open/close (inspire_hand.py docstring)
     speed: 500                  # 0-1000; 1000 = 0.8 s full stroke
-    force_g: 400                # per-finger stop threshold, grams (0-1000)
-    step_timeout_s: 3.0         # wait per motion step before moving on
+    force_g: 400                # per-finger stop threshold, grams (0-1000); per object:
+                                # config/grasp_forces.yaml inspire_grasp (set at each close)
+    close_mode: sequential      # sequential (verified 2026-09-15) | simultaneous -- which one
+                                # GraspGen-X grasps need is measured on the robot (plan M9)
+    step_timeout_s: 3.0         # wait per motion step; still moving after it = an error
     state_rate_hz: 10.0         # /inspire_hand/joint_states while idle
+
+  # Register value u (0-1000) -> the URDF joint it drives (GraspGen-X inspire_hand):
+  #   q = q_at_0 + (q_at_1000 - q_at_0) * u / 1000        (rad)
+  # little/ring/middle/index -> pinky/ring/middle/index_proximal_joint, thumb_bend ->
+  # thumb_proximal_pitch_joint, thumb_rot -> thumb_proximal_yaw_joint. Read by the hand
+  # node (joint_states in radians) and tpgpt.hardware.inspire_model (the hand's geometry).
+  # UNVERIFIED until measured on the hand (plan M4): these are the URDF limits reversed.
+  # The manual's thumb bend span (-13..53.6 deg = 1.16 rad) does not match the URDF's
+  # 0..0.6 rad; its thumb rotation span (90..165 deg = 1.309 rad) does.
+  joint_map:
+    little:     {q_at_0: 1.47,  q_at_1000: 0.0, verified: false}
+    ring:       {q_at_0: 1.47,  q_at_1000: 0.0, verified: false}
+    middle:     {q_at_0: 1.47,  q_at_1000: 0.0, verified: false}
+    index:      {q_at_0: 1.47,  q_at_1000: 0.0, verified: false}
+    thumb_bend: {q_at_0: 0.6,   q_at_1000: 0.0, verified: false}
+    thumb_rot:  {q_at_0: 1.308, q_at_1000: 0.0, verified: false}
 
   mount:
     # Frame CRISP commands and /current_pose reports. fr3_hand_tcp needs NO change to the
