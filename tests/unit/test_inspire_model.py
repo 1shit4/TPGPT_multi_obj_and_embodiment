@@ -243,3 +243,16 @@ def test_graspgenx_s_close_is_not_the_hand_s_full_close(desc):
     a = m.manual_angles(desc.close_q)
     assert 38.0 < a["index"] < 46.0
     assert m.close_q[3] > desc.close_q[3] + 0.2
+
+
+def test_the_open_hand_is_the_manual_s_217_8_mm_long(desc):
+    """The RH56 manual's dimension drawing (figure 1): 217.8 mm from the mounting face to
+    the (middle) fingertip, open. The model, from GraspGen-X's URDF with the wrist face
+    as hand_base_link's origin, gives 217.9 -- the URDF is this hand, and its origin is
+    the face that bolts to the adapter."""
+    m = im.InspireHandModel(desc)
+    lm = im.landmarks(m, "open")
+    assert lm["middle_length"] == pytest.approx(217.8, abs=1.0)
+    assert 55.0 < lm["knuckles_index_to_pinky"] < 60.0
+    half = im.landmarks(m, m.registers_to_q([500] * 5 + [0]))
+    assert half["thumb_to_index"] < lm["thumb_to_index"] - 100.0

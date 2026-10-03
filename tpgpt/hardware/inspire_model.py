@@ -616,6 +616,72 @@ def default_model(tool_depth: float | None = None) -> InspireHandModel:
     return InspireHandModel(tool_depth=tool_depth)
 
 
+#: The palm's surface in ``hand_base_link``: the palm box's face on the palm side
+#: (``body_palm``: centre x -0.0032, 39.1 mm thick, palm facing -X).
+PALM_SURFACE_X = -0.0032 - 0.0391 / 2.0
+
+
+def landmarks(model: InspireHandModel, q) -> dict:
+    """Distances a caliper can take on the real hand, mm, as the model predicts them.
+
+    * ``<finger>_length``: the fingertip's distance from the wrist face along the hand's
+      axis (the hand's length to that tip, from the face that bolts to the adapter);
+    * ``<finger>_to_palm``: the fingertip's height above the palm surface (negative =
+      curled past it);
+    * ``thumb_to_<finger>``: thumb tip to fingertip, straight line;
+    * ``knuckles_index_to_pinky``: the index and little fingers' knuckle axes, apart.
+
+    The fingertip is :meth:`InspireHandModel.fingertip_points`' point -- the end of the
+    last pad. Measure at the same point on the hand.
+    """
+    q = model._resolve(q)
+    T = model.link_poses(q)
+    H = T["hand_base_link"]
+    tips = model.fingertip_points(q)
+    local = {c: (p - H[:3, 3]) @ H[:3, :3] for c, p in tips.items()}      # in H
+    out = {}
+    for chain in ("index", "middle", "ring", "pinky", "thumb"):
+        out[f"{chain}_length"] = -local[chain][1] * 1000.0
+    for chain in ("index", "middle", "ring", "pinky"):
+        out[f"{chain}_to_palm"] = (PALM_SURFACE_X - local[chain][0]) * 1000.0
+        out[f"thumb_to_{chain}"] = float(np.linalg.norm(tips["thumb"] - tips[chain])) * 1000.0
+    out["knuckles_index_to_pinky"] = float(np.linalg.norm(
+        T["index_proximal"][:3, 3] - T["pinky_proximal"][:3, 3])) * 1000.0
+    return out
+
+
+def main(argv=None) -> int:
+    """``python -m tpgpt.hardware.inspire_model landmarks --registers u0 .. u5``."""
+    import argparse
+
+    ap = argparse.ArgumentParser(description="The Inspire hand model's predictions.")
+    ap.add_argument("command", choices=["landmarks", "angles"])
+    ap.add_argument("--registers", nargs=6, type=int, default=[1000, 1000, 1000, 1000, 1000, 0],
+                    metavar="U", help="little ring middle index thumb_bend thumb_rot, 0-1000")
+    ap.add_argument("--config", default=None, help="inspire_hand.yaml for the joint map "
+                    "(default: the source tree's)")
+    args = ap.parse_args(argv)
+    import yaml
+
+    path = Path(args.config) if args.config else (
+        Path(__file__).resolve().parents[2] / "ycb_pointcloud_pipeline/config/inspire_hand.yaml")
+    cfg = yaml.safe_load(path.read_text())
+    model = InspireHandModel(joint_map=joint_map_from_config(cfg))
+    q = model.registers_to_q(args.registers)
+    print(f"registers {args.registers} -> q {np.round(q, 3).tolist()} rad "
+          f"(joint map {'verified' if all(v[2] for v in model.joint_map.values()) else 'UNVERIFIED'}"
+          f", {path})")
+    values = landmarks(model, q) if args.command == "landmarks" else model.manual_angles(q)
+    unit = "mm" if args.command == "landmarks" else "deg"
+    for name, value in values.items():
+        print(f"  {name:26s} {value:8.1f} {unit}")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
+
+
 __all__ = [
     "CHAIN_OF_DOF",
     "CONTACT_DEPTH",
