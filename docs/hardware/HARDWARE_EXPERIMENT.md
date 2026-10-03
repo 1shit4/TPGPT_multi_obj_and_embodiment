@@ -85,13 +85,14 @@ departures from the table above, both from measurement on the current setup:
   banana. The fifth candidate, the tomato soup can, plans nowhere upright: the hand can
   only grip it around its barrel, past the ~45 deg of tilt where the map folds
   (`GRASP_LIBRARY.md`).
-- **3 destinations**, not 2: `top_left`, `top_right`, `bottom_left`. `bottom_right`
-  admitted no grasp on any capture and is abandoned (user, 2026-09-25). **`bottom_left` is
-  81 mm from where the demonstration set the banana down** (same board), so it tests a
-  new object and hand more than a new destination; the two top slots are 248 mm higher.
+- **2 destinations**: `top_left`, `top_right`, both on the top board, 248 mm above the board the
+  demonstration set the banana down on. `bottom_right` admitted no grasp on any capture and is
+  abandoned (user, 2026-09-25); `bottom_left` was in the grid until 2026-10-03 and is out (user):
+  it admitted 0-2 executable grasps an object, depending on where the object stood, and leaves
+  no room for a larger hand. A third destination, off the shelf, is to be set up later.
 
-So 4 × 3 × 3 = **36 trials per hand**, 72 in all. Expect this to change again when the
-second hand works.
+So 4 × 3 × 2 = **24 trials per hand**, 48 in all. Expect this to change again when the third
+destination and the second hand are in.
 
 **Trial count (as briefed).** 2 × 5 × 3 × 2 = **60 trials**. At roughly 3 minutes per trial
 including reset, about 3 hours of running, realistically 2–3 sessions.
@@ -140,7 +141,7 @@ outputs/hardware/<run_id>/
   "conditions": {
     "hand": "panda | inspire",
     "object": "…",
-    "destination": "top_left | top_right | bottom_left",
+    "destination": "top_left | top_right",
     "pick_pose_index": 0,            // which of the 3 operator placements
     "order_in_session": 7
   },

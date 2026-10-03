@@ -45,8 +45,8 @@ demonstration:
   object: banana
   hand: panda
   # From its teach.json: set down on the BOTTOM board at (0.608, -0.264), 81 mm from the
-  # bottom_left mark and 169 mm from the right one. bottom_left is therefore the slot
-  # nearest the demonstration's own destination; say so when reporting it.
+  # bottom_left mark and 169 mm from the right one (bottom_left is not in the grid since
+  # 2026-10-03; every destination run is on the top board, 248 mm higher).
   placed_at_note: "bottom board, (0.608, -0.264, 0.075) base frame, slid in under the top board"
   recorded_dir: ~/tpgpt_demos/banana_20260925_183904
   # The same demonstration, its attractor learned by replaying it on this arm (audit B1,
@@ -84,12 +84,13 @@ hands:
     panda: hands/panda.yaml
     inspire: hands/inspire.yaml       # side grasp, no GraspGen-X (INSPIRE_HAND.md)
 
-# Every object that plans into all three slots (2026-09-26), except the banana, which is
+# Every object that plans into both top slots (2026-09-26), except the banana, which is
 # the demonstrated object. Names are config/target_objects.yaml's (topic
 # /ycb_pointclouds/<name>), each with its YCB scan and grasp library. The brief asks for 5;
 # the fifth (the tomato soup can) plans nowhere upright and was dropped (GRASP_LIBRARY.md).
 # Each is set down in its protocol pose (docs/hardware/OPERATOR_CHECKLIST.md): the mug
-# opening-up with its handle visible, the pudding box on one of its long narrow sides.
+# opening-up with its handle visible, the pudding box on its long narrow side (88 x 35 mm
+# face), the apple upright.
 objects:
   - apple
   - mug
@@ -111,17 +112,19 @@ pick_poses:
 # Destinations: the planner's named slots, resolved from the touched slot marks in
 # shelf_file (tpgpt.hardware.shelf.slots), so no coordinate is typed here. Each trial
 # records the resolved (x, y, board height) and the shelf file's sha256. bottom_right is
-# abandoned (user, 2026-09-25: 0 admissible on every capture, and the arm reaches it badly).
+# abandoned (user, 2026-09-25: 0 admissible on every capture, and the arm reaches it badly);
+# bottom_left too (user, 2026-10-03: 0-2 executable grasps an object, placement-dependent, and
+# no room for other hands). A third destination, off the shelf, is to be set up later.
 # The pick support is inferred by the planner (the table), as outside an experiment.
 destinations:
   shelf_file: ~/thor_ws/install/ycb_pointcloud_pipeline/share/ycb_pointcloud_pipeline/config/shelf.yaml
-  slots: [top_left, top_right, bottom_left]
+  slots: [top_left, top_right]
 
 # ----------------------------------------------------------------------------
 # Grid and order
 # ----------------------------------------------------------------------------
 grid:
-  # trials per hand = 4 objects x 3 pick poses x 3 destinations = 36; total 72
+  # trials per hand = 4 objects x 3 pick poses x 2 destinations = 24; total 48
   # Trials are started one at a time by the operator (tpgpt_pick_place
   # experiment:=true trial_id:=...). The order actually run is whatever trial ids
   # were used; follow a randomised order sheet (orders/order_<hand>.csv, generated
@@ -129,7 +132,7 @@ grid:
   trials_per_condition: 1
   randomise_within_hand: true
   seeds: {panda: 6001, inspire: 6002}
-  trial_ids: {panda: "0001-0036", inspire: "0037-0072"}
+  trial_ids: {panda: "0001-0024", inspire: "0025-0048"}
   stop_early: false                   # a hand doing badly still finishes its grid
 
 instrument_check:                     # §4 of the brief

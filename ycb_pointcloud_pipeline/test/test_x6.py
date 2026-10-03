@@ -97,19 +97,21 @@ def test_destinations_are_the_shelf_files_named_slots():
     cfg.raw['destinations']['shelf_file'] = SOURCE_SHELF     # the installed copy may be absent
     with open(SOURCE_SHELF) as f:
         named = slots(yaml.safe_load(f))
-    assert cfg.destination_names() == ['top_left', 'top_right', 'bottom_left']
+    assert cfg.destination_names() == ['top_left', 'top_right']
     for name in cfg.destination_names():
         d = cfg.destination(name)
         assert (d['x'], d['y'], d['surface_height']) == named[name]
     with pytest.raises(KeyError):
         cfg.destination('bottom_right')                       # in the shelf, not in the grid
+    with pytest.raises(KeyError):
+        cfg.destination('bottom_left')                        # out of the grid since 2026-10-03
 
 
 def test_order_sheet_is_a_permutation_of_the_grid_and_reproducible(tmp_path):
     from ycb_pointcloud_pipeline.x6_session import order_sheet
     cfg = xc.X6Config(CONFIG)
     n = len(cfg.raw['objects']) * len(cfg.raw['pick_poses']) * len(cfg.destination_names())
-    assert n == 36
+    assert n == 24
     rows, seed = order_sheet(cfg, 'panda')
     again, _ = order_sheet(cfg, 'panda')
     assert rows == again

@@ -23,11 +23,11 @@ arm homed before every trial.
 | item | count |
 |---|---|
 | Demonstrations | **1**: banana, Franka Hand, onto the bottom board (`~/tpgpt_demos/banana_20260925_183904`), recorded once, never again |
-| Hands | **2**: `panda` first (all 36 trials), then `inspire` (side grasp, no GraspGen-X) |
+| Hands | **2**: `panda` first (all 24 trials), then `inspire` (side grasp, no GraspGen-X) |
 | Test objects | **4**: `apple`, `mug`, `pudding_box`, `foam_brick` (the brief asks for 5; none is the banana) |
 | Pick poses | **3** taped marks, different yaw each, same marks for every object and both hands. **Not typed in**: recorded from the point cloud (centroid + yaw) |
-| Destinations | **3**: `top_left`, `top_right`, `bottom_left`, resolved from the touched slot marks in `shelf.yaml` |
-| Trials per hand | 4 × 3 × 3 = **36**. Panda `0001`–`0036`, Inspire `0037`–`0072`. **72 total** |
+| Destinations | **2**: `top_left`, `top_right`, resolved from the touched slot marks in `shelf.yaml` (`bottom_left` out since 2026-10-03; a third, off the shelf, to come) |
+| Trials per hand | 4 × 3 × 2 = **24**. Panda `0001`–`0024`, Inspire `0025`–`0048`. **48 total** |
 | Instrument checks | **3 × 10** captures: before trial 1, after re-mounting, at the end |
 | Robustness check | **6** (3 per hand), after both grids (not built) |
 
@@ -36,7 +36,7 @@ arm homed before every trial.
 - Never edit `method:` in the config.
 - Running an existing trial id **overwrites** that trial: its folder is deleted and its `trial_index.csv` row replaced.
 - Refusing at `yes`, or stopping the node mid-trial, is an **aborted trial**. Its data stays and it counts in the denominator.
-- Finish a hand's 36 trials before re-mounting.
+- Finish a hand's 24 trials before re-mounting.
 - A trial that stops with `approach_blocked` is **not a trial** (`preflight_failed`, not
   counted): the arm was not at home. Re-home and run the same trial id again.
 
@@ -118,8 +118,8 @@ ros2 run ycb_pointcloud_pipeline tpgpt_teach_keyboard                           
 **Done**: the 18:39 demonstration of 2026-09-25 is in the config with its hashes, as
 `source_bundle_learned`: its attractor learned by replaying it on the arm (passes 0-3,
 2026-09-30; `docs/hardware/commands.md` §3b), which every hand uses -- one demonstration,
-one replay. It set the banana down on the bottom board 81 mm from the `bottom_left` mark, so
-`bottom_left` is the slot nearest the demonstrated destination; report it as such. A trial
+one replay. It set the banana down on the bottom board, 81 mm from the `bottom_left` mark; every
+destination in the grid is on the top board, 248 mm higher. A trial
 of a learned plan follows its arm path (audit B1 step 8), so the trace's
 `path_deviation`/`path_across` columns are part of what to report. For the record, the
 procedure was:
@@ -194,7 +194,7 @@ Example: trial 0001, Franka Hand, apple on a mark, going to top_left.
 
 Move the apple to another mark (or keep the mark and change the slot). Run the same command with the next trial id:
 ```bash
-... -p trial_id:=0002 -p hand:=panda -p object_name:=apple -p destination_name:=bottom_left
+... -p trial_id:=0002 -p hand:=panda -p object_name:=apple -p destination_name:=top_right
 ```
 You don't restart T1, T2 or T3.
 
@@ -226,7 +226,7 @@ reuse this one. A Ctrl-C during the questions writes what was answered and marks
 3. Re-verify the calibration manually if the camera was touched.
 4. Run the instrument check again with `when:=after_remount`.
 5. `ros2 run ycb_pointcloud_pipeline x6_order_sheet --hand inspire`.
-6. Run trials `0037`–`0072` with `-p hand:=inspire`: same marks, same slots, same command
+6. Run trials `0025`–`0048` with `-p hand:=inspire`: same marks, same slots, same command
    otherwise. The hand file switches the planner to the side grasp and the executor to
    `gripper_mode: inspire`. **Only upright round objects** suit that grasp (of these, the
    mug); the others are outside what it was built for, which is a finding to record, not

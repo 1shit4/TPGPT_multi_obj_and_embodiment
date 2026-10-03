@@ -611,8 +611,8 @@ The planner's support height is: its `support_height` parameter, else the calibr
   the shelf file's named slots, the prompts are `config/target_objects.yaml` (X6's own copy is
   gone), a refused scan fit is retried on frames the trial captures and saves, and an
   `approach_blocked` plan is `preflight_failed` (not counted): re-home, re-run the same id.
-  Grid: apple, mug, pudding box, foam brick x 3 marks x top_left/top_right/bottom_left = 36 per
-  hand. **`bottom_left` is 81 mm from where the 18:39 demonstration set the banana down.**
+  Grid: apple, mug, pudding box, foam brick x 3 marks x top_left/top_right = 24 per hand
+  (`bottom_left` out since 2026-10-03, the user; a third destination, off the shelf, to come).
 - **`auto_plan:=true` re-plans every second** after a refusal (each cloud arrival starts a plan
   while `latest_plan` is unset). Old behaviour; `tpgpt_pick_place` calls the planner once.
 - **The planner and the executor refuse to run without fresh `/joint_states`**: robot container
