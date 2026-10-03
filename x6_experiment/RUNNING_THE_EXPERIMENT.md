@@ -15,7 +15,7 @@ planned since the 2026-09-26 move; its mount, grasp and caveats are in
 current setup and will be again when more grippers work.
 
 **The object protocol and the log lines** are in `docs/hardware/OPERATOR_CHECKLIST.md`:
-the mug opening-up with its handle visible, the pudding box on a long narrow side, the
+the mug opening-up with its handle visible, the pudding box standing 88 mm tall on its 70 x 35 face, the
 arm homed before every trial.
 
 ## At a glance

@@ -61,7 +61,7 @@ def _surface_gap(model, R, t, fit):
 
 @pytest.mark.parametrize("name,rest,heading", [
     ("banana", 0, 0.7), ("banana", 1, 2.3), ("apple", 0, 1.1), ("mug", 0, 2.0),
-    ("tomato_soup_can", 0, 0.4), ("pudding_box", 1, 4.0), ("foam_brick", 0, 2.7)])
+    ("tomato_soup_can", 0, 0.4), ("pudding_box", 2, 4.0), ("foam_brick", 0, 2.7)])
 def test_the_scan_lands_on_the_object(name, rest, heading):
     model = ObjectModel.load(name)
     R, t = _placed(model, rest, heading, (0.52, 0.18))
@@ -73,7 +73,7 @@ def test_the_scan_lands_on_the_object(name, rest, heading):
     assert fit.full_cloud[:, 2].min() == pytest.approx(TABLE, abs=5e-4)
 
 
-@pytest.mark.parametrize("rest,heading_deg", [(1, 0), (1, 170), (3, 0), (3, 10)])
+@pytest.mark.parametrize("rest,heading_deg", [(2, 0), (2, 170), (4, 0), (4, 10)])
 def test_a_box_seen_from_its_near_side_is_not_turned_onto_its_corner(rest, heading_deg):
     """The camera sees two faces of the box: the cloud's median sits toward the camera,
     and centred there by its whole median the right heading scored worse than a wrong one
@@ -136,8 +136,8 @@ def test_the_protocol_poses_are_the_ones_the_protocol_means():
     assert top == 0 and bottom > 100              # opening up: nothing across the top
     box = ObjectModel.load("pudding_box")
     pts, _ = box.sample(4096, 1)
-    for k in PROTOCOL_RESTS["pudding_box"]:       # standing on a long narrow side
-        assert np.ptp((pts @ np.asarray(box.rests[k]).T)[:, 2]) == pytest.approx(0.090, abs=0.004)
+    for k in PROTOCOL_RESTS["pudding_box"]:       # standing 88 mm tall on its 70 x 35 face
+        assert np.ptp((pts @ np.asarray(box.rests[k]).T)[:, 2]) == pytest.approx(0.087, abs=0.003)
 
 
 def test_the_mug_is_only_fitted_upright_and_does_not_lean():
@@ -178,7 +178,7 @@ def test_a_box_seen_almost_face_on_is_placed_flat_but_can_slide_along_that_face(
     unleaned, but its centre can be 15-20 mm off along the face. The rest tilt
     used to hide this by accident; on live clouds it leaned boxes 12-20 deg."""
     box = ObjectModel.load("pudding_box")
-    R, t = _placed(box, 1, 0.3, (0.52, 0.18))
+    R, t = _placed(box, PROTOCOL_RESTS["pudding_box"][0], 0.3, (0.52, 0.18))
     fit = fit_object(box, _view(box, R, t), TABLE, CAMERA)
     assert fit.accepted, fit.reason
     assert fit.rest_index in PROTOCOL_RESTS["pudding_box"]
@@ -190,14 +190,52 @@ def test_a_box_seen_almost_face_on_is_placed_flat_but_can_slide_along_that_face(
 
 
 
-def test_a_box_stood_the_wrong_way_is_refused_not_squeezed_into_the_protocol_pose():
-    """On its end (112 mm) the box cannot be fitted as on its side (90 mm) and accepted."""
+def test_a_box_laid_down_is_refused_not_squeezed_into_the_protocol_pose():
+    """Standing (88 mm) is the protocol and the box's tallest pose. On its long side
+    (69 mm) or flat (35 mm) the fit's fractions accept it as standing -- the extra height
+    stands in free space above the box, which no ray tests -- so the height decides."""
     box = ObjectModel.load("pudding_box")
-    on_end = next(k for k, r in enumerate(box.rests)
-                  if np.ptp((box.sample(2000)[0] @ np.asarray(r).T)[:, 2]) > 0.105)
-    R, t = _placed(box, on_end, 0.8, (0.52, 0.18))
-    fit = fit_object(box, _view(box, R, t), TABLE, CAMERA)
-    assert not fit.accepted
-    assert "standing another way" in fit.reason
+    pts = box.sample(2000)[0]
+    lying = [k for k, r in enumerate(box.rests) if np.ptp((pts @ np.asarray(r).T)[:, 2]) < 0.075]
+    assert len(lying) == 4                         # two long sides, two faces
+    for k in lying:
+        R, t = _placed(box, k, 0.8, (0.52, 0.18))
+        fit = fit_object(box, _view(box, R, t), TABLE, CAMERA)
+        assert not fit.accepted
+        assert "lying down" in fit.reason
     R, t = _placed(box, PROTOCOL_RESTS["pudding_box"][0], 0.8, (0.52, 0.18))
     assert fit_object(box, _view(box, R, t), TABLE, CAMERA).accepted
+
+
+def test_the_pudding_box_is_the_one_on_the_bench_not_the_ycb_scan():
+    """88 x 70 x 35 mm by tape (2026-10-03); the YCB scan is 112.5 x 89.7 x 38.9."""
+    box = ObjectModel.load("pudding_box")
+    pts = box.sample(4000, 1)[0]
+    heights = sorted(np.ptp((pts @ np.asarray(r).T)[:, 2]) for r in box.rests)
+    assert heights[0] == pytest.approx(0.035, abs=0.002)
+    assert heights[len(heights) // 2] == pytest.approx(0.070, abs=0.003)
+    assert heights[-1] == pytest.approx(0.088, abs=0.003)
+
+
+def test_the_real_box_of_17_32_is_fitted_where_the_camera_saw_it():
+    """The capture of 2026-10-03 17:32 (pudding box, top_left). With the full-size scan the
+    camera's box was 30-40 mm shorter than the model; the fit put the extra length on the
+    end facing the camera, where the camera saw nothing, the jaws were planned 20 mm inside
+    it and closed on air. With the measured box the model ends where the camera's box ends."""
+    from pathlib import Path
+    rec = np.load(Path(__file__).resolve().parents[1] / "data" / "pudding_box_20261003_173210.npz")
+    obs = rec["observed"].astype(float)
+    box = ObjectModel.load("pudding_box")
+    fit = fit_object(box, obs, float(rec["table"]), rec["camera"])
+    assert fit.accepted, fit.reason
+    assert fit.rest_index in PROTOCOL_RESTS["pudding_box"]
+    assert fit.explained > 0.85 and fit.median_mm < 4.0        # full-size scan: 0.75, 4.5 mm
+    # Along the box's length (horizontal, through both clouds), the model ends within
+    # 10 mm of where the camera's box ends, at both ends.
+    model = fit.full_cloud
+    flat = model[:, :2] - model[:, :2].mean(axis=0)
+    axis = np.linalg.eigh(flat.T @ flat)[1][:, -1]
+    m_lo, m_hi = np.percentile(flat @ axis, [1, 99])
+    o = (obs[:, :2] - model[:, :2].mean(axis=0)) @ axis
+    o_lo, o_hi = np.percentile(o, [1, 99])
+    assert abs(m_lo - o_lo) < 0.010 and abs(m_hi - o_hi) < 0.010

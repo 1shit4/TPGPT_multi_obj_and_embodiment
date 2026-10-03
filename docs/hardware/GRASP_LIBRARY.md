@@ -420,6 +420,17 @@ they dragged a set-down mug:
 come back are the finger pads, nearly always. Raw in `outputs/hardware/retreat_clearance_20261003/`.
 **Left off** (the user, 2026-10-03).
 
+**12. The pudding box on the bench is not the YCB one** (2026-10-03). It measures 88 x 70 x 35 mm
+by tape; the YCB scan is 112.5 x 89.7 x 38.9. Items 2, 8, 9 and the tables above with a pudding box
+in them were measured on the full-size scan. Since 10-03 the scan is scaled to the measured edges
+when it loads (`object_model.MEASURED_EDGES`), so the box has a new library (the cache key is the
+scaled surface; the old file stays, unused). It stands 88 mm tall on its 70 x 35 face, the pose it
+has been set down in since 09-25 -- the full-size scan's "long narrow side" was the same height.
+Why it mattered: the camera's box was 30-40 mm shorter than the model on every capture, the fit
+put the missing length at whichever end scored better, and on 17:32 that was the end facing the
+camera, where nothing was; the jaws closed on air beside the real box. Bottom_left is no longer
+run (the user, 2026-10-03).
+
 ## Deviation from the simulation
 
 The simulation caches candidates per cloud (`tpgpt/grasp/cache.py`) and re-draws whenever the cloud

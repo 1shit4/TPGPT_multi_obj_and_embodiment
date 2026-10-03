@@ -40,7 +40,7 @@ Put it in the pick area on the table in front of the robot, one object at a time
 | object | how it is set down | why |
 |---|---|---|
 | mug | **opening up, handle visible to the camera** | upright and upside down look alike from this camera; a hidden handle cannot be fitted |
-| pudding box | **on one of its long narrow sides, 89 mm tall** -- not on its end, not flat | on its end it barely plans into bottom_left; flat it cannot be grasped. Stood another way, the fit is refused ("standing another way?") |
+| pudding box | **standing 88 mm tall on its 70 x 35 mm face** (as since 09-25) -- not on its side (70 mm), not flat | the planner's model is this box (88 x 70 x 35, not the YCB one). Laid lower the fit is refused ("is it lying down?"), stood taller "standing another way?" |
 | foam brick | on any face | -- |
 | banana, apple | as they rest | -- |
 

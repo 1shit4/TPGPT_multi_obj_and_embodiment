@@ -69,28 +69,54 @@ YCB_SCANS = {
     "apple": "013_apple",
     "mug": "025_mug",
     "tomato_soup_can": "005_tomato_soup_can",
-    "pudding_box": "008_pudding_box",       # Jell-O chocolate pudding, 138 x 89 x 39 mm
+    "pudding_box": "008_pudding_box",       # Jell-O pudding; scan 112 x 90 x 39, ours 88 x 70 x 35
     "foam_brick": "061_foam_brick",         # 78 x 53 x 51 mm
 }
 
+#: The bench's own object where it is not the size of its YCB scan: its edges, metres,
+#: longest first, measured by tape. The scan is scaled along its own box edges to match
+#: (:func:`_scaled_to_edges`), so the fit, the grasp library (whose cache key is the
+#: scaled surface) and everything downstream see the object on the table. For boxes only.
+#: The pudding box (user, 2026-10-03) is a smaller pack of the YCB one: 88 x 70 x 35 mm
+#: against the scan's 112.5 x 89.7 x 38.9. With the scan, the camera's cloud was 30-40 mm
+#: shorter than the model on every capture (its top face 65-71 x 30-39 mm), so the fit had
+#: to add that length at one end or the other and could not tell which; on 17:32 it chose
+#: the end facing the camera, where the camera saw nothing, the plan put the jaws 20 mm
+#: inside that end, and the jaws closed on air beside the real box.
+MEASURED_EDGES = {"pudding_box": (0.088, 0.070, 0.035)}
+
 #: Resting poses the experiment's protocol allows (user, 2026-09-25): the mug is set
 #: down opening-up (rest 0; rest 2 is the same shape upside down, and from this
-#: camera the two differ only inside the cup); the pudding box stands on one of its
-#: long narrow sides, 89 mm tall (rests 1 and 3). Lying flat it cannot be grasped at
-#: all, and on its end (112 mm) it planned into bottom_left almost nowhere -- the two
-#: live runs that planned there had it on its side (85 and 91 mm tall in the camera's
-#: cloud), while the fit, then restricted to the end, put it on its end. An object
-#: not listed may rest any way. Indices are into :meth:`ObjectModel._resting_orientations`,
-#: which is deterministic for a given scan; ``test_object_model`` pins them.
-PROTOCOL_RESTS = {"mug": (0,), "pudding_box": (1, 3)}
+#: camera the two differ only inside the cup); the pudding box stands 88 mm tall on
+#: its 70 x 35 mm face (rests 2 and 4 of the measured box, :data:`MEASURED_EDGES`).
+#: That is how it has been set down since 2026-09-25 (the camera's cloud 85-91 mm tall,
+#: its top 65-71 x 30-39 mm); with the full-size YCB scan the same height was the scan
+#: on its long narrow side (rests 1 and 3), which is why the protocol was named that.
+#: An object not listed may rest any way. Indices are into
+#: :meth:`ObjectModel._resting_orientations`, which is deterministic for a given scan;
+#: ``test_object_model`` pins them.
+PROTOCOL_RESTS = {"mug": (0,), "pudding_box": (2, 4)}
 #: A protocol object whose camera cloud reaches this far above the fitted pose's top
 #: is refused: the fit may only use the protocol poses, so it cannot refuse the
 #: wrong one on its own, and a box stood on its end would be planned as a box on
 #: its side. Measured 2026-09-25 (98th percentile of the cloud against the fitted
-#: top): pudding box on its side -6 to +2 mm, on its end +24 and +28; the upright
-#: mug -24 to +16 (stray points at the rim). Not for other objects: the banana
-#: carries a specular layer ~20 mm above itself.
+#: top), with the full-size scan: pudding box at its protocol height -6 to +2 mm, a
+#: box 22 mm taller +24 and +28; the upright mug -24 to +16 (stray points at the
+#: rim). Not for other objects: the banana carries a specular layer ~20 mm above
+#: itself. The measured pudding box's protocol pose is its tallest, so for it this
+#: test refuses nothing new; a box laid lower is :data:`MAX_HEIGHT_DEFICIT`'s.
 MAX_HEIGHT_EXCESS = 0.020
+#: ... and one whose cloud stops this far *below* the fitted top. The fit's fractions
+#: cannot see it: a measured pudding box laid on its long side (69 mm) and fitted
+#: standing (86-87 mm) is accepted at 0.83 explained on a synthetic view, and the real
+#: one of 09-25 22:01 at 0.82 -- a standing box over a lying one leaves its extra
+#: height in free space above the box, which no ray tests. Measured 2026-10-03 on every
+#: pudding box capture, with the measured box (98th percentile of the cloud against the
+#: fitted top): standing -2.8 to +16 mm (27 captures); the four that fit best lying down
+#: when every pose is allowed -11.2, -14.7, -17.4 and -21.2 mm; synthetic lying -14 to
+#: -15 mm on its side, -49 flat. Not for open vessels: an upright mug's thin rim reads
+#: up to 24 mm low (above).
+MAX_HEIGHT_DEFICIT = 0.007
 
 #: Camera points further than this *behind* the fitted surface, along their own
 #: ray, are refused as impossible and the pose is fitted again without them. The
@@ -266,6 +292,8 @@ class ObjectModel:
                 f"{path} is missing: download {YCB_SCANS[name]}_google_16k.tgz from the YCB "
                 "benchmark site into assets/ycb/")
         vertices, faces = read_stl_faces(path)
+        if name in MEASURED_EDGES:
+            vertices = _scaled_to_edges(vertices, faces, MEASURED_EDGES[name])
         model = cls(name=name, vertices=vertices, faces=faces,
                     centre_of_mass=_volume_centroid(vertices, faces))
         model.rests = model._resting_orientations()
@@ -392,7 +420,8 @@ def fit_object(model: ObjectModel, observed: np.ndarray, support_height: float,
 
 
 def _check_height(model: ObjectModel, observed: np.ndarray, fit: ObjectFit) -> ObjectFit:
-    """Refuse a protocol object whose cloud stands taller than its fitted pose."""
+    """Refuse a protocol object whose cloud stands taller, or (not an open vessel)
+    lower, than its fitted pose."""
     if getattr(model, "allowed_rests", None) is None or not fit.accepted or not len(observed):
         return fit
     excess = float(np.percentile(observed[:, 2], 98) - fit.full_cloud[:, 2].max())
@@ -401,6 +430,11 @@ def _check_height(model: ObjectModel, observed: np.ndarray, fit: ObjectFit) -> O
         fit.reason = (f"the camera's points reach {excess * 1000:.0f} mm above the fitted "
                       f"{model.name}, which may only rest as the protocol sets it down "
                       f"(rests {model.allowed_rests}): is it standing another way?")
+    elif excess < -MAX_HEIGHT_DEFICIT and model.name not in OPEN_VESSELS:
+        fit.accepted = False
+        fit.reason = (f"the camera's points stop {-excess * 1000:.0f} mm below the top of "
+                      f"the fitted {model.name}, which may only rest as the protocol sets "
+                      f"it down (rests {model.allowed_rests}): is it lying down?")
     return fit
 
 
@@ -778,6 +812,30 @@ def _volume_centroid(vertices: np.ndarray, faces: np.ndarray) -> np.ndarray:
     if abs(vol.sum()) < 1e-12:
         return vertices.mean(axis=0)
     return (vol[:, None] * tri.sum(axis=1) / 4.0).sum(axis=0) / vol.sum()
+
+
+def _scaled_to_edges(vertices: np.ndarray, faces: np.ndarray, edges) -> np.ndarray:
+    """The scan scaled along its own box edges so that they measure ``edges``, longest
+    first (:data:`MEASURED_EDGES`), about the middle of its extent; its frame is kept.
+
+    The edge directions are the eigenvectors of the hull's area-weighted normals,
+    ``sum a_i n_i n_i^T``: a box's hull is six faces, two per edge direction, so its
+    face normals are the edges whatever bulges and bevels the scan has.
+    """
+    from scipy.spatial import ConvexHull
+
+    hull = ConvexHull(vertices)
+    tri = vertices[hull.simplices]
+    area = 0.5 * np.linalg.norm(np.cross(tri[:, 1] - tri[:, 0], tri[:, 2] - tri[:, 0]), axis=1)
+    normals = hull.equations[:, :3]
+    _, axes = np.linalg.eigh((normals * area[:, None]).T @ normals)
+    along = vertices @ axes
+    lo, hi = along.min(axis=0), along.max(axis=0)
+    order = np.argsort(-(hi - lo))
+    scale = np.empty(3)
+    scale[order] = np.asarray(edges, dtype=float) / (hi - lo)[order]
+    centre = (lo + hi) / 2.0
+    return ((along - centre) * scale + centre) @ axes.T
 
 
 def _inside_convex(poly: np.ndarray, p: np.ndarray) -> bool:

@@ -427,7 +427,7 @@ The planner's support height is: its `support_height` parameter, else the calibr
 - **The mug is set down opening-up with its handle visible to the camera** (user, 2026-09-25).
   Both are the fit's needs, measured: (1) from this camera an upright and an upside-down mug differ
   only inside the cup, and the fit chose upside-down on 15 of 20 live frames, so the fit only tries
-  the protocol poses (`object_model.PROTOCOL_RESTS`: mug 0; pudding box 2 or 4, on an end);
+  the protocol poses (`object_model.PROTOCOL_RESTS`: mug 0; pudding box 2 or 4, standing 88 mm tall);
   (2) the D435's infrared bounces inside the glossy cup and puts 15-30 % of the mug's cloud ~80 mm
   too far, behind the mug near the table, and the fit turned the handle onto those points (and
   leaned the mug 13 deg). For the mug (`OPEN_VESSELS`) the fit now has no rest tilt and is run a
@@ -452,16 +452,23 @@ The planner's support height is: its `support_height` parameter, else the calibr
 - **Plan records** (2026-09-25): a planned run now keeps `clouds.npz` too (the camera's object
   cloud and the obstacles), so its fit can be re-checked and its scene re-measured with
   coverage; a refused run records its `destination_name`/`destination`.
-- **A lying pudding box is not graspable by this hand** (138 x 128 x 39 mm: both horizontal
-  dimensions beat the 80 mm opening, and a pinch across 39 mm has the fingertips at the table).
-  Of 2000 grasps none survives the jaw check. **It is set down on one of its long narrow sides,
-  89 mm tall** (user, 2026-09-25, after live runs; `object_model.PROTOCOL_RESTS` 1 and 3). On its
-  end (112 mm) it planned into bottom_left almost nowhere: grasps from above leave no room under
-  the top board, and side grasps put the fingers below the board surface or the arm into it. The
-  two live plans into bottom_left that evening had it on its side (85 and 91 mm tall in the
-  camera's cloud). A box stood another way is refused by the fit (`MAX_HEIGHT_EXCESS`: the cloud
-  reaching >20 mm above the fitted top), not planned as the protocol pose. On its side the brick's
-  prompt can take it for the brick -- detection was tuned on frames with the box on its end.
+- **Our pudding box is not the YCB one: 88 x 70 x 35 mm, against the scan's 112.5 x 89.7 x 38.9**
+  (user's tape, 2026-10-03; `object_model.MEASURED_EDGES`). The scan is scaled along its own
+  edges when it loads, so the fit, the grasp library (a new one: its cache key is the scaled
+  surface) and the detector's `max_size` (0.110) all see the real box. With the full-size scan
+  the camera's box was 30-40 mm shorter than the model on every capture, and the fit had to put
+  that length at one end or the other: on 10-03 17:32 it put it on the end facing the camera,
+  where the camera saw nothing, the plan put the jaws 20 mm inside that end and they **closed
+  on air** -- with the arm at the planned grasp to 4 mm. Measured box: 91-97 % explained and
+  ~3 mm on every capture (64-80 % and 4-6 mm before), at a steady heading. **It is set down
+  standing 88 mm tall on its 70 x 35 face** (`PROTOCOL_RESTS` 2 and 4) -- how it has been set
+  down since 2026-09-25, which the full-size scan called "on its long narrow side" (the scan's
+  89.7 mm happened to match). Laid lower the fit is refused ("is it lying down?",
+  `MAX_HEIGHT_DEFICIT` 7 mm: standing boxes read -3 to +16 mm, lying ones -11 to -21; the fit's
+  fractions accept a lying box as standing). **Every pudding-box number before 2026-10-03 was
+  for the full-size scan** (coverage, bottom_left, "a lying box is not graspable": at 88 x 70 the
+  box fits the 80 mm opening across 70 -- unmeasured). Taller than its pose is still refused
+  (`MAX_HEIGHT_EXCESS`). The brick's prompt can take the box for the brick.
 - **Destinations have names**: `destination_name:=top_left|top_right|bottom_left|bottom_right`,
   resolved from the touched slot marks (`config/shelf.yaml`, `slots:`, `shelf.slots()`).
 - **`bottom_right` is abandoned** (user, 2026-09-25). Measured: every object scored 0 admissible of

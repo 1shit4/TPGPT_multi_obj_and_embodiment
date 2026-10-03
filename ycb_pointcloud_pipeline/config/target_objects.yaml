@@ -18,7 +18,7 @@
 #       --frames ~/ycb_detection_frames --object <name> --prompts "..." "..."
 # which replays the saved frames and reports each wording's WORST frame.
 #
-# `max_size` is the object's largest dimension, m -- the diameter of its YCB scan. A box that
+# `max_size` is the object's largest dimension, m -- the diameter of its (measured) scan. A box that
 # measures more than size_margin (1.5) times that, at the depth it shows, is refused for that
 # object before the best box is chosen. Measured 2026-09-25: with the pudding box off the table
 # its prompt found the shelf, at 0.25-0.40 -- as high as the real box scores -- over 72 000
@@ -73,7 +73,7 @@ target_objects:
     # shared 0.35 cutoff. 0.25 is for this object only; every miss now logs its score, so the
     # next run shows whether 0.25 is enough (docs/hardware/SEGMENTATION.md).
     threshold: 0.25           # never scored on a frame without it
-    max_size: 0.142
+    max_size: 0.110           # the measured box (88 x 70 x 35 mm, 2026-10-03), not its YCB scan (0.142)
   - name: foam_brick
     prompt: brown cube with holes   # "brown cube" took the pudding box's brown picture face 17 times
     threshold: 0.29           # absent up to 0.29 (on the pudding box): the thinnest margin here
