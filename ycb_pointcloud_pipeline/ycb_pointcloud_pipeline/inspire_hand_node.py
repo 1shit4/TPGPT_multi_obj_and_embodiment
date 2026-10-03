@@ -16,7 +16,9 @@ ROS 2 driver for the Inspire RH56DFX-2R hand: the open/close grasp as services.
     /inspire_hand/registers    std_msgs/Int16MultiArray: ANGLE_ACT x6, FORCE_ACT x6,
                                STATUS x6, in DOF order (little, ring, middle, index,
                                thumb_bend, thumb_rot) -- the raw values, for the record.
-    /inspire_hand/grasp_state  std_msgs/String (latched): open | closed | unknown
+    /inspire_hand/point        std_srvs/Trigger  the pointing pose for measuring the mount
+                                                 (index straight, others curled, thumb out)
+    /inspire_hand/grasp_state  std_msgs/String (latched): open | closed | pointing | unknown
 
 Both services block until the motion has finished. ``success`` is false on a serial
 error, an actuator error flag, or a DOF still moving at the step timeout. Closing on
@@ -133,6 +135,7 @@ class InspireHandNode(Node):
         services = MutuallyExclusiveCallbackGroup()
         self.create_service(Trigger, '~/open', self._open, callback_group=services)
         self.create_service(Trigger, '~/close', self._close, callback_group=services)
+        self.create_service(Trigger, '~/point', self._point, callback_group=services)
         rate = float(grasp.get('state_rate_hz', 10.0))
         if rate > 0 and not self.dry:
             self.create_timer(1.0 / rate, self._poll, callback_group=ReentrantCallbackGroup())
@@ -186,6 +189,22 @@ class InspireHandNode(Node):
         response.success, response.message = True, 'open'
         self.state_pub.publish(String(data='open'))
         log.info('hand OPEN (thumb opposed)')
+        return response
+
+    def _point(self, request, response):
+        with self.lock:
+            try:
+                st = self.hand.point(self.speed, self._force(), self.step_timeout,
+                                     verbose=False, on_status=self._publish)
+            except IOError as exc:
+                response.success, response.message = False, f'point failed: {exc}'
+                self.get_logger().error(response.message)
+                self.state_pub.publish(String(data='unknown'))
+                return response
+        problem = ((st or {}).get('timed_out') or []) or ih.error_text(st)
+        response.success = not problem
+        response.message = 'pointing' if not problem else f'point: {problem}'
+        self.state_pub.publish(String(data='pointing' if not problem else 'unknown'))
         return response
 
     def _close(self, request, response):

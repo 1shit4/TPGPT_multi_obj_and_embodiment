@@ -117,6 +117,9 @@ DEFAULT_CLOSE_MODE = "sequential"
 THUMB_OPPOSED = 0
 OPEN_POSE = [1000, 1000, 1000, 1000, 1000, THUMB_OPPOSED]   # wide C-shape
 CLOSE_POSE = [0, 0, 0, 0, 0, THUMB_OPPOSED]                 # stops on contact
+#: Index straight, three fingers curled, thumb straight and swung out flat beside the
+#: palm: for touching with the index tip (tpgpt.hardware.inspire_mount.POINT_POSE).
+POINT_POSE = [0, 0, 0, 1000, 1000, 1000]
 
 #: Register -> URDF angle before measurement: the RH56 manual's angle ranges solved on
 #: the URDF (config/inspire_hand.yaml joint_map explains). UNVERIFIED on the hand
@@ -405,6 +408,15 @@ class InspireHand:
                 report.on_air.append(name)
         return report
 
+    def point(self, speed: int = DEFAULT_SPEED, force=DEFAULT_FORCE, timeout: float = 3.0,
+              verbose: bool = True, on_status=None) -> dict:
+        """The pointing pose for measuring the mount by touch (``POINT_POSE``): the thumb
+        swings out flat first, then three fingers curl and the index straightens."""
+        self.set_speed(speed)
+        self.set_force(force)
+        self.move("point: thumb out", [HOLD] * 5 + [POINT_POSE[5]], timeout, verbose, on_status)
+        return self.move("point", POINT_POSE, timeout, verbose, on_status)
+
     def grasp_close(self, speed: int = DEFAULT_SPEED, force=DEFAULT_FORCE,
                     timeout: float = 3.0, verbose: bool = True) -> dict:
         """The sequential close, returning the final status (the 2026-09-15 interface)."""
@@ -545,7 +557,7 @@ def _config_defaults(argv) -> dict:
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("command", choices=["ports", "scan", "status", "open", "close", "cycle",
-                                        "thumb", "home", "clear-error",
+                                        "thumb", "home", "point", "clear-error",
                                         "round-open", "round-close", "round-cycle"],
                     help="round-* are aliases of open/close/cycle")
     ap.add_argument("--config", default=None,
@@ -608,6 +620,8 @@ def main(argv=None) -> int:
             hand.move("thumb rotation -> 1000", [HOLD] * 5 + [1000], args.timeout)
         elif command == "open":
             hand.grasp_open(args.speed, args.force, args.timeout)
+        elif command == "point":
+            hand.point(args.speed, args.force, args.timeout)
         elif command in ("close", "cycle"):
             if command == "cycle":
                 hand.grasp_open(args.speed, args.force, args.timeout)

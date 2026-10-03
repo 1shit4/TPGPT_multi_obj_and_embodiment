@@ -368,6 +368,17 @@ def _cached_link_pieces(config_name: str, geometry_name: str) -> dict:
     return _link_pieces(load_description(config_name, geometry_name))
 
 
+@lru_cache(maxsize=64)
+def _mesh_vertices(config_name: str, link: str) -> np.ndarray:
+    """A mesh link's collision-mesh vertices in its own frame (its collision origin applied)."""
+    desc = load_description(config_name)
+    items = [(path, origin) for kind, path, origin in desc.link_geometry.get(link, [])
+             if kind == "mesh"]
+    if not items:
+        raise ValueError(f"{link!r} has no collision mesh")
+    return np.vstack([_transform(_read_obj(Path(path)), origin) for path, origin in items])
+
+
 # ------------------------------------------------------------------ joint map
 def joint_map_from_config(cfg: dict | None) -> dict:
     """``{dof: (q_at_0, q_at_1000, verified)}`` from ``inspire_hand.yaml``'s
@@ -563,6 +574,13 @@ class InspireHandModel:
         top = v - H[:, 1] * (v @ H[:, 1])
         out["thumb_rot"] = angle(top, H[:, 2])
         return out
+
+    def mesh_vertices(self, link: str, q="open") -> np.ndarray:
+        """``link``'s **exact** collision-mesh vertices in ``G`` at ``q`` -- not its 26-DOP,
+        which over-states it by up to 4.6 mm. For measuring by touch (where the hand
+        touches is a vertex of the real shape)."""
+        T = self.link_poses(self._resolve(q))[link]
+        return _transform(_mesh_vertices(self.description.config_name, link), T)
 
     def lowest_z(self, R: np.ndarray, p: np.ndarray, q="open") -> float:
         """World ``z`` of the hand's lowest vertex with ``G`` at rotation ``R``, origin ``p``."""

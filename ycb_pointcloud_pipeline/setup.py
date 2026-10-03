@@ -49,6 +49,7 @@ setup(
             'x6_analyse = ycb_pointcloud_pipeline.x6_analyse:main',
             'inspire_hand = ycb_pointcloud_pipeline.inspire_hand:main',
             'inspire_hand_node = ycb_pointcloud_pipeline.inspire_hand_node:main',
+            'inspire_touch = ycb_pointcloud_pipeline.inspire_touch:main',
         ],
     },
 )
