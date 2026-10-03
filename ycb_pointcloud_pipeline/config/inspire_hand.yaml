@@ -46,16 +46,22 @@ inspire_hand:
   # little/ring/middle/index -> pinky/ring/middle/index_proximal_joint, thumb_bend ->
   # thumb_proximal_pitch_joint, thumb_rot -> thumb_proximal_yaw_joint. Read by the hand
   # node (joint_states in radians) and tpgpt.hardware.inspire_model (the hand's geometry).
-  # UNVERIFIED until measured on the hand (plan M4): these are the URDF limits reversed.
-  # The manual's thumb bend span (-13..53.6 deg = 1.16 rad) does not match the URDF's
-  # 0..0.6 rad; its thumb rotation span (90..165 deg = 1.309 rad) does.
+  # From the RH56 manual (2.4.11) through the URDF's own kinematics (2026-10-04;
+  # inspire_model.manual_angles): the manual defines each DOF's angle on the hand -- a
+  # finger's alpha at the knuckle between the palm line and the knuckle->tip line, 176.7 deg
+  # at 1000 .. 19 deg at 0; the thumb bend theta, 53.6 .. -13 deg; the thumb rotation beta,
+  # 165 .. 90 deg -- assumed linear in the register. Solving the URDF for those angles: the
+  # fingers and the thumb bend reach FURTHER than the URDF's limits (fingers 1.68-1.77 rad
+  # against 1.47; thumb 0.69 against 0.6), so GraspGen-X's 'close' pose is not the hand's
+  # full close. Fingers measured in their own bending plane (splay is not a bend); linear
+  # in u to 0.014 rad. UNVERIFIED on the hand (plan M4).
   joint_map:
-    little:     {q_at_0: 1.47,  q_at_1000: 0.0, verified: false}
-    ring:       {q_at_0: 1.47,  q_at_1000: 0.0, verified: false}
-    middle:     {q_at_0: 1.47,  q_at_1000: 0.0, verified: false}
-    index:      {q_at_0: 1.47,  q_at_1000: 0.0, verified: false}
-    thumb_bend: {q_at_0: 0.6,   q_at_1000: 0.0, verified: false}
-    thumb_rot:  {q_at_0: 1.308, q_at_1000: 0.0, verified: false}
+    little:     {q_at_0: 1.770, q_at_1000: 0.037, verified: false}
+    ring:       {q_at_0: 1.699, q_at_1000: 0.031, verified: false}
+    middle:     {q_at_0: 1.676, q_at_1000: 0.032, verified: false}
+    index:      {q_at_0: 1.698, q_at_1000: 0.029, verified: false}
+    thumb_bend: {q_at_0: 0.690, q_at_1000: 0.028, verified: false}
+    thumb_rot:  {q_at_0: 1.308, q_at_1000: 0.0,   verified: false}
 
   mount:
     # Frame CRISP commands and /current_pose reports. fr3_hand_tcp needs NO change to the

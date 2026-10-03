@@ -118,13 +118,12 @@ THUMB_OPPOSED = 0
 OPEN_POSE = [1000, 1000, 1000, 1000, 1000, THUMB_OPPOSED]   # wide C-shape
 CLOSE_POSE = [0, 0, 0, 0, 0, THUMB_OPPOSED]                 # stops on contact
 
-#: Register -> URDF angle before measurement: the URDF limits, reversed (register
-#: 1000 = straight = joint 0). UNVERIFIED -- the manual's ranges do not match the
-#: URDF's for the thumb bend (-13..53.6 deg against 0..0.6 rad); measured on the
-#: hand (M4) and then written into config/inspire_hand.yaml ``joint_map``.
+#: Register -> URDF angle before measurement: the RH56 manual's angle ranges solved on
+#: the URDF (config/inspire_hand.yaml joint_map explains). UNVERIFIED on the hand
+#: (plan M4); the config's block overrides it.
 DEFAULT_JOINT_MAP = {
-    "little": (1.47, 0.0), "ring": (1.47, 0.0), "middle": (1.47, 0.0),
-    "index": (1.47, 0.0), "thumb_bend": (0.6, 0.0), "thumb_rot": (1.308, 0.0),
+    "little": (1.770, 0.037), "ring": (1.699, 0.031), "middle": (1.676, 0.032),
+    "index": (1.698, 0.029), "thumb_bend": (0.690, 0.028), "thumb_rot": (1.308, 0.0),
 }
 
 

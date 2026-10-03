@@ -315,16 +315,17 @@ def test_the_joint_map_is_read_from_the_config_and_flagged_until_measured():
     jm = ih.joint_map_from_config(_config())
     assert set(jm) == set(ih.DOF_NAMES)
     assert jm["thumb_rot"][:2] == (1.308, 0.0)
-    # Anything missing from the config falls back to the URDF limits, unverified.
-    assert ih.joint_map_from_config({})["index"] == (1.47, 0.0, False)
+    assert not any(ok for _, _, ok in jm.values())          # until measured (M4)
+    # Anything missing from the config falls back to the manual-derived default, unverified.
+    assert ih.joint_map_from_config({})["index"] == (1.698, 0.029, False)
 
 
 def test_registers_and_joint_angles_round_trip():
     jm = ih.joint_map_from_config(_config())
     q = ih.register_to_joint([1000, 1000, 1000, 1000, 1000, 0], jm)
-    assert q == pytest.approx([0.0, 0.0, 0.0, 0.0, 0.0, 1.308])   # open, thumb opposed
+    assert q == pytest.approx([0.037, 0.031, 0.032, 0.029, 0.028, 1.308])  # open, opposed
     q = ih.register_to_joint([0, 0, 0, 0, 0, 0], jm)
-    assert q == pytest.approx([1.47, 1.47, 1.47, 1.47, 0.6, 1.308])
+    assert q == pytest.approx([1.770, 1.699, 1.676, 1.698, 0.690, 1.308])
     u = [0, 250, 500, 750, 1000, 333]
     assert ih.joint_to_register(ih.register_to_joint(u, jm), jm) == u
     assert ih.joint_to_register([9.0] * 6, jm) == [0, 0, 0, 0, 0, 0]       # clipped
@@ -351,7 +352,7 @@ def test_node_joint_states_are_urdf_joints_in_radians():
     st = {"angle": [1000, 1000, 0, 500, 1000, 0], "force_g": [0, 0, 380, 0, 0, 0]}
     msg = node.joint_state_message(st, jm, _stamp())
     assert list(msg.name) == list(ih.URDF_JOINTS)
-    assert msg.position[2] == pytest.approx(1.47) and msg.position[3] == pytest.approx(0.735)
+    assert msg.position[2] == pytest.approx(1.676) and msg.position[3] == pytest.approx(0.8635)
     assert msg.position[5] == pytest.approx(1.308)
     assert msg.effort[2] == 380.0
 
