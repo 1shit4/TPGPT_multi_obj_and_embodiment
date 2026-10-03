@@ -60,7 +60,7 @@ def _surface_gap(model, R, t, fit):
 
 
 @pytest.mark.parametrize("name,rest,heading", [
-    ("banana", 0, 0.7), ("banana", 1, 2.3), ("apple", 0, 1.1), ("mug", 0, 2.0),
+    ("banana", 0, 0.7), ("banana", 0, 2.3), ("apple", 0, 1.1), ("mug", 0, 2.0),
     ("tomato_soup_can", 0, 0.4), ("pudding_box", 1, 4.0), ("foam_brick", 0, 2.7)])
 def test_the_scan_lands_on_the_object(name, rest, heading):
     model = ObjectModel.load(name)
@@ -266,3 +266,21 @@ def test_the_banana_of_19_33_lies_on_the_table():
     model = fit.full_cloud
     middle = np.linalg.norm(model[:, :2] - model[:, :2].mean(axis=0), axis=1) < 0.02
     assert model[middle, 2].min() - float(rec["table"]) < 0.002          # its middle on the table
+
+
+def test_the_banana_lies_stem_down():
+    """The protocol (user, 2026-10-03): stem on the table. Of the banana's two lying faces
+    only the stem end moves -- on the table in one, 9.4 mm up in the other -- so that end
+    is the stem, and the protocol rest has it down."""
+    banana = ObjectModel.load("banana")
+    pts = banana.sample(20000, 1)[0]
+    c = pts - pts.mean(axis=0)
+    along = c @ np.linalg.eigh(c.T @ c)[1][:, -1]
+    def ends(rest):
+        b = pts @ np.asarray(banana.rests[rest]).T
+        b[:, 2] -= b[:, 2].min()
+        return b[along < along.min() + 0.01, 2].min(), b[along > along.max() - 0.01, 2].min()
+    (a0, b0), (a1, b1) = ends(PROTOCOL_RESTS["banana"][0]), ends(1)
+    moved = 0 if abs(a1 - a0) > abs(b1 - b0) else 1      # the stem: the end that moves
+    assert (a0, b0)[moved] < 0.001                        # on the table in the protocol rest
+    assert (a1, b1)[moved] > 0.008                        # in the air when flipped

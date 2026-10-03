@@ -429,7 +429,8 @@ The planner's support height is: its `support_height` parameter, else the calibr
 - **The mug is set down opening-up with its handle visible to the camera** (user, 2026-09-25).
   Both are the fit's needs, measured: (1) from this camera an upright and an upside-down mug differ
   only inside the cup, and the fit chose upside-down on 15 of 20 live frames, so the fit only tries
-  the protocol poses (`object_model.PROTOCOL_RESTS`: mug 0; pudding box 1 or 3, on its 88 x 35 face);
+  the protocol poses (`object_model.PROTOCOL_RESTS`: mug 0; pudding box 1 or 3, on its 88 x 35 face; banana 0, stem
+  on the table -- its two faces fit within 0.03 on 42 of 51 captures, at headings up to 41 deg apart);
   (2) the D435's infrared bounces inside the glossy cup and puts 15-30 % of the mug's cloud ~80 mm
   too far, behind the mug near the table, and the fit turned the handle onto those points (and
   leaned the mug 13 deg). For the mug (`OPEN_VESSELS`) the fit now has no rest tilt and is run a

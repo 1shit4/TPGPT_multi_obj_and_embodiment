@@ -90,10 +90,15 @@ MEASURED_EDGES = {"pudding_box": (0.088, 0.070, 0.035)}
 #: camera the two differ only inside the cup); the pudding box lies on its long narrow
 #: side, its 88 x 35 mm face, 70 mm tall (rests 1 and 3 of the measured box,
 #: :data:`MEASURED_EDGES`; the camera's box is 80-84 x 25-40 mm at mid-height on every
-#: capture since). An object not listed may rest any way. Indices are into
+#: capture since). The banana lies with its stem on the table (rest 0; user, 2026-10-03):
+#: flipped (rest 1) the stem end is 9.4 mm up, the middle on the table either way, and
+#: the camera cannot tell the two apart -- on 42 of its 51 captures the two fits explain
+#: within 0.03 of each other, at headings up to 41 deg apart (19:56: 238 vs 197 deg, 0.92
+#: each), so a banana lying the other way had its jaws planned across it 40 deg off.
+#: An object not listed may rest any way. Indices are into
 #: :meth:`ObjectModel._resting_orientations`, which is deterministic for a given scan;
 #: ``test_object_model`` pins them.
-PROTOCOL_RESTS = {"mug": (0,), "pudding_box": (1, 3)}
+PROTOCOL_RESTS = {"mug": (0,), "pudding_box": (1, 3), "banana": (0,)}
 #: A protocol object whose camera cloud reaches this far above the fitted pose's top
 #: is refused: the fit may only use the protocol poses, so it cannot refuse the
 #: wrong one on its own, and a box stood on its end would be planned as a box on
@@ -107,12 +112,14 @@ MAX_HEIGHT_EXCESS = 0.020
 #: 2026-10-03 on every capture against the measured box lying 70 mm tall: lying, 29
 #: captures, -2.7 to +33.3 mm; stood on its end (the protocol before 09-25 evening, and
 #: 10-03 18:14) +43.8 to +49; a cloud with something else in it +90 to +135. Between
-#: 33 and 44, 38. A box stood on its end with its silver face down would read about
+#: 33 and 44, 38. The banana's skin reads -20 to +19 mm (median +7) on its 52 captures on
+#: the table, stem down; its two faces differ by 1.6 mm in height, so the test cannot tell
+#: them apart and only guards against something else in the cloud: 30. A box stood on its end with its silver face down would read about
 #: +19 and is not caught. The layer misled the pose: read as the box's height it made the
 #: box look 90 mm tall, which the full-size scan on its side matched (89.7) and the
 #: measured box matched standing (86-87) -- the latter briefly the protocol here (10-03,
 #: 2a196a4), until the user's 18:14 run.
-HEIGHT_EXCESS = {"pudding_box": 0.038}
+HEIGHT_EXCESS = {"pudding_box": 0.038, "banana": 0.030}
 
 #: Camera points further than this *behind* the fitted surface, along their own
 #: ray, are refused as impossible and the pose is fitted again without them. The
