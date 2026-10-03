@@ -96,6 +96,30 @@ deviations are in the node around it.
 
 ---
 
+## D. The Inspire hand (2026-10-04)
+
+The second hand: an **Inspire RH56DFX-2R, a right hand** (box label; with the palm facing
+you, fingers up, the thumb is on your right). The 2026-09-15 integration (a scripted side
+grasp, a left hand, an estimated one-box envelope) is gone. The Inspire hand now takes
+GraspGen-X's grasps like the Franka Hand. Code: `tpgpt/hardware/inspire_model.py`,
+`end_effector.py`, `grasp_selection.judge_hand`, `planner.py` (the roll), `grasp_test.py`,
+`inspire_mount.py`. Run guide: `ycb_pointcloud_pipeline/INSPIRE_HAND.md`. "Pending" means it
+waits on a robot measurement (M0-M9 there).
+
+| # | Sim | Hardware | Status |
+|---|---|---|---|
+| **D1. The hand's model** | robosuite `InspireRightHand` with a measured grip-site frame (closing -80 deg, contact offset 131 mm off the axis, `gripper_frames.json`); its fingers travelled 1.5 mm ("does not actuate"). | GraspGen-X's own `inspire_hand` URDF (the same right hand), in GraspGen-X's grasp frame. One convex piece per link: a 26-DOP around each collision mesh (encloses it, 2.7-4.6 mm larger) and the URDF's exact palm boxes. Checked: GraspGen-X's own samples of the hand lie within it (median 0 mm outside, p95 5.4 mm). The open middle finger is 217.9 mm from the wrist face; the manual says 217.8. The robosuite frame is not used: the funnel gets an unregistered pair (identity alignment, zero offset), so its held point is GraspGen-X's grasp point. | Done. Caliper check pending (M0). |
+| **D2. Joint ranges** | The URDF's limits (fingers 0-1.47 rad, thumb pitch 0-0.6). | The RH56 manual's angle ranges, solved on the URDF (`manual_angles`). The real fingers curl to 1.68-1.77 rad and the thumb bends to 0.69: **GraspGen-X's `close` pose is not the hand's full close** (it leaves the fingers at alpha 42 deg; the hand reaches 19). Register to joint is linear to 0.014 rad. The closed hand in the path check uses the real ranges. | Manual-derived, unverified on the hand (M4). |
+| **D3. The roll of an asymmetric hand** | `scene_keypoints` turns the target grasp half a turn when its closing opposes the demonstration's, for every hand (the comment justifies it for a parallel jaw). | For the Inspire hand (GraspGen-X `symmetric: false`) the half turn is a different grasp: thumb and fingers swapped, the wrist on the far side, a pose the generator never proposed. **The demonstrating jaw is turned instead** (user, 2026-10-04): the whole demonstration is described with the Franka jaw frame times J = diag(-1,-1,1). A parallel jaw's closing sign is a convention (`frames.GRASP_TO_FR3_TCP` already differs from GraspGen-X's Panda by it). Tested: the same keypoints, map, `min det`, positions and carried-object motion as the sim's turned plan; the Inspire hand runs the generator's grasp. The Franka Hand keeps the sim's rule. | Done (`plan.metrics["roll"]`). |
+| **D4. The hand's hard stage** | The sim's funnel only (`by_collision` with the hand's sample, place zone). | `judge_hand` instead of the jaws. It rejects a grasp when the open hand, or the hand at any point of its close, comes within 3 mm of the table; when a body piece or an open finger is in the object; when there are fewer than 8 points between thumb and fingers; or when, closing each finger until it stops on the object, the thumb and a finger do not both reach it. It is the Franka jaw check's counterpart; the generator sees only the object, not the table. | Done. |
+| **D5. Distinct grasps** | -- | For an asymmetric hand a grasp and its half turn are kept as two candidates; the jaw's `abs()` comparison folded them. | Done. |
+| **D6. Grasp depth** | `calibrated_depth` per hand, swept in physics. | `calibrated_depth` in the hand's tool point (the keypoint cube stays on GraspGen-X's point), 0 until measured by a depth sweep of real grasps (`grasp_test`, pinned candidate). | Pending (M6). |
+| **D7. Close** | One command to every actuator. | `sequential` (the 09-15 order) or `simultaneous` (GraspGen-X's description closes thumb and fingers together); force per object, grams per finger. Which one holds better is to be measured. | Pending (M7, M9). |
+| **D8. The description itself** | GraspGen-X's `inspire_hand` (held 0 in the sim, but the sim's hand did not actuate). | The shipped description for now. A description measured on this hand (sweep boxes from the measured pocket) is to be compared with it on the same real grasps (user: the shipped one is suspect). | Pending (stage 5). |
+| **D9. The learned bundle on a new hand** | -- | The 18:39 bundle's command lead and arm-path margin were learned with the Franka Hand; they are used as they are (one demonstration, one replay: user, 2026-10-01). The Inspire's grasp point is 165 mm from the flange against 103, so orientation lag lands further from the wrist. | To measure on the transport runs. |
+| **D10. Where the place surface ends** | -- | `PLACE_FOOTPRINT_MARGIN` (the jaw's 50 mm half-width) is now the hand's own: the open hand's widest reach across its approach (93 mm for the Inspire hand). | Done. |
+| **D11. Coverage, first measured** (estimated mount, shipped description, 10-03 captures, top slots, budget 10) | -- | Of 2000 grasps per object, about half approach from below; `judge_hand` keeps apple 203, mug 296, pudding box 178, foam brick 81, **banana 0**. Every banana grasp puts the hand into the table (median 46 mm below, best 3 mm above, the limit); the foam brick loses 838 of 930 the same way. Admissible of 10 planned: apple 1 / 0, mug 0 / 3, others 0 (top_left / top_right). In the carry, the dominant refusal is the wrist within 20 mm of full stretch: the hand is 62 mm longer than the jaw. | Measured; the refinement it suggests (lifting a grasp off the table, as the jaw's `refine_grasp` does) is the user's call. |
+
 ## Checked and faithful
 
 - The execution loop: `gate_step`, `advance_step`, `advance_phase`, `belief_position`,

@@ -1,174 +1,180 @@
-# Inspire RH56 left hand on the FR3
+# The Inspire RH56DFX-2R on the FR3
 
-> **Status 2026-10-04 -- being replaced.** The hand on the robot is an **RH56DFX-2R, a right
-> hand** (the box, and the thumb is on your right with the palm facing you, fingers up); this
-> document's "left hand" is wrong. The scripted side grasp, the one-box envelope and the
-> estimated mount below are being replaced by GraspGen-X grasps on a measured model of the hand
-> and a measured mount. Until the rewrite, read this file as the 2026-09-15 record only.
+The second hand of the hardware experiment: an **Inspire RH56DFX-2R, a right hand** (the box
+says 2R; with the palm facing you, fingers up, the thumb is on your right). Rebuilt 2026-10-04
+around GraspGen-X's grasps. The 2026-09-15 integration (a scripted side grasp, a left hand, an
+estimated one-box envelope) is gone; `git show 0aceaec:ycb_pointcloud_pipeline/INSPIRE_HAND.md`
+has its record.
 
-What was built (2026-09-15), how to mount the hand, where the gripper is switched,
-and how to run teaching, planning, execution and X6 trials with it. **None of this
-has run on the robot yet.** Only the hand's open/close grasp was tested on the real
-hand, detached from the arm.
+**State (2026-10-04):** code done and tested offline, including a full offline ROS dry run of a
+grasp test. **Nothing has run on the robot**, and the mount, the register map, the grasp depth
+and the close are not measured yet (section 4). Every deviation from the simulation is in
+`docs/hardware/FAITHFULNESS_AUDIT.md`, section D.
 
-## 1. Mounting the hand on joint 7
+## 1. What the pipeline does with this hand
 
-The FR3's last link ends in a flange. Its frame, `fr3_link8`, has **+Z pointing out of
-the flange face, along the joint-7 axis**. Its axes are joint 7's, moved 0.107 m along
-that axis. The Franka Hand was bolted on turned **-45° about +Z**. Its fingertip
-point `fr3_hand_tcp` sits **103.4 mm** out along +Z (`franka_description` `fr3.urdf.xacro`:
-`rpy_ee="0 0 -pi/4"`, `tcp_xyz="0 0 0.1034"`).
+- **Grasps** come from GraspGen-X's `inspire_hand` description, the same right hand, like the
+  Franka Hand's come from `franka_panda`: a fixed library per object, carried onto the fitted
+  scan (`grasp_library.py`).
+- **The grasp frame** is GraspGen-X's: `+Z` the approach, the bisector of the palm normal and
+  the finger direction (45 deg from each); `+X` closing, the thumb on `+X` and the four fingers
+  on `-X`. The grasp point is `fingertip` (0.15 m) along `+Z` from GraspGen-X's pose origin,
+  between thumb and fingers, about 37 mm in front of the palm.
+- **The hand's model** (`tpgpt/hardware/inspire_model.py`) is GraspGen-X's URDF: one convex
+  piece per link (a 26-DOP, 2.7-4.6 mm larger than the link), the URDF's exact palm boxes, and
+  the adapter plate. Pieces are `body` (wrist, palm, knuckles, thumb base, adapter) or `finger`;
+  only fingers may touch the object at the pick.
+- **Screening** (`grasp_selection.judge_hand`) replaces the jaw check. A grasp is refused when:
+  - the open hand, or the hand while closing, comes within 3 mm of the table;
+  - a body piece is in the object;
+  - an open finger is in the object;
+  - fewer than 8 points lie between thumb and fingers;
+  - closing each finger until it stops on the object, the thumb and a finger do not both
+    reach it.
+- **The plan** records where the fingers stop (`hand_closed_q`). That is the carried hand in the
+  path check.
+- **The roll**: the Inspire hand runs GraspGen-X's grasp as proposed. When its closing opposes
+  the demonstration's, the demonstration's jaw frame is turned half a turn instead, which the
+  Franka jaw allows. The map and path are the same; only the wrist differs
+  (`plan.metrics["roll"]`, audit D3).
+- **The executor** drives the plan's hand (`gripper_mode` auto) and closes with the object's
+  force (`config/grasp_forces.yaml`, `inspire_grasp`, grams per finger). It keeps the hand's
+  close report (what each finger touched) in `<log>_hand.json`, and the hand's joints in the
+  full-rate record.
 
-Mount the Inspire hand like this:
-
-| What | Setting |
-|---|---|
-| Hand axis (wrist → fingertips) | **coaxial with joint 7**, pointing away from the flange |
-| Rotation about joint 7 | **palm faces `fr3_hand_tcp` +X**, i.e. `fr3_link8` +X turned -45° about +Z (`mount.yaw_deg: -45`) |
-| Physical check, Franka home pose (`ros2 run ycb_pointcloud_pipeline joint_homing -p open_gripper:=false`) | fingers point **down**, palm faces **forward, away from the robot base** (base +X), thumb towards the **robot's left** (base +Y) |
-| RViz check | TF display, frame `fr3_hand_tcp`: the palm faces the **red** arrow and the fingers run along the **blue** one |
-| Adapter plate | robot side: the FR3 flange pattern. The Franka Hand's flange is ISO 9409-1-31.5-4-M5 (4 × M5 on a Ø31.5 mm circle, one Ø6 mm dowel); **check this against the FR3 datasheet before machining**. Hand side: the RH56 wrist base (Ø52 mm in the manual's drawing; take the hole pattern from Inspire's mounting drawing) |
-| Cable | the hand's GX12 cable (24 V + RS485) runs along the arm to the CH340 adapter; leave slack for ±170° of joint 7 |
-
-**Why -45°.** It is the Franka Hand's own orientation. With it, `fr3_hand_tcp`'s axes
-line up with the palm: +X = palm normal, +Z = along the fingers. That is the rotation
-the code assumes by default. Any other yaw works too, provided `mount.yaw_deg` says
-what was actually built.
-
-The home-pose check relies on `fr3_hand_tcp` +X pointing along base +X at the Franka
-home pose (the Franka Hand's usual home orientation, rotation `diag(1, -1, -1)`). Confirm
-it once in RViz before relying on it.
-
-### Measure these, then write them into `config/inspire_hand.yaml`
+## 2. Frames and the mount
 
 ```
-          joint-7 axis (fr3_link8 +Z) ──────────────────────────►
- flange ┃adapter┃ hand base ─── palm ──────────── fingertips
- face   ┃       ┃                ▲ palm_normal_offset_m (axis -> palm surface)
-        ├───────┼────────────────┤
-  adapter_thickness_m  palm_along_axis_m (hand mounting face -> palm centre)
+fr3_link8 (flange) --[mount: yaw, adapter thickness, lateral]--> hand_base_link (wrist face)
+hand_base_link --[GraspGen-X URDF world_joint]--> W (GraspGen-X's pose frame)
+W --[fingertip 0.15 - calibrated_depth along +Z]--> the grasp point (the plan's positions)
+fr3_link8 --[Rz(-45 deg), 103.4 mm]--> fr3_hand_tcp (what CRISP commands; a virtual point now)
 ```
 
-| Key (`mount:`) | Meaning | Default, an estimate |
-|---|---|---|
-| `adapter_thickness_m` | flange face → hand mounting face | 0.012 |
-| `palm_along_axis_m` | hand mounting face → palm centre, along the axis | 0.095 |
-| `palm_normal_offset_m` | hand axis → palm **surface** | 0.020 |
-| `palm_lateral_offset_m` | palm centre off the axis, towards the little finger | 0.0 |
+The mount, in `config/inspire_hand.yaml` `mount:`:
 
-The defaults come from the manual's drawing (217.8 mm from mounting face to fingertip,
-80.7 mm palm width), not from the hand. **The planner stops the palm exactly where
-these numbers put it.** A 10 mm error means 10 mm into the object or 10 mm short of it.
-From them the code computes the palm point in `fr3_hand_tcp` coordinates. With the
-defaults that is `[20.0, 0.0, 3.6] mm`: 20 mm along +X, and 12 + 95 - 103.4 = 3.6 mm
-along +Z.
+- **`yaw_deg`**: the palm normal is `Rz(yaw) * fr3_link8 +X`. At -45 the palm faces
+  `fr3_hand_tcp` +X. At the home pose the hand then hangs fingers down, palm forward (robot +X),
+  index finger on the robot's right (-Y).
+- **`adapter_thickness_m`**: the flange face to the wrist face. The RH56 manual's 217.8 mm to the
+  middle fingertip is measured from the wrist face, and the URDF gives 217.9.
+- **`lateral_m`**: the wrist face's centre off the flange axis.
 
-## 2. Where the gripper is switched
+With the estimated values (-45 deg, 12 mm, 0) the grasp point sits (60.1, 10.0, 60.6) mm from
+`fr3_hand_tcp`, 165 mm from the flange against the Franka Hand's 103 mm.
 
-| Place | Franka Hand | Inspire hand |
-|---|---|---|
-| **Franka Desk** → Settings → End effector | Franka Hand | **Other / none**: the Inspire hand + adapter **mass**, **centre of mass** (roughly 0.08 m along +Z) and flange-to-EE transform 0.1034 m along Z, rotated -45°. The mass matters most while teaching: the arm floats with zero stiffness, so a wrong mass makes it sink or rise |
-| **Robot bringup** (`THOR_DOCKER_SETUP`, `./scripts/run.sh robot`) | unchanged | **unchanged.** It still loads the Franka Hand description (`load_gripper` defaults to true), so `fr3_hand_tcp` exists and every CRISP controller keeps `end_effector_frame: fr3_hand_tcp`. The `franka_gripper` node finds no hand, logs an error and exits; nothing else depends on it |
-| **Hand driver** | `franka_gripper` (in the robot container) | `ros2 run ycb_pointcloud_pipeline inspire_hand_node` on the host |
-| **Planner** `end_effector` | `panda` | `inspire` |
-| **Executor** `gripper_mode` / `gripper_namespace` | `franka_grasp` / `/franka_gripper` | `inspire` / `/inspire_hand` |
-| **Teach node** `end_effector`, `gripper_mode` | `panda`, `franka_grasp` | `inspire`, `inspire` |
-| **joint_homing** | default | `-p gripper_type:=inspire` (or `-p open_gripper:=false`) |
-| **free_drive** | automatic: `gripper_type` defaults to `auto`, which reads `hands.mounted` in `x6_experiment.yaml` | automatic (`mounted: inspire`). While the arm floats: `c`+Enter closes the hand, `o`+Enter opens it, Enter alone holds |
-| **X6 trials** | `-p hand:=panda` | `-p hand:=inspire` (reads `x6_experiment/config/hands/inspire.yaml`) |
+The robot bring-up is unchanged (`load_gripper:=true`, `fr3_hand_tcp` kept). The Franka gripper
+node fails without its hand, which is expected and harmless.
 
-**Cleaner alternative, not the default.** Launch with `load_gripper:=false`, so the URDF
-shows a bare flange. Then set `end_effector_frame: fr3_link8` in
-`THOR_DOCKER_SETUP/packages/fr3_crisp_bringup/config/controllers.real.yaml`
-(`pose_broadcaster` and `cartesian_impedance_controller`), in this package's
-`config/tpgpt_variable_stiffness_controller.yaml`, `tpgpt_teaching_controller.yaml` and
-`joint_impedance_controller.yaml`, and `mount.controller_frame: fr3_link8` in
-`config/inspire_hand.yaml`. The mount geometry gives the same palm pose in either frame
-(unit test `test_both_controller_frames_describe_the_same_physical_hand`). Everything
-else in the pipeline still assumes `fr3_hand_tcp`, so this path needs more checking.
+## 3. Bring-up with this hand
 
-## 3. The grasp
-
-**Open and close** are the fixed poses tested on the real hand
-(`ycb_pointcloud_pipeline/inspire_hand.py`):
-
-| DOF | open | close |
-|---|---|---|
-| little, ring, middle, index | 1000 (straight) | 0, each stops at `force_g` |
-| thumb bend | 1000 | 0, bends **after** the fingers |
-| thumb rotation | 0 (opposed, facing the fingers) | 0 |
-
-**Where the arm goes** (`tpgpt.hardware.side_grasp`, no GraspGen-X):
-
-1. A circle fitted to the object cloud's footprint gives the axis. The camera sees
-   only the front, so the centroid would sit up to `2r/π` in front of the true axis:
-   21 mm for a 33 mm-radius can.
-2. The palm approaches **horizontally, straight out from the robot base** towards
-   that axis.
-3. The palm stops **`standoff_m` (15 mm)** in front of the surface, at
-   **`height_fraction` (0.5)** of the object's height. The floor is
-   `min_height_above_support_m` (50 mm), because the hand lies on its side and half its
-   80 mm palm hangs below the grasp point.
-4. Thumb and index on top, little finger nearest the table (`thumb_up: true`). Fingers
-   run horizontally round the object.
-
-So the palm arrives beside the object, not above it, and the close wraps the fingers
-round it with the thumb opposing.
-
-**Palm frame** (the grasp convention the map transports): +Z = palm normal (approach),
-+X = wrist → fingertips (the "closing" axis), +Y = across the palm. The fingers are the
-closing axis because in a side grasp they are horizontal. The keypoint task frame is
-built from the table normal and the closing axis, and refuses a vertical one; the first
-version used the vertical palm width and planning failed on exactly that.
-
-## 4. Running it
-
-Build after any change: `cd ~/thor_ws && colcon build --packages-select ycb_pointcloud_pipeline`.
-The CH340 serial adapter needs the out-of-tree `ch341` driver loaded (`/dev/ttyUSB0`).
+Every terminal as `docs/hardware/commands.md` §1 (sourcing, venvs), then:
 
 ```bash
-# hand alone
-ros2 run ycb_pointcloud_pipeline inspire_hand scan            # finds ID 2, 115200
-ros2 run ycb_pointcloud_pipeline inspire_hand --speed 300 cycle
-ros2 run ycb_pointcloud_pipeline inspire_hand_node            # /inspire_hand/open, /close
-ros2 service call /inspire_hand/close std_srvs/srv/Trigger
+# once after every boot: the USB-RS485 adapter's driver (the kernel lacks it)
+sudo insmod ~/ch341/ch341.ko
+ls /dev/ttyUSB0
+```
+```bash
+# Th  the hand (one terminal for the whole session)
+ros2 launch ycb_pointcloud_pipeline inspire_hand.launch.py
+# open / close / pointing pose, by hand:
+ros2 service call /inspire_hand/open std_srvs/srv/Trigger
+ros2 service call /inspire_hand/close std_srvs/srv/Trigger     # answers the close report (JSON)
+ros2 service call /inspire_hand/point std_srvs/srv/Trigger
+# settable while it runs (read at each close):
+ros2 param set /inspire_hand close_mode simultaneous            # or sequential
+ros2 param set /inspire_hand force_g 300                        # grams per finger
+```
+`free_drive` and `joint_homing` open this hand by themselves (`gripper_type` auto reads X6's
+`hands.mounted: inspire`).
 
-# teach an Inspire demonstration (palm against the side of the object, then g)
-ros2 launch ycb_pointcloud_pipeline tpgpt_teach.launch.py object_name:=tomato_soup_can \
-    end_effector:=inspire gripper_mode:=inspire
+**Desk**: set the end effector to the Inspire hand plus adapter, with its mass and centre of mass
+(M5). Without them, gravity compensation is wrong by the difference.
 
-# plan + execute (dry run first)
+## 4. Measuring the hand (once, then whenever it is re-mounted)
+
+Each measurement has a pass criterion. Results go into `config/inspire_hand.yaml` (then
+`colcon build`) and `x6_experiment/config/hands/inspire.yaml` `measured:`.
+
+| # | what | how | pass |
+|---|---|---|---|
+| M0 | The hand is the URDF | Caliper on the open hand, against `python -m tpgpt.hardware.inspire_model landmarks`: middle fingertip to wrist face (217.9), knuckle spacing index to little finger (57.8) | within 2 mm |
+| M1 | Yaw and handedness | At home (`joint_homing`): fingers down, palm forward, index finger on the robot's right | by eye; no 90 or 180 deg error |
+| M2 | Adapter thickness | Caliper, flange face to the wrist face | within 1 mm; into `adapter_thickness_m` |
+| M3 | The mount, by touch | Below | table RMS within 2 mm, marks within 3 mm |
+| M4 | Register to joint map | Angles at registers 1000/500/0 against `python -m tpgpt.hardware.inspire_model angles --registers ...` (the manual's definitions) | within 3 deg; else measure q_at_0/q_at_1000 into `joint_map` |
+| M5 | Payload | Weigh hand, adapter and screws; centre of mass; set in Desk | force estimate at rest under 1.5 N in 3 orientations |
+| M6 | Grasp depth | Grasp-test sweep, below | the middle of the plateau into `graspgenx.calibrated_depth_m` |
+| M7 | Close and force | Close on each object in both modes; read the reports | thumb plus a finger in contact; grams per object into `grasp_forces.yaml` |
+| M8/M9 | Description and close mode | The same grasp tests with the shipped vs a measured description, sequential vs simultaneous | keep what holds more |
+
+**M3, the mount by touch.** The hand in its pointing pose, the arm floating:
+```bash
+ros2 service call /inspire_hand/point std_srvs/srv/Trigger
+ros2 run ycb_pointcloud_pipeline free_drive
+```
+```bash
+source ~/venvs/tpgpt/bin/activate
+ros2 run --prefix python3 ycb_pointcloud_pipeline inspire_touch
+```
+Rest the index fingertip on the table and type `t`. Do it six times or more, each with the hand
+tilted 15-30 deg in a different direction. Then touch each top slot mark: `p top_left`,
+`p top_right`. `f` fits; the yaml block it prints goes into `config/inspire_hand.yaml`. Touches
+made straight down cannot separate the yaw from the offset, and the fit says so.
+
+## 5. Grasp tests (the grasp on its own, before any transport)
+
+A grasp test plans one grasp and runs it: in along the approach from 10 cm back, close, lift 10 cm
+and hold 2 s, set down, release, back out. The whole-path check judges it like any plan
+(`tpgpt/hardware/grasp_test.py`). After a robot run the executor asks what happened (held,
+dropped, not picked, pushed) and keeps it with the close report in `<log>_outcome.json`.
+
+```bash
+source ~/venvs/tpgpt/bin/activate
 ros2 run --prefix python3 ycb_pointcloud_pipeline tpgpt_pick_place --ros-args \
-    -p end_effector:=inspire -p gripper_mode:=inspire -p gripper_namespace:=/inspire_hand \
-    -p source_bundle_dir:=$HOME/tpgpt_demos/<demo>/source_bundle \
-    -p object_name:=tomato_soup_can -p destination:="[0.60, -0.25, 0.006]" -p dry_run:=true
-
-# X6 trial
-ros2 run --prefix python3 ycb_pointcloud_pipeline tpgpt_pick_place --ros-args \
-    -p experiment:=true -p trial_id:=0031 -p hand:=inspire \
-    -p object_name:=red_cup -p destination_name:=top_shelf -p dry_run:=true
+    -p end_effector:=inspire -p task:=grasp_test -p object_name:=apple -p dry_run:=false
 ```
 
-Before the first real run, check the plan in RViz (`/tpgpt/plan/markers`): the axes at
-the grasp should show red (palm normal) pointing at the object and blue (fingers)
-horizontal. The overlay (`overlay.png`) draws the hand's envelope box at the grasp.
+- `-p grasp_test_constructed:=true`: a grasp built by hand (straight down, closing across the
+  object's narrow side), not GraspGen-X's. It checks the frame chain: the hand must arrive as
+  drawn.
+- `-p grasp_test_library_index:=N -p grasp_test_depth_offset:=0.01`: the same library grasp,
+  1 cm deeper. For the depth sweep (M6): 6 depths 10 mm apart, 3 tries each. Never in X6.
+- Dry runs (`dry_run` true, the default) simulate the motion. Offline, with no camera or robot,
+  replay a recorded capture on another ROS domain:
+  ```bash
+  export ROS_DOMAIN_ID=88       # never 61
+  ~/venvs/tpgpt/bin/python ~/thor_ws/src/ycb_point_cloud/TPGPT_multi_obj_and_embodiment/ycb_pointcloud_pipeline/scripts/fake_scene.py \
+      ~/tpgpt_plans/apple_20261003_221827 --object apple
+  ```
 
-## 5. What to expect, and what is not known
+## 6. Transport
 
-* **A top-down demonstration transports badly onto a side grasp.** The map has to turn
-  the demonstrated grasp 90°. On three synthetic scenes (the unit-test demo onto
-  cylinder clouds), min det(J) was **0.007, 0.40 and 0.20**; the planner refuses
-  anything under 0.1. For the Inspire hand, **teach a demonstration with the Inspire
-  hand, from the side**. X6's rule of one Franka Hand demonstration does not allow
-  that, so X6 Inspire trials will show this as planning failures.
-* **Hand clearance.** The envelope is one box round the open hand, including the
-  opposed thumb (80 mm out of the palm). On the synthetic scenes the transported path
-  took its lowest corner 6-9 mm below the table before the grasp, which the default
-  `grasp_min_path_clearance` (-2 mm) refuses. That is the check doing its job. If it
-  refuses real plans, raise `min_height_above_support_m`; do not loosen the check.
-* **Not checked by any code:** joint limits and reachability of the sideways wrist pose
-  (joint 7 turns the palm; the flange has to lie horizontal), collisions of the arm
-  with the object, and whether Desk's payload matches the real hand.
-* **Measurements outstanding:** the four mount lengths, the envelope, Desk mass/CoM.
-* `/inspire_hand/joint_states` reports closure 0-1 per DOF, not a width, so X6's
-  `gripper_width` column stays empty for this hand.
+Once grasps hold, the same command without `task` (`transport`, the default) and with
+`-p destination_name:=top_left` (or `top_right`) and the learned bundle
+(`-p source_bundle_dir:=$HOME/tpgpt_demos/banana_20260925_183904/source_bundle_learned`), as for
+the Franka Hand (`commands.md` §6).
+
+## 7. What is known, measured offline (2026-10-04)
+
+Measured on the 10-03 captures, with the estimated mount and GraspGen-X's shipped description
+(`python -m tpgpt.hardware.coverage --hand inspire`, `docs/hardware/GRASP_LIBRARY.md`):
+
+- **About half of GraspGen-X's Inspire grasps approach from below** (more than 90 deg from
+  straight down) and are refused at once.
+- **The table is the hand's main problem.** GraspGen-X sees the object, not the table, and its
+  grasp depth puts the open fingers 15 mm and the closed ones 26 mm below the grasp point on a
+  top-down grasp. Every banana grasp (37 mm tall) puts the hand into the table: 1008 of 1008,
+  median 46 mm under. The foam brick loses 838 of 930 this way. The Franka Hand's selection
+  lifts such grasps (`refine_grasp`); whether the Inspire hand should is open, and waits on the
+  depth sweep (M6).
+- **Reach is the transport's problem.** Of 10 planned per slot: apple 1 / 0, mug 0 / 3, the rest
+  0 (top_left / top_right). The hand is 62 mm longer than the jaw, and the carry most often
+  brings the wrist within 20 mm of full stretch.
+- **The real hand closes further than GraspGen-X's model** (fingers 1.68-1.77 rad against the
+  URDF's 1.47; the manual's ranges, unverified: M4). The model closes the fingers to the real
+  ranges.
+- **The simulation never got this hand to hold anything**, but its model barely moved
+  (1.5 mm of finger travel). That says nothing about the real hand; the grasp tests are the
+  first evidence.

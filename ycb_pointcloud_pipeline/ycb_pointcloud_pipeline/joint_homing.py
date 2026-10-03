@@ -8,9 +8,10 @@ impedance controller:
 Same sequence and safety checks as joint_target_publisher (load/configure the
 controller from config/joint_impedance_controller.yaml, confirm,
 strict switch), but one target: home, and no tracking-error monitoring: the target is
-interpolated to home and the controller is left holding it. Then the Franka Hand
-is opened (franka_gripper move action; -p open_gripper:=false to skip; with the
-Inspire hand mounted, -p gripper_type:=inspire calls /inspire_hand/open instead). The move duration is
+interpolated to home and the controller is left holding it. Then the hand is
+opened: the Franka Hand by its franka_gripper move action, the Inspire hand by
+/inspire_hand/open -- whichever x6_experiment.yaml's hands.mounted names (gripper_type
+auto; -p gripper_type:=franka|inspire to choose, -p open_gripper:=false to skip). The move duration is
 scaled so no joint exceeds `max_joint_velocity`.
 
     ros2 run ycb_pointcloud_pipeline joint_homing
@@ -38,21 +39,39 @@ class JointHoming(JointTargetPublisher):
         self.declare_parameter('min_move_duration', 3.0)    # s
         self.declare_parameter('home_tolerance', 0.02)      # rad, already home below this
         self.declare_parameter('open_gripper', True)        # open the Franka Hand once home
-        self.declare_parameter('gripper_type', 'franka')     # franka | inspire
-        self.declare_parameter('gripper_namespace', '/franka_gripper')
+        # auto: the hand x6_experiment.yaml says is mounted (hands.mounted), as free_drive does
+        self.declare_parameter('gripper_type', 'auto')       # auto | franka | inspire
+        self.declare_parameter('gripper_namespace', '')     # '' -> /franka_gripper or /inspire_hand
         self.declare_parameter('gripper_open_width', 0.08)  # m
         self.declare_parameter('gripper_speed', 0.05)       # m/s
         self.gripper_move = None
+
+    def _gripper_type(self):
+        kind = str(self.get_parameter('gripper_type').value).strip().lower()
+        if kind == 'auto':
+            try:
+                from ycb_pointcloud_pipeline.x6_common import X6Config
+                mounted = X6Config().raw.get('hands', {}).get('mounted')
+            except Exception:  # noqa: BLE001 - no experiment config: the Franka Hand
+                mounted = None
+            kind = 'inspire' if mounted == 'inspire' else 'franka'
+            self.get_logger().info(f'gripper_type auto -> {kind} (x6_experiment.yaml '
+                                   f'hands.mounted: {mounted})')
+        if kind not in ('franka', 'inspire'):
+            raise AbortMotion(f'gripper_type must be auto, franka or inspire, not {kind!r}')
+        return kind
 
     def connect_gripper(self):
         """Check the gripper move action before the arm moves, so a missing gripper
         is found while nothing has been activated yet."""
         if not self.get_parameter('open_gripper').value:
             return
-        if self.get_parameter('gripper_type').value == 'inspire':
+        kind = self._gripper_type()
+        ns = self.get_parameter('gripper_namespace').value or (
+            '/inspire_hand' if kind == 'inspire' else '/franka_gripper')
+        if kind == 'inspire':
             from ycb_pointcloud_pipeline.ros_utils import InspireHandClient
-            ns = self.get_parameter('gripper_namespace').value
-            client = InspireHandClient(self, ns if ns != '/franka_gripper' else '/inspire_hand')
+            client = InspireHandClient(self, ns)
             missing = client.available(timeout=5.0)
             if missing:
                 raise AbortMotion(f'Inspire hand services {missing} not available '
@@ -64,7 +83,7 @@ class JointHoming(JointTargetPublisher):
         except ImportError:
             raise AbortMotion('open_gripper needs franka_msgs on the host, or pass '
                               '-p open_gripper:=false')
-        name = self.get_parameter('gripper_namespace').value.rstrip('/') + '/move'
+        name = ns.rstrip('/') + '/move'
         self.gripper_move = (ActionClient(self, Move, name), Move)
         if not self.gripper_move[0].wait_for_server(timeout_sec=5.0):
             raise AbortMotion(f'gripper action {name} not available '
@@ -76,7 +95,11 @@ class JointHoming(JointTargetPublisher):
         client, Move = self.gripper_move
         if Move is None:                  # Inspire hand
             ok, message = client.wait(client.send(False), 20.0)
-            (self.get_logger().info if ok else self.get_logger().error)(f'Inspire hand open: {message}')
+            # two calls, not one call site at two severities (rclpy refuses that)
+            if ok:
+                self.get_logger().info(f'Inspire hand open: {message}')
+            else:
+                self.get_logger().error(f'Inspire hand open: {message}')
             return
         goal = Move.Goal()
         goal.width = float(self.get_parameter('gripper_open_width').value)
