@@ -293,6 +293,11 @@ class TpgptExecutorNode(Node):
         d('arrival_timeout', 4.0)                   # s
         d('arrival_gain', 1.5)                      # 1/s, integral gain of the hold
         d('arrival_max_gap', 0.04)                  # m, abort if the command strayed this far
+        # The holds bring the hand onto the planned orientation too (2026-10-03): every grasp that
+        # night closed 2.7-7.3 deg off it, the foam brick's into a corner grab.
+        d('arrival_rotation_tolerance', 0.026)      # rad (1.5 deg), hand to the mark's orientation
+        d('arrival_max_rotation', 0.15)             # rad, the most the hold's twist may build
+        d('arrival_rotation_release', 1.0)          # s, time constant of the return to the plan's
         d('require_confirmation', True)
         # Gripper
         d('gripper_mode', 'franka_grasp')           # franka_grasp | gripper_command | inspire | none
@@ -881,6 +886,7 @@ class TpgptExecutorNode(Node):
             self.posture = posture
         self.moving = True
         self.offset = np.zeros(3)
+        self.rot_offset = np.zeros(3)     # a hold's turn of the hand, returned gradually
         if p('gripper_mode') != 'none':
             self.command_gripper(False, object_width, wait=not self.dry)
 
@@ -1025,13 +1031,20 @@ class TpgptExecutorNode(Node):
                 gripper_closed = closed
                 next_t = time.monotonic()
                 meas_p, meas_R = self.measured()     # the hold moved the arm; log where it is now
-            self.publish(cmd.tcp_position - self.offset, cmd.tcp_rotation, values)
+            send_R = cmd.tcp_rotation
+            if float(np.linalg.norm(self.rot_offset)) > 1e-6:
+                # what a hold turned the hand by, returned to the plan's orientation gradually
+                from scipy.spatial.transform import Rotation as Rot
+                send_R = Rot.from_rotvec(self.rot_offset).as_matrix() @ cmd.tcp_rotation
+                self.rot_offset = self.rot_offset * float(
+                    np.exp(-dt / float(p('arrival_rotation_release'))))
+            self.publish(cmd.tcp_position - self.offset, send_R, values)
             if self.dry:
                 # The simulated arm runs the gains CRISP applies for this message, not the
                 # policy's own K: the same when nothing is dropped or clamped.
                 K_run, D_run = crisp_applied_gains(values, meas_R)
-                self.simulate(cmd.tcp_position - self.offset, cmd.tcp_rotation, K_run, D_run, dt)
-            trace.append((cmd.tcp_position.copy(), cmd.tcp_rotation.copy()))
+                self.simulate(cmd.tcp_position - self.offset, send_R, K_run, D_run, dt)
+            trace.append((cmd.tcp_position.copy(), np.asarray(send_R).copy()))
             k_diag, k_rot = logged_stiffness(values)
             writer.writerow([f'{time.monotonic() - started:.3f}', 'policy', f'{cmd.phase:.5f}',
                              f'{cmd.gate:.4f}', f'{cmd.behind:.5f}', f'{cmd.expected:.5f}',
@@ -1643,17 +1656,20 @@ class TpgptExecutorNode(Node):
         """
         from tpgpt.hardware.executor import crisp_applied_gains, logged_stiffness
 
+        from scipy.spatial.transform import Rotation as Rot
+
         p, log = self.p, self.get_logger()
         self.stage = stage
         self.posture_label = float(index)       # the posture checked where the gripper acts
         labels = plan.labels
         if learned:
             row = 0 if stage == 'arrive_grasp' else 1
-            target_R = np.asarray(cmd.tcp_rotation, dtype=float)
-            target_p = executor.tcp_from_tool(plan.marks['positions'][row],
-                                              np.asarray(plan.marks['orientations'][row]))
+            target_R = np.asarray(cmd.tcp_rotation, dtype=float)      # the learned command's own
+            mark_R = np.asarray(plan.marks['orientations'][row], dtype=float)
+            target_p = executor.tcp_from_tool(plan.marks['positions'][row], mark_R)
         else:
             target_R = np.asarray(labels.orientations[index], dtype=float)
+            mark_R = target_R
             target_p = executor.tcp_from_tool(labels.positions[index], target_R)
         gap = float(np.linalg.norm(cmd.tcp_position - target_p))
         if not learned and gap > float(p('arrival_max_gap')):
@@ -1673,22 +1689,36 @@ class TpgptExecutorNode(Node):
         step = float(p('approach_max_linear_speed')) * dt
         command = cmd.tcp_position.copy()
         goal = target_p
+        meas_p0, meas_R0 = self.measured()
         if learned:
             goal = command + (target_p - executor.tcp_from_tool(
-                executor.tool_position(*self.measured()), target_R))
+                executor.tool_position(meas_p0, meas_R0), target_R))
+        # The orientation the same way (2026-10-03): the command's turned by the hand's own error
+        # from the mark (a learned command sits off the mark's orientation by what the replay
+        # learned), walked at the approach's turning speed, then a bounded twist builds.
+        rot_tol, rot_cap = float(p('arrival_rotation_tolerance')), float(p('arrival_max_rotation'))
+        rot_step = float(p('approach_max_angular_speed')) * dt
+        goal_R = (Rot.from_rotvec(Rot.from_matrix(mark_R @ meas_R0.T).as_rotvec()).as_matrix()
+                  @ target_R) if learned else mark_R
+        command_R = target_R.copy()
+        twist = np.zeros(3)
+        sent_R = target_R
         while True:
-            meas_p, _ = self.measured()
+            meas_p, meas_R = self.measured()
             error = target_p - meas_p
             dist = float(np.linalg.norm(error))
-            inside = inside + 1 if dist <= tol else 0
+            rot_error = Rot.from_matrix(mark_R @ meas_R.T).as_rotvec()       # base frame
+            angle = float(np.linalg.norm(rot_error))
+            inside = inside + 1 if dist <= tol and angle <= rot_tol else 0
             if inside >= 3:
-                log.info(f'{stage}: within {dist * 1000:.1f} mm of the plan '
-                         f'(integral {np.round(integral * 1000, 1).tolist()} mm)')
+                log.info(f'{stage}: within {dist * 1000:.1f} mm and {np.degrees(angle):.1f} deg of '
+                         f'the plan (integral {np.round(integral * 1000, 1).tolist()} mm, twist '
+                         f'{np.degrees(np.linalg.norm(twist)):.1f} deg)')
                 break
             if time.monotonic() > deadline:
-                log.warn(f'{stage}: still {dist * 1000:.1f} mm from the plan after '
-                         f'{float(p("arrival_timeout")):.1f} s ({np.round(error * 1000, 1).tolist()} '
-                         'mm); acting anyway')
+                log.warn(f'{stage}: still {dist * 1000:.1f} mm and {np.degrees(angle):.1f} deg from '
+                         f'the plan after {float(p("arrival_timeout")):.1f} s '
+                         f'({np.round(error * 1000, 1).tolist()} mm); acting anyway')
                 break
             delta = goal - command
             command = command + delta * min(1.0, step / max(float(np.linalg.norm(delta)), 1e-9))
@@ -1696,12 +1726,21 @@ class TpgptExecutorNode(Node):
                 integral = integral + gain * dt * error
                 if np.linalg.norm(integral) > limit:
                     integral *= limit / np.linalg.norm(integral)
+            turn = Rot.from_matrix(goal_R @ command_R.T).as_rotvec()
+            n = float(np.linalg.norm(turn))
+            if n > 1e-9:
+                command_R = Rot.from_rotvec(turn * min(1.0, rot_step / n)).as_matrix() @ command_R
+            else:
+                twist = twist + gain * dt * rot_error
+                if np.linalg.norm(twist) > rot_cap:
+                    twist *= rot_cap / np.linalg.norm(twist)
+            sent_R = Rot.from_rotvec(twist).as_matrix() @ command_R
             out = command - self.offset + integral
             self.check_workspace(out, f'{stage} target')
-            self.publish(out, target_R, values)
+            self.publish(out, sent_R, values)
             if self.dry:
-                # the dry-run arm holds target_R, so it is also the frame CRISP would use
-                self.simulate(out, target_R, *crisp_applied_gains(values, target_R), dt)
+                # the dry-run arm holds sent_R, so it is also the frame CRISP would use
+                self.simulate(out, sent_R, *crisp_applied_gains(values, sent_R), dt)
             k_diag, k_rot = logged_stiffness(values)
             writer.writerow([f'{time.monotonic() - started:.3f}', stage, f'{cmd.phase:.5f}', 1,
                              dist, 0, 0, int(cmd.gripper), *meas_p, *out, *command,
@@ -1713,6 +1752,8 @@ class TpgptExecutorNode(Node):
         if not learned:
             self.offset = self.offset - integral
         self.stage = 'policy'
+        # hand the orientation back to the plan gradually (the caller decays it)
+        self.rot_offset = Rot.from_matrix(sent_R @ np.asarray(cmd.tcp_rotation).T).as_rotvec()
         return out
 
     def _send_start_joints(self, q):

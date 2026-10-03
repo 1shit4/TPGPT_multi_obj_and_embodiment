@@ -200,13 +200,23 @@ grasp mark, `q ← q + (mark − p)`, then a small push builds:
 
     I ← I + 1.5/s · dt · (mark − p),   |I| ≤ 30 mm,   sent: q + I
 
-until the hand is within 4 mm of the mark for 3 steps, or 4 s have passed. Then the jaws close
+The orientation the same way (since 2026-10-03): the commanded orientation `Rq` (the learned
+command's own, which sits off the mark's by what the replay learned) is turned by the hand's own
+angular error `θ = log(R_mark · R_handᵀ)`, walked there at 0.3 rad/s, then a small twist builds:
+
+    T ← T + 1.5/s · dt · log(R_mark · R_handᵀ),   |T| ≤ 0.15 rad,   sent: exp(T) · Rq
+
+until the hand is within 4 mm **and 1.5°** of the mark for 3 steps, or 4 s have passed. After
+the hold the extra turn is handed back to the plan's orientation gradually (time constant 1 s), so
+the hand does not swing round with the jaws on the object. Why: every grasp of 2026-10-03 closed
+2.7-7.3° off the planned orientation (the arm lands anywhere between the learned command's
+orientation and the plan's), and the foam brick's 7.3° made its pads take an edge. Then the jaws close
 with **40 N** (`grasp_force`; 20 N until 2026-10-03, when a mug pinched by its rim twisted out
 of the jaws as the carry turned the hand -- a pinch resists that twist only by friction, which
 grows with the squeeze; whether 40 N is too much for the banana and the foam brick is to be seen
 on their runs). The correction takes over the hold's offset so the command does not jump back.
 
-**Release.** The same, onto the release mark, before the jaws open: the hand is brought there,
+**Release.** The same, position and orientation, onto the release mark, before the jaws open: the hand is brought there,
 pressing the object onto its support if need be (pressing down on the board is harmless; an arm
 short of its release mark must not open there). Until 2026-10-03 it only waited for the arm to
 settle and opened wherever it was.

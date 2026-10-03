@@ -255,6 +255,9 @@ method:
     arrival_timeout: 4.0
     arrival_gain: 1.5
     arrival_max_gap: 0.04
+    arrival_rotation_tolerance: 0.026  # the holds bring the hand onto the planned orientation too
+    arrival_max_rotation: 0.15
+    arrival_rotation_release: 1.0
     follow_arm_path: true             # learned plans: tpgpt.hardware.executor.ArmPathSettings
     path_pace_span: 0.02
     path_pacing: true
