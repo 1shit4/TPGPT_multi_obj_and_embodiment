@@ -308,8 +308,9 @@ class TpgptExecutorNode(Node):
         # N. 20 until 2026-10-03: a mug held by a pinch on its rim twisted out of the jaws as the
         # carry turned the hand; a pinch resists that twist only by friction, which grows with
         # the squeeze. The Franka Hand takes 70 N continuous. Too much for soft objects (banana,
-        # foam brick) is to be found on their runs (the user, 2026-10-03).
-        d('grasp_force', 40.0)
+        # foam brick) is to be found on their runs (the user, 2026-10-03). 40 N was too much for
+        # the foam brick: 30 N (the user, 2026-10-03).
+        d('grasp_force', 30.0)
         d('log_dir', '')
         # Replay mode (tpgpt.hardware.replay; audit B1): instead of a plan, stream the pending
         # pass of a replay directory -- a taught demonstration's attractor, in time, at the

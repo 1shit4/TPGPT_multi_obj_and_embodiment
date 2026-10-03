@@ -211,10 +211,9 @@ the hold the extra turn is handed back to the plan's orientation gradually (time
 the hand does not swing round with the jaws on the object. Why: every grasp of 2026-10-03 closed
 2.7-7.3° off the planned orientation (the arm lands anywhere between the learned command's
 orientation and the plan's), and the foam brick's 7.3° made its pads take an edge. Then the jaws close
-with **40 N** (`grasp_force`; 20 N until 2026-10-03, when a mug pinched by its rim twisted out
+with **30 N** (`grasp_force`; 20 N until 2026-10-03, when a mug pinched by its rim twisted out
 of the jaws as the carry turned the hand -- a pinch resists that twist only by friction, which
-grows with the squeeze; whether 40 N is too much for the banana and the foam brick is to be seen
-on their runs). The correction takes over the hold's offset so the command does not jump back.
+grows with the squeeze; then 40 N, too much for the foam brick). The correction takes over the hold's offset so the command does not jump back.
 
 **Release.** The same, position and orientation, onto the release mark, before the jaws open: the hand is brought there,
 pressing the object onto its support if need be (pressing down on the board is harmless; an arm
