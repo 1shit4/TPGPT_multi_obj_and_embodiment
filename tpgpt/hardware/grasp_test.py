@@ -49,12 +49,17 @@ LIFT = 0.10                   # m straight up once closed
 SPEED = 0.06                  # m/s at the labels (the executor's speed_scale slows it)
 DWELL = 1.0                   # s at the grasp, open and closed, and after the release
 HOLD_LIFTED = 2.0             # s held up
+#: The labels' stiffness, N/m, the same in every direction, critically damped
+#: (2 sqrt(K)): the static profile of a taught demonstration
+#: (``teach --stiffness-profile static``), which the executor's gate reads.
+STIFFNESS = 400.0
 
 
 def grasp_test_labels(grasp: GraspFrame, dt: float = DT,
                       approach_distance: float = APPROACH_DISTANCE, lift: float = LIFT,
                       speed: float = SPEED, dwell: float = DWELL,
-                      hold_lifted: float = HOLD_LIFTED) -> PolicyLabels:
+                      hold_lifted: float = HOLD_LIFTED,
+                      stiffness: float = STIFFNESS) -> PolicyLabels:
     """The test's labels in the grasp convention (grasp point, grasp-frame orientations)."""
     a = np.asarray(grasp.approach, dtype=float)
     tcp = np.asarray(grasp.tcp, dtype=float)
@@ -85,12 +90,18 @@ def grasp_test_labels(grasp: GraspFrame, dt: float = DT,
     stay(tcp, dwell, -1.0)                     # released
     move(tcp, pre, -1.0)
     P = np.asarray(positions, dtype=float)
+    eye = np.repeat(np.eye(3)[None], len(P), axis=0)
     return PolicyLabels(
         positions=P,
         velocities=np.gradient(P, float(dt), axis=0),
         orientations=np.repeat(grasp.rotation[None], len(P), axis=0),
+        stiffness=eye * float(stiffness),
+        damping=eye * 2.0 * np.sqrt(float(stiffness)),
         gripper=np.asarray(gripper, dtype=float),
+        # The phase, and its rate per second at the labels' own pace: the executor advances
+        # the phase by it (without it the phase runs one whole test per second).
         time_belief=np.linspace(0.0, 1.0, len(P)),
+        time_rate=np.full(len(P), 1.0 / ((len(P) - 1) * float(dt))),
         metadata={"control_freq": int(round(1.0 / dt)), "task": "grasp_test"},
     )
 

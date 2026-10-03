@@ -33,7 +33,7 @@ import numpy as np
 def coverage(object_name, object_pose, world, source, destination, destination_height,
              support_height, camera_position, start_q, end_effector, settings=None,
              plan_budget: int = 40, gripper: str | None = None, library_size=None,
-             cloud=None, poses=None, scores=None, clearance=None):
+             cloud=None, poses=None, scores=None, clearance=None, stop_early: bool = False):
     """Walk an object's whole grasp library against one destination.
 
     Args:
@@ -54,6 +54,9 @@ def coverage(object_name, object_pose, world, source, destination, destination_h
             camera's own cloud, and for tests.
         clearance: a gap the path must keep, m (``path_check.path_feasibility``);
             None is the planner's check.
+        stop_early: end each path check at its first fault, as the planner does --
+            the same verdict, a fraction of the time, but only the first fault of each
+            refused plan is counted in "what they touched".
 
     Returns a dict: the stage tally, what the planned ones died of, and the
     first admissible grasp's rank if there is one.
@@ -109,7 +112,8 @@ def coverage(object_name, object_pose, world, source, destination, destination_h
                                        approach_rejects=s.approach_rejects, clearance=clearance,
                                        joint_margin=s.joint_margin,
                                        reach_margin=s.reach_margin,
-                                       retreat_clearance=s.retreat_clearance)
+                                       retreat_clearance=s.retreat_clearance,
+                                       stop_early=stop_early)
         unrefined += int(report.get("unrefined", 0))
         verdict = path_check.verdict(report)
         if verdict is None:
@@ -251,6 +255,9 @@ def main(argv=None):
                     help="the hand judged; inspire reads --hand-config")
     ap.add_argument("--hand-config", default=None,
                     help="inspire_hand.yaml (default: the one in --config-dir)")
+    ap.add_argument("--stop-early", action="store_true",
+                    help="end each path check at its first fault (the planner's way): the same "
+                         "verdicts, faster, only the first fault counted")
     ap.add_argument("--json", default=None, help="write the full reports here")
     a = ap.parse_args(argv)
 
@@ -320,7 +327,7 @@ def main(argv=None):
         start = HOME_Q if a.start_q is None else np.asarray(a.start_q, dtype=float)
         report = coverage(name, (rotation, position), world, source, xyz, xyz[2], table, camera,
                           start, hand, settings=settings, plan_budget=a.budget,
-                          library_size=a.size, clearance=a.clearance)
+                          library_size=a.size, clearance=a.clearance, stop_early=a.stop_early)
         print(f"--- {slot} [{xyz[0]:.3f}, {xyz[1]:.3f}, {xyz[2]:.3f}]  "
               f"({time.monotonic() - t0:.0f} s)")
         print(describe(report), flush=True)

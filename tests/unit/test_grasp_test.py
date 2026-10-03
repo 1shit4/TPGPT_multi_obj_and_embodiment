@@ -137,3 +137,14 @@ def test_the_constructed_test_is_path_checked(inspire):
                                  inspire, "ball")
     assert sel.source == "constructed" and sel.plan.metadata["task"] == "grasp_test"
     assert sel.chosen.path_check["verdict"] is None
+
+
+def test_the_labels_carry_the_static_stiffness_the_gate_reads():
+    L = grasp_test_labels(TOP_DOWN)
+    assert L.stiffness[0] == pytest.approx(400.0 * np.eye(3))
+    assert L.damping[0] == pytest.approx(40.0 * np.eye(3))
+
+
+def test_the_phase_advances_at_the_labels_pace():
+    L = grasp_test_labels(TOP_DOWN)
+    assert L.time_rate * 0.05 * (len(L) - 1) == pytest.approx(np.ones(len(L)))
