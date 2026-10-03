@@ -118,11 +118,13 @@ MARGIN_JOINTS = (0, 1, 2, 3, 4, 5)
 #: (mug into top_right, 23:28): the plan's start was 1.8 mm inside full stretch (reachable, so
 #: the IK check passed); the arm stopped 12 mm short of full stretch, 54 mm from its command,
 #: and a 31 N pull gave the elbow about 1.4 N m; the run never got going. Across 12 runs the
-#: gap at the start grew as the starts got more stretched (correlation -0.8). No default value
-#: yet: what each costs is to be measured on recorded captures first (the user, 2026-10-03).
-#: The shoulder-to-wrist distance depends only on the elbow (joint 4); full stretch is
-#: 719.4 mm at -26.7 deg.
-REACH_MARGIN = None
+#: gap at the start grew as the starts got more stretched (correlation -0.8). 20 mm (the user,
+#: 2026-10-03), from its cost on the fifteen recorded captures (GRASP_LIBRARY.md item 11): 315 ->
+#: 246 executable grasps, no cell emptied, bottom_left unchanged (10/30/50 mm: 264/231/200). It
+#: keeps room for the 10-15 mm the arm stops short. The planner's default (`grasp_reach_margin`);
+#: path_feasibility itself leaves it off unless asked. The shoulder-to-wrist distance depends
+#: only on the elbow (joint 4); full stretch is 719.4 mm at -26.7 deg.
+REACH_MARGIN = 0.02
 
 
 def stretch_room(fr3: FR3, q) -> float:

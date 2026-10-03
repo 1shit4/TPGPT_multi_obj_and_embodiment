@@ -156,6 +156,13 @@ Two facts that need several files to see, and that decide whether a change is fa
   sim's rule too -- and on the 00:47/00:50 mug runs it swung joints 1 and 3 50-65 deg as joint
   2 crossed 0 (the hand still), the arm stuck, and the elbow ended 108-110 deg off the checked
   posture. Plans made before 2026-10-02 have no checked postures: re-plan.
+- **The planner keeps the wrist 20 mm inside full stretch along the whole path** (2026-10-03;
+  planner `grasp_reach_margin`, `path_check.REACH_MARGIN`). Near full stretch a pull on the hand
+  barely turns the joints, so the arm cannot be pulled there (the 23:28 mug start was 1.8 mm
+  inside it and never reached). Cost on the fifteen captures: 315 -> 246 grasps, no cell emptied,
+  bottom_left unchanged (`GRASP_LIBRARY.md` item 11). The retreat clearance from the placed
+  object (`grasp_retreat_clearance`) is built but off (the user, 2026-10-03: it empties bottom_left
+  cells).
 - **Grasp selection is the simulation's rule, and sees the shelf** (since 2026-09-21,
   `docs/hardware/SHELF_AND_PATH_CHECK.md`). `grasp_selection.select_and_plan` walks survivors in
   score order and takes the first whose **whole transported path** passes

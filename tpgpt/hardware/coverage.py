@@ -222,9 +222,10 @@ def main(argv=None):
     ap.add_argument("--joint-margin", type=float, default=None,
                     help="refuse paths with joints 1-6 this close to a limit, rad (default: "
                          "off; path_check.JOINT_MARGIN is CRISP's 0.1)")
-    ap.add_argument("--reach-margin", type=float, default=None,
-                    help="refuse paths whose wrist comes this close to full stretch, m "
-                         "(default: off; path_check.REACH_MARGIN)")
+    from tpgpt.hardware.path_check import REACH_MARGIN
+    ap.add_argument("--reach-margin", type=float, default=REACH_MARGIN,
+                    help="refuse paths whose wrist comes this close to full stretch, m (default: "
+                         "path_check.REACH_MARGIN, the planner's; 0 = off)")
     ap.add_argument("--retreat-clearance", type=float, default=None,
                     help="once clear of the placed object by this much in the retreat, stay that "
                          "far from it, m (default: off)")

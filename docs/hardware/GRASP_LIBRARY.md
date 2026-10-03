@@ -404,6 +404,7 @@ the arm stops short (the 23:28 mug start, 1.8 mm inside full stretch, never reac
 The empty cell is apple bottom_left, empty with the check off too. No bottom_left cell changes at
 any margin; the losses are in the top slots, where the far shelf stretches the arm (mug top_right
 17 -> 8, banana top_left 56 -> 44 at 10 mm). Raw in `outputs/hardware/reach_margin_20261003/`.
+**On at 20 mm since 2026-10-03** (the user).
 
 *Keep the hand away from the placed object once it has left it* (`path_check`
 `retreat_clearance`, planner `grasp_retreat_clearance`). The taught retreat swings the open
@@ -417,6 +418,7 @@ they dragged a set-down mug:
 
 5 mm empties mug bottom_left (1 -> 0); 10 mm also foam brick bottom_left (2 -> 0). The pieces that
 come back are the finger pads, nearly always. Raw in `outputs/hardware/retreat_clearance_20261003/`.
+**Left off** (the user, 2026-10-03).
 
 ## Deviation from the simulation
 
