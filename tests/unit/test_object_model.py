@@ -250,3 +250,19 @@ def test_the_real_box_of_17_32_is_fitted_where_the_camera_saw_it():
     o = (obs[:, :2] - model[:, :2].mean(axis=0)) @ axis
     o_lo, o_hi = np.percentile(o, [1, 99])
     assert abs(m_lo - o_lo) < 0.010 and abs(m_hi - o_hi) < 0.010
+
+
+def test_the_banana_of_19_33_lies_on_the_table():
+    """The capture of 2026-10-03 19:33 (banana, top_left). With the rest tilt the fit rolled
+    the banana 14.5 deg about its long axis, after the band the camera reads over its skin,
+    lifting its middle 11 mm off the table; the jaws, centred on it, closed 10 mm above the
+    real banana. Fitted flat (FLAT_RESTING) it explains more (0.78 against 0.72)."""
+    from pathlib import Path
+    rec = np.load(Path(__file__).resolve().parents[1] / "data" / "banana_20261003_193336.npz")
+    banana = ObjectModel.load("banana")
+    fit = fit_object(banana, rec["observed"].astype(float), float(rec["table"]), rec["camera"])
+    assert fit.accepted, fit.reason
+    assert fit.explained > 0.75
+    model = fit.full_cloud
+    middle = np.linalg.norm(model[:, :2] - model[:, :2].mean(axis=0), axis=1) < 0.02
+    assert model[middle, 2].min() - float(rec["table"]) < 0.002          # its middle on the table

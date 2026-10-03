@@ -133,10 +133,16 @@ OPEN_VESSELS = ("mug",)
 #: brick leaned 19.5 and 19.3 deg on two of three runs (resting on an edge, as it
 #: looked), the upright pudding box 11.7 and 12.0 deg on both of its plans into
 #: bottom_left, and the mug 11-22 deg. The tilt stays for what can really rest
-#: rolled or leaning: the banana (8.8 deg on the same evening), the apple, the can.
-#: (On a synthetic box with no artefacts the tilt search was worth 2.5 mm of fit
-#: against 5.5 -- the live fits are the evidence that counts.)
-FLAT_RESTING = ("mug", "pudding_box", "foam_brick")
+#: rolled or leaning: the apple, the can. (On a synthetic box with no artefacts the
+#: tilt search was worth 2.5 mm of fit against 5.5 -- the live fits are the evidence
+#: that counts.) **The banana since 2026-10-03.** Rolled about its long axis it lifted
+#: its middle off the table, which a banana on its side cannot do: on its 49 recorded
+#: captures the tilted fit rolled it up to 29 deg (most 5-21) and lifted the middle
+#: 5-15 mm, chasing the band the camera reads over its skin, while fitted flat it
+#: explains as much or more on 48 (median 0.68 -> 0.81, the other 0.73 vs 0.72). On
+#: 10-03 19:33 the plan centred the jaws on the lifted middle, 10 mm above the real
+#: banana, and they closed on air with the arm at the planned grasp to 2 mm.
+FLAT_RESTING = ("mug", "pudding_box", "foam_brick", "banana")
 #: The occlusion test is a depth image of the placed scan: :data:`OCCLUSION_POINTS`
 #: on its surface, the nearest per angular bin of :data:`OCCLUSION_BIN_DEG` (1.5 mm
 #: at 1.1 m), each camera point compared with its own bin only. A neighbourhood

@@ -445,8 +445,12 @@ The planner's support height is: its `support_height` parameter, else the calibr
   When a grasp looks wrong at execution, first compare the planned hand with the arm's at the
   close (FK of the logged joints); if they agree, the plan -- usually the fit -- is the suspect.
 - **Flat-resting objects are fitted without lean** (`object_model.FLAT_RESTING`: mug, pudding
-  box, foam brick; 2026-09-25). The rest-tilt search (up to 25 deg) is for what can really rest
-  rolled or leaning (banana, apple, can); on the planner's live fits it leaned the foam brick 19.5
+  box, foam brick; 2026-09-25; **the banana since 2026-10-03**). The rest-tilt search (up to 25 deg)
+  is for what can really rest rolled or leaning (apple, can). It rolled the banana 5-21 deg about
+  its long axis on most of its 49 captures, lifting its middle 5-15 mm off the table after the band
+  the camera reads over its skin; flat it explains as much or more on 48 (median 0.68 -> 0.81). On
+  10-03 19:33 the jaws, centred on that lifted middle, closed 10 mm above the real banana -- the arm
+  at the plan to 2 mm. On the planner's live fits it also leaned the foam brick 19.5
   and 19.3 deg (on an edge, as it looked) and the upright pudding box 12 deg on both of its plans
   into bottom_left. On the day's seven real pudding-box clouds the new fit accepts all seven, on
   an end and flat; the old one put the box on its long edge on three. Known limit, in a test:
