@@ -631,6 +631,11 @@ The planner's support height is: its `support_height` parameter, else the calibr
   (`joint_homing`) and the robot filter at 50 mm. The pudding box also planned into bottom_right.
   **Dry runs only: nothing executed on the robot yet.** That morning, before the filter fix and
   from a parked pose, the apple took up to 849 s and top_left refused.
+- **The foam brick does not plan into bottom_left** (live, 2026-10-03: no grasp at any heading or
+  position the user tried). The grasps one would expect -- tilted 20-70 deg, pads flat on the 53 mm
+  faces -- are in the library (132 of 2000) and reach selection; they are refused because the
+  hand's tilt at the pick is its tilt at the release (audit A12): tilted like that it meets the top
+  board or the left wall in the bottom slot (`place_zone`, then the path check).
 - **bottom_left plans on a thin margin** (measured 2026-09-29, `GRASP_LIBRARY.md` item 9): of the
   fifteen live plans' captures, the top slots admit 22-63 executable grasps each; bottom_left
   admits **2** for banana, apple, mug and foam brick and 4 for the pudding box. What kills it: the
