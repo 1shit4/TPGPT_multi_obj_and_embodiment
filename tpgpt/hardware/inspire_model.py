@@ -588,18 +588,26 @@ class InspireHandModel:
         return float((verts @ np.asarray(R).T + np.asarray(p))[:, 2].min())
 
     # ------------------------------------------------------------- closing
-    def closed_onto(self, points, target=None, steps: int = 24, refine: int = 6) -> ClosedState:
+    def closed_onto(self, points, target=None, steps: int = 16, refine: int = 6) -> ClosedState:
         """Close each chain from open towards ``target`` (default :attr:`close_q`) until
         it holds :data:`CONTACT_POINTS` of ``points`` (in ``G``) :data:`CONTACT_DEPTH`
         deep. The thumb rotation stays at its open value."""
-        pts = np.atleast_2d(np.asarray(points, dtype=float))
+        all_pts = np.atleast_2d(np.asarray(points, dtype=float))
         target = self.close_q if target is None else self._resolve(target)
         q = self.open_q.copy()
         contact, fraction = {}, {}
+        open_poses = self.link_poses(self.open_q)
         for k, dof in enumerate(DOF_NAMES[:5]):
             chain = CHAIN_OF_DOF[dof]
+            # The chain turns about its first joint, so nothing further from that joint
+            # than its furthest vertex can ever be touched: test only the points within.
+            pivot = open_poses[FINGER_LINKS[chain][0]][:3, 3]
+            reach = max(float(np.linalg.norm(p.vertices - pivot, axis=1).max())
+                        for p in self.pieces(self.open_q, chains=(chain,)))
+            pts = all_pts[np.linalg.norm(all_pts - pivot, axis=1) <= reach] if len(all_pts) \
+                else all_pts
 
-            def touches(s, k=k, chain=chain):
+            def touches(s, k=k, chain=chain, pts=pts):
                 qq = self.open_q.copy()
                 qq[k] = self.open_q[k] + s * (target[k] - self.open_q[k])
                 inside = np.zeros(len(pts), dtype=bool)
