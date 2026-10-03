@@ -440,6 +440,57 @@ run (the user, 2026-10-03). **The apple too**: 70 x 72 mm against the scan's 75.
 (`MEASURED_EXTENTS`), so a new library; with the scan, grasps across its middle were too wide for
 the 80 mm open hand and selection fell to one on its cap.
 
+## The Inspire hand (2026-10-04)
+
+The Inspire RH56DFX-2R has its own libraries: 2000 grasps per object from GraspGen-X's
+`inspire_hand` description. The cache key includes the gripper, so they sit beside the Franka
+Hand's. They are judged by the hand's own stage, `judge_hand` (`ycb_pointcloud_pipeline/INSPIRE_HAND.md`
+§1), instead of the jaw check.
+
+**First coverage.** Conditions:
+- **Mount:** the estimated one (yaw -45 deg, 12 mm adapter), not yet measured.
+- **Description:** the shipped one, with no depth correction.
+- **Scenes:** the latest 10-03 capture of each object.
+- **Demonstration:** the 18:39 learned bundle.
+- **Slots:** top_left and top_right.
+- **Planning:** 10 survivors planned per slot, path checks stopped at the first fault
+  (`--stop-early`).
+
+`outputs/hardware/coverage_inspire/`; re-run with
+`python -m tpgpt.hardware.coverage --hand inspire --capture <plan> --demo <bundle> --slots
+top_left,top_right --budget 10 --stop-early`.
+
+| object (capture) | approach not from below | after the hand stage | after the funnel (TL / TR) | admissible of 10 (TL / TR) |
+|---|---|---|---|---|
+| apple (221827) | 904 | 203 | 91 / 89 | 1 / 0 |
+| banana (202141) | 1008 | **0** | -- | -- |
+| mug (031730) | 938 | 296 | 176 / 144 | 0 / 3 |
+| pudding box (192437) | 923 | 178 | 64 / 55 | 0 / 0 |
+| foam brick (163039) | 930 | 81 | 39 / 33 | 0 / 0 |
+
+What it says:
+
+1. **About half of GraspGen-X's Inspire grasps approach from below** (more than 90 deg from
+   straight down; 992-1096 of 2000), against 1096 for the apple with the Franka Hand. This holds
+   for every object.
+2. **The table removes most of the rest.** GraspGen-X sees the object and not the table. On a
+   top-down grasp its grasp depth (0.15 m) puts the open fingertips 15 mm below the grasp point
+   and the closed hand 26 mm below it.
+   - Every one of the banana's 1008 grasps puts the hand into the table: median 46 mm under,
+     the best at the 3 mm limit. The banana is 37 mm tall.
+   - The foam brick (52 mm) loses 838 of 930 this way.
+   - The Franka Hand's selection lifts such grasps (`refine_grasp`). For this hand that is open,
+     after the depth sweep (M6). A shallower calibrated depth would move every grasp up at once.
+3. **Reach decides the transport.** The commonest fault of the planned candidates is "the wrist
+   within 20 mm of full stretch" in the carry. The Inspire hand's grasp point is 165 mm from the
+   flange against the Franka Hand's 103, so the same slot needs a longer reach. top_right also
+   puts the arm into the right wall and the topmost board.
+4. **Two hand faults** appear: the open thumb meeting the object on the way in (the
+   demonstration's approach suits a thin jaw), and the retreating thumb coming back within
+   10 mm of the placed mug.
+
+These numbers move with the mount (M1-M3) and the depth (M6); re-measure after them.
+
 ## Deviation from the simulation
 
 The simulation caches candidates per cloud (`tpgpt/grasp/cache.py`) and re-draws whenever the cloud
