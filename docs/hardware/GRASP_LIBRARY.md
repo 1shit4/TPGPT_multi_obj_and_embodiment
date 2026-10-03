@@ -471,8 +471,9 @@ top_left,top_right --budget 10 --stop-early`.
 What it says:
 
 1. **About half of GraspGen-X's Inspire grasps approach from below** (more than 90 deg from
-   straight down; 992-1096 of 2000), against 1096 for the apple with the Franka Hand. This holds
-   for every object.
+   straight down; 992-1096 of 2000). The Franka Hand's libraries are no different: on the same
+   captures, 984 survive for the apple (Inspire 904) and 1052 for the banana (1008). GraspGen-X
+   samples all round the object; this is the generator, not the hand.
 2. **The table removes most of the rest.** GraspGen-X sees the object and not the table. On a
    top-down grasp its grasp depth (0.15 m) puts the open fingertips 15 mm below the grasp point
    and the closed hand 26 mm below it.
