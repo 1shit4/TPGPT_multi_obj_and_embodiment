@@ -87,6 +87,21 @@ def _installed_config(name):
                             'config', name)
 
 
+def grip_force(given: float, object_name, table_path: str) -> tuple[float, str]:
+    """The Franka Hand's grip force for this run, N, and where it came from: ``given`` when
+    > 0, else the object's entry in ``config/grasp_forces.yaml`` (else its ``default``).
+    Different objects need different squeezes (the user, 2026-10-03): 7.5 N for the pudding
+    box, 80 for the apple."""
+    if given > 0:
+        return float(given), 'grasp_force parameter'
+    import yaml
+    with open(table_path) as f:
+        table = (yaml.safe_load(f) or {}).get('franka_grasp', {})
+    if object_name in table:
+        return float(table[object_name]), f'{os.path.basename(table_path)}, {object_name}'
+    return float(table.get('default', 30.0)), f'{os.path.basename(table_path)}, default'
+
+
 class AbortRun(RuntimeError):
     pass
 
@@ -338,8 +353,10 @@ class TpgptExecutorNode(Node):
         # carry turned the hand; a pinch resists that twist only by friction, which grows with
         # the squeeze. The Franka Hand takes 70 N continuous. Too much for soft objects (banana,
         # foam brick) is to be found on their runs (the user, 2026-10-03). 40 N was too much for
-        # the foam brick: 30 N (the user, 2026-10-03).
-        d('grasp_force', 30.0)
+        # the foam brick: 30 N (the user, 2026-10-03). Since then per object, from
+        # config/grasp_forces.yaml (grip_force); > 0 here overrides the table for one run.
+        d('grasp_force', 0.0)
+        d('grasp_forces_yaml', '')                  # '' -> the installed config/grasp_forces.yaml
         d('log_dir', '')
         # Replay mode (tpgpt.hardware.replay; audit B1): instead of a plan, stream the pending
         # pass of a replay directory -- a taught demonstration's attractor, in time, at the
@@ -611,6 +628,15 @@ class TpgptExecutorNode(Node):
         else:
             raise AbortRun(f'unknown gripper_mode {mode!r}')
 
+    def grip_force(self) -> float:
+        """This run's grip force (:func:`grip_force`), logged the first time it is used."""
+        force, source = grip_force(float(self.p('grasp_force')), getattr(self, 'run_object', None),
+                                   self.p('grasp_forces_yaml') or _installed_config('grasp_forces.yaml'))
+        if getattr(self, '_force_logged', None) != (force, source):
+            self.get_logger().info(f'grip force {force:g} N ({source})')
+            self._force_logged = (force, source)
+        return force
+
     def command_gripper(self, close, object_width, wait=False):
         """Send an open/close goal. Non-blocking unless `wait`."""
         self.gripper_state = close
@@ -639,7 +665,7 @@ class TpgptExecutorNode(Node):
                 goal.epsilon.inner = goal.width
                 goal.epsilon.outer = open_w - goal.width
                 goal.speed = float(self.p('grasp_speed'))
-                goal.force = float(self.p('grasp_force'))
+                goal.force = self.grip_force()
                 future = self.gripper['grasp'].send_goal_async(goal)
             else:
                 goal = self.gripper['Move'].Goal()
@@ -648,7 +674,7 @@ class TpgptExecutorNode(Node):
         else:
             goal = self.gripper['GripperCommand'].Goal()
             goal.command.position = 0.0 if close else open_w / 2.0
-            goal.command.max_effort = float(self.p('grasp_force'))
+            goal.command.max_effort = self.grip_force()
             future = self.gripper['command'].send_goal_async(goal)
         self.get_logger().info(f'gripper {label} sent')
         if wait:
@@ -842,6 +868,7 @@ class TpgptExecutorNode(Node):
         belief = np.asarray(plan.labels.time_belief, dtype=float).reshape(-1)
         start_pos, start_rot = executor.start_pose
         object_width = float(m.get('object_width_closing_m', 0.04))
+        self.run_object = m.get('object_name')
 
         # --- where the arm is -------------------------------------------------
         if not self.dry:
@@ -1433,6 +1460,7 @@ class TpgptExecutorNode(Node):
 
         log, p = self.get_logger(), self.p
         name = p('replay_object') or rp.object_name(info)
+        self.run_object = name
         calib = CalibrationProvider(self, default_calibration_yaml())
         T = calib.T_base_optical(calib.cal.optical_frame)
         if T is None:

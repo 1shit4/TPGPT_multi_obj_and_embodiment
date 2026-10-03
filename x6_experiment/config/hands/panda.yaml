@@ -29,7 +29,8 @@ hand:
     namespace: /franka_gripper
     open_width_m: 0.08
     grasp_speed_mps: 0.05
-    grasp_force_n: 30.0
+    # grip force: per object, ycb_pointcloud_pipeline/config/grasp_forces.yaml (the executor
+    # reads it by the plan's object; 2026-10-03). Not passed from here.
     width_topic: /franka_gripper/joint_states   # recorded as gripper_width
 
   mount_check:                                  # pre-flight: this hand is the one mounted

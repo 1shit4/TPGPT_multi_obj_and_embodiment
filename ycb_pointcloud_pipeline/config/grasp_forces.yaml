@@ -1,0 +1,17 @@
+# Franka Hand grip force per object, N: what the grasp action squeezes with. The executor
+# takes the plan's object from here (tpgpt_executor_node.grip_force); -p grasp_force:=N > 0
+# overrides it for one run. Set on the robot by the user, 2026-10-03, after runs at 30 N:
+#   pudding_box  a light cardboard box: more crushes it
+#   apple        held across its middle; it slipped at less
+#   banana       it slipped and dropped at 30 N
+#   foam_brick   soft: 40 N squashed it
+#   mug          a pinch on the rim resists the carry's twist only by friction
+# The Franka Hand is rated 70 N continuous: 80 N on the apple is above it (the user's choice;
+# it held on the runs). The Inspire hand's force lives in its own config.
+franka_grasp:
+  default: 30.0
+  pudding_box: 7.5
+  apple: 80.0
+  banana: 40.0
+  foam_brick: 20.0
+  mug: 50.0

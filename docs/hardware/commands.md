@@ -295,6 +295,8 @@ ros2 run --prefix python3 ycb_pointcloud_pipeline tpgpt_pick_place --ros-args \
 ```
 `gripper_mode`: `franka_grasp` (default) | `gripper_command` | `inspire` | `none`. `none` runs the
 motion without touching the gripper, which is the safer first move on a new plan.
+The grip force is the object's, from `config/grasp_forces.yaml` (the run logs `grip force N N`);
+`-p grasp_force:=N` overrides it for one run (as above: 15 N against the brick's 20).
 
 Type `yes` at the prompt. **Hand on the e-stop.** Inspect the plan in RViz before confirming — the
 same view as §4:
