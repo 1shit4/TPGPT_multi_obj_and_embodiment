@@ -516,12 +516,36 @@ class InspireHandClient:
     poll, exactly like the Franka gripper action clients it stands in for."""
 
     def __init__(self, node, namespace='/inspire_hand', callback_group=None):
+        from rcl_interfaces.srv import SetParameters
         from std_srvs.srv import Trigger
         ns = namespace.rstrip('/') or '/inspire_hand'
-        self.Trigger = Trigger
+        self.Trigger, self.SetParameters = Trigger, SetParameters
         self.names = {'open': f'{ns}/open', 'close': f'{ns}/close'}
         self.clients = {k: node.create_client(Trigger, name, callback_group=callback_group)
                         for k, name in self.names.items()}
+        # The hand node's own parameter service: its force is a parameter read at each close.
+        self.params = node.create_client(SetParameters, f'{ns}/set_parameters',
+                                         callback_group=callback_group)
+
+    def set_force(self, grams, timeout=3.0):
+        """Set the hand's per-finger force threshold (grams, 0-1000) for the next close.
+        Returns ``(ok, reason)``."""
+        from rcl_interfaces.msg import Parameter, ParameterType, ParameterValue
+        if not self.params.wait_for_service(timeout_sec=timeout):
+            return False, f'{self.params.srv_name} not available'
+        request = self.SetParameters.Request()
+        request.parameters = [Parameter(name='force_g', value=ParameterValue(
+            type=ParameterType.PARAMETER_INTEGER, integer_value=int(grams)))]
+        future = self.params.call_async(request)
+        deadline = time.monotonic() + timeout
+        while not future.done():
+            if time.monotonic() > deadline:
+                return False, f'no answer within {timeout:.0f} s'
+            time.sleep(0.02)
+        result = future.result()
+        if result is None or not result.results:
+            return False, 'set_parameters failed'
+        return bool(result.results[0].successful), str(result.results[0].reason)
 
     def available(self, timeout=5.0):
         """Names of the services that did not appear within `timeout` (empty = all up)."""

@@ -11,7 +11,7 @@ advance_phase / StallWatchdog). Each step:
         --> PoseStamped attractor        --> <controller>/target_pose
         --> [optional] 6 stiffnesses     --> <controller>/target_stiffness
         --> gripper open/close edges     --> /franka_gripper/{grasp,move}
-                                              or /inspire_hand/{open,close} (gripper_mode inspire)
+                                              or /inspire_hand/{open,close} (the Inspire hand)
 
 Stiffness (parameter `use_transported_stiffness`)
   false (default): controller `cartesian_impedance_controller` as spawned by
@@ -36,11 +36,17 @@ Modes
 
 Hand (from the plan's metadata['end_effector'], written by tpgpt_planner_node)
   The plan's positions are the hand's grasp point (the Franka Hand's fingertip centre,
-  or the Inspire hand's palm point) and its orientations are the controller frame
-  (fr3_hand_tcp). The hand's tool_offset -- grasp point in controller-frame coordinates --
-  is taken from the plan, and the `tool_offset` parameter is ADDED to it (a correction,
-  default zero). A plan made for one hand refuses to run with the other hand's
-  gripper_mode (inspire <-> franka_grasp / gripper_command).
+  or the Inspire hand's GraspGen-X grasp point) and its orientations are the controller
+  frame (fr3_hand_tcp). The hand's tool_offset -- grasp point in controller-frame
+  coordinates -- is taken from the plan, and the `tool_offset` parameter is ADDED to it (a
+  correction, default zero). gripper_mode auto (the default) drives the plan's hand:
+  franka_grasp for the Franka Hand, inspire for the Inspire hand; a plan made for one
+  hand refuses to run with the other hand's gripper_mode.
+  The Inspire hand closes with its object's force (config/grasp_forces.yaml inspire_grasp,
+  grams per finger, set on /inspire_hand before each close; inspire_force_g > 0 overrides)
+  and answers with what each finger touched: kept in <log>_hand.json, and with
+  abort_on_empty_close:=true a close without the thumb and a finger on the object aborts
+  the run (holding the arm).
 
 Aborts hold the arm at its measured pose (the gripper is left as it is, so a held
 object is not dropped): stale pose, tracking error, arm not following its target
@@ -344,8 +350,9 @@ class TpgptExecutorNode(Node):
         d('arrival_rotation_release', 1.0)          # s, time constant of the return to the plan's
         d('require_confirmation', True)
         # Gripper
-        d('gripper_mode', 'franka_grasp')           # franka_grasp | gripper_command | inspire | none
-        d('gripper_namespace', '/franka_gripper')   # /inspire_hand for gripper_mode inspire
+        # auto: the plan's hand (franka_grasp for the Franka Hand, inspire for the Inspire)
+        d('gripper_mode', 'auto')                   # auto | franka_grasp | gripper_command | inspire | none
+        d('gripper_namespace', '')                  # '' -> /franka_gripper or /inspire_hand by mode
         d('gripper_timeout', 20.0)                  # s, inspire open/close service answer
         d('open_width', 0.08)
         d('grasp_speed', 0.05)
@@ -357,6 +364,11 @@ class TpgptExecutorNode(Node):
         # config/grasp_forces.yaml (grip_force); > 0 here overrides the table for one run.
         d('grasp_force', 0.0)
         d('grasp_forces_yaml', '')                  # '' -> the installed config/grasp_forces.yaml
+        # The Inspire hand: grams per finger, > 0 overrides grasp_forces.yaml inspire_grasp.
+        d('inspire_force_g', 0)
+        # The Inspire hand closed without its thumb and a finger on the object: abort (holding).
+        d('abort_on_empty_close', False)
+        d('hand_state_topic', '/inspire_hand/joint_states')   # kept in the full-rate record
         d('log_dir', '')
         # Replay mode (tpgpt.hardware.replay; audit B1): instead of a plan, stream the pending
         # pass of a replay directory -- a taught demonstration's attractor, in time, at the
@@ -443,6 +455,11 @@ class TpgptExecutorNode(Node):
         self.create_subscription(PoseStamped, p('current_pose_topic'), self._pose_cb, 1)
         self._joints = None   # (monotonic, JointState) -- converted on demand
         self.create_subscription(JointState, p('joint_states_topic'), self._joint_cb, 1)
+        # The Inspire hand's joints (URDF names, rad; effort = grams), for the full-rate record:
+        # a finger giving way under the carry shows here first.
+        self.create_subscription(JointState, p('hand_state_topic'), self._hand_cb, 10)
+        self.mode = None                  # the gripper mode for the run's hand (resolve_gripper_mode)
+        self.hand_reports, self.hand_report_path = [], None
 
         if self.dry:
             self.pose_pub = self.create_publisher(PoseStamped, '/tpgpt/executor/commanded_pose', 1)
@@ -491,6 +508,10 @@ class TpgptExecutorNode(Node):
         if self._highrate is not None:
             self._highrate['joints'].append(msg)
 
+    def _hand_cb(self, msg):
+        if self._highrate is not None:
+            self._highrate.setdefault('hand', []).append(msg)
+
     def _take_highrate(self):
         """Stop keeping messages and return those kept, as arrays (header stamps, s)."""
         log, self._highrate = self._highrate, None
@@ -519,6 +540,13 @@ class TpgptExecutorNode(Node):
             if all(f in rows[0].name for f in fingers) and all(m.name == rows[0].name for m in rows):
                 idx = [rows[0].name.index(f) for f in fingers]
                 out['finger_position'] = np.array([[m.position[i] for i in idx] for m in rows])
+        hand = [m for m in log.get('hand', []) if len(m.position) == len(m.name)]
+        if hand:
+            out['hand_stamp'] = np.array([stamp(m) for m in hand])
+            out['hand_names'] = np.array(list(hand[0].name))
+            out['hand_position'] = np.array([list(m.position) for m in hand])
+            if all(len(m.effort) == len(m.name) for m in hand):
+                out['hand_effort_g'] = np.array([list(m.effort) for m in hand])
         return out
 
     def measured(self, max_age=None):
@@ -591,9 +619,22 @@ class TpgptExecutorNode(Node):
         return controllers
 
     # ------------------------------------------------------------------ gripper
-    def setup_gripper(self):
+    def resolve_gripper_mode(self, hand) -> str:
+        """The gripper mode for ``hand``: the parameter, or for ``auto`` the hand's own."""
         mode = self.p('gripper_mode')
-        ns = self.p('gripper_namespace').rstrip('/')
+        if mode == 'auto':
+            mode = 'franka_grasp' if hand.is_parallel_jaw else 'inspire'
+        if mode != 'none' and (mode == 'inspire') == hand.is_parallel_jaw:
+            raise AbortRun(f'this plan is for the {hand.name} hand but gripper_mode is {mode!r}; '
+                           f"use gripper_mode:={'inspire' if not hand.is_parallel_jaw else 'franka_grasp'}"
+                           ' (or auto, or none)')
+        self.mode = mode
+        return mode
+
+    def setup_gripper(self):
+        mode = self.mode
+        ns = (self.p('gripper_namespace') or
+              ('/inspire_hand' if mode == 'inspire' else '/franka_gripper')).rstrip('/')
         if self.dry or mode == 'none':
             return
         if mode == 'franka_grasp':
@@ -610,7 +651,7 @@ class TpgptExecutorNode(Node):
                     raise AbortRun(f'gripper action {ns}/{name} not available')
         elif mode == 'inspire':
             from ycb_pointcloud_pipeline.ros_utils import InspireHandClient
-            client = InspireHandClient(self, ns if ns != '/franka_gripper' else '/inspire_hand')
+            client = InspireHandClient(self, ns)
             missing = client.available(timeout=5.0)
             if missing:
                 raise AbortRun(f'Inspire hand services {missing} not available; start '
@@ -627,6 +668,36 @@ class TpgptExecutorNode(Node):
                 raise AbortRun(f'gripper action {ns}/gripper_action not available')
         else:
             raise AbortRun(f'unknown gripper_mode {mode!r}')
+
+    def inspire_force(self):
+        """This run's Inspire grip, grams per finger, and where it came from."""
+        given = int(self.p('inspire_force_g'))
+        if given > 0:
+            return given, 'inspire_force_g parameter'
+        import yaml
+        path = self.p('grasp_forces_yaml') or _installed_config('grasp_forces.yaml')
+        with open(path) as f:
+            table = (yaml.safe_load(f) or {}).get('inspire_grasp', {})
+        name = getattr(self, 'run_object', None)
+        if name in table:
+            return int(table[name]), f'{os.path.basename(path)}, {name}'
+        return int(table.get('default', 400)), f'{os.path.basename(path)}, default'
+
+    def _hand_report(self, label, ok, message):
+        """Keep the Inspire hand's answer (its close report) beside the run's log."""
+        report = None
+        try:
+            report = json.loads(message)
+        except (TypeError, ValueError):
+            pass
+        entry = {'label': label, 'success': bool(ok), 'message': message, 'report': report,
+                 't': time.monotonic() - getattr(self, '_run_t0', time.monotonic())}
+        self.hand_reports.append(entry)
+        path = getattr(self, 'hand_report_path', None)
+        if path:
+            with open(path, 'w') as f:
+                json.dump(self.hand_reports, f, indent=1)
+        return report
 
     def grip_force(self) -> float:
         """This run's grip force (:func:`grip_force`), logged the first time it is used."""
@@ -647,13 +718,33 @@ class TpgptExecutorNode(Node):
             return True
         if 'inspire' in self.gripper:
             client = self.gripper['inspire']
+            if close:
+                grams, source = self.inspire_force()
+                ok, why = client.set_force(grams)
+                if not ok:
+                    raise AbortRun(f'could not set the Inspire hand force to {grams} g: {why}')
+                self.get_logger().info(f'Inspire hand force {grams} g per finger ({source})')
             future = client.send(close)
             self.get_logger().info(f'gripper {label} sent (Inspire hand)')
             if wait:
                 ok, message = client.wait(future, float(self.p('gripper_timeout')))
+                report = self._hand_report(label, ok, message)
                 if not ok:
                     raise AbortRun(f'Inspire hand {label} failed: {message}')
-                self.get_logger().info(f'Inspire hand: {message}')
+                if close and report is not None:
+                    text = (f"contact on {', '.join(report.get('contact', [])) or 'nothing'}"
+                            + (f"; on air: {', '.join(report['on_air'])}" if report.get('on_air')
+                               else ''))
+                    if report.get('opposed'):
+                        self.get_logger().info(f'Inspire hand closed: {text}')
+                    else:
+                        self.get_logger().warning(f'Inspire hand closed WITHOUT the thumb and a '
+                                                  f'finger on the object: {text}')
+                        if self.p('abort_on_empty_close'):
+                            raise AbortRun(f'the Inspire hand closed without opposition ({text}); '
+                                           'abort_on_empty_close')
+                elif not close:
+                    self.get_logger().info(f'Inspire hand: {message}')
             return True
         open_w = float(self.p('open_width'))
         if 'grasp' in self.gripper:
@@ -781,11 +872,7 @@ class TpgptExecutorNode(Node):
 
         # --- the hand the plan was made for ----------------------------------------
         hand = end_effector_for_plan(plan.metadata)
-        mode = p('gripper_mode')
-        if mode != 'none' and (mode == 'inspire') == hand.is_parallel_jaw:
-            raise AbortRun(f'this plan is for the {hand.name} hand but gripper_mode is {mode!r}; '
-                           f"use gripper_mode:={'inspire' if not hand.is_parallel_jaw else 'franka_grasp'}"
-                           ' (or none)')
+        mode = self.resolve_gripper_mode(hand)
         tool_offset = np.asarray(hand.tool_offset, dtype=float) + np.asarray(p('tool_offset'),
                                                                              dtype=float)
         log.info(f'Hand {hand.name}: grasp point {np.round(tool_offset * 1000, 1).tolist()} mm '
@@ -868,7 +955,9 @@ class TpgptExecutorNode(Node):
         belief = np.asarray(plan.labels.time_belief, dtype=float).reshape(-1)
         start_pos, start_rot = executor.start_pose
         object_width = float(m.get('object_width_closing_m', 0.04))
-        self.run_object = m.get('object_name')
+        # The planner writes the object's name into the plan's metadata (not its metrics):
+        # read from metrics, every run took the grip-force table's default.
+        self.run_object = plan.metadata.get('object_name') or m.get('object_name')
 
         # --- where the arm is -------------------------------------------------
         if not self.dry:
@@ -924,7 +1013,7 @@ class TpgptExecutorNode(Node):
             f"  grasp at        {np.round(where.positions[int(m['grasp_index'])], 3).tolist()}"
             f"  release at {np.round(where.positions[int(m['release_index'])], 3).tolist()}"
             f"{' (the arm; the learned command leads it)' if plan.arm_path is not None else ''}\n"
-            f"  hand            {hand.name}, gripper {p('gripper_mode') if not self.dry else 'not sent'}\n"
+            f"  hand            {hand.name}, gripper {mode if not self.dry else 'not sent'}\n"
         )
         print(summary)
         if not self.dry and p('require_confirmation'):
@@ -947,10 +1036,13 @@ class TpgptExecutorNode(Node):
         self.moving = True
         self.offset = np.zeros(3)
         self.rot_offset = np.zeros(3)     # a hold's turn of the hand, returned gradually
-        if p('gripper_mode') != 'none':
+        log_path = self._open_log(p('plan_dir'))
+        self.hand_reports, self._run_t0 = [], time.monotonic()
+        self.hand_report_path = (None if hand.is_parallel_jaw
+                                 else log_path.replace('.csv', '_hand.json'))
+        if mode != 'none':
             self.command_gripper(False, object_width, wait=not self.dry)
 
-        log_path = self._open_log(p('plan_dir'))
         writer = csv.writer(open(log_path, 'w', newline=''))
         writer.writerow(['t', 'stage', 'phase', 'gate', 'behind', 'expected', 'clamped', 'gripper',
                          'meas_x', 'meas_y', 'meas_z', 'cmd_x', 'cmd_y', 'cmd_z',
@@ -1086,7 +1178,7 @@ class TpgptExecutorNode(Node):
                         cap = float(p('path_correction_max'))
                         if np.linalg.norm(executor.correction) > cap:
                             executor.correction *= cap / np.linalg.norm(executor.correction)
-                if p('gripper_mode') != 'none':
+                if mode != 'none':
                     self.command_gripper(closed, object_width, wait=not self.dry)
                 gripper_closed = closed
                 next_t = time.monotonic()
@@ -1198,10 +1290,8 @@ class TpgptExecutorNode(Node):
             log.warn(f"speed_scale {p('speed_scale')} ignored: a replay runs at its own "
                      f"{info['speed_scale']} (replay.json)")
         hand = end_effector_for_plan(bundle.metadata)
-        mode = p('gripper_mode')
-        if mode != 'none' and (mode == 'inspire') == hand.is_parallel_jaw:
-            raise AbortRun(f'this demonstration is for the {hand.name} hand but gripper_mode is '
-                           f'{mode!r}')
+        mode = self.resolve_gripper_mode(hand)
+        self.hand_reports, self._run_t0, self.hand_report_path = [], time.monotonic(), None
         offset = np.asarray(hand.tool_offset, dtype=float) + np.asarray(p('tool_offset'), dtype=float)
         tcp_R = np.asarray(hand.ee_from_grasp(attractor_R), dtype=float)   # commanded
         tcp_from_tool = lambda pos, R: np.asarray(pos) - np.asarray(R) @ offset  # noqa: E731
@@ -1628,7 +1718,7 @@ class TpgptExecutorNode(Node):
         path, origin = self._run_record
         self._run_record = None
         out = self._take_highrate()
-        for key in ('pose', 'joint'):
+        for key in ('pose', 'joint', 'hand'):
             if f'{key}_stamp' in out:
                 out[f'{key}_t'] = out.pop(f'{key}_stamp') - origin
         np.savez_compressed(path, **out)
