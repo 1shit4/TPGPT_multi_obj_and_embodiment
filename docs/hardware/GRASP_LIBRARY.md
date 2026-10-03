@@ -418,7 +418,13 @@ they dragged a set-down mug:
 
 5 mm empties mug bottom_left (1 -> 0); 10 mm also foam brick bottom_left (2 -> 0). The pieces that
 come back are the finger pads, nearly always. Raw in `outputs/hardware/retreat_clearance_20261003/`.
-**Left off** (the user, 2026-10-03).
+Left off at first; **on at 10 mm since 2026-10-03** (the user), once bottom_left was no longer run.
+In the top slots alone (ten captures, pudding box excluded: measured on its old scan) it costs, on
+its own, 307 -> 265 at 5 mm and 218 at 10. With the 20 mm reach margin (187 alone) the two were not
+measured together; per cell the pair lies between the larger single loss and the sum of the two:
+5 mm 147-178, 10 mm 105-149, the thinnest cells mug top_right 6-8 and foam brick top_left 4-13 (at
+5 mm 11-19), none empty. 10 rather than 5: the arm strays ~3 mm across the jaws after a release,
+which 5 mm barely covers.
 
 **12. The pudding box on the bench is not the YCB one** (2026-10-03). It measures 88 x 70 x 35 mm
 by tape; the YCB scan is 112.5 x 89.7 x 38.9. Items 2, 8, 9 and the tables above with a pudding box

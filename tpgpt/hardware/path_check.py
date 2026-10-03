@@ -126,6 +126,18 @@ MARGIN_JOINTS = (0, 1, 2, 3, 4, 5)
 #: only on the elbow (joint 4); full stretch is 719.4 mm at -26.7 deg.
 REACH_MARGIN = 0.02
 
+#: Once the open hand has got this far from the placed object in the retreat, it must stay
+#: that far (``retreat_clearance``), m. **Why**: the taught retreat swings the open fingers
+#: back past the placed object, to 0.5-8 mm on most of 33 recent plans, and the arm strays
+#: about 3 mm across the jaws after a release; on 2026-10-03 the fingers dragged a set-down
+#: mug. 10 mm (the user, 2026-10-03, once bottom_left was no longer run), from its cost on the
+#: ten top-slot captures (GRASP_LIBRARY.md item 11): on its own 307 -> 218 executable grasps;
+#: with the 20 mm reach margin, bounded from the two measured separately, 105-149 of the
+#: margin's 187 (pudding box excluded, measured on its old scan), no cell emptied (mug
+#: top_right 6-8, foam brick top_left 4-13). It emptied bottom_left cells. The planner's
+#: default (`grasp_retreat_clearance`); path_feasibility itself leaves it off unless asked.
+RETREAT_CLEARANCE = 0.010
+
 
 def stretch_room(fr3: FR3, q) -> float:
     """How far the wrist is inside full stretch, m: the longest shoulder-to-wrist distance

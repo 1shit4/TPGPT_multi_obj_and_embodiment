@@ -230,8 +230,8 @@ class TpgptPlannerNode(Node):
         # cannot be pulled (path_check.REACH_MARGIN, 20 mm since 2026-10-03). 0 = off.
         d('grasp_reach_margin', 0.02)
         # m; > 0: once clear of the placed object by this much in the retreat, the hand must
-        # stay that far from it (path_check retreat_clearance). 0 = off.
-        d('grasp_retreat_clearance', 0.0)
+        # stay that far from it (path_check.RETREAT_CLEARANCE, 10 mm since 2026-10-03). 0 = off.
+        d('grasp_retreat_clearance', 0.01)
         d('max_centre_offset', 0.025)             # by_centre_offset on a one-sided cloud
         d('output_dir', os.path.expanduser('~/tpgpt_plans'))
         d('auto_plan', False)                     # plan as soon as n_frames arrived

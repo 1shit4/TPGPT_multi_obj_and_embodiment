@@ -222,13 +222,14 @@ def main(argv=None):
     ap.add_argument("--joint-margin", type=float, default=None,
                     help="refuse paths with joints 1-6 this close to a limit, rad (default: "
                          "off; path_check.JOINT_MARGIN is CRISP's 0.1)")
-    from tpgpt.hardware.path_check import REACH_MARGIN
+    from tpgpt.hardware.path_check import REACH_MARGIN, RETREAT_CLEARANCE
     ap.add_argument("--reach-margin", type=float, default=REACH_MARGIN,
                     help="refuse paths whose wrist comes this close to full stretch, m (default: "
                          "path_check.REACH_MARGIN, the planner's; 0 = off)")
-    ap.add_argument("--retreat-clearance", type=float, default=None,
+    ap.add_argument("--retreat-clearance", type=float, default=RETREAT_CLEARANCE,
                     help="once clear of the placed object by this much in the retreat, stay that "
-                         "far from it, m (default: off)")
+                         "far from it, m (default: path_check.RETREAT_CLEARANCE, the planner's; "
+                         "0 = off)")
     ap.add_argument("--clearance", type=float, default=None,
                     help="a gap every path must keep from the table, the shelf and the seen "
                          "points, m (default: none, the planner's check)")
@@ -276,8 +277,8 @@ def main(argv=None):
     # centred off, no grasp offset (A5), strict reachability.
     settings = SelectionSettings(max_tilt_deg=90.0, check_centred=False, check_visibility=False,
                                  grasp_offset=(0.0, 0.0, 0.0), kinematic_criterion="strict",
-                                 joint_margin=a.joint_margin, reach_margin=a.reach_margin,
-                                 retreat_clearance=a.retreat_clearance)
+                                 joint_margin=a.joint_margin, reach_margin=a.reach_margin or None,
+                                 retreat_clearance=a.retreat_clearance or None)
     want = list(slots) if a.slots == "all" else a.slots.split(",")
     if a.slot_depth is not None:
         shelf_model = world.model

@@ -72,6 +72,7 @@ PLANNER_METHOD_PARAMETERS = {
     ('selection', 'kinematic_criterion'): 'kinematic_criterion',
     ('selection', 'approach_rejects_grasp'): 'approach_rejects_grasp',
     ('selection', 'reach_margin_m'): 'grasp_reach_margin',
+    ('selection', 'retreat_clearance_m'): 'grasp_retreat_clearance',
     ('map', 'min_determinant'): 'min_determinant',
 }
 
