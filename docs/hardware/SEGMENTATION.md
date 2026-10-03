@@ -318,6 +318,33 @@ but by 0.02. That one is a prompt problem, for `prompt_bench`.
 Earlier, from when the cracker box was listed: the phrase "cracker box" scored below 0.2 where
 "small red box" scored 0.67, which is why prompts here describe what a thing **looks like**.
 
+**Fourth session: the apple not seen, and the two caption modes** (2026-10-03). Live, an apple
+standing alone in plain view was published on almost no cycle. Its frames are scene `apple_3` (23
+frames, `labels.yaml`; the file before is `replays/labels_before_20261003.yaml`): every one scored
+**0.45-0.48** against the apple's 0.48 -- found on 5. In every earlier apple scene it was found on
+nearly every frame (19/19, 21/21, 26/30, 8/8). Both caption modes were replayed on all 558 frames
+in 15 scenes (`~/ycb_detection_frames/replays/20261003_{joint,per_object}.{json,log}`), and
+`detection_sweep` searched each mode's thresholds (no false detection first, then the most found):
+
+| | joint, as in `target_objects.yaml` | per_object, same thresholds | per_object, searched |
+|---|---|---|---|
+| apple | 78/101 (`apple_3` 5/23) | 96/101, 5 false | **96/101** at 0.60 (`apple_3` 23/23, at 0.86-0.89) |
+| mug | 63/70, 1 false | 70/70, **37 false** | 68/70 at 0.59, 6 false |
+| foam brick | 255/266 | 236/266 | 260/266 at 0.29 |
+| pudding box | 237/310 | 234/310 | 239/310 at 0.25 |
+| time per frame | ~1.5 s | ~6.3 s | |
+
+(The times are the replay's, with the GraspGen-X server on the same GPU.) In one caption "red
+apple" competes with the mug's "red cup with a handle"; on its own it scores about 0.87. On its own
+the mug's prompt also fires on things that are not a mug, up to 0.71, and no mug threshold removes
+that without losing real mugs: per_object's 6 false detections are all "mug" on frames with no mug.
+Whether a false mug could win over a real mug on the same table is not measured (the labels say
+which objects a frame holds, not where).
+
+**Left as it is** (the user, 2026-10-03: not sure one setup serves every object): the default stays
+`joint` with the thresholds above. An apple scene like `apple_3` is found with
+`caption_mode:=per_object`; at the joint thresholds that mode's mug detections are not to be trusted.
+
 ## Related
 
 * `config/target_objects.yaml` -- the list, the prompts, the per-object thresholds.
