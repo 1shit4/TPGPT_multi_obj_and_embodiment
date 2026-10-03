@@ -424,8 +424,9 @@ come back are the finger pads, nearly always. Raw in `outputs/hardware/retreat_c
 by tape; the YCB scan is 112.5 x 89.7 x 38.9. Items 2, 8, 9 and the tables above with a pudding box
 in them were measured on the full-size scan. Since 10-03 the scan is scaled to the measured edges
 when it loads (`object_model.MEASURED_EDGES`), so the box has a new library (the cache key is the
-scaled surface; the old file stays, unused). It stands 88 mm tall on its 70 x 35 face, the pose it
-has been set down in since 09-25 -- the full-size scan's "long narrow side" was the same height.
+scaled surface; the old file stays, unused). It lies on its 88 x 35 face, 70 mm tall, as it has
+been set down since 09-25; its silver face reads 14-33 mm high, which is why the cloud looked 90 mm
+tall and the full-size scan on its side (89.7) seemed to fit.
 Why it mattered: the camera's box was 30-40 mm shorter than the model on every capture, the fit
 put the missing length at whichever end scored better, and on 17:32 that was the end facing the
 camera, where nothing was; the jaws closed on air beside the real box. Bottom_left is no longer
