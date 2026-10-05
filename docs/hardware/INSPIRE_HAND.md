@@ -66,6 +66,39 @@ With the estimated values (-45 deg, 12 mm, 0) the grasp point sits (60.1, 10.0, 
 The robot bring-up is unchanged (`load_gripper:=true`, `fr3_hand_tcp` kept). The Franka gripper
 node fails without its hand, which is expected and harmless.
 
+### What Inspire's own package says (`~/inspire_mount (2)/`, read 2026-10-05)
+
+The vendor's package for the RH56DFQ/DFX/BFX (June 2025) holds three things: the hand's STEP
+models (with and without the wrist module), its URDFs and SDK, and manuals. It describes the
+hand only; **the adapter between the FR3 flange and the hand is not in it**, so the adapter's
+thickness and the yaw still have to be measured (M2, M3).
+
+**Mounting interface.**
+- The hand mounts by a **Ø52 / Ø38 mm ring, 8.1 mm thick** (the 8-19 URDF's `base_link`: its
+  bottom face is the base frame's origin), held by radial screws in its side.
+- The manual's drawing gives 217.8 mm from that face to the middle fingertip, 80.7 mm palm
+  width, and finger segments of 32.0 and 49.3 mm. GraspGen-X's URDF, which the model uses, puts
+  its origin at the same face and agrees: 217.9 mm, a 32.1 mm proximal segment.
+
+**The vendor's URDFs, against GraspGen-X's.**
+
+| | joint positions vs GraspGen-X's | joint limits |
+|---|---|---|
+| `RH56DFX_R_8_19` ("水波纹款", the ripple-pad RH56D(B)FX) | knuckles within 2 mm across the palm and 0.1 mm along it; the thumb pivot 2.75 mm nearer the wrist (66.35 against 69.1 mm); models the rubber pads and tips | placeholders [0, 1] |
+| `urdf_right_2025_4_18` | the finger row 10-12 mm further across the palm: another variant | fingers 1.333 rad, thumb pitch 0.48, distal coupling x1.117 |
+| the wrist-module URDF | -- | index 1.7 rad: what the manual's ranges give (1.70), against GraspGen-X's 1.47 |
+
+GraspGen-X's geometry stays the model: it is what the grasps are generated for, and it is
+within 2-3 mm of the vendor's latest.
+
+**The wrist module.** It is a 2-DOF wrist (pitch -22.7..+22.1 deg, yaw ±25.5 deg) between the arm
+and the hand; its first joint is ~78 mm out from the mounting face, and its registers are
+1020/1022 on the same serial line. **If the hand on the robot has it, the mount is not rigid**
+and the model needs its two joints.
+
+**The SDK** publishes the raw 0-1000 registers; it has no conversion to joint angles. The
+register map (`joint_map`) stays ours to measure (M4).
+
 ## 3. Bring-up with this hand
 
 Every terminal as `docs/hardware/commands.md` §1 (sourcing, venvs), then:
