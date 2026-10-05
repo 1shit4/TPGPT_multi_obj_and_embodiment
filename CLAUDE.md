@@ -215,9 +215,17 @@ The planner's support height is: its `support_height` parameter, else the calibr
   `(log.info if ok else log.warn)(...)`; use two separate calls.
 - **Checking whether a node is running:** `pgrep -f <name>` also matches your own shell when the
   command line contains that name. Use `ros2 node list` as the authority.
-- **`free_drive` "pose went stale"** means its own callback received nothing for `max_pose_age`
-  (0.5 s) — subscriber starvation, while `/current_pose` itself holds 250 Hz. Intermittent.
-  `-p max_pose_age:=2.0` works around it; that is a safety parameter, so it is the user's call.
+- **rclpy's `MultiThreadedExecutor` starves high-rate subscriptions on this machine**
+  (measured 2026-10-05, passively on the live stream, alternating runs): `/current_pose` (250 Hz)
+  arrived at 45-51 Hz with 7-11 silences over 0.5 s (up to 1.3 s) per 30 s under
+  `MultiThreadedExecutor(num_threads=2)`, at 234-241 Hz never more than 5 ms apart under
+  `SingleThreadedExecutor`. That was **`free_drive`'s "pose went stale while floating"**, so it
+  now spins single-threaded (its waits all poll futures from the main thread). Still on the
+  multi-threaded executor, with high-rate subscriptions and staleness checks of their own:
+  `joint_target_publisher` (JointState; used by `joint_homing`), `calibration_check_node`
+  (`/current_pose`, images), the planner inside `tpgpt_pick_place`/`x6_trial` (JointState), and
+  `segmentation_node`. The executor node and `inspire_touch` were already single-threaded.
+  Prefer `SingleThreadedExecutor` in new nodes.
 - **The setup was moved on 2026-09-26** (by someone else): the camera was knocked ~46 mm / 2.9 deg
   and recalibrated (9 face-flat correspondences plus the table and top-board planes; on a fresh
   frame table +3.8 mm, top board +2.1 mm), and the shelf re-touched. The shelf came back within

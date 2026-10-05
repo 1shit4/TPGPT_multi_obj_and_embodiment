@@ -331,7 +331,15 @@ Measured on the 10-03 captures, with the estimated mount and GraspGen-X's shippe
   beyond (the mug's middle finger 398-425 against 180; the banana's little finger 206-245
   against 0). The thumb is left out: in a palm grasp it closes over the fingers as in the fist.
   The model puts its thumb 5.5 mm into the index finger at the empty fist's angles -- the
-  ruler map's accuracy. Measured at 400 g; at the pudding box's 150 g, not yet.
+  ruler map's accuracy. **The empty fist is not repeatable**: at 150 g it stopped [0, 2, 140,
+  386, 526] once and [0, 0, 349, 361, 491] once -- the second reads as held. The reference is
+  kept at the 400 g fist so no real grasp reads as empty (the mug's middle finger, 398-425, is
+  the closest); `held` therefore errs towards "held". Its uses tolerate that: the release checks
+  that every DOF opened and otherwise opens again in order (that 150 g fist's one-stage open
+  left the fingers under the thumb), and `abort_on_empty_close` only saves time -- the trial's
+  outcome is what the operator records. **`held` is a run-time check of the real close, not a
+  grasp-selection filter**: selection judges a grasp before the robot moves, on the hand model
+  and the cloud (`judge_hand`).
 
 - **The simulation never got this hand to hold anything**, but its model barely moved
   (1.5 mm of finger travel). That says nothing about the real hand; the grasp tests are the

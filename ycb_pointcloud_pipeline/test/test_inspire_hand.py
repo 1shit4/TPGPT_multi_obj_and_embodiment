@@ -28,7 +28,8 @@ class FakeHand:
     driver must not do.
     """
 
-    def __init__(self, hand_id=2, contact_at=None, stuck=None, contact_status=2):
+    def __init__(self, hand_id=2, contact_at=None, stuck=None, contact_status=2,
+                 obstruct_together=False):
         self.id = hand_id
         self.master, slave = pty.openpty()
         tty.setraw(slave)
@@ -41,6 +42,9 @@ class FakeHand:
         self.contact_at = list(contact_at or [None] * 6)
         self.stuck = list(stuck or [False] * 6)
         self.contact_status = contact_status
+        # The thumb lying on the fingers: an ANGLE_SET that opens fingers and the thumb
+        # bend together leaves the fingers where they are (what the user saw, 2026-10-05).
+        self.obstruct_together = obstruct_together
         self.angle_sets = []
         self.force_sets = []
         self._stop = False
@@ -61,6 +65,9 @@ class FakeHand:
 
     def _set_angles(self, values):
         self.angle_sets.append(values)
+        if self.obstruct_together and values[4] > self.angle[4] and any(
+                v != -1 and v > self.angle[k] for k, v in enumerate(values[:4])):
+            values = [-1] * 4 + list(values[4:])           # the fingers are blocked
         for k, v in enumerate(values):
             if v == -1:
                 if k == 5:
@@ -336,6 +343,28 @@ def test_an_empty_fist_is_not_held_though_the_thumb_stops_two_fingers(fake):
     finally:
         hand.close_port()
     assert fake.angle_sets[n][:5] == [-1, -1, -1, -1, 1000]     # the ordered open
+
+
+def test_a_release_the_thumb_blocks_is_redone_in_order():
+    """The user's second 150 g empty close (2026-10-05): middle 349, read as held; the
+    one-stage open left the fingers under the thumb. The open checks and opens in order."""
+    fake = FakeHand(contact_at=[None, None, 349, 361, 491, None], obstruct_together=True)
+    hand = _hand(fake)
+    try:
+        assert hand.close("simultaneous", timeout=0.6, verbose=False).held   # the false 'held'
+        n = len(fake.angle_sets)
+        hand.grasp_open(timeout=0.6, verbose=False)
+    finally:
+        hand.close_port()
+        fake.close()
+    sets = fake.angle_sets[n:]
+    assert sets[0] == ih.OPEN_POSE                                 # the one-stage try
+    # Then in order from where it got to (here the thumb was already up): no step moves
+    # the fingers and the thumb bend together, until the final confirming pose.
+    for v in sets[1:-1]:
+        assert v[4] == -1 or all(x == -1 for x in v[:4]), v
+    assert sets[1][:4] == [1000] * 4
+    assert fake.angle[:5] == [1000] * 5                            # and the hand is open
 
 
 def test_the_mug_close_of_2026_10_05_is_held():

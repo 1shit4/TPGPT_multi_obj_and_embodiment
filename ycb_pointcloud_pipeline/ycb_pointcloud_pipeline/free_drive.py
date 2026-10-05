@@ -39,7 +39,7 @@ import time
 import rclpy
 from geometry_msgs.msg import PoseStamped
 from rclpy.action import ActionClient
-from rclpy.executors import MultiThreadedExecutor
+from rclpy.executors import SingleThreadedExecutor
 from rclpy.node import Node
 from rclpy.signals import SignalHandlerOptions
 
@@ -245,7 +245,12 @@ def main(args=None):
     signal.signal(signal.SIGTERM, signal.default_int_handler)
     rclpy.init(args=args, signal_handler_options=SignalHandlerOptions.NO)
     node = FreeDrive()
-    executor = MultiThreadedExecutor(num_threads=2)
+    # Single-threaded: rclpy's MultiThreadedExecutor(2) delivered /current_pose (250 Hz) at
+    # 45-51 Hz with 7-11 silences over 0.5 s per 30 s on this machine, the single one at
+    # 234-241 Hz, never more than 5 ms apart (2026-10-05, passive A/B on the live stream):
+    # the 'pose went stale while floating' aborts. Every wait here polls its future from
+    # the main thread, so one spinning thread serves them all.
+    executor = SingleThreadedExecutor()
     executor.add_node(node)
     threading.Thread(target=executor.spin, daemon=True).start()
     exit_code = 0

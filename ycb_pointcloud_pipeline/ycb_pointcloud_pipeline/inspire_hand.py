@@ -41,9 +41,13 @@ timeout, and the actuator errors. A close that touches nothing is not a success.
 **Something is held** (:attr:`CloseReport.held`) when a finger stopped more than
 :data:`CONTACT_MARGIN` beyond where an empty close leaves it (:data:`EMPTY_CLOSE_ANGLES`):
 an empty close stops the middle and index fingers on the thumb, so the thumb and a finger
-stopping proves nothing. On every hold of 2026-10-05 a finger stopped 190-590 units beyond
-that; the empty close is within it by construction. The thumb is not used: in a palm grasp
-it closes over the fingers just as in the empty fist.
+stopping proves nothing. On every hold of 2026-10-05 (17 closes, five objects) a finger
+stopped 190-590 units beyond that. The thumb is not used: in a palm grasp it closes over
+the fingers just as in the empty fist. **It errs towards "held"**: the empty fist is not
+repeatable (at 150 g the middle finger stopped at 140 once and 349 once -- read as held),
+and the reference is kept low so that no real grasp reads as empty (the mug's middle finger
+stops at 398-425). Its two uses tolerate that: the release checks that the hand opened and
+otherwise opens in order, and the executor's ``abort_on_empty_close`` only saves time.
 
 **Contact is judged by where a DOF stopped, not by its STATUS.** The manual (2.4.21) has
 STATUS 3 for "stopped on the force threshold", but this hand reports 2 ("reached the
@@ -461,8 +465,16 @@ class InspireHand:
             if abs(self.read_shorts(ANGLE_ACT)[5] - OPEN_POSE[5]) <= GOTO_TOLERANCE:
                 self.set_speed(speed)
                 self.set_force(force)
-                return self.move("open: release, all at once", OPEN_POSE, timeout, verbose,
-                                 on_status)
+                st = self.move("open: release, all at once", OPEN_POSE, timeout, verbose,
+                               on_status)
+                short = [n for n, a, t in zip(DOF_NAMES, st["angle"], OPEN_POSE)
+                         if abs(int(a) - t) > CONTACT_MARGIN]
+                if not short:
+                    return st
+                # The thumb blocked the fingers: 'held' was an empty fist after all (it can
+                # read so: the user's 150 g empty close, middle at 349). Open in order.
+                self.log(f"open: {', '.join(short)} not open after the release; "
+                         "opening in order (the thumb first)")
         return self.goto(OPEN_POSE, speed, force, timeout, verbose, on_status)
 
     def close(self, mode: str = DEFAULT_CLOSE_MODE, speed: int = DEFAULT_SPEED,
