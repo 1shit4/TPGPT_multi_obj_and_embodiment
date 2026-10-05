@@ -46,21 +46,31 @@ inspire_hand:
   # little/ring/middle/index -> pinky/ring/middle/index_proximal_joint, thumb_bend ->
   # thumb_proximal_pitch_joint, thumb_rot -> thumb_proximal_yaw_joint. Read by the hand
   # node (joint_states in radians) and tpgpt.hardware.inspire_model (the hand's geometry).
-  # From the RH56 manual (2.4.11) through the URDF's own kinematics (2026-10-04;
-  # inspire_model.manual_angles): the manual defines each DOF's angle on the hand -- a
-  # finger's alpha at the knuckle between the palm line and the knuckle->tip line, 176.7 deg
-  # at 1000 .. 19 deg at 0; the thumb bend theta, 53.6 .. -13 deg; the thumb rotation beta,
-  # 165 .. 90 deg -- assumed linear in the register. Solving the URDF for those angles: the
-  # fingers and the thumb bend reach FURTHER than the URDF's limits (fingers 1.68-1.77 rad
-  # against 1.47; thumb 0.69 against 0.6), so GraspGen-X's 'close' pose is not the hand's
-  # full close. Fingers measured in their own bending plane (splay is not a bend); linear
-  # in u to 0.014 rad. UNVERIFIED on the hand (plan M4).
+  # Measured 2026-10-05 with a ruler (docs/hardware/INSPIRE_HAND.md, M4), about +-5 mm a
+  # reading (parallax, the ruler's tilt, where on the tip), so still verified: false:
+  # * fingers (the middle finger's tip below the ring's face at 1000/750/500/250/0: 216 195
+  #   168 125 89 mm): straight at 1000 as the URDF has it (216 against 218); a straight-line
+  #   map fits all five within 3-9 mm with the full curl at 1.42-1.51 rad (it depends on
+  #   which point of the tip the ruler read), and the URDF's own limit, 1.47, is in that
+  #   range. The manual's angles had given 1.68-1.77, which missed the 500 and 250 readings
+  #   by 13-22 mm. The other three fingers take the middle's value (same mechanism, same
+  #   URDF limit; not measured).
+  # * thumb bend (thumb tip to index tip, fingers open, at 1000/750/500/250: 120 92 73 64
+  #   mm, "roughly between the centres of both tips"): read 12-30 mm back from the very
+  #   ends, a straight-line map fits all four within 1.8 mm at 0.11-0.13 rad (1000) to
+  #   0.75-0.82 (0); taken here as 0.12 / 0.77. Read at the very ends it would be 0.15,
+  #   at the middles of the last segments 0.08 (and a worse fit). Against the manual's
+  #   0.028-0.690 the thumb is 0.06-0.12 rad (3-7 deg) more bent at every setting, however
+  #   the reading is taken -- when open, its tip 17 mm nearer the grasp axis (41 mm, not 58).
+  # * thumb rotation: not measured (the manual's 90-165 deg = the URDF's full 1.308).
+  # The hand reports where it really stopped (ANGLE_ACT, a few units short of the command:
+  # [997, 996, 999, 1000, 243, 0] for 250 on the thumb, ~0.3 deg); the node maps that.
   joint_map:
-    little:     {q_at_0: 1.770, q_at_1000: 0.037, verified: false}
-    ring:       {q_at_0: 1.699, q_at_1000: 0.031, verified: false}
-    middle:     {q_at_0: 1.676, q_at_1000: 0.032, verified: false}
-    index:      {q_at_0: 1.698, q_at_1000: 0.029, verified: false}
-    thumb_bend: {q_at_0: 0.690, q_at_1000: 0.028, verified: false}
+    little:     {q_at_0: 1.470, q_at_1000: 0.037, verified: false}
+    ring:       {q_at_0: 1.470, q_at_1000: 0.031, verified: false}
+    middle:     {q_at_0: 1.470, q_at_1000: 0.032, verified: false}
+    index:      {q_at_0: 1.470, q_at_1000: 0.029, verified: false}
+    thumb_bend: {q_at_0: 0.770, q_at_1000: 0.120, verified: false}
     thumb_rot:  {q_at_0: 1.308, q_at_1000: 0.0,   verified: false}
 
   mount:

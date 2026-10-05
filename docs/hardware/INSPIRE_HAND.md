@@ -115,8 +115,8 @@ ripple ones (user, 2026-10-05), so of the vendor's files `urdf_right_2025_4_18` 
   | the wrist-module URDF | its 1.7 rad limit matches the manual-derived 1.70 | -- |
   | the manual | 176.7 -> 19 deg | 53.6 -> -13 deg |
 
-  The register map (`joint_map`: the manual's ranges solved on GraspGen-X's linkage) is the prior,
-  and only measuring the real hand settles it (M4).
+  The register map was first the manual's ranges solved on GraspGen-X's linkage; the ruler
+  (M4, 2026-10-05, below) contradicted it, and the map is now the ruler's fit.
 
 **The wrist module.** It is a 2-DOF wrist (pitch -22.7..+22.1 deg, yaw ±25.5 deg) between the arm
 and the hand; its first joint is ~78 mm out from the mounting face, and its registers are
@@ -176,7 +176,7 @@ Each measurement has a pass criterion. Results go into `config/inspire_hand.yaml
 | M2 | Adapter thickness | The flange-mount seam is under tape: from the printed part's file if there is one, else from M3's fit (the ruler gives only the beige band, flange part included) | within 1 mm; into `adapter_thickness_m` |
 | M2b | Play at the ring | Rock the palm gently against the held flange; how far the middle fingertip moves (`INSPIRE_MEASURING.md` step 4) | under about 1 mm, or M3's residual and the grasp tests are read with it in mind |
 | M3 | The mount, by touch | Below | table RMS within 2 mm, marks within 3 mm |
-| M4 | Register to joint map | Ruler distances at registers 1000/750/500/250/0: the middle fingertip below the ring's face (thumb swung out), the thumb tip to the index tip (fingers open), against `python -m tpgpt.hardware.inspire_model landmarks --registers ...` (`middle_length`, `thumb_to_index`); 1 mm is about 0.5 deg | within 3 mm; else fit q_at_0/q_at_1000 into `joint_map` |
+| M4 | Register to joint map | Ruler distances at registers 1000/750/500/250/0: the middle fingertip below the ring's face (thumb swung out), the thumb tip to the index tip (fingers open), against `python -m tpgpt.hardware.inspire_model landmarks --registers ...` (`middle_length`, `thumb_to_index`); 1 mm is about 0.5 deg | within 3 mm; else fit q_at_0/q_at_1000 into `joint_map`. **Done by ruler 2026-10-05** (section 7): fitted, still unverified |
 | M5 | Payload | Weigh hand, adapter and screws; centre of mass; set in Desk | force estimate at rest under 1.5 N in 3 orientations |
 | M6 | Grasp depth | Grasp-test sweep, below | the middle of the plateau into `graspgenx.calibrated_depth_m` |
 | M7 | Close and force | Close on each object in both modes; read the reports | thumb plus a finger in contact; grams per object into `grasp_forces.yaml` |
@@ -229,7 +229,7 @@ Once grasps hold, the same command without `task` (`transport`, the default) and
 (`-p source_bundle_dir:=$HOME/tpgpt_demos/banana_20260925_183904/source_bundle_learned`), as for
 the Franka Hand (`commands.md` §6).
 
-## 7. What is known, measured offline (2026-10-04)
+## 7. What is known (offline 2026-10-04; the ruler 2026-10-05)
 
 Measured on the 10-03 captures, with the estimated mount and GraspGen-X's shipped description
 (`python -m tpgpt.hardware.coverage --hand inspire`, `docs/hardware/GRASP_LIBRARY.md`):
@@ -245,9 +245,38 @@ Measured on the 10-03 captures, with the estimated mount and GraspGen-X's shippe
 - **Reach is the transport's problem.** Of 10 planned per slot: apple 1 / 0, mug 0 / 3, the rest
   0 (top_left / top_right). The hand is 62 mm longer than the jaw, and the carry most often
   brings the wrist within 20 mm of full stretch.
-- **The real hand closes further than GraspGen-X's model** (fingers 1.68-1.77 rad against the
-  URDF's 1.47; the manual's ranges, unverified: M4). The model closes the fingers to the real
-  ranges.
+- **The register map, by ruler (M4, 2026-10-05; `INSPIRE_MEASURING.md` step 3).** The readings
+  carry about +-5 mm each (parallax, the ruler's tilt, where on the tip it was read; the hand's
+  own shortfall, ANGLE_ACT a few units under the command, is ~0.3 deg), so the map stays
+  `verified: false`. They still decide, because the manual-derived map missed them by up to 22 mm.
+
+  | | 1000 | 750 | 500 | 250 | 0 |
+  |---|---|---|---|---|---|
+  | middle tip below the ring's face, read | 216 | 195 | 168 | 125 | 89 |
+  | the manual's map | 218 | 196 | 149 | 103 | 84 |
+  | the fitted map (fingers 0.032 -> 1.47) | 218 | 201 | 162 | 118 | 90 |
+  | thumb to index, tip centres, read | 120 | 92 | 73 | 64 | -- |
+  | the manual's map | 137 | 108 | 82 | 66 | -- |
+  | the fitted map (thumb 0.12 -> 0.77) | 121 | 94 | 72 | 64 | -- |
+
+  - **Fingers:** straight at 1000, as modelled (216 against 218). A straight-line map fits every
+    reading within 7 mm with the full curl at 1.42-1.51 rad, depending on which point of the tip
+    the ruler read; the URDF's own limit, **1.47**, is in that range and is used. The manual's
+    1.68-1.77 is wrong for this hand: **GraspGen-X's `close` is the fingers' full curl.** The
+    near-closed readings carry no angle (the tip's height barely changes there), so the full
+    curl comes from the middle readings. Only the middle finger was read; the other three take
+    its value (same mechanism, same URDF limit).
+  - **Thumb:** **0.06-0.12 rad (3-7 deg) more bent than modelled at every setting**, however the
+    reading is taken (at the very ends: 0.15 at 1000; 12-30 mm back from them, as read: 0.11-0.13;
+    at the segments' middles: 0.08, a worse fit). Used: 0.12 open, 0.77 closed (the span, 0.65,
+    is near the URDF's 0.6). **When open, the thumb's tip is 17 mm nearer the grasp axis than the
+    manual's map had it** (41 mm from it instead of 58; GraspGen-X's own open, pitch 0, is
+    straighter still): the open hand is narrower than the generator thinks. A 70 mm ball centred
+    on the grasp point has 6 mm to spare on the thumb's side (the old model gave 23).
+  - **Thumb rotation:** not measured (the URDF's full 1.308 rad span, the manual's 75 deg).
+  - What the map changes: the planner uses only each DOF's two ends (the open hand and the
+    farthest close); the middle of the map only turns the hand's reported registers into angles
+    (`/inspire_hand/joint_states`, the logs). The coverage numbers above predate it.
 - **The simulation never got this hand to hold anything**, but its model barely moved
   (1.5 mm of finger travel). That says nothing about the real hand; the grasp tests are the
   first evidence.

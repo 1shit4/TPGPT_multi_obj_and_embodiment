@@ -128,12 +128,12 @@ POINT_POSE = [0, 0, 0, 1000, 1000, 1000]
 #: goto() leaves a DOF alone when it is already this close to its target (register units).
 GOTO_TOLERANCE = 20
 
-#: Register -> URDF angle before measurement: the RH56 manual's angle ranges solved on
-#: the URDF (config/inspire_hand.yaml joint_map explains). UNVERIFIED on the hand
-#: (plan M4); the config's block overrides it.
+#: Register -> URDF angle: the ruler fit of 2026-10-05 (config/inspire_hand.yaml
+#: joint_map explains; about +-5 mm per reading, so still flagged unverified). The
+#: config's block overrides it.
 DEFAULT_JOINT_MAP = {
-    "little": (1.770, 0.037), "ring": (1.699, 0.031), "middle": (1.676, 0.032),
-    "index": (1.698, 0.029), "thumb_bend": (0.690, 0.028), "thumb_rot": (1.308, 0.0),
+    "little": (1.470, 0.037), "ring": (1.470, 0.031), "middle": (1.470, 0.032),
+    "index": (1.470, 0.029), "thumb_bend": (0.770, 0.120), "thumb_rot": (1.308, 0.0),
 }
 
 

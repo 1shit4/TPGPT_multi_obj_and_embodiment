@@ -67,6 +67,10 @@ The hand talks over a small USB box (the "CH340"). Its driver needs a second dri
 
 ## Step 3 -- where the fingertips go (ruler only, no photos)
 
+**Done 2026-10-05** (readings and what they changed: `INSPIRE_HAND.md` section 7). To repeat it,
+read the same points as then: the very end of the middle fingertip (part A), the centres of the
+thumb's and the index finger's tips (part B).
+
 Why: the hand reports each finger as a number from 0 (closed) to 1000 (open). The model says where
 the fingertip is for each number. Measuring the fingertip at a few numbers checks that. One
 millimetre of ruler is about half a degree of finger angle, so a ruler is good enough.
@@ -124,14 +128,14 @@ fingers when opening, so the thumb no longer gets in the way.
 | | your reading | the model says |
 |---|---|---|
 | A: fingers 1000 | | about 218 mm |
-| A: fingers 750 | | 196 |
-| A: fingers 500 | | 149 |
-| A: fingers 250 | | 103 |
-| A: fingers 0 | | 84 |
-| B: thumb 1000 | | 142 |
-| B: thumb 750 | | 112 |
-| B: thumb 500 | | 84 |
-| B: thumb 250 | | 66 |
+| A: fingers 750 | | 201 |
+| A: fingers 500 | | 162 |
+| A: fingers 250 | | 118 |
+| A: fingers 0 | | 90 |
+| B: thumb 1000 | | 121 |
+| B: thumb 750 | | 94 |
+| B: thumb 500 | | 72 |
+| B: thumb 250 | | 64 |
 
 (Part A's numbers may all be shifted by the same few mm: where the hand's own base face really is
 compared with the seam. That shift is itself useful; it is not an error.)

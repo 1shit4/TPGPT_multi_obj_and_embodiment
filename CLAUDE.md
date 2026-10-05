@@ -669,8 +669,9 @@ The planner's support height is: its `support_height` parameter, else the calibr
   the demonstrating jaw takes the half turn instead (`plan.metrics["roll"]`, audit D3).
 - **Not measured yet** (all in `config/inspire_hand.yaml`, `measured: false`): the mount (yaw -45,
   adapter 12 mm: estimates; `inspire_touch` + `python -m tpgpt.hardware.inspire_mount fit`), the
-  register map (the manual's ranges solved on the URDF; the real hand closes further than the
-  URDF's limits), the grasp depth (`calibrated_depth_m` 0), the close mode and per-object force
+  register map (by ruler, 2026-10-05, rough: the fingers close to the URDF's 1.47 as GraspGen-X's
+  `close` does; the thumb is ~0.12 rad more bent than GraspGen-X's model at both ends, so the
+  open hand is narrower than the generator thinks), the grasp depth (`calibrated_depth_m` 0), the close mode and per-object force
   (`grasp_forces.yaml` `inspire_grasp`), Desk's payload. **Nothing has run on the robot.**
 - **The hand's serial driver**: `sudo modprobe usbserial && sudo insmod ~/ch341/ch341.ko` after every
   boot (`insmod` alone fails with "Unknown symbol": it does not load `usbserial`). Desk is still

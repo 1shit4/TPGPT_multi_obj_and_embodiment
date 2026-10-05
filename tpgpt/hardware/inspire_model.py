@@ -90,12 +90,12 @@ BODY_MESH_LINKS = {"thumb_proximal_base": "body_thumb_base"}
 #: hand_base_link's collision primitives, in URDF order.
 BASE_PIECE_NAMES = ("body_wrist", "body_palm_lower", "body_palm", "body_palm_upper",
                     "body_knuckle_1", "body_knuckle_2", "body_knuckle_3", "body_knuckle_4")
-#: Register -> joint before measurement: the RH56 manual's angle ranges solved on the
-#: URDF (:func:`manual_angles`; ``config/inspire_hand.yaml`` ``joint_map`` explains).
-#: Unverified on the hand; the config's block overrides it.
+#: Register -> joint: the ruler fit of 2026-10-05 (``config/inspire_hand.yaml``
+#: ``joint_map`` explains; about +-5 mm per reading, so still flagged unverified). The
+#: config's block overrides it.
 DEFAULT_JOINT_MAP = {
-    "little": (1.770, 0.037), "ring": (1.699, 0.031), "middle": (1.676, 0.032),
-    "index": (1.698, 0.029), "thumb_bend": (0.690, 0.028), "thumb_rot": (1.308, 0.0),
+    "little": (1.470, 0.037), "ring": (1.470, 0.031), "middle": (1.470, 0.032),
+    "index": (1.470, 0.029), "thumb_bend": (0.770, 0.120), "thumb_rot": (1.308, 0.0),
 }
 #: A finger is in contact once it holds this many points this deep -- the path
 #: check's rule for measured points (``path_check.MIN_CLOUD_CONTACT_POINTS``,
@@ -449,8 +449,9 @@ class InspireHandModel:
         """Where the hand's open command puts each DOF: fingers and thumb bend at 1000,
         thumb rotation at 0 (opposed) -- ``inspire_hand.OPEN_POSE`` -- through the joint
         map. GraspGen-X's own ``open`` (all zero, yaw 1.308) is
-        ``description.open_q``; they differ by the 0.03 rad the manual's "straight"
-        (176.7 deg) is short of the URDF's."""
+        ``description.open_q``; they differ by the 0.03 rad the fingers' 1000 is short of
+        the URDF's straight, and by the thumb's 0.12 rad bend at 1000 (the ruler, 2026-10-05:
+        the real thumb is never as straight as GraspGen-X's open)."""
         return self.registers_to_q([1000, 1000, 1000, 1000, 1000, 0])
 
     @property

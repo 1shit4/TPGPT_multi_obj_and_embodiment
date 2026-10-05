@@ -146,8 +146,8 @@ def test_the_register_map_round_trips_and_defaults_are_unverified(desc):
     m = im.InspireHandModel(desc)
     assert all(not ok for _, _, ok in m.joint_map.values())
     assert m.registers_to_q([1000] * 4 + [1000, 0]) == pytest.approx(
-        [0.037, 0.031, 0.032, 0.029, 0.028, 1.308])         # the hand's open
-    assert m.close_q == pytest.approx([1.770, 1.699, 1.676, 1.698, 0.690, 1.308])
+        [0.037, 0.031, 0.032, 0.029, 0.120, 1.308])         # the hand's open
+    assert m.close_q == pytest.approx([1.470, 1.470, 1.470, 1.470, 0.770, 1.308])
     u = np.array([0, 250, 500, 750, 1000, 400])
     assert np.array_equal(m.q_to_registers(m.registers_to_q(u)), u)
 
@@ -218,31 +218,47 @@ def test_a_finger_does_not_pass_through_a_thin_wall(desc):
     assert state.fraction["index"] < 0.9
 
 
-def test_the_default_map_reproduces_the_manual_s_angles(desc):
-    """The default register map is the manual's angle ranges (2.4.11) solved on the URDF:
-    with it, the URDF reads the manual's angle at every register value -- alpha to 1.5 deg
-    on every finger (linear in u to 0.014 rad), the thumb bend to 1 deg."""
+#: The ruler readings of 2026-10-05 (docs/hardware/INSPIRE_HAND.md, M4), mm.
+FINGER_READINGS = {1000: 216, 750: 195, 500: 168, 250: 125, 0: 89}   # middle tip below the face
+THUMB_READINGS = {1000: 120, 750: 92, 500: 73, 250: 64}                # thumb to index, tip centres
+
+
+def _tip_centre(m, link, chain, q, radius=0.012):
+    tip = m.fingertip_points(q)[chain]
+    v = m.mesh_vertices(link, q)
+    return v[np.linalg.norm(v - tip, axis=1) < radius].mean(0)
+
+
+def test_the_default_map_reproduces_the_ruler_readings(desc):
+    """The default register map is the 2026-10-05 ruler fit: the middle fingertip within
+    the ruler's ~7 mm at every setting (the manual's map missed 500 and 250 by 19 and 22),
+    the thumb-to-index distance between the tips' centres within 2 mm (the manual's
+    missed by up to 17)."""
     m = im.InspireHandModel(desc)
-    for u in (0, 250, 500, 750, 1000):
-        a = m.manual_angles(m.registers_to_q([u] * 5 + [0]))
-        alpha = 19.0 + (176.7 - 19.0) * u / 1000.0
-        theta = -13.0 + (53.6 + 13.0) * u / 1000.0
-        for dof in ("little", "ring", "middle", "index"):
-            assert a[dof] == pytest.approx(alpha, abs=1.5), (dof, u)
-        assert a["thumb_bend"] == pytest.approx(theta, abs=1.0), u
-    # Thumb rotation: the URDF's 1.308 rad span is the manual's 75 deg, to 0.5 deg.
+    for u, mm in FINGER_READINGS.items():
+        lm = im.landmarks(m, m.registers_to_q([u] * 4 + [1000, 1000]))
+        assert lm["middle_length"] == pytest.approx(mm, abs=7.0), u
+    for u, mm in THUMB_READINGS.items():
+        q = m.registers_to_q([1000] * 4 + [u, 0])
+        d = np.linalg.norm(_tip_centre(m, "thumb_distal", "thumb", q)
+                           - _tip_centre(m, "index_intermediate", "index", q)) * 1000.0
+        assert d == pytest.approx(mm, abs=2.0), u
+    # Thumb rotation (not measured yet): the URDF's 1.308 rad span is the manual's 75 deg.
     span = (m.manual_angles(m.registers_to_q([1000] * 6))["thumb_rot"]
             - m.manual_angles(m.registers_to_q([1000] * 5 + [0]))["thumb_rot"])
     assert span == pytest.approx(75.0, abs=0.5)
 
 
-def test_graspgenx_s_close_is_not_the_hand_s_full_close(desc):
-    """The URDF's limits stop short of the manual's ranges: GraspGen-X's 'close' pose
-    leaves the fingers at alpha ~42 deg, the real hand curls to 19."""
+def test_the_hand_closes_its_fingers_as_far_as_graspgenx_s_close(desc):
+    """The ruler puts the fingers' full curl at the URDF's own limit, 1.47 rad, which is
+    GraspGen-X's 'close' (alpha ~42 deg by the manual's construction, not the manual's
+    19). The thumb is bent further than GraspGen-X's at both ends: 0.12 rad when open
+    (GraspGen-X 0), 0.77 closed (0.6)."""
     m = im.InspireHandModel(desc)
-    a = m.manual_angles(desc.close_q)
-    assert 38.0 < a["index"] < 46.0
-    assert m.close_q[3] > desc.close_q[3] + 0.2
+    assert 38.0 < m.manual_angles(desc.close_q)["index"] < 46.0
+    assert m.close_q[:4] == pytest.approx(desc.close_q[:4])
+    assert m.close_q[4] > desc.close_q[4] + 0.1
+    assert m.open_q[4] > desc.open_q[4] + 0.1
 
 
 def test_the_open_hand_is_the_manual_s_217_8_mm_long(desc):
