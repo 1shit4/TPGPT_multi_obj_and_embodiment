@@ -364,3 +364,11 @@ def test_node_joint_states_are_urdf_joints_in_radians():
 def _stamp():
     from builtin_interfaces.msg import Time
     return Time()
+
+
+def test_the_cli_sets_six_values_thumb_rotation_first(fake):
+    assert ih.main(["--port", fake.port, "--id", "2", "--timeout", "0.3",
+                    "set", "500", "500", "500", "500", "500", "300"]) == 0
+    assert fake.angle_sets[-2] == [-1, -1, -1, -1, -1, 300]
+    assert fake.angle_sets[-1] == [500, 500, 500, 500, 500, 300]
+    assert ih.main(["--port", fake.port, "set", "500", "500"]) == 2

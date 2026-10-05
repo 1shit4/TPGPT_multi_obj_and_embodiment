@@ -55,6 +55,7 @@ CLI (the hand in this lab answers on ID 2 at 115200; ``scan`` finds it)::
     ros2 run ycb_pointcloud_pipeline inspire_hand --speed 300 open
     ros2 run ycb_pointcloud_pipeline inspire_hand --speed 300 --force 400 close
     ros2 run ycb_pointcloud_pipeline inspire_hand --close-mode simultaneous close
+    ros2 run ycb_pointcloud_pipeline inspire_hand set 500 500 500 500 500 0   # hold these (M4)
     ros2 run ycb_pointcloud_pipeline inspire_hand cycle --hold 3
     ros2 run ycb_pointcloud_pipeline inspire_hand --dry-run close   # print frames only
 
@@ -557,9 +558,12 @@ def _config_defaults(argv) -> dict:
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("command", choices=["ports", "scan", "status", "open", "close", "cycle",
-                                        "thumb", "home", "point", "clear-error",
+                                        "thumb", "home", "point", "set", "clear-error",
                                         "round-open", "round-close", "round-cycle"],
-                    help="round-* are aliases of open/close/cycle")
+                    help="round-* are aliases of open/close/cycle; set takes six values")
+    ap.add_argument("values", nargs="*", type=int,
+                    help="set: little ring middle index thumb_bend thumb_rot, 0-1000 "
+                         "(the thumb rotation first, as the open sequence does)")
     ap.add_argument("--config", default=None,
                     help="config/inspire_hand.yaml to take defaults from (default: installed)")
     ap.add_argument("--port", default=DEFAULT_PORT)
@@ -622,6 +626,19 @@ def main(argv=None) -> int:
             hand.grasp_open(args.speed, args.force, args.timeout)
         elif command == "point":
             hand.point(args.speed, args.force, args.timeout)
+        elif command == "set":
+            if len(args.values) != 6 or not all(0 <= v <= 1000 for v in args.values):
+                print("set needs six values 0-1000: little ring middle index thumb_bend "
+                      "thumb_rot", file=sys.stderr)
+                return 2
+            hand.set_speed(args.speed)
+            hand.set_force(args.force)
+            # The thumb rotation alone first, with the rest held, so a swinging thumb does not
+            # strike a finger on its way (the open sequence's order, reversed as needed).
+            hand.move("set: thumb rotation", [HOLD] * 5 + [args.values[5]], args.timeout)
+            st = hand.move("set", args.values, args.timeout)
+            if st:
+                print(f"holding {args.values}; ANGLE_ACT {st['angle']}")
         elif command in ("close", "cycle"):
             if command == "cycle":
                 hand.grasp_open(args.speed, args.force, args.timeout)
