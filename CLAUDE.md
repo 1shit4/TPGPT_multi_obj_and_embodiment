@@ -697,7 +697,9 @@ The planner's support height is: its `support_height` parameter, else the calibr
     middle and index fingers): a close **holds** something only when a finger stops beyond the
     empty close's angles (`grasp.empty_close_angles`); the release after a held close opens in
     one stage, and every open checks it opened.
-- **Not measured yet:** the grasp depth (`calibrated_depth_m` 0) and Desk's payload (M5).
+- **Not measured yet:** the grasp depth (`calibrated_depth_m` 0) and Desk's payload (M5: the
+  robot weighs the hand with `payload_measure`, `tpgpt/hardware/payload.py`; the manufacturer's
+  data says 0.568 kg at 88 mm out, Desk still has the Franka Hand's 0.73 kg at 30 mm).
   **Nothing has run on the robot. Every Inspire coverage number so far is void** (the mount was
   the -45 deg estimate).
 - **The hand's serial driver**: `sudo modprobe usbserial && sudo insmod ~/ch341/ch341.ko` after every

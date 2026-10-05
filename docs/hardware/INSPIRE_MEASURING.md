@@ -328,11 +328,32 @@ if ~20 mm, it is the other.
 
 ---
 
-## Step 8 -- the hand's weight (later; Claude will send a small tool)
+## Step 8 -- the hand's weight (the robot weighs it)
 
-The robot is still set up (in Desk) for the Franka Hand: 0.73 kg. The Inspire hand and adapter
-weigh about the same, but their weight sits further from the flange. The robot can weigh them
-itself from a few poses held still, so no scale is needed. Claude will send the steps.
+Why: Desk tells the robot what hangs on its flange, and the robot subtracts that weight to hold
+the arm up. It still has the Franka Hand: 0.73 kg, 30 mm out. The Inspire hand and its mount are
+about 0.57 kg with their centre about 88 mm out (the manufacturer's data). The difference reads
+as a phantom push and makes a held arm sag a little.
+
+The robot weighs it itself: it holds still in 18 poses around home (the hand turned and tilted,
+the elbow moved; each at least 18 cm above the table and 9 cm from the shelf) and measures the
+joint torques its model cannot explain. About 4 minutes; nothing touches anything.
+
+1. The hand program running (Terminal A). Clear the space around the arm. Hand on the e-stop.
+2. In Terminal B, home the arm:
+   ```bash
+   ros2 run ycb_pointcloud_pipeline joint_homing
+   ```
+3. In Terminal B, weigh:
+   ```bash
+   source ~/venvs/tpgpt/bin/activate
+   ros2 run --prefix python3 ycb_pointcloud_pipeline payload_measure
+   ```
+   Type `yes`. The arm goes home -> pose -> home 17 times and stops at home.
+4. It prints the mass and the centre of mass, and what the manufacturer's data says.
+
+**Send:** what it printed. Claude checks it before anything goes into Desk; then you type three
+numbers into Desk (Settings > End effector) and run step 3 once more to confirm.
 
 ---
 
