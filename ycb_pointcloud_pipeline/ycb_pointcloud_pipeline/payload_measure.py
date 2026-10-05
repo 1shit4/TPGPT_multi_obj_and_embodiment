@@ -188,6 +188,8 @@ class PayloadMeasure(JointTargetPublisher):
             print('\n' + fit.describe())
             print(f"\nthe manufacturer's data says {cad.mass:.3f} kg at "
                   + ' '.join(f'{v * 1000:+.1f}' for v in cad.com) + ' mm')
+            print('\nfor Desk (Settings > End effector; mass, centre of mass and inertia only):\n'
+                  + fit.payload.desk_text())
         except Exception as exc:  # noqa: BLE001 - the record is saved; fit it offline
             self.get_logger().error(f'fit failed ({exc}); python -m tpgpt.hardware.payload fit {path}')
 

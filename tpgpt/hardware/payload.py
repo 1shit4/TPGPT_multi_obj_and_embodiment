@@ -33,10 +33,12 @@ that is on it now, two ways:
   (:data:`POSES`). The static data cannot give the inertia: that comes from the
   manufacturer's data either way.
 
-The sign of the robot's external torques (what the environment applies to the robot, or
-the reverse) flips the payload part of the fit, not the friction; the fit reports both.
-Which holds is a push test: push the hand up and see the sign of
-``external_wrench_in_base_frame``'s force z.
+The sign of the robot's external torques flips the payload part of the fit, not the
+friction. **Measured** (push test, 2026-10-05, ``wrench_watch``): pushing the hand up made
+``external_wrench_in_base_frame``'s Fz go down (-0.43 -> -2.38 N), so the robot reports
+the force IT applies to what touches it, the reverse of the environment's push
+(:data:`TAU_EXT_SIGN`). It agrees with the first weighing: the other sign put this hand's
+centre of mass 7 mm from the flange, where none of its mass is.
 
 numpy only (the FR3 model for the Jacobian); no ROS. The robot side is the node
 ``payload_measure``.
@@ -56,6 +58,9 @@ from pathlib import Path
 import numpy as np
 
 G = np.array([0.0, 0.0, -9.81])
+#: The robot's external torques/wrench are minus the environment's push on it (the push
+#: test, module docstring): +1 would mean the environment's push itself.
+TAU_EXT_SIGN = -1.0
 
 
 @dataclass
@@ -246,8 +251,8 @@ def pose_clearances(end_effector, poses=POSES, home=None, shelf_config: dict | N
 # ------------------------------------------------------------------------ the fit
 @dataclass
 class PayloadFit:
-    payload: Payload                 # environment-applies convention (inertia: manufacturer's)
-    flipped: Payload                 # the opposite sign convention
+    payload: Payload                 # with the measured sign (TAU_EXT_SIGN); inertia: given
+    flipped: Payload                 # what the other sign would have said
     bias: list                       # N m per joint
     friction: list                   # N m per joint (empty when no approach was given)
     residual_rms: list               # N m per joint, after the fit
@@ -266,8 +271,8 @@ class PayloadFit:
                     "of mass " + " ".join(f"{k} {v * 1000:+.1f}" for k, v in zip("xyz", p.com))
                     + f" mm (+- {max(self.stderr[k] for k in ('com_x', 'com_y', 'com_z')) * 1000:.1f})")
         lines = [f"payload from {self.n_poses} poses (condition {self.condition:.0f}):",
-                 one("if torques are applied ON it:", self.payload),
-                 one("if the reverse:", self.flipped),
+                 one("measured:", self.payload),
+                 one("(the other sign would say:", self.flipped) + ")",
                  "  joint offsets (N m)  " + " ".join(f"{b:+.2f}" for b in self.bias)]
         if self.friction:
             lines.append("  static friction (N m) " + " ".join(f"{f:.2f}" for f in self.friction))
@@ -343,7 +348,7 @@ def fit_payload(samples, modelled: Payload = FRANKA_HAND_DESK, inertia=None, fr3
     rows, rhs = [], []
     for sample in samples:
         q, tau = sample[0], sample[1]
-        A = _regressor(fr3, np.asarray(q, dtype=float))
+        A = TAU_EXT_SIGN * _regressor(fr3, np.asarray(q, dtype=float))
         cols = [A, np.eye(7)]
         if friction:
             cols.append(np.diag(np.asarray(sample[2], dtype=float))[:, varies])
@@ -458,7 +463,8 @@ def main(argv=None) -> int:
     print(fit.describe())
     print(f"\nthe manufacturer's data says {cad.mass:.3f} kg at "
           + " ".join(f"{v * 1000:+.1f}" for v in cad.com) + " mm")
-    print("\nWhich line holds is the push test (module docstring); Desk's values follow from it.")
+    print("\nfor Desk (Settings > End effector; mass, centre of mass and inertia only -- keep its\n"
+          "flange-to-end-effector transform):\n" + fit.payload.desk_text())
     return 0
 
 

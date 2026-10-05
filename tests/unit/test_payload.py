@@ -43,7 +43,7 @@ def _synthetic(true: pl.Payload, modelled: pl.Payload, bias, noise, seed=0):
     out = []
     for off in pl.POSES:
         q = np.asarray(HOME_Q) + np.asarray(off, dtype=float)
-        tau = pl._regressor(fr3, q) @ np.r_[dm, ds] + bias + rng.normal(0.0, noise, 7)
+        tau = pl.TAU_EXT_SIGN * pl._regressor(fr3, q) @ np.r_[dm, ds] + bias + rng.normal(0.0, noise, 7)
         out.append((q, tau))
     return out
 

@@ -698,9 +698,13 @@ The planner's support height is: its `support_height` parameter, else the calibr
     empty close's angles (`grasp.empty_close_angles`); the release after a held close opens in
     one stage, and every open checks it opened.
 - **Not measured yet:** the grasp depth (`calibrated_depth_m` 0). Desk's payload (M5): the robot
-  weighed the hand (`payload_measure`, `tpgpt/hardware/payload.py`) at **0.71 kg, 55 mm out**
-  (pending a push test of the torque sign); the manufacturer's data says 0.568 kg at 88 mm;
-  Desk still has the Franka Hand's 0.73 kg at 30 mm -- close in mass.
+  weighed the hand, cable included (`payload_measure`, `tpgpt/hardware/payload.py`): **0.708 kg
+  at (-9, 1, 55) mm** in the flange frame (the manufacturer's data: 0.568 kg at 88 mm; the cable
+  is taped along the last link); Desk to be set to it (it had the Franka Hand's 0.73 kg at 30 mm).
+- **The robot's external torques and wrench are the force it applies, not the push on it**
+  (push test 2026-10-05, `wrench_watch`: pushing the hand up made Fz go down). Anything reading
+  `external_wrench_in_base_frame` or `external_joint_torques` (the X6 recorder too) must flip
+  them for the force on the hand (`payload.TAU_EXT_SIGN`).
 - **Static friction under the soft joint controller** (`joint_impedance_controller.yaml`,
   40/20/15/8 N m/rad): the arm stops 0.05-0.08 rad short of a joint target, on the side it came
   from (joint 7 0.07 rad after `joint_homing`), and friction holds up to ~0.6 N m, which the
