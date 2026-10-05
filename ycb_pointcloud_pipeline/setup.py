@@ -51,6 +51,7 @@ setup(
             'inspire_hand_node = ycb_pointcloud_pipeline.inspire_hand_node:main',
             'inspire_touch = ycb_pointcloud_pipeline.inspire_touch:main',
             'payload_measure = ycb_pointcloud_pipeline.payload_measure:main',
+            'wrench_watch = ycb_pointcloud_pipeline.wrench_watch:main',
         ],
     },
 )
