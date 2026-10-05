@@ -21,14 +21,22 @@ that is on it now, two ways:
   centre of mass in the flange frame, ``m0, c0`` Desk's values), and the joints see
   ``tau_ext = J_F^T [f; tau_F] + b``, with ``J_F`` the flange's geometric Jacobian and
   ``b`` a constant offset per joint (the torque sensors': ~0.2 N m was seen at rest).
-  Everything is linear in ``(m, s, b)``: 11 unknowns, 7 equations per pose. The poses
-  must turn the hand through different directions relative to gravity; a dozen around
-  home do (:data:`POSES`). The static data cannot give the inertia: that comes from the
+  **And static friction** (the first weighing, 2026-10-05): under the soft joint
+  controller every joint stops 0.05-0.08 rad short of its target, always on the side it
+  came from, and friction then holds up to ~0.6 N m that the robot reads as external --
+  more than the payload's whole effect. Friction pushes back along the joint's last
+  motion and the payload does not care which way it came, so the fit adds ``+-f_j``
+  signed by each joint's approach (``approach``: the side it stopped on, sign(target - q);
+  without it the first weighing's residuals were 0.13-0.53 N m, with it 0.02-0.08). All
+  linear in ``(m, s, b, f)``: 18 unknowns, 7 equations per pose. The poses must turn the
+  hand through different directions relative to gravity; a dozen around home do
+  (:data:`POSES`). The static data cannot give the inertia: that comes from the
   manufacturer's data either way.
 
-The sign: libfranka's external torques and wrench are what the environment applies to the
-robot, so an unmodelled extra weight reads downward. Measured, not assumed: the fit
-reports the mass both ways, and the one near the manufacturer's 0.57 kg is the convention.
+The sign of the robot's external torques (what the environment applies to the robot, or
+the reverse) flips the payload part of the fit, not the friction; the fit reports both.
+Which holds is a push test: push the hand up and see the sign of
+``external_wrench_in_base_frame``'s force z.
 
 numpy only (the FR3 model for the Jacobian); no ROS. The robot side is the node
 ``payload_measure``.
@@ -238,25 +246,32 @@ def pose_clearances(end_effector, poses=POSES, home=None, shelf_config: dict | N
 # ------------------------------------------------------------------------ the fit
 @dataclass
 class PayloadFit:
-    payload: Payload                 # the measured one (inertia: from the manufacturer's)
-    flipped_mass: float              # the mass with the opposite sign convention
+    payload: Payload                 # environment-applies convention (inertia: manufacturer's)
+    flipped: Payload                 # the opposite sign convention
     bias: list                       # N m per joint
+    friction: list                   # N m per joint (empty when no approach was given)
     residual_rms: list               # N m per joint, after the fit
     stderr: dict                     # mass, com_x, com_y, com_z
     condition: float
     n_poses: int
     notes: list = field(default_factory=list)
 
+    @property
+    def flipped_mass(self) -> float:
+        return self.flipped.mass
+
     def describe(self) -> str:
-        p = self.payload
+        def one(name, p):
+            return (f"  {name:30s} mass {p.mass:.3f} kg +- {self.stderr['mass']:.3f}, centre "
+                    "of mass " + " ".join(f"{k} {v * 1000:+.1f}" for k, v in zip("xyz", p.com))
+                    + f" mm (+- {max(self.stderr[k] for k in ('com_x', 'com_y', 'com_z')) * 1000:.1f})")
         lines = [f"payload from {self.n_poses} poses (condition {self.condition:.0f}):",
-                 f"  mass  {p.mass:.3f} kg  +- {self.stderr['mass']:.3f}"
-                 f"   (the opposite sign convention would say {self.flipped_mass:.3f})",
-                 "  centre of mass (flange frame)  "
-                 + "  ".join(f"{k} {v * 1000:+.1f} +- {self.stderr['com_' + k] * 1000:.1f} mm"
-                             for k, v in zip("xyz", p.com)),
-                 "  joint offsets (N m)  " + " ".join(f"{b:+.2f}" for b in self.bias),
-                 "  residual rms (N m)   " + " ".join(f"{r:.2f}" for r in self.residual_rms)]
+                 one("if torques are applied ON it:", self.payload),
+                 one("if the reverse:", self.flipped),
+                 "  joint offsets (N m)  " + " ".join(f"{b:+.2f}" for b in self.bias)]
+        if self.friction:
+            lines.append("  static friction (N m) " + " ".join(f"{f:.2f}" for f in self.friction))
+        lines.append("  residual rms (N m)   " + " ".join(f"{r:.2f}" for r in self.residual_rms))
         return "\n".join(lines + self.notes)
 
 
@@ -288,17 +303,51 @@ def _regressor(fr3, q) -> np.ndarray:
     return A
 
 
+def approach_of(q, target, dead: float = 0.005) -> np.ndarray:
+    """Each joint's approach, from which side of its target it stopped (+1 below, -1 above,
+    0 within ``dead`` rad): friction stops a joint short in the direction it moved (every
+    joint, every pose, in the first weighing)."""
+    e = np.asarray(target, dtype=float) - np.asarray(q, dtype=float)
+    return np.where(np.abs(e) > dead, np.sign(e), 0.0)
+
+
+def approach_history(poses, first) -> list[np.ndarray]:
+    """Each sample's approach for ``payload_measure``'s sequence -- home (reached from the
+    start: ``first``, per joint), then home -> pose -> home for each further pose: a joint
+    a pose moves approaches it from that side, and the others keep their last motion's."""
+    last = np.asarray(first, dtype=float).copy()
+    out = []
+    for k, off in enumerate(np.asarray(poses, dtype=float)):
+        if k:
+            last = np.where(off != 0, np.sign(off), last)
+        out.append(last.copy())
+        if k:
+            last = np.where(off != 0, -np.sign(off), last)       # back home
+    return out
+
+
 def fit_payload(samples, modelled: Payload = FRANKA_HAND_DESK, inertia=None, fr3=None) -> PayloadFit:
-    """The payload from ``samples`` -- ``[(q, tau_ext), ...]``, each averaged at rest -- given
-    what the robot ``modelled`` (Desk's values when they were taken). See the module
-    docstring. ``inertia``: reported with the result (default: ``modelled``'s)."""
+    """The payload from ``samples`` -- ``[(q, tau_ext), ...]`` or ``[(q, tau_ext, approach),
+    ...]``, each averaged at rest -- given what the robot ``modelled`` (Desk's values when
+    they were taken). See the module docstring. With ``approach`` (:func:`approach_of`) a
+    static friction per joint is fitted too. ``inertia``: reported with the result (default:
+    ``modelled``'s)."""
     from tpgpt.hardware.fr3 import default_model
 
     fr3 = fr3 or default_model()
+    friction = all(len(s) > 2 and s[2] is not None for s in samples)
+    # A joint that came from the same side every time: its friction is a constant, which
+    # the offset already is -- fit it only where the approach changes.
+    varies = (np.ptp(np.array([s[2] for s in samples], dtype=float), axis=0) > 0
+              if friction else np.zeros(7, dtype=bool))
     rows, rhs = [], []
-    for q, tau in samples:
+    for sample in samples:
+        q, tau = sample[0], sample[1]
         A = _regressor(fr3, np.asarray(q, dtype=float))
-        rows.append(np.hstack([A, np.eye(7)]))
+        cols = [A, np.eye(7)]
+        if friction:
+            cols.append(np.diag(np.asarray(sample[2], dtype=float))[:, varies])
+        rows.append(np.hstack(cols))
         rhs.append(np.asarray(tau, dtype=float))
     X, y = np.vstack(rows), np.concatenate(rhs)
     notes = []
@@ -317,24 +366,46 @@ def fit_payload(samples, modelled: Payload = FRANKA_HAND_DESK, inertia=None, fr3
     c = s / m
     # Error propagation for c = s / m (first order).
     se_c = np.sqrt((se[1:4] / m) ** 2 + (s * se[0] / m ** 2) ** 2)
-    flipped = modelled.mass - dm
-    if not 0.2 < m < 3.0:
-        notes.append(f"IMPLAUSIBLE mass {m:.3f} kg: check the sign convention and the poses")
+    m_f = modelled.mass - dm
+    c_f = (modelled.first_moment() - ds) / m_f if m_f > 0 else np.full(3, np.nan)
+    if not 0.2 < m < 3.0 and not 0.2 < m_f < 3.0:
+        notes.append(f"IMPLAUSIBLE mass ({m:.3f} / {m_f:.3f} kg): check the poses")
     if condition > 1e3:
         notes.append(f"poorly conditioned ({condition:.0f}): turn the hand through more "
                      "directions")
     rms = np.sqrt(np.mean(r.reshape(-1, 7) ** 2, axis=0))
-    return PayloadFit(Payload(float(m), tuple(c.tolist()),
-                              inertia if inertia is not None else modelled.inertia),
-                      float(flipped), sol[4:].tolist(), rms.tolist(),
+    if max(rms) > 0.15:
+        notes.append(f"residuals up to {max(rms):.2f} N m: something the model lacks "
+                     "(friction without approach directions? a cable pulling?)")
+    I = inertia if inertia is not None else modelled.inertia
+    return PayloadFit(Payload(float(m), tuple(c.tolist()), I),
+                      Payload(float(m_f), tuple(np.asarray(c_f).tolist()), I),
+                      sol[4:11].tolist(), _spread(sol[11:], varies) if friction else [],
+                      rms.tolist(),
                       {"mass": float(se[0]), "com_x": float(se_c[0]), "com_y": float(se_c[1]),
                        "com_z": float(se_c[2])}, condition, len(samples), notes)
 
 
+def _spread(values, mask) -> list:
+    out, it = [], iter(values)
+    for m in mask:
+        out.append(float(next(it)) if m else 0.0)
+    return out
+
+
 def load_samples(path) -> tuple[list, Payload]:
-    """``(samples, modelled)`` from a ``payload_measure`` record."""
+    """``(samples, modelled)`` from a ``payload_measure`` record, with each sample's approach
+    (recorded, or from its target: home plus the pose's offsets)."""
+    from tpgpt.hardware.fr3 import HOME_Q
+
     d = json.loads(Path(path).expanduser().read_text())
-    samples = [(s["q"], s["tau_ext"]) for s in d["samples"]]
+    samples = d["samples"]
+    if all("approach" in s for s in samples):
+        approach = [s["approach"] for s in samples]
+    else:                         # a record from before they were kept: the fixed sequence,
+        first = approach_of(samples[0]["q"], HOME_Q)      # home reached from the start's side
+        approach = approach_history(d["poses"], first)
+    samples = [(s["q"], s["tau_ext"], a) for s, a in zip(samples, approach)]
     m = d.get("modelled") or asdict(FRANKA_HAND_DESK)
     return samples, Payload(m["mass"], tuple(m["com"]), tuple(map(tuple, m["inertia"])))
 
@@ -387,7 +458,7 @@ def main(argv=None) -> int:
     print(fit.describe())
     print(f"\nthe manufacturer's data says {cad.mass:.3f} kg at "
           + " ".join(f"{v * 1000:+.1f}" for v in cad.com) + " mm")
-    print("\nfor Desk (Settings > End effector):\n" + fit.payload.desk_text())
+    print("\nWhich line holds is the push test (module docstring); Desk's values follow from it.")
     return 0
 
 

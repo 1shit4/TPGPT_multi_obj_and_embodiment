@@ -697,9 +697,15 @@ The planner's support height is: its `support_height` parameter, else the calibr
     middle and index fingers): a close **holds** something only when a finger stops beyond the
     empty close's angles (`grasp.empty_close_angles`); the release after a held close opens in
     one stage, and every open checks it opened.
-- **Not measured yet:** the grasp depth (`calibrated_depth_m` 0) and Desk's payload (M5: the
-  robot weighs the hand with `payload_measure`, `tpgpt/hardware/payload.py`; the manufacturer's
-  data says 0.568 kg at 88 mm out, Desk still has the Franka Hand's 0.73 kg at 30 mm).
+- **Not measured yet:** the grasp depth (`calibrated_depth_m` 0). Desk's payload (M5): the robot
+  weighed the hand (`payload_measure`, `tpgpt/hardware/payload.py`) at **0.71 kg, 55 mm out**
+  (pending a push test of the torque sign); the manufacturer's data says 0.568 kg at 88 mm;
+  Desk still has the Franka Hand's 0.73 kg at 30 mm -- close in mass.
+- **Static friction under the soft joint controller** (`joint_impedance_controller.yaml`,
+  40/20/15/8 N m/rad): the arm stops 0.05-0.08 rad short of a joint target, on the side it came
+  from (joint 7 0.07 rad after `joint_homing`), and friction holds up to ~0.6 N m, which the
+  robot reports as external torque. Anything read from `external_joint_torques` or the external
+  wrench at rest carries it: model it by the approach direction, as `payload.fit_payload` does.
   **Nothing has run on the robot. Every Inspire coverage number so far is void** (the mount was
   the -45 deg estimate).
 - **The hand's serial driver**: `sudo modprobe usbserial && sudo insmod ~/ch341/ch341.ko` after every

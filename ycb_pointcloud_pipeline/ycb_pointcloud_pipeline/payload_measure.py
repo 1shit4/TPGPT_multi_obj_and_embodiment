@@ -75,8 +75,9 @@ class PayloadMeasure(JointTargetPublisher):
                      delta * math.pi / 2 / self.get_parameter('max_joint_velocity').value)
         self.move_to(q_from, q_to, label, move_t=move_t)
 
-    def _sample(self, label):
-        """Wait until still, then average the external torques and the joints."""
+    def _sample(self, label, target, approach):
+        """Wait until still, then average the external torques and the joints. ``approach``:
+        each joint's last commanded motion (+1 up, -1 down): friction's sign."""
         settle, span = self.get_parameter('settle_s').value, self.get_parameter('sample_s').value
         still = self.get_parameter('still_velocity').value
         time.sleep(settle)
@@ -110,7 +111,9 @@ class PayloadMeasure(JointTargetPublisher):
         tau = np.mean(taus, axis=0)
         self.get_logger().info(f'{label}: tau_ext ' + ' '.join(f'{v:+.2f}' for v in tau)
                                + f' N m ({len(taus)} msgs, sd {np.std(taus, axis=0).max():.2f})')
-        return {'q': np.mean(qs, axis=0).tolist(), 'tau_ext': tau.tolist(),
+        q_mean = np.mean(qs, axis=0)
+        return {'q': q_mean.tolist(), 'tau_ext': tau.tolist(), 'target': list(target),
+                'approach': [float(a) for a in approach],
                 'tau_sd': np.std(taus, axis=0).tolist(), 'n': len(taus), 'label': label}
 
     def run(self):
@@ -154,14 +157,18 @@ class PayloadMeasure(JointTargetPublisher):
         self.cmc.activate(self.controller, controllers)
         self.moving = True
         self._move(q_start, home, 'to home')
+        last = np.sign(np.subtract(home, q_start))       # each joint's last motion
         samples = []
         for k, q in enumerate(targets):
             label = f'pose {k + 1}/{len(targets)}'
             if k:
                 self._move(home, q, label)
-            samples.append(self._sample(label))
+                d = np.subtract(q, home)
+                last = np.where(np.abs(d) > 1e-9, np.sign(d), last)
+            samples.append(self._sample(label, q if k else home, last))
             if k:
                 self._move(q, home, f'{label}: back home')
+                last = np.where(np.abs(d) > 1e-9, -np.sign(d), last)
         self.moving = False
         os.makedirs(self.get_parameter('output_dir').value, exist_ok=True)
         path = os.path.join(self.get_parameter('output_dir').value,
@@ -176,12 +183,11 @@ class PayloadMeasure(JointTargetPublisher):
         try:
             ee = pl._hand_from_config(None)
             cad = pl.inspire_cad_payload(ee)
-            fit = pl.fit_payload([(s['q'], s['tau_ext']) for s in samples], modelled,
-                                 inertia=cad.inertia)
+            fit = pl.fit_payload([(s['q'], s['tau_ext'], s['approach']) for s in samples],
+                                 modelled, inertia=cad.inertia)
             print('\n' + fit.describe())
             print(f"\nthe manufacturer's data says {cad.mass:.3f} kg at "
                   + ' '.join(f'{v * 1000:+.1f}' for v in cad.com) + ' mm')
-            print('\nfor Desk (Settings > End effector):\n' + fit.payload.desk_text())
         except Exception as exc:  # noqa: BLE001 - the record is saved; fit it offline
             self.get_logger().error(f'fit failed ({exc}); python -m tpgpt.hardware.payload fit {path}')
 

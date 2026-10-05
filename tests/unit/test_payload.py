@@ -67,6 +67,30 @@ def test_with_the_right_payload_in_desk_only_the_offsets_are_left(hand):
     assert fit.payload.mass == pytest.approx(true.mass, abs=0.015)
 
 
+def test_static_friction_signed_by_the_approach_is_separated_from_the_payload(hand):
+    """The first weighing (2026-10-05): every joint stopped short on the side it came from,
+    and friction held up to 0.6 N m. With each sample's approach the fit separates it."""
+    true = pl.inspire_cad_payload(hand)
+    bias = np.array([0.1, -0.3, 0.2, 0.25, -0.1, 0.2, 0.05])
+    friction = np.array([0.03, 0.6, 0.12, 0.23, 0.42, 0.27, 0.18])
+    rng = np.random.default_rng(1)
+    samples = []
+    for q, tau in _synthetic(true, pl.FRANKA_HAND_DESK, bias, noise=0.02):
+        approach = rng.choice([-1.0, 1.0], 7)
+        samples.append((q, tau + friction * approach, approach))
+    fit = pl.fit_payload(samples)
+    assert fit.payload.mass == pytest.approx(true.mass, abs=0.02)
+    assert np.allclose(fit.friction, friction, atol=0.03)
+    # Without the approach the friction is unmodelled: the residuals say so.
+    blind = pl.fit_payload([(q, tau) for q, tau, _ in samples])
+    assert max(blind.residual_rms) > 0.15 and any("residuals" in n for n in blind.notes)
+
+
+def test_the_approach_is_the_side_a_joint_stopped_on():
+    a = pl.approach_of([0.0, 0.1, 0.2], [0.07, 0.03, 0.2])
+    assert a.tolist() == [1.0, -1.0, 0.0]
+
+
 def test_every_weighing_pose_clears_the_table_and_the_shelf(hand):
     shelf = yaml.safe_load((CONFIG / "shelf.yaml").read_text())
     rows = pl.pose_clearances(hand, shelf_config=shelf)
