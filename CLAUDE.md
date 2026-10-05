@@ -676,17 +676,20 @@ The planner's support height is: its `support_height` parameter, else the calibr
   records where its fingers stop (`hand_closed_q`). An asymmetric hand keeps the generator's grasp:
   the demonstrating jaw takes the half turn instead (`plan.metrics["roll"]`, audit D3).
 - **Measured on the robot and the bench (2026-10-05; `config/inspire_hand.yaml`):**
-  - **The mount, by touch** (M3: index and little fingertips, 15 touches, rms 1.6 mm): yaw
-    136.7 +- 1.4 deg (the first estimate, -45, was half a turn off), thickness 11.0 mm (the
-    printed part alone: 16 by ruler), and the hand's ring **10.6 mm off the flange's centre**
-    towards the palm -- unexpected, an eye check pending. **One fingertip cannot tell the yaw
-    from an offset** (index alone: 116 deg, little alone: 151, each held centred): touch with
-    both (`/inspire_hand/point_little`; `inspire_touch` reads the finger).
+  - **The mount, by touch** (M3: index and little fingertips, 15 touches, rms 1.7 mm): yaw
+    137.1 +- 1.4 deg (the first estimate, -45, was half a turn off), thickness 12.45 mm (the
+    printed part alone: 16 by ruler), the ring concentric with the flange (the user). **One
+    fingertip cannot tell the yaw from an offset** (index alone: 116 deg, little alone: 151, each
+    held centred): touch with both (`/inspire_hand/point_little`; `inspire_touch` reads the
+    finger), and fit with `--finger-bend`: two fingers still cannot tell an offset along the
+    palm's normal from **fingers bent towards the palm -- which they are: 5.2 deg at register
+    1000** (the free fit had called it a 10.6 mm offset).
   - **The ring is taped over loose screws** and rocks ~5 mm at the fingertips across the palm
     (across the closing direction; not modelled).
-  - **The register map, by ruler (rough):** the fingers close to the URDF's 1.47, as GraspGen-X's
-    `close` does; the thumb is ~0.12 rad more bent than GraspGen-X's model at both ends, so the
-    open hand is narrower than the generator thinks.
+  - **The register map** (ruler, plus the touches' finger bend): fingers 0.12-0.13 -> 1.373 rad,
+    thumb 0.082 -> 0.650. **The real open hand is 27 mm narrower along the closing direction
+    than GraspGen-X's model** (it opens every joint to 0), and the fingers curl less far than its
+    `close` (1.47).
   - **The close is simultaneous** (sequential pushes the object away), 400 g per finger, the
     pudding box 150 (`grasp_forces.yaml` `inspire_grasp`). **The hand reports a force stop as
     STATUS 2, not the manual's 3**: contact is judged by where a DOF stopped

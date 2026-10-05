@@ -146,8 +146,8 @@ def test_the_register_map_round_trips_and_defaults_are_unverified(desc):
     m = im.InspireHandModel(desc)
     assert all(not ok for _, _, ok in m.joint_map.values())
     assert m.registers_to_q([1000] * 4 + [1000, 0]) == pytest.approx(
-        [0.037, 0.031, 0.032, 0.029, 0.120, 1.308])         # the hand's open
-    assert m.close_q == pytest.approx([1.470, 1.470, 1.470, 1.470, 0.770, 1.308])
+        [0.128, 0.122, 0.123, 0.120, 0.082, 1.308])         # the hand's open
+    assert m.close_q == pytest.approx([1.373, 1.373, 1.373, 1.373, 0.650, 1.308])
     u = np.array([0, 250, 500, 750, 1000, 400])
     assert np.array_equal(m.q_to_registers(m.registers_to_q(u)), u)
 
@@ -230,10 +230,10 @@ def _tip_centre(m, link, chain, q, radius=0.012):
 
 
 def test_the_default_map_reproduces_the_ruler_readings(desc):
-    """The default register map is the 2026-10-05 ruler fit: the middle fingertip within
-    the ruler's ~7 mm at every setting (the manual's map missed 500 and 250 by 19 and 22),
-    the thumb-to-index distance between the tips' centres within 2 mm (the manual's
-    missed by up to 17)."""
+    """The default register map reproduces the 2026-10-05 ruler readings, with the fingers'
+    open end from the mount touches: the middle fingertip within the ruler's ~7 mm at every
+    setting (the manual's map missed 500 and 250 by 19 and 22), the thumb-to-index distance
+    between the tips' centres within 4 mm (the manual's missed by up to 17)."""
     m = im.InspireHandModel(desc)
     for u, mm in FINGER_READINGS.items():
         lm = im.landmarks(m, m.registers_to_q([u] * 4 + [1000, 1000]))
@@ -242,33 +242,36 @@ def test_the_default_map_reproduces_the_ruler_readings(desc):
         q = m.registers_to_q([1000] * 4 + [u, 0])
         d = np.linalg.norm(_tip_centre(m, "thumb_distal", "thumb", q)
                            - _tip_centre(m, "index_intermediate", "index", q)) * 1000.0
-        assert d == pytest.approx(mm, abs=2.0), u
+        assert d == pytest.approx(mm, abs=4.0), u
     # Thumb rotation (not measured yet): the URDF's 1.308 rad span is the manual's 75 deg.
     span = (m.manual_angles(m.registers_to_q([1000] * 6))["thumb_rot"]
             - m.manual_angles(m.registers_to_q([1000] * 5 + [0]))["thumb_rot"])
     assert span == pytest.approx(75.0, abs=0.5)
 
 
-def test_the_hand_closes_its_fingers_as_far_as_graspgenx_s_close(desc):
-    """The ruler puts the fingers' full curl at the URDF's own limit, 1.47 rad, which is
-    GraspGen-X's 'close' (alpha ~42 deg by the manual's construction, not the manual's
-    19). The thumb is bent further than GraspGen-X's at both ends: 0.12 rad when open
-    (GraspGen-X 0), 0.77 closed (0.6)."""
+def test_the_real_hand_opens_less_flat_and_curls_less_than_graspgenx_s(desc):
+    """Measured 2026-10-05: at 1000 the fingers are 0.12-0.13 rad from straight (the touches)
+    and the thumb 0.08 (GraspGen-X's open: 0); the fingers' full curl is 1.373 rad, short of
+    GraspGen-X's close, 1.47 (alpha ~42 deg by the manual's construction, not its 19); the
+    thumb's is 0.65 against 0.6."""
     m = im.InspireHandModel(desc)
     assert 38.0 < m.manual_angles(desc.close_q)["index"] < 46.0
-    assert m.close_q[:4] == pytest.approx(desc.close_q[:4])
-    assert m.close_q[4] > desc.close_q[4] + 0.1
-    assert m.open_q[4] > desc.open_q[4] + 0.1
+    assert np.all(m.close_q[:4] < desc.close_q[:4] - 0.05)
+    assert np.all(m.open_q[:4] > desc.open_q[:4] + 0.1)
+    assert m.open_q[4] > desc.open_q[4] + 0.05
 
 
 def test_the_open_hand_is_the_manual_s_217_8_mm_long(desc):
     """The RH56 manual's dimension drawing (figure 1): 217.8 mm from the mounting face to
-    the (middle) fingertip, open. The model, from GraspGen-X's URDF with the wrist face
-    as hand_base_link's origin, gives 217.9 -- the URDF is this hand, and its origin is
-    the face that bolts to the adapter."""
+    the (middle) fingertip, straight. The model, from GraspGen-X's URDF with the wrist face
+    as hand_base_link's origin, gives 218.0 -- the URDF is this hand, and its origin is
+    the face that bolts to the adapter. At register 1000 the real fingers are 5 deg short
+    of straight (the mount touches): 216.4, and the ruler read 216 (2026-10-05)."""
     m = im.InspireHandModel(desc)
+    straight = im.landmarks(m, desc.open_q)
+    assert straight["middle_length"] == pytest.approx(217.8, abs=1.0)
+    assert 55.0 < straight["knuckles_index_to_pinky"] < 60.0
     lm = im.landmarks(m, "open")
-    assert lm["middle_length"] == pytest.approx(217.8, abs=1.0)
-    assert 55.0 < lm["knuckles_index_to_pinky"] < 60.0
+    assert lm["middle_length"] == pytest.approx(216.0, abs=1.0)
     half = im.landmarks(m, m.registers_to_q([500] * 5 + [0]))
     assert half["thumb_to_index"] < lm["thumb_to_index"] - 100.0

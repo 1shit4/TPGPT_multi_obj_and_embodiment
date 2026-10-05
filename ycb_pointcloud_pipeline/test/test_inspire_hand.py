@@ -230,10 +230,10 @@ def test_config_builds_the_mount():
         pytest.skip(str(exc))
     assert ee.controller_frame == "fr3_hand_tcp"
     assert ee.kind == "multi_finger" and ee.graspgen == "inspire_hand"
-    # Measured by touch (M3, 2026-10-05, both fingertips): yaw 136.7, 11.0 mm, 10.6 mm off-centre.
+    # Measured by touch (M3, 2026-10-05, both fingertips, the ring concentric): 137.1 deg, 12.45 mm.
     assert ee.model_spec["mount_measured"]
-    assert ee.model_spec["mount_yaw_deg"] == pytest.approx(136.66)
-    assert ee.model_spec["adapter_thickness"] == pytest.approx(0.0110)
+    assert ee.model_spec["mount_yaw_deg"] == pytest.approx(137.11)
+    assert ee.model_spec["adapter_thickness"] == pytest.approx(0.01245)
 
 
 # --------------------------------------------------------------------------- close
@@ -485,15 +485,15 @@ def test_the_joint_map_is_read_from_the_config_and_flagged_until_measured():
     assert jm["thumb_rot"][:2] == (1.308, 0.0)
     assert not any(ok for _, _, ok in jm.values())          # until measured (M4)
     # Anything missing from the config falls back to the default (the ruler fit), unverified.
-    assert ih.joint_map_from_config({})["index"] == (1.470, 0.029, False)
+    assert ih.joint_map_from_config({})["index"] == (1.373, 0.120, False)
 
 
 def test_registers_and_joint_angles_round_trip():
     jm = ih.joint_map_from_config(_config())
     q = ih.register_to_joint([1000, 1000, 1000, 1000, 1000, 0], jm)
-    assert q == pytest.approx([0.037, 0.031, 0.032, 0.029, 0.120, 1.308])  # open, opposed
+    assert q == pytest.approx([0.128, 0.122, 0.123, 0.120, 0.082, 1.308])  # open, opposed
     q = ih.register_to_joint([0, 0, 0, 0, 0, 0], jm)
-    assert q == pytest.approx([1.470, 1.470, 1.470, 1.470, 0.770, 1.308])
+    assert q == pytest.approx([1.373, 1.373, 1.373, 1.373, 0.650, 1.308])
     u = [0, 250, 500, 750, 1000, 333]
     assert ih.joint_to_register(ih.register_to_joint(u, jm), jm) == u
     assert ih.joint_to_register([9.0] * 6, jm) == [0, 0, 0, 0, 0, 0]       # clipped
@@ -520,7 +520,7 @@ def test_node_joint_states_are_urdf_joints_in_radians():
     st = {"angle": [1000, 1000, 0, 500, 1000, 0], "force_g": [0, 0, 380, 0, 0, 0]}
     msg = node.joint_state_message(st, jm, _stamp())
     assert list(msg.name) == list(ih.URDF_JOINTS)
-    assert msg.position[2] == pytest.approx(1.470) and msg.position[3] == pytest.approx(0.7495)
+    assert msg.position[2] == pytest.approx(1.373) and msg.position[3] == pytest.approx(0.7465)
     assert msg.position[5] == pytest.approx(1.308)
     assert msg.effort[2] == 380.0
 

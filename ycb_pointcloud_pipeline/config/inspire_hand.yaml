@@ -51,31 +51,28 @@ inspire_hand:
   # little/ring/middle/index -> pinky/ring/middle/index_proximal_joint, thumb_bend ->
   # thumb_proximal_pitch_joint, thumb_rot -> thumb_proximal_yaw_joint. Read by the hand
   # node (joint_states in radians) and tpgpt.hardware.inspire_model (the hand's geometry).
-  # Measured 2026-10-05 with a ruler (docs/hardware/INSPIRE_HAND.md, M4), about +-5 mm a
-  # reading (parallax, the ruler's tilt, where on the tip), so still verified: false:
-  # * fingers (the middle finger's tip below the ring's face at 1000/750/500/250/0: 216 195
-  #   168 125 89 mm): straight at 1000 as the URDF has it (216 against 218); a straight-line
-  #   map fits all five within 3-9 mm with the full curl at 1.42-1.51 rad (it depends on
-  #   which point of the tip the ruler read), and the URDF's own limit, 1.47, is in that
-  #   range. The manual's angles had given 1.68-1.77, which missed the 500 and 250 readings
-  #   by 13-22 mm. The other three fingers take the middle's value (same mechanism, same
-  #   URDF limit; not measured).
-  # * thumb bend (thumb tip to index tip, fingers open, at 1000/750/500/250: 120 92 73 64
-  #   mm, "roughly between the centres of both tips"): read 12-30 mm back from the very
-  #   ends, a straight-line map fits all four within 1.8 mm at 0.11-0.13 rad (1000) to
-  #   0.75-0.82 (0); taken here as 0.12 / 0.77. Read at the very ends it would be 0.15,
-  #   at the middles of the last segments 0.08 (and a worse fit). Against the manual's
-  #   0.028-0.690 the thumb is 0.06-0.12 rad (3-7 deg) more bent at every setting, however
-  #   the reading is taken -- when open, its tip 17 mm nearer the grasp axis (41 mm, not 58).
+  # Measured 2026-10-05 (docs/hardware/INSPIRE_HAND.md, M3 and M4). Still verified: false:
+  # * the fingers' OPEN end (q_at_1000): the manual's straight (0.029-0.037) + 0.091 +- 0.008 rad
+  #   (5.2 deg towards the palm), from the mount touches. With the hand's ring concentric with
+  #   the flange (the user), the index and little fingertips sit 10.6 mm further towards the
+  #   palm than the manual's straight puts them; fitted as one bend for both fingers (apart:
+  #   index 3.9, little 7.2 deg, +-1). The other two take it too (same mechanism).
+  # * the fingers' CLOSED end (q_at_0): 1.373 rad, the ruler's middle-fingertip heights at
+  #   1000/750/500/250/0 (216 195 168 125 89 mm) with that open end; within 6 mm of each
+  #   (a reading is +-5 mm). Below the URDF's 1.47: GraspGen-X's close curls further than
+  #   the real fingers.
+  # * the thumb bend: 0.082 (1000) -> 0.650 (0) rad, the ruler's thumb-to-index distances at
+  #   1000/750/500/250 (120 92 73 64 mm, between the tips' centres) with the index bent as
+  #   above; within 3.3 mm. Against the manual's 0.028-0.690: 0.05 rad more bent when open.
   # * thumb rotation: not measured (the manual's 90-165 deg = the URDF's full 1.308).
   # The hand reports where it really stopped (ANGLE_ACT, a few units short of the command:
   # [997, 996, 999, 1000, 243, 0] for 250 on the thumb, ~0.3 deg); the node maps that.
   joint_map:
-    little:     {q_at_0: 1.470, q_at_1000: 0.037, verified: false}
-    ring:       {q_at_0: 1.470, q_at_1000: 0.031, verified: false}
-    middle:     {q_at_0: 1.470, q_at_1000: 0.032, verified: false}
-    index:      {q_at_0: 1.470, q_at_1000: 0.029, verified: false}
-    thumb_bend: {q_at_0: 0.770, q_at_1000: 0.120, verified: false}
+    little:     {q_at_0: 1.373, q_at_1000: 0.128, verified: false}
+    ring:       {q_at_0: 1.373, q_at_1000: 0.122, verified: false}
+    middle:     {q_at_0: 1.373, q_at_1000: 0.123, verified: false}
+    index:      {q_at_0: 1.373, q_at_1000: 0.120, verified: false}
+    thumb_bend: {q_at_0: 0.650, q_at_1000: 0.082, verified: false}
     thumb_rot:  {q_at_0: 1.308, q_at_1000: 0.0,   verified: false}
 
   mount:
@@ -84,21 +81,18 @@ inspire_hand:
     controller_frame: fr3_hand_tcp
     # The hand's axis along the flange's; its palm normal = Rz(yaw) * fr3_link8 +X.
     # MEASURED by touch (M3, 2026-10-05): 15 touches, 8 with the index fingertip
-    # (touches_20261005_212605.json) and 7 with the little one (touches_20261005_214936.json);
-    # all four numbers free, condition 3, rms 1.6 mm (table 1.1, slot marks 2.0 -- the ring's
-    # play is +-2.5 mm at the fingertips). At home the palm faces the robot's base and the
-    # thumb is on its left, as the user saw (yaw ~135; the first estimate, -45, was half a
-    # turn off). One finger alone cannot tell yaw from offset: the index alone said 116 deg,
-    # the little finger alone 151, each held centred.
-    yaw_deg: 136.66             # +- 1.4
-    # Flange face -> the hand's wrist face (its base ring's face), along the axis: 11.0 +- 0.5 mm.
-    # The 3D-printed mount alone measured 16 by ruler: the hand sits ~5 mm deeper (a rim or a
-    # recess?), or the model's fingers are a little long (step 3: the middle finger 2 mm short).
-    adapter_thickness_m: 0.0110
-    # The wrist face's centre off the flange axis, fr3_link8 x y: 10.6 mm, +- 0.9 per axis. At
-    # home that is 10.6 mm towards the robot's base, the palm's side. Unexpected for a printed
-    # mount (the fit calls anything over 10 mm implausible): to check by eye (INSPIRE_HAND.md).
-    lateral_m: [-0.0072, 0.0078]
+    # (touches_20261005_212605.json), 7 with the little one (touches_20261005_214936.json),
+    # fitted with the fingers' bend at 1000 and the offset held at 0, since the ring is
+    # concentric with the flange (the user): `python -m tpgpt.hardware.inspire_mount fit
+    # <both files> --finger-bend`. Condition 3, rms 1.7 mm (table 1.1, slot marks 2.1; the
+    # ring's play is +-2.5 mm at the fingertips). At home the palm faces the robot's base and
+    # the thumb is on its left, as the user saw (the first estimate, -45, was half a turn off).
+    yaw_deg: 137.11             # +- 1.4
+    # Flange face -> the hand's wrist face (its base ring's face), along the axis: 12.45 +- 0.5
+    # mm. The 3D-printed mount alone measured 16 by ruler: the hand sits ~3.5 mm deeper (a rim
+    # or a recess?), or the model's fingers are a little long.
+    adapter_thickness_m: 0.01245
+    lateral_m: [0.0, 0.0]       # the ring is concentric with the flange (the user, 2026-10-05)
     adapter_radius_m: 0.0315    # the adapter plate, a body piece of the hand (flange: 63 mm)
     measured: true              # M3, 2026-10-05: by touch, both fingers (above)
     # The hand's ring is held by tape over two loose screws, and rocks about one line: the

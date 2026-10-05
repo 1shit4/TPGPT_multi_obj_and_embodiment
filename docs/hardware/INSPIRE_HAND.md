@@ -194,7 +194,7 @@ Each measurement has a pass criterion. Results go into `config/inspire_hand.yaml
 | M1 | Yaw and handedness | At home (`joint_homing`): fingers down; which way the palm faces; the thumb's side | by eye; no 90 or 180 deg error. **2026-10-05: palm towards the base, thumb on the robot's left: yaw 135, not the estimated -45** (a right hand, as the box says) |
 | M2 | Adapter thickness | The flange-mount seam is under tape: from the printed part's file if there is one, else from M3's fit (the ruler gives only the beige band, flange part included) | within 1 mm; into `adapter_thickness_m`. **The printed part alone, by ruler 2026-10-05: 16 mm** (the estimate was 12); M3 refines it |
 | M2b | Play at the ring | Rock the palm gently against the held flange; how far the middle fingertip moves (`INSPIRE_MEASURING.md` step 4) | under about 1 mm, or M3's residual and the grasp tests are read with it in mind. **2026-10-05: ~5 mm across the palm only** (section 2) |
-| M3 | The mount, by touch | Below | table RMS within 2 mm, marks within 3 mm (the ring's play adds up to ~2.5 mm). **Done 2026-10-05, both fingers, 15 touches: yaw 136.7 +- 1.4 deg, thickness 11.0 +- 0.5 mm, offset 10.6 mm (+-0.9) towards the palm's side; rms table 1.1, marks 2.0 mm: passes.** The offset is unexpected: an eye check is pending |
+| M3 | The mount, by touch | Below | table RMS within 2 mm, marks within 3 mm (the ring's play adds up to ~2.5 mm). **Done 2026-10-05, both fingers, 15 touches, the ring concentric: yaw 137.1 +- 1.4 deg, thickness 12.45 +- 0.5 mm, the fingers bent 5.2 deg at 1000; rms table 1.1, marks 2.1 mm: passes** |
 | M4 | Register to joint map | Ruler distances at registers 1000/750/500/250/0: the middle fingertip below the ring's face (thumb swung out), the thumb tip to the index tip (fingers open), against `python -m tpgpt.hardware.inspire_model landmarks --registers ...` (`middle_length`, `thumb_to_index`); 1 mm is about 0.5 deg | within 3 mm; else fit q_at_0/q_at_1000 into `joint_map`. **Done by ruler 2026-10-05** (section 7): fitted, still unverified |
 | M5 | Payload | Weigh hand, adapter and screws; centre of mass; set in Desk | force estimate at rest under 1.5 N in 3 orientations |
 | M6 | Grasp depth | Grasp-test sweep, below | the middle of the plateau into `graspgenx.calibrated_depth_m` |
@@ -217,31 +217,49 @@ tilted 15-30 deg in a different direction. Then touch each top slot mark: `p top
 finger from the hand's registers). `f` fits; the yaml block it prints goes into
 `config/inspire_hand.yaml`.
 
-**Result (2026-10-05).** `python -m tpgpt.hardware.inspire_mount fit
-~/inspire_mount/touches_20261005_212605.json ~/inspire_mount/touches_20261005_214936.json`
-(8 index, 7 little-finger touches): yaw 136.7 +- 1.4 deg, thickness 11.0 +- 0.5 mm, offset
-(-7.2, +7.8) +- 0.9 mm in `fr3_link8` -- 10.6 mm, at home towards the robot's base (the palm's
-side); condition 3; rms 1.6 mm (table 1.1, slot marks 2.0); no touch over 5.4 mm. In the config.
-The grasp point is now (-70.4, -11.3, 59.6) mm from `fr3_hand_tcp`: 11 mm from where the eye's
-135 deg / 16 mm / centred put it, 23 mm from the index-only fit's. An offset of 10.6 mm is more
-than a printed mount should allow; whether the ring really sits that far off the flange's
-centre is to be checked by eye (the ring's edge should stand ~21 mm further out on the palm's
-side than on the back's, relative to the beige band).
+**Result (2026-10-05).** 15 touches: 8 with the index fingertip
+(`touches_20261005_212605.json`), 7 with the little one (`touches_20261005_214936.json`).
+Fitted with all four numbers free they say yaw 136.7 deg, thickness 11.0 mm and the ring
+**10.6 mm off-centre** (rms 1.6 mm). But the ring is concentric with the flange (the user, who
+looked: the beige band, the flange and the ring line up), and in the manufacturer's mesh the
+ring is centred on the hand's axis to 0.0 mm. So the 10.6 mm is not in the mount -- and it lies
+entirely **along the palm's normal** (+10.6 mm towards the palm, -0.8 across it): both
+fingertips sit 10.6 mm further towards the palm than the model puts them. Fingers that at
+register 1000 are bent a little towards the palm do exactly that. Fitted that way --
+`python -m tpgpt.hardware.inspire_mount fit <both files> --finger-bend` (offset held at 0):
+
+| | value | |
+|---|---|---|
+| yaw | 137.1 +- 1.4 deg | the user saw ~135 at home |
+| thickness | 12.45 +- 0.5 mm | the printed part alone: 16 by ruler |
+| the fingers' bend at 1000 | 5.2 +- 0.45 deg (0.091 rad) towards the palm | index alone 3.9, little 7.2 (+-1; they trade off against the yaw) |
+| rms | 1.7 mm | table 1.1, slot marks 2.1 (the ring's play: +-2.5 at the tips) |
+
+The bend explains two ruler readings too: the middle finger read 216 mm at 1000, the model with
+the bend gives 216.4 (straight, 218.0); and part of the thumb's "extra bend" was the index's (the
+thumb's open end refits to 0.082 rad, from 0.12). In the config: the mount above, every finger's
+`q_at_1000` + 0.091, the ruler maps refitted with it. The grasp point is (-59.7, -12.2, 61.1) mm
+from `fr3_hand_tcp`, within 4 mm of the eye's estimate.
+
+**The open hand is 27 mm narrower than GraspGen-X's model**: at register 1000 the thumb's tip is
+48 mm from the grasp axis and the middle fingertip 76 mm on the other side (GraspGen-X's open,
+every joint at 0: 63 and 89). GraspGen-X samples grasps for the wider hand; `judge_hand`
+checks them on the measured one.
 
 **Why both fingers.** Touches with one fingertip only say where that one point is relative to
 the flange: three numbers, however the wrist is tilted. The mount has four, and turning the hand
 about the flange axis or shifting it sideways both just move that point. The first live fit
-(index only, 2026-10-05 21:26, 8 touches) showed it: yaw +-405 deg, offset +-160 mm, thickness
-+-0.8 mm. Held centred, the yaw is 116.4 +- 2.8 deg; held at the eye's 135, the hand is 9.8 mm
-off-centre; both fit to 1.7-1.9 mm, and they put the grasp point **20 mm** apart. The little
-fingertip, 68 mm across the palm, is 23 mm apart in the two -- easy to see. With one finger's
-touches the fit holds the offset (at the config's) and says so (`--free` frees it).
+(index only, 8 touches) showed it: yaw +-405 deg, offset +-160 mm, thickness +-0.8 mm. Each
+finger alone, held centred, gave 116 and 151 deg. Two fingers 68 mm apart across the palm
+separate the yaw from anything that moves both tips alike -- an offset, or a bend. They cannot
+separate an offset along the palm's normal from a bend towards the palm: only knowing the
+ring is concentric did. With one finger's touches the fit holds the offset (at the config's)
+and says so (`--free` frees it).
 
-**The thickness, 11.8 mm, against the ruler's 16.** The touches measure flange to index tip,
-225.6 mm along the axis; the model's index is 213.8 of it. Either the hand sits 4 mm deeper
-than the printed part's length (a rim, or the ring in a recess), or the model's finger is a
-little long (step 3 read the middle finger 2 mm short of it). For the fingertips the touched
-value is right whichever it is; for the palm it is within those 4 mm.
+**The thickness, 12.45 mm, against the ruler's 16.** The hand sits ~3.5 mm deeper than the
+printed part's length (a rim, or the ring in a recess), or the model's fingers are a little
+long. For the fingertips the touched value is right either way; for the palm it is within those
+3.5 mm.
 
 ## 5. Grasp tests (the grasp on its own, before any transport)
 
@@ -292,34 +310,31 @@ Measured on the 10-03 captures, with the estimated mount and GraspGen-X's shippe
 - **Reach is the transport's problem.** Of 10 planned per slot: apple 1 / 0, mug 0 / 3, the rest
   0 (top_left / top_right). The hand is 62 mm longer than the jaw, and the carry most often
   brings the wrist within 20 mm of full stretch.
-- **The register map, by ruler (M4, 2026-10-05; `INSPIRE_MEASURING.md` step 3).** The readings
-  carry about +-5 mm each (parallax, the ruler's tilt, where on the tip it was read; the hand's
-  own shortfall, ANGLE_ACT a few units under the command, is ~0.3 deg), so the map stays
-  `verified: false`. They still decide, because the manual-derived map missed them by up to 22 mm.
+- **The register map (M4 by ruler, M3 by touch; 2026-10-05; `INSPIRE_MEASURING.md` step 3).**
+  The ruler readings carry about +-5 mm each (parallax, the ruler's tilt, where on the tip it
+  was read; the hand's own shortfall, ANGLE_ACT a few units under the command, is ~0.3 deg), so
+  the map stays `verified: false`. They still decide, because the manual-derived map missed them
+  by up to 22 mm. The fingers' open end comes from the mount touches (section 4: 5.2 deg towards
+  the palm at 1000); the rest is fitted to the ruler with it.
 
   | | 1000 | 750 | 500 | 250 | 0 |
   |---|---|---|---|---|---|
   | middle tip below the ring's face, read | 216 | 195 | 168 | 125 | 89 |
   | the manual's map | 218 | 196 | 149 | 103 | 84 |
-  | the fitted map (fingers 0.032 -> 1.47) | 218 | 201 | 162 | 118 | 90 |
+  | the measured map (fingers 0.123 -> 1.373) | 216 | 197 | 162 | 124 | 95 |
   | thumb to index, tip centres, read | 120 | 92 | 73 | 64 | -- |
   | the manual's map | 137 | 108 | 82 | 66 | -- |
-  | the fitted map (thumb 0.12 -> 0.77) | 121 | 94 | 72 | 64 | -- |
+  | the measured map (thumb 0.082 -> 0.650) | 119 | 94 | 73 | 61 | -- |
 
-  - **Fingers:** straight at 1000, as modelled (216 against 218). A straight-line map fits every
-    reading within 7 mm with the full curl at 1.42-1.51 rad, depending on which point of the tip
-    the ruler read; the URDF's own limit, **1.47**, is in that range and is used. The manual's
-    1.68-1.77 is wrong for this hand: **GraspGen-X's `close` is the fingers' full curl.** The
-    near-closed readings carry no angle (the tip's height barely changes there), so the full
-    curl comes from the middle readings. Only the middle finger was read; the other three take
-    its value (same mechanism, same URDF limit).
-  - **Thumb:** **0.06-0.12 rad (3-7 deg) more bent than modelled at every setting**, however the
-    reading is taken (at the very ends: 0.15 at 1000; 12-30 mm back from them, as read: 0.11-0.13;
-    at the segments' middles: 0.08, a worse fit). Used: 0.12 open, 0.77 closed (the span, 0.65,
-    is near the URDF's 0.6). **When open, the thumb's tip is 17 mm nearer the grasp axis than the
-    manual's map had it** (41 mm from it instead of 58; GraspGen-X's own open, pitch 0, is
-    straighter still): the open hand is narrower than the generator thinks. A 70 mm ball centred
-    on the grasp point has 6 mm to spare on the thumb's side (the old model gave 23).
+  - **Fingers:** at 1000, 0.12-0.13 rad (5 deg plus the manual's 2) short of straight -- the
+    touches, and the ruler's 216 against a straight 218 agrees. Full curl **1.373 rad**, from the
+    middle readings (the near-closed ones carry no angle: the tip's height barely changes there);
+    within 6 mm of every reading. That is short of the URDF's limit, 1.47: **GraspGen-X's `close`
+    curls further than the real fingers.** The manual's 1.68-1.77 is wrong for this hand. Only the
+    middle finger was read; the other three take its value (same mechanism).
+  - **Thumb:** 0.082 rad when open (the manual's 0.028), 0.650 closed (0.690); within 3.3 mm of
+    the readings. Before the fingers' bend was known it fitted 0.12 -> 0.77: part of the thumb's
+    apparent bend was the index's.
   - **Thumb rotation:** not measured (the URDF's full 1.308 rad span, the manual's 75 deg).
   - What the map changes: the planner uses only each DOF's two ends (the open hand and the
     farthest close); the middle of the map only turns the hand's reported registers into angles

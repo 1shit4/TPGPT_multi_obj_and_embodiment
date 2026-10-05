@@ -66,6 +66,8 @@ POSE_TOLERANCE = 40
 DISAGREES_MM = 5.0
 #: The four fitted numbers, in ``inspire_end_effector``'s units (deg, m, m, m).
 PARAMS = ("mount_yaw_deg", "adapter_thickness", "lateral_x", "lateral_y")
+#: The fingers' DOFs whose open end (``q_at_1000``) the optional ``finger_bend`` shifts.
+FINGERS = ("little", "ring", "middle", "index")
 
 
 @dataclass
@@ -94,6 +96,19 @@ def pointing_finger(registers) -> str | None:
         if max(abs(int(a) - int(b)) for a, b in zip(registers, pose)) <= POSE_TOLERANCE:
             return finger
     return None
+
+
+def with_finger_bend(base: dict | None, bend: float) -> dict:
+    """``base`` with every finger's open end (``q_at_1000``) bent ``bend`` rad further."""
+    from tpgpt.hardware.inspire_model import joint_map_from_config
+
+    base = dict(base or {})
+    jm = dict(base.get("joint_map") or joint_map_from_config({}))
+    for f in FINGERS:
+        q0, q1, ok = jm[f]
+        jm[f] = (q0, q1 + float(bend), ok)
+    base["joint_map"] = jm
+    return base
 
 
 def _mount(params) -> dict:
@@ -140,8 +155,8 @@ def touch_residual(touch: Touch, params, base: dict | None = None) -> np.ndarray
 class MountFit:
     """What :func:`fit_mount` found."""
 
-    params: dict                                   # PARAMS -> value
-    stderr: dict                                   # PARAMS -> standard error
+    params: dict                                   # PARAMS (+ finger_bend) -> value
+    stderr: dict                                   # the same -> standard error
     residuals_mm: list                             # per touch: its residual vector, mm
     rms_mm: dict                                   # "table", "point", "all"
     start: dict
@@ -153,20 +168,27 @@ class MountFit:
 
     def yaml_block(self) -> str:
         p = self.params
-        return ("  mount:\n"
+        bend = ""
+        if "finger_bend" in p:
+            bend = (f"  # and every finger's joint_map q_at_1000 + {p['finger_bend']:.3f} rad "
+                    "(finger_bend)\n")
+        return (bend + "  mount:\n"
                 "    controller_frame: fr3_hand_tcp\n"
                 f"    yaw_deg: {p['mount_yaw_deg']:.2f}\n"
                 f"    adapter_thickness_m: {p['adapter_thickness']:.4f}\n"
                 f"    lateral_m: [{p['lateral_x']:.4f}, {p['lateral_y']:.4f}]\n"
                 + ("    measured: true" if not self.held else
+                   "    measured: true   # offset 0: the ring is concentric (finger_bend fitted)"
+                   if "finger_bend" in p else
                    "    measured: false   # the offset was held: touch with both fingers"))
 
     def describe(self, touches) -> str:
         lines = [f"fit from {len(touches)} touches ({self.n_equations} equations), condition "
                  f"{self.condition:.0f}:"]
         units = {"mount_yaw_deg": ("deg", 1.0), "adapter_thickness": ("mm", 1000.0),
-                 "lateral_x": ("mm", 1000.0), "lateral_y": ("mm", 1000.0)}
-        for k in PARAMS:
+                 "lateral_x": ("mm", 1000.0), "lateral_y": ("mm", 1000.0),
+                 "finger_bend": ("deg", float(np.degrees(1.0)))}
+        for k in [k for k in units if k in self.params]:
             u, s = units[k]
             spread = "HELD" if k in self.held else f"+- {self.stderr[k] * s:.2f}"
             lines.append(f"  {k:18s} {self.params[k] * s:9.2f} {u}  {spread}"
@@ -181,7 +203,7 @@ class MountFit:
 
 
 def fit_mount(touches: list[Touch], start: dict | None = None, base: dict | None = None,
-              hold: tuple | None = None) -> MountFit:
+              hold: tuple | None = None, finger_bend: bool = False) -> MountFit:
     """Least-squares mount from touches (module docstring).
 
     Args:
@@ -189,8 +211,12 @@ def fit_mount(touches: list[Touch], start: dict | None = None, base: dict | None
             the robot's tools pass the config's, since 2026-10-05 135 deg and 16 mm).
         base: the other ``inspire_end_effector`` arguments (description, joint map).
         hold: :data:`PARAMS` kept at their start values. ``None`` = the lateral offset when
-            every touch is with the same finger (it cannot be told from the yaw then),
-            nothing otherwise; ``()`` = nothing.
+            every touch is with the same finger (it cannot be told from the yaw then), or
+            when ``finger_bend`` is fitted; nothing otherwise; ``()`` = nothing.
+        finger_bend: also fit one angle (rad) added to every finger's open end
+            (``q_at_1000``). Touches cannot tell fingers bent towards the palm from a hand
+            shifted that way, so the offset is held then (the hand's ring is concentric
+            with the flange: the user, 2026-10-05). See the module docstring.
     """
     from scipy.optimize import least_squares
 
@@ -199,6 +225,11 @@ def fit_mount(touches: list[Touch], start: dict | None = None, base: dict | None
     x0 = np.array([s0[k] for k in PARAMS], dtype=float)
     notes = []
     fingers = sorted({t.link for t in touches})
+    names = PARAMS + (("finger_bend",) if finger_bend else ())
+    s0.setdefault("finger_bend", 0.0)
+    x0 = np.array([s0[k] for k in names], dtype=float)
+    if hold is None and finger_bend:
+        hold = ("lateral_x", "lateral_y")
     if hold is None:
         hold = ("lateral_x", "lateral_y") if len(fingers) < 2 else ()
         if hold:
@@ -210,23 +241,25 @@ def fit_mount(touches: list[Touch], start: dict | None = None, base: dict | None
                             if fingers[0] == TOUCH_LINKS["little"] else
                             "little finger too (/inspire_hand/point_little)")
                          + " to measure it; fit both files together.")
-    free = [k for k in PARAMS if k not in hold]
-    # Scale so a degree and a millimetre weigh alike in the solver.
-    scale = np.array([{"mount_yaw_deg": 1.0}.get(k, 0.001) for k in free])
+    free = [k for k in names if k not in hold]
+    # Scale so a degree, a millimetre and 0.01 rad of bend weigh alike in the solver.
+    scale = np.array([{"mount_yaw_deg": 1.0, "finger_bend": 0.01}.get(k, 0.001) for k in free])
 
     def full(x):
         v = x0.copy()
         for k, value in zip(free, x):
-            v[PARAMS.index(k)] = value
+            v[names.index(k)] = value
         return v
 
     def residuals(x):
-        return np.concatenate([touch_residual(t, full(x), base) for t in touches])
+        v = full(x)
+        b = with_finger_bend(base, v[names.index("finger_bend")]) if finger_bend else base
+        return np.concatenate([touch_residual(t, v[:len(PARAMS)], b) for t in touches])
 
     n = sum(1 if t.kind == "table" else 3 for t in touches)
     if n < len(free):
         raise ValueError(f"{n} equations for {len(free)} unknowns: touch more")
-    sol = least_squares(residuals, x0[[PARAMS.index(k) for k in free]], x_scale=scale,
+    sol = least_squares(residuals, x0[[names.index(k) for k in free]], x_scale=scale,
                         method="lm" if n >= len(free) else "trf")
     J = sol.jac
     dof = max(n - len(free), 1)
@@ -237,16 +270,16 @@ def fit_mount(touches: list[Touch], start: dict | None = None, base: dict | None
         stderr_free = np.sqrt(np.clip(np.diag(cov), 0.0, None))
     except np.linalg.LinAlgError:
         notes.append("the touches do not determine every number (singular): vary the wrist")
-    stderr = np.zeros(len(PARAMS))
+    stderr = np.zeros(len(names))
     for k, e in zip(free, stderr_free):
-        stderr[PARAMS.index(k)] = e
+        stderr[names.index(k)] = e
     Js = J * scale
     sv = np.linalg.svd(Js, compute_uv=False)
     condition = float(sv[0] / max(sv[-1], 1e-15))
     if condition > 1e3:
         notes.append(f"poorly conditioned ({condition:.0f}): tilt the hand more between touches, "
                      "and touch with both fingers")
-    yaw, a, lx, ly = full(sol.x)
+    yaw, a, lx, ly = full(sol.x)[:len(PARAMS)]
     if not 0.0 <= a <= 0.06 or np.hypot(lx, ly) > 0.010 or abs(yaw - x0[0]) > 30.0:
         notes.append(f"IMPLAUSIBLE mount (adapter {a * 1000:.1f} mm, lateral "
                      f"{np.hypot(lx, ly) * 1000:.1f} mm, yaw {yaw - x0[0]:+.1f} deg from the "
@@ -265,9 +298,9 @@ def fit_mount(touches: list[Touch], start: dict | None = None, base: dict | None
     rms = {name: float(np.sqrt(np.mean(np.concatenate([np.square(r) for r in rows]))))
            for name, rows in kinds.items() if rows}
     rms["all"] = float(np.sqrt(np.mean(np.square(sol.fun)))) * 1000.0
-    return MountFit(params=dict(zip(PARAMS, full(sol.x).tolist())),
-                    stderr=dict(zip(PARAMS, stderr.tolist())),
-                    residuals_mm=per, rms_mm=rms, start={k: s0[k] for k in PARAMS},
+    return MountFit(params=dict(zip(names, full(sol.x).tolist())),
+                    stderr=dict(zip(names, stderr.tolist())),
+                    residuals_mm=per, rms_mm=rms, start={k: s0[k] for k in names},
                     n_equations=n, condition=condition, notes=notes, held=list(hold),
                     fingers=fingers)
 
@@ -308,6 +341,9 @@ def main(argv=None) -> int:
     f.add_argument("touches", nargs="+")
     f.add_argument("--free", action="store_true",
                    help="fit all four numbers even if every touch is with one finger")
+    f.add_argument("--finger-bend", action="store_true",
+                   help="fit the fingers' bend at register 1000 instead of an offset "
+                        "(the offset held at 0: the ring is concentric with the flange)")
     f.add_argument("--config", default=None, help="inspire_hand.yaml (start values, joint map)")
     o = sub.add_parser("offsets", help="the index tip in fr3_hand_tcp, in POINT_POSE")
     o.add_argument("--config", default=None)
@@ -326,7 +362,10 @@ def main(argv=None) -> int:
               f"\"[{in_tcp[0]:.4f}, {in_tcp[1]:.4f}, {in_tcp[2]:.4f}]\"")
         return 0
     touches = [t for path in a.touches for t in load_touches(path)]
-    result = fit_mount(touches, start, base, hold=() if a.free else None)
+    if a.finger_bend:                       # the ring is concentric (the user, 2026-10-05)
+        start = {**start, "lateral_x": 0.0, "lateral_y": 0.0}
+    result = fit_mount(touches, start, base, hold=() if a.free else None,
+                       finger_bend=a.finger_bend)
     print(result.describe(touches))
     print("\nfor config/inspire_hand.yaml (then colcon build):\n" + result.yaml_block())
     return 0

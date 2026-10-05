@@ -163,12 +163,12 @@ POINT_POSES = {"index": POINT_POSE, "little": POINT_POSE_LITTLE}
 #: goto() leaves a DOF alone when it is already this close to its target (register units).
 GOTO_TOLERANCE = 20
 
-#: Register -> URDF angle: the ruler fit of 2026-10-05 (config/inspire_hand.yaml
-#: joint_map explains; about +-5 mm per reading, so still flagged unverified). The
-#: config's block overrides it.
+#: Register -> URDF angle, measured 2026-10-05 (config/inspire_hand.yaml joint_map
+#: explains): the fingers' open end from the mount touches, the rest from the ruler.
+#: Still flagged unverified. The config's block overrides it.
 DEFAULT_JOINT_MAP = {
-    "little": (1.470, 0.037), "ring": (1.470, 0.031), "middle": (1.470, 0.032),
-    "index": (1.470, 0.029), "thumb_bend": (0.770, 0.120), "thumb_rot": (1.308, 0.0),
+    "little": (1.373, 0.128), "ring": (1.373, 0.122), "middle": (1.373, 0.123),
+    "index": (1.373, 0.120), "thumb_bend": (0.650, 0.082), "thumb_rot": (1.308, 0.0),
 }
 
 
