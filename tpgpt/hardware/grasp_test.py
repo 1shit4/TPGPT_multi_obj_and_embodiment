@@ -272,8 +272,17 @@ def constructed_grasp_test(points, support_height, settings=None, path=None, end
     """:func:`constructed_grasp`'s test, path-checked: a
     :class:`~tpgpt.hardware.grasp_selection.Selection` with ``source`` ``"constructed"``.
 
+    The hand closes across the object's narrow side, then its long side, each both ways
+    (:func:`constructed_closings`): for a jaw the two ways are one grasp, for the Inspire hand
+    a half turn apart, and with it mounted as it is (yaw 137 deg) some need more turn than
+    joint 7 has -- the arm then contorts (2026-10-06, the foam brick at 294 deg: closing +x
+    needed joint 7 at its limit and the shoulder at +1.7 rad, links 5 and 7 touched; closing
+    -x passed). Of those that pass the whole-path check, the one whose start posture is
+    nearest the arm's joints (``path.start_q``) is taken: the executor moves the joints there
+    and refuses a move over ``start_joint_max_move`` (0.5 rad).
+
     Raises:
-        PlanningError: the whole-path check refused it.
+        PlanningError: the whole-path check refused every one.
     """
     import dataclasses
 
@@ -283,24 +292,59 @@ def constructed_grasp_test(points, support_height, settings=None, path=None, end
     ee = end_effector or FRANKA_HAND
     s = settings or SelectionSettings()
     pc = dataclasses.replace(path or PathContext(), end_effector=ee)
-    grasp = constructed_grasp(points, support_height, ee)
-    c = Candidate(index=-1, score=float("nan"), grasp=grasp, tilt_deg=_tilt_deg(grasp.approach))
-    result = grasp_test_plan(grasp, points, support_height, ee, object_name, depth_offset)
-    if s.check_path:
+    closings = constructed_closings(points)
+    if ee.symmetric:
+        closings = closings[::2]                   # a jaw: +-closing is the same grasp
+    tried, best = [], None
+    for name, closing in closings:
+        grasp = constructed_grasp(points, support_height, ee, closing=closing)
+        c = Candidate(index=-1, score=float("nan"), grasp=grasp, tilt_deg=_tilt_deg(grasp.approach))
+        result = grasp_test_plan(grasp, points, support_height, ee, object_name, depth_offset)
+        if not s.check_path:
+            best = (0.0, name, result, c)
+            break
         reason, _ = _path_verdict(result, c, s, pc)
         if reason is not None:
             c.rejected = reason
-            error = PlanningError(f"no_executable_grasp: the constructed grasp: {reason}")
-            error.candidates, error.fallback, error.stages = [], c, []
-            raise error
-    return Selection(result, c, [], "constructed", ["a grasp built by hand, for checking the "
-                                                    "frame chain; not the generator's"], [], 1)
+            tried.append(f"{name}: {reason}")
+            continue
+        move = 0.0
+        postures = getattr(result, "checked_postures", None)
+        if pc.start_q is not None and postures is not None and len(postures["q"]):
+            first = np.asarray(postures["q"])[int(np.argmin(np.asarray(postures["labels"])))]
+            move = float(np.max(np.abs(first - np.asarray(pc.start_q, dtype=float))))
+        tried.append(f"{name}: passes, its start {move:.2f} rad (largest joint) from the arm")
+        if best is None or move < best[0]:
+            best = (move, name, result, c)
+    if best is None:
+        error = PlanningError("no_executable_grasp: the constructed grasp, every way: "
+                              + "; ".join(tried))
+        error.candidates, error.fallback, error.stages = [], None, []
+        raise error
+    move, name, result, c = best
+    result.metrics["constructed_closing"] = name
+    note = ("a grasp built by hand, for checking the frame chain; not the generator's. "
+            f"Closing {name} (tried: " + "; ".join(tried) + ")")
+    return Selection(result, c, [], "constructed", [note], [], 1)
+
+
+def constructed_closings(points) -> list:
+    """The horizontal directions a hand can close across an object lying on a support,
+    from its footprint's principal axes:
+    ``[("narrow +", c), ("narrow -", -c), ("long +", d), ("long -", -d)]``."""
+    xy = np.atleast_2d(np.asarray(points, dtype=float))[:, :2]
+    _, _, axes = np.linalg.svd(xy - xy.mean(axis=0), full_matrices=False)
+    narrow = np.array([axes[1][0], axes[1][1], 0.0])
+    long_ = np.array([axes[0][0], axes[0][1], 0.0])
+    narrow, long_ = narrow / np.linalg.norm(narrow), long_ / np.linalg.norm(long_)
+    return [("narrow +", narrow), ("narrow -", -narrow), ("long +", long_), ("long -", -long_)]
 
 
 def constructed_grasp(points: np.ndarray, support_height: float, end_effector=None,
-                      clearance: float = 0.035) -> GraspFrame:
+                      clearance: float = 0.035, closing=None) -> GraspFrame:
     """A grasp built by hand: straight down onto the object's horizontal centre, closing
-    across its narrow horizontal side, the grasp point at half its height but at least
+    across its narrow horizontal side (or along ``closing``, horizontal), the grasp point at
+    half its height but at least
     ``clearance`` above the support (top-down, the closed Inspire hand reaches ~26 mm below
     its grasp point). For checking the frame chain: the hand must arrive as drawn."""
     points = np.atleast_2d(np.asarray(points, dtype=float))
@@ -314,9 +358,11 @@ def constructed_grasp(points: np.ndarray, support_height: float, end_effector=No
     top = float(points[:, 2].max())
     z = max(float(support_height) + 0.5 * (top - float(support_height)),
             float(support_height) + float(clearance))
+    if closing is not None:
+        narrow = np.array([float(closing[0]), float(closing[1]), 0.0])
     return GraspFrame(tcp=np.array([c[0], c[1], z]), approach=np.array([0.0, 0.0, -1.0]),
                       closing=narrow / np.linalg.norm(narrow))
 
 
-__all__ = ["constructed_grasp", "grasp_test_labels", "grasp_test_plan", "select_grasp_test",
-           "constructed_grasp_test"]
+__all__ = ["constructed_grasp", "constructed_closings", "grasp_test_labels", "grasp_test_plan",
+           "select_grasp_test", "constructed_grasp_test"]

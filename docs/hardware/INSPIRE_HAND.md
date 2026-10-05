@@ -274,9 +274,15 @@ ros2 run --prefix python3 ycb_pointcloud_pipeline tpgpt_pick_place --ros-args \
     -p end_effector:=inspire -p task:=grasp_test -p object_name:=apple -p dry_run:=false
 ```
 
-- `-p grasp_test_constructed:=true`: a grasp built by hand (straight down, closing across the
-  object's narrow side), not GraspGen-X's. It checks the frame chain: the hand must arrive as
-  drawn.
+- `-p grasp_test_constructed:=true`: a grasp built by hand (straight down), not GraspGen-X's.
+  It checks the frame chain: the hand must arrive as drawn. It closes across the object's narrow
+  side, else its long side, each with the thumb on either side, and takes the way whose start
+  posture is nearest the arm. For this hand the two thumb sides are different arm postures: with
+  the mount's yaw (137 deg), tilting only the wrist 45 deg from home makes a clean top-down grasp
+  with the **thumb towards the robot**; the thumb away from it needs joint 7 past its range, and
+  on the live brick of 2026-10-06 the arm then contorted (shoulder +1.7 rad, links 5 and 7 1.9 mm
+  into each other) and the plan was refused. The planned postures can look far from home in
+  joints 1 and 3 together: the elbow swivels (the arm has a seventh joint), not a contortion.
 - `-p grasp_test_library_index:=N -p grasp_test_depth_offset:=0.01`: the same library grasp,
   1 cm deeper. For the depth sweep (M6): 6 depths 10 mm apart, 3 tries each. Never in X6.
 - Dry runs (`dry_run` true, the default) simulate the motion. Offline, with no camera or robot,

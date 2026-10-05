@@ -139,6 +139,45 @@ def test_the_constructed_test_is_path_checked(inspire):
     assert sel.chosen.path_check["verdict"] is None
 
 
+def test_the_constructed_closings_are_both_sides_both_ways():
+    from tpgpt.hardware.grasp_test import constructed_closings
+
+    rng = np.random.default_rng(2)
+    box = rng.uniform([-0.044, -0.0175, 0.0], [0.044, 0.0175, 0.07], size=(2000, 3)) + [0.5, 0.1, TABLE]
+    names = [n for n, _ in constructed_closings(box)]
+    dirs = np.array([d for _, d in constructed_closings(box)])
+    assert names == ["narrow +", "narrow -", "long +", "long -"]
+    assert abs(dirs[0] @ [0.0, 1.0, 0.0]) == pytest.approx(1.0, abs=0.02)       # across 35 mm
+    assert dirs[1] == pytest.approx(-dirs[0]) and dirs[3] == pytest.approx(-dirs[2])
+
+
+def test_a_refused_way_falls_through_to_the_next(inspire, monkeypatch):
+    """The live brick of 2026-10-06: closing one way needed joint 7 past its limit (the arm
+    contorted, links 5 and 7 touched), the other way passed. Every way is tried."""
+    from tpgpt.hardware import grasp_selection
+    from tpgpt.hardware.grasp_test import constructed_grasp_test
+
+    real = grasp_selection._path_verdict
+    calls = []
+
+    def refuse_first(result, c, s, pc):
+        calls.append(c.grasp.closing.copy())
+        if len(calls) == 1:
+            return "collision: first at waypoint 0 (approach: self fr3_link5 <-> fr3_link7 x1)", False
+        return real(result, c, s, pc)
+
+    monkeypatch.setattr(grasp_selection, "_path_verdict", refuse_first)
+    sel = constructed_grasp_test(ball(), TABLE, SelectionSettings(), PathContext(world=_world()),
+                                 inspire, "ball")
+    assert sel.plan.metrics["constructed_closing"] != "narrow +"
+    assert "narrow +: collision" in sel.notes[0]
+    assert len(calls) == 4                                          # every way judged
+    monkeypatch.setattr(grasp_selection, "_path_verdict", lambda *a: ("refused", False))
+    with pytest.raises(PlanningError, match="every way"):
+        constructed_grasp_test(ball(), TABLE, SelectionSettings(), PathContext(world=_world()),
+                               inspire, "ball")
+
+
 def test_the_labels_carry_the_static_stiffness_the_gate_reads():
     L = grasp_test_labels(TOP_DOWN)
     assert L.stiffness[0] == pytest.approx(400.0 * np.eye(3))
