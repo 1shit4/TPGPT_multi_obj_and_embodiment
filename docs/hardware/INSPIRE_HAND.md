@@ -66,8 +66,8 @@ The mount, in `config/inspire_hand.yaml` `mount:`:
   middle fingertip is measured from the wrist face, and the URDF gives 217.9.
 - **`lateral_m`**: the wrist face's centre off the flange axis.
 
-With the current values (yaw 135 deg, seen; the adapter 16 mm by ruler; no lateral offset,
-an estimate) the grasp point sits (-60.1, -10.0, 64.6) mm from `fr3_hand_tcp`: 168 mm out along the
+With the touched values (yaw 136.7 deg, the adapter 11.0 mm, the ring 10.6 mm off-centre; M3)
+the grasp point sits (-70.4, -11.3, 59.6) mm from `fr3_hand_tcp`: 168 mm out along the
 flange's axis (152 of them the hand's own), against the Franka Hand's 103 mm.
 
 **How it is held (user, 2026-10-05).** A 3D-printed mount is screwed to the flange, and beige
@@ -194,7 +194,7 @@ Each measurement has a pass criterion. Results go into `config/inspire_hand.yaml
 | M1 | Yaw and handedness | At home (`joint_homing`): fingers down; which way the palm faces; the thumb's side | by eye; no 90 or 180 deg error. **2026-10-05: palm towards the base, thumb on the robot's left: yaw 135, not the estimated -45** (a right hand, as the box says) |
 | M2 | Adapter thickness | The flange-mount seam is under tape: from the printed part's file if there is one, else from M3's fit (the ruler gives only the beige band, flange part included) | within 1 mm; into `adapter_thickness_m`. **The printed part alone, by ruler 2026-10-05: 16 mm** (the estimate was 12); M3 refines it |
 | M2b | Play at the ring | Rock the palm gently against the held flange; how far the middle fingertip moves (`INSPIRE_MEASURING.md` step 4) | under about 1 mm, or M3's residual and the grasp tests are read with it in mind. **2026-10-05: ~5 mm across the palm only** (section 2) |
-| M3 | The mount, by touch | Below | table RMS within 2 mm, marks within 3 mm (the ring's play adds up to ~2.5 mm). **Index only, 2026-10-05**: thickness 11.8 +- 0.75 mm; yaw 116.4 +- 2.8 deg *if* centred -- one finger cannot separate yaw from offset; the little finger's touches decide |
+| M3 | The mount, by touch | Below | table RMS within 2 mm, marks within 3 mm (the ring's play adds up to ~2.5 mm). **Done 2026-10-05, both fingers, 15 touches: yaw 136.7 +- 1.4 deg, thickness 11.0 +- 0.5 mm, offset 10.6 mm (+-0.9) towards the palm's side; rms table 1.1, marks 2.0 mm: passes.** The offset is unexpected: an eye check is pending |
 | M4 | Register to joint map | Ruler distances at registers 1000/750/500/250/0: the middle fingertip below the ring's face (thumb swung out), the thumb tip to the index tip (fingers open), against `python -m tpgpt.hardware.inspire_model landmarks --registers ...` (`middle_length`, `thumb_to_index`); 1 mm is about 0.5 deg | within 3 mm; else fit q_at_0/q_at_1000 into `joint_map`. **Done by ruler 2026-10-05** (section 7): fitted, still unverified |
 | M5 | Payload | Weigh hand, adapter and screws; centre of mass; set in Desk | force estimate at rest under 1.5 N in 3 orientations |
 | M6 | Grasp depth | Grasp-test sweep, below | the middle of the plateau into `graspgenx.calibrated_depth_m` |
@@ -216,6 +216,17 @@ tilted 15-30 deg in a different direction. Then touch each top slot mark: `p top
 (`ros2 service call /inspire_hand/point_little std_srvs/srv/Trigger`; the recorder reads which
 finger from the hand's registers). `f` fits; the yaml block it prints goes into
 `config/inspire_hand.yaml`.
+
+**Result (2026-10-05).** `python -m tpgpt.hardware.inspire_mount fit
+~/inspire_mount/touches_20261005_212605.json ~/inspire_mount/touches_20261005_214936.json`
+(8 index, 7 little-finger touches): yaw 136.7 +- 1.4 deg, thickness 11.0 +- 0.5 mm, offset
+(-7.2, +7.8) +- 0.9 mm in `fr3_link8` -- 10.6 mm, at home towards the robot's base (the palm's
+side); condition 3; rms 1.6 mm (table 1.1, slot marks 2.0); no touch over 5.4 mm. In the config.
+The grasp point is now (-70.4, -11.3, 59.6) mm from `fr3_hand_tcp`: 11 mm from where the eye's
+135 deg / 16 mm / centred put it, 23 mm from the index-only fit's. An offset of 10.6 mm is more
+than a printed mount should allow; whether the ring really sits that far off the flange's
+centre is to be checked by eye (the ring's edge should stand ~21 mm further out on the palm's
+side than on the back's, relative to the beige band).
 
 **Why both fingers.** Touches with one fingertip only say where that one point is relative to
 the flange: three numbers, however the wrist is tilted. The mount has four, and turning the hand

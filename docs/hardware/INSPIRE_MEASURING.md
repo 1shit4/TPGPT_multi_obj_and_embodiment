@@ -300,6 +300,9 @@ Step 7b settles it.
 
 ## Step 7b -- the same with the little finger
 
+**Done 2026-10-05 21:49** (`touches_20261005_214936.json`, 7 touches). Fitted with the index
+touches: yaw 136.7, thickness 11.0 mm, the ring 10.6 mm off-centre (`INSPIRE_HAND.md`, M3).
+
 The little fingertip is 68 mm across the palm from the index tip: the two explanations put it
 **23 mm apart**, so a few touches decide. The config now holds "116 deg, centred": if the status
 line in Terminal D says the little tip is within a few mm of where it should be, that is right;

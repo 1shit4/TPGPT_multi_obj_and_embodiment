@@ -159,7 +159,7 @@ class MountFit:
                 f"    adapter_thickness_m: {p['adapter_thickness']:.4f}\n"
                 f"    lateral_m: [{p['lateral_x']:.4f}, {p['lateral_y']:.4f}]\n"
                 + ("    measured: true" if not self.held else
-                   "    measured: false   # the offset was held: touch with the little finger"))
+                   "    measured: false   # the offset was held: touch with both fingers"))
 
     def describe(self, touches) -> str:
         lines = [f"fit from {len(touches)} touches ({self.n_equations} equations), condition "
@@ -204,9 +204,12 @@ def fit_mount(touches: list[Touch], start: dict | None = None, base: dict | None
         if hold:
             notes.append(f"every touch is with {fingers[0]}: one fingertip cannot tell the yaw "
                          f"from a sideways offset, so the offset is HELD at "
-                         f"({s0['lateral_x'] * 1000:.1f}, {s0['lateral_y'] * 1000:.1f}) mm -- "
-                         "the hand assumed centred on the flange. Touch with the little "
-                         "finger too (/inspire_hand/point_little) to measure it.")
+                         f"({s0['lateral_x'] * 1000:.1f}, {s0['lateral_y'] * 1000:.1f}) mm, its "
+                         "start (the config's). Touch with the "
+                         + ("index finger too (/inspire_hand/point)"
+                            if fingers[0] == TOUCH_LINKS["little"] else
+                            "little finger too (/inspire_hand/point_little)")
+                         + " to measure it; fit both files together.")
     free = [k for k in PARAMS if k not in hold]
     # Scale so a degree and a millimetre weigh alike in the solver.
     scale = np.array([{"mount_yaw_deg": 1.0}.get(k, 0.001) for k in free])

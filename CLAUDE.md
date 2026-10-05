@@ -675,22 +675,28 @@ The planner's support height is: its `support_height` parameter, else the calibr
   26-DOP per link, the URDF's palm boxes, the adapter) by `grasp_selection.judge_hand`; the plan
   records where its fingers stop (`hand_closed_q`). An asymmetric hand keeps the generator's grasp:
   the demonstrating jaw takes the half turn instead (`plan.metrics["roll"]`, audit D3).
-- **Not measured yet** (all in `config/inspire_hand.yaml`, `measured: false`): the mount (**yaw
-  116.4, thickness 11.8 mm from index-finger touches, 2026-10-05 -- if the hand is centred**: one
-  fingertip cannot tell the yaw from a sideways offset (135 deg + 9.8 mm fits as well, 20 mm
-  apart at the grasp point); the little finger's touches decide (`inspire_touch` reads the
-  finger, `/inspire_hand/point_little`). The first estimate, -45, was half a turn off; the hand's ring is taped over loose screws and
-  rocks ~5 mm at the fingertips across the palm -- across the closing direction, not modelled; `inspire_touch` + `python -m tpgpt.hardware.inspire_mount fit`), the
-  register map (by ruler, 2026-10-05, rough: the fingers close to the URDF's 1.47 as GraspGen-X's
-  `close` does; the thumb is ~0.12 rad more bent than GraspGen-X's model at both ends, so the
-  open hand is narrower than the generator thinks), the grasp depth (`calibrated_depth_m` 0), Desk's payload. **Nothing has run on the robot.**
-  Measured on the bench (2026-10-05): the close is **simultaneous** (sequential pushes the
-  object away), 400 g per finger, the pudding box 150 (`grasp_forces.yaml` `inspire_grasp`).
-  **The hand reports a force stop as STATUS 2, not the manual's 3**: contact is judged by
-  where a DOF stopped (`inspire_hand.CONTACT_MARGIN`). **An empty close is an "opposed" fist**
-  (the thumb stops the middle and index fingers): a close **holds** something only when a finger
-  stops beyond the empty close's angles (`grasp.empty_close_angles`); the release after a held
-  close opens in one stage. **Every Inspire coverage number so far had the yaw -45 and is void.**
+- **Measured on the robot and the bench (2026-10-05; `config/inspire_hand.yaml`):**
+  - **The mount, by touch** (M3: index and little fingertips, 15 touches, rms 1.6 mm): yaw
+    136.7 +- 1.4 deg (the first estimate, -45, was half a turn off), thickness 11.0 mm (the
+    printed part alone: 16 by ruler), and the hand's ring **10.6 mm off the flange's centre**
+    towards the palm -- unexpected, an eye check pending. **One fingertip cannot tell the yaw
+    from an offset** (index alone: 116 deg, little alone: 151, each held centred): touch with
+    both (`/inspire_hand/point_little`; `inspire_touch` reads the finger).
+  - **The ring is taped over loose screws** and rocks ~5 mm at the fingertips across the palm
+    (across the closing direction; not modelled).
+  - **The register map, by ruler (rough):** the fingers close to the URDF's 1.47, as GraspGen-X's
+    `close` does; the thumb is ~0.12 rad more bent than GraspGen-X's model at both ends, so the
+    open hand is narrower than the generator thinks.
+  - **The close is simultaneous** (sequential pushes the object away), 400 g per finger, the
+    pudding box 150 (`grasp_forces.yaml` `inspire_grasp`). **The hand reports a force stop as
+    STATUS 2, not the manual's 3**: contact is judged by where a DOF stopped
+    (`inspire_hand.CONTACT_MARGIN`). **An empty close is an "opposed" fist** (the thumb stops the
+    middle and index fingers): a close **holds** something only when a finger stops beyond the
+    empty close's angles (`grasp.empty_close_angles`); the release after a held close opens in
+    one stage, and every open checks it opened.
+- **Not measured yet:** the grasp depth (`calibrated_depth_m` 0) and Desk's payload (M5).
+  **Nothing has run on the robot. Every Inspire coverage number so far is void** (the mount was
+  the -45 deg estimate).
 - **The hand's serial driver**: `sudo modprobe usbserial && sudo insmod ~/ch341/ch341.ko` after every
   boot (`insmod` alone fails with "Unknown symbol": it does not load `usbserial`). Desk is still
   configured for the Franka Hand (0.73 kg, CoM 30 mm out): the payload is to be measured (M5).
