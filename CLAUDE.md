@@ -697,10 +697,13 @@ The planner's support height is: its `support_height` parameter, else the calibr
     middle and index fingers): a close **holds** something only when a finger stops beyond the
     empty close's angles (`grasp.empty_close_angles`); the release after a held close opens in
     one stage, and every open checks it opened.
-- **Not measured yet:** the grasp depth (`calibrated_depth_m` 0). Desk's payload (M5): the robot
-  weighed the hand, cable included (`payload_measure`, `tpgpt/hardware/payload.py`): **0.708 kg
-  at (-9, 1, 55) mm** in the flange frame (the manufacturer's data: 0.568 kg at 88 mm; the cable
-  is taped along the last link); Desk to be set to it (it had the Franka Hand's 0.73 kg at 30 mm).
+- **Desk's payload is the weighed hand** (M5, 2026-10-05; `payload_measure`,
+  `tpgpt/hardware/payload.py`): **0.708 kg at (-9, 1, 55) mm** in the flange frame, cable included
+  (taped along the last link; the manufacturer's data alone: 0.568 kg at 88 mm). Desk's
+  flange-to-TCP stays the Franka Hand's (`fr3_hand_tcp`, what every tool commands). A re-weigh with
+  it in Desk agreed within the method's +-0.04 kg / +-15 mm (the arm's own model error at joint 2,
+  friction). `payload_measure` reads Desk's values from the robot at its start.
+- **Not measured yet:** the grasp depth (`calibrated_depth_m` 0).
 - **The robot's external torques and wrench are the force it applies, not the push on it**
   (push test 2026-10-05, `wrench_watch`: pushing the hand up made Fz go down). Anything reading
   `external_wrench_in_base_frame` or `external_joint_torques` (the X6 recorder too) must flip
