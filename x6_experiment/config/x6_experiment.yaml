@@ -84,7 +84,7 @@ hands:
   order: [panda, inspire]             # complete one hand before re-mounting
   files:
     panda: hands/panda.yaml
-    inspire: hands/inspire.yaml       # side grasp, no GraspGen-X (INSPIRE_HAND.md)
+    inspire: hands/inspire.yaml       # GraspGen-X grasps (docs/hardware/INSPIRE_HAND.md)
 
 # Every object that plans into both top slots (2026-09-26), except the banana, which is
 # the demonstrated object. Names are config/target_objects.yaml's (topic

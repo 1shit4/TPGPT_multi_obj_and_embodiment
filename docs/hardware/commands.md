@@ -331,11 +331,11 @@ ros2 run --prefix python3 ycb_pointcloud_pipeline tpgpt_pick_place --ros-args \
 ```
 X6 overrides some selection defaults from its frozen `method:` block; see
 `x6_experiment/RUNNING_THE_EXPERIMENT.md`. The Inspire hand's trials (ids 0025-0048) wait on its
-measurements (`ycb_pointcloud_pipeline/INSPIRE_HAND.md`).
+measurements (`docs/hardware/INSPIRE_HAND.md`).
 
 ### The Inspire hand
 
-Bring-up, measurements, grasp tests and transport: `ycb_pointcloud_pipeline/INSPIRE_HAND.md`. The
+Bring-up, measurements, grasp tests and transport: `docs/hardware/INSPIRE_HAND.md`. The
 usual ones:
 ```bash
 sudo insmod ~/ch341/ch341.ko                                    # once per boot: /dev/ttyUSB0

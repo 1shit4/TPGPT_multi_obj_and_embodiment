@@ -103,7 +103,7 @@ you, fingers up, the thumb is on your right). The 2026-09-15 integration (a scri
 grasp, a left hand, an estimated one-box envelope) is gone. The Inspire hand now takes
 GraspGen-X's grasps like the Franka Hand. Code: `tpgpt/hardware/inspire_model.py`,
 `end_effector.py`, `grasp_selection.judge_hand`, `planner.py` (the roll), `grasp_test.py`,
-`inspire_mount.py`. Run guide: `ycb_pointcloud_pipeline/INSPIRE_HAND.md`. "Pending" means it
+`inspire_mount.py`. Run guide: `docs/hardware/INSPIRE_HAND.md`. "Pending" means it
 waits on a robot measurement (M0-M9 there).
 
 | # | Sim | Hardware | Status |

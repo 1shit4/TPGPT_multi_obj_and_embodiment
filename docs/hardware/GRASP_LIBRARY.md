@@ -444,7 +444,7 @@ the 80 mm open hand and selection fell to one on its cap.
 
 The Inspire RH56DFX-2R has its own libraries: 2000 grasps per object from GraspGen-X's
 `inspire_hand` description. The cache key includes the gripper, so they sit beside the Franka
-Hand's. They are judged by the hand's own stage, `judge_hand` (`ycb_pointcloud_pipeline/INSPIRE_HAND.md`
+Hand's. They are judged by the hand's own stage, `judge_hand` (`docs/hardware/INSPIRE_HAND.md`
 §1), instead of the jaw check.
 
 **First coverage.** Conditions:

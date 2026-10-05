@@ -173,10 +173,10 @@ aborts and holds the current pose. CRISP also clips the pose error to 0.1 m / 0.
 
 ## 8. TPGPT: transported policy from real perception to the FR3
 
-> **Inspire RH56 hand instead of the Franka Hand:** mounting relative to joint 7, where the
-> gripper is switched, the side grasp for upright round objects (no GraspGen-X) and the
-> commands are in [INSPIRE_HAND.md](INSPIRE_HAND.md). In short: `inspire_hand_node`, and
-> `-p end_effector:=inspire -p gripper_mode:=inspire` on the planner / executor / teach node.
+> **The Inspire RH56DFX-2R instead of the Franka Hand:** GraspGen-X grasps on a model of the
+> hand, the mount, the measurements, grasp tests and the commands are in
+> [INSPIRE_HAND.md](../docs/hardware/INSPIRE_HAND.md). In short: `inspire_hand_node`, and
+> `-p end_effector:=inspire` on the planner (the executor follows the plan's hand).
 
 The full guide -- frames, the calibration file, how to verify the point cloud pose,
 how to teach the demonstration, what each check measures, and what was validated -- is

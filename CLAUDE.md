@@ -648,7 +648,7 @@ The planner's support height is: its `support_height` parameter, else the calibr
 - `docs/hardware/HARDWARE_EXPERIMENT.md` + `docs/hardware/HANDOVER_PROMPT.md` — the X6 experiment
   brief and its rules (one demonstration, no per-hand tuning, never force a grasp rank, clean tree).
 - `x6_experiment/RUNNING_THE_EXPERIMENT.md` — operating the X6 harness.
-- `ycb_pointcloud_pipeline/INSPIRE_HAND.md` — the Inspire RH56DFX-2R (a right hand): GraspGen-X
+- `docs/hardware/INSPIRE_HAND.md` — the Inspire RH56DFX-2R (a right hand): GraspGen-X
   grasps on a model of the hand, the mount, the measurements M0-M9, grasp tests, transport.
 - `docs/hardware/hardware_integration.md` — the operating manual of the bridge: frames, verifying the
   cloud, **teaching a demonstration (keys, order, refusals)**, planning, execution.
@@ -661,7 +661,7 @@ The planner's support height is: its `support_height` parameter, else the calibr
 
 - **The Franka Hand runs are done; the Inspire RH56DFX-2R is mounted** -- a **right** hand (the
   2026-09-15 notes said left: wrong). Plan: `~/.claude/plans/this-repo-is-executing-calm-trinket.md`;
-  run guide `ycb_pointcloud_pipeline/INSPIRE_HAND.md`; deviations `FAITHFULNESS_AUDIT.md` section D.
+  run guide `docs/hardware/INSPIRE_HAND.md`; deviations `FAITHFULNESS_AUDIT.md` section D.
 - **The scripted side grasp is gone.** The Inspire hand takes GraspGen-X's `inspire_hand` grasps,
   judged on a model of the hand from GraspGen-X's own URDF (`tpgpt/hardware/inspire_model.py`:
   26-DOP per link, the URDF's palm boxes, the adapter) by `grasp_selection.judge_hand`; the plan

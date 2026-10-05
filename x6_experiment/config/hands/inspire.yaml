@@ -4,7 +4,7 @@
 # hand's first trial, then never changed. The numbers the planner uses are the ones in
 # end_effector_config (inspire_hand.yaml); these record them for the paper.
 #
-# How this hand differs from the Franka Hand in the pipeline (INSPIRE_HAND.md):
+# How this hand differs from the Franka Hand in the pipeline (docs/hardware/INSPIRE_HAND.md):
 #   * GraspGen-X grasps for its own description (inspire_hand, the same right hand), judged
 #     on a model of the hand (tpgpt.hardware.inspire_model) instead of the jaw checks;
 #   * the plan's grasp point is GraspGen-X's for this hand (between thumb and fingers), its

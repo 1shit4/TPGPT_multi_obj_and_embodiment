@@ -11,7 +11,7 @@ again with the next trial id.
 Everything below is built except the **robustness re-runs** (Phase 5, step 2). The
 **Inspire hand** is integrated in code (2026-09-15) but has not run a trial yet, nor
 planned since the 2026-09-26 move; its mount, grasp and caveats are in
-`ycb_pointcloud_pipeline/INSPIRE_HAND.md`. The config was reworked on 2026-09-29 for the
+`docs/hardware/INSPIRE_HAND.md`. The config was reworked on 2026-09-29 for the
 current setup and will be again when more grippers work.
 
 **The object protocol and the log lines** are in `docs/hardware/OPERATOR_CHECKLIST.md`:
@@ -216,7 +216,7 @@ reuse this one. A Ctrl-C during the questions writes what was answered and marks
 
 ## Phase 4: re-mount and Inspire trials
 
-1. Mount the Inspire hand as `ycb_pointcloud_pipeline/INSPIRE_HAND.md` describes, measure
+1. Mount the Inspire hand as `docs/hardware/INSPIRE_HAND.md` describes, measure
    the `MEASURE` lengths into `ycb_pointcloud_pipeline/config/inspire_hand.yaml` and the
    `TO_FILL` fields of `hands/inspire.yaml`, rebuild. Update Desk (end effector: the
    Inspire hand's mass and centre of mass). Take **photo 5**.
