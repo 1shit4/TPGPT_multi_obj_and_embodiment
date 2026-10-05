@@ -6,6 +6,9 @@ around GraspGen-X's grasps. The 2026-09-15 integration (a scripted side grasp, a
 estimated one-box envelope) is gone; `git show 0aceaec:ycb_pointcloud_pipeline/INSPIRE_HAND.md`
 has its record.
 
+**Every hand fact recorded on 2026-09-15 is unverified** (the user, 2026-10-05: that may
+have been a different, left hand). Each is measured again here.
+
 **State (2026-10-04):** code done and tested offline, including a full offline ROS dry run of a
 grasp test. **Nothing has run on the robot**, and the mount, the register map, the grasp depth
 and the close are not measured yet (section 4). Every deviation from the simulation is in
@@ -62,6 +65,15 @@ The mount, in `config/inspire_hand.yaml` `mount:`:
 
 With the estimated values (-45 deg, 12 mm, 0) the grasp point sits (60.1, 10.0, 60.6) mm from
 `fr3_hand_tcp`, 165 mm from the flange against the Franka Hand's 103 mm.
+
+**How it is held (user, 2026-10-05).** A 3D-printed mount is screwed to the flange, and beige
+paper tape wraps the flange and the mount, so their seam cannot be seen: a ruler cannot give
+`adapter_thickness_m` (the touches of M3 do, or the printed part's file). The hand's own 52 mm
+base ring (clear tape) is screwed to the mount, but its holes have no thread, so the screws do not
+grip; the tape holds it and it is **still slightly loose**. Play there turns into an error that
+changes with the pose (the hand's weight takes it up a different way in each), magnified about
+218 / 26 = 8 times from the ring's edge to the fingertips. M2b measures it; M3's touch residual
+shows it too.
 
 The robot bring-up is unchanged (`load_gripper:=true`, `fr3_hand_tcp` kept). The Franka gripper
 node fails without its hand, which is expected and harmless.
@@ -136,6 +148,13 @@ ros2 service call /inspire_hand/point std_srvs/srv/Trigger
 ros2 param set /inspire_hand close_mode simultaneous            # or sequential
 ros2 param set /inspire_hand force_g 300                        # grams per finger
 ```
+Every pose change (open, point, `inspire_hand set`) moves the thumb and the fingers in turn, as a
+fist does (the user, 2026-10-05: moved together, the thumb obstructs the fingers): closing, the
+fingers first and the thumb last; opening, the thumb lifts first, then the fingers open. The
+thumb's sideways swing (its **rotation**, the 6th value: 0 opposed, facing the fingers, as every
+grasp uses; 1000 swung back flat beside the palm) moves only while the thumb is straight and the
+fingers are open. Without the node (it holds the serial line):
+`ros2 run ycb_pointcloud_pipeline inspire_hand set <little> <ring> <middle> <index> <thumb bend> <thumb rotation>`.
 `free_drive` and `joint_homing` open this hand by themselves (`gripper_type` auto reads X6's
 `hands.mounted: inspire`), so they need the hand node running; without it, or to keep the hand
 as it is (the pointing pose for M3), pass `-p open_gripper:=false`.
@@ -154,9 +173,10 @@ Each measurement has a pass criterion. Results go into `config/inspire_hand.yaml
 |---|---|---|---|
 | M0 | The hand is the URDF | Caliper on the open hand, against `python -m tpgpt.hardware.inspire_model landmarks`: middle fingertip to wrist face (217.9), knuckle spacing index to little finger (57.8) | within 2 mm |
 | M1 | Yaw and handedness | At home (`joint_homing`): fingers down, palm forward, index finger on the robot's right | by eye; no 90 or 180 deg error |
-| M2 | Adapter thickness | Caliper, flange face to the wrist face | within 1 mm; into `adapter_thickness_m` |
+| M2 | Adapter thickness | The flange-mount seam is under tape: from the printed part's file if there is one, else from M3's fit (the ruler gives only the beige band, flange part included) | within 1 mm; into `adapter_thickness_m` |
+| M2b | Play at the ring | Rock the palm gently against the held flange; how far the middle fingertip moves (`INSPIRE_MEASURING.md` step 4) | under about 1 mm, or M3's residual and the grasp tests are read with it in mind |
 | M3 | The mount, by touch | Below | table RMS within 2 mm, marks within 3 mm |
-| M4 | Register to joint map | Angles at registers 1000/500/0 against `python -m tpgpt.hardware.inspire_model angles --registers ...` (the manual's definitions) | within 3 deg; else measure q_at_0/q_at_1000 into `joint_map` |
+| M4 | Register to joint map | Ruler distances at registers 1000/750/500/250/0: the middle fingertip below the ring's face (thumb swung out), the thumb tip to the index tip (fingers open), against `python -m tpgpt.hardware.inspire_model landmarks --registers ...` (`middle_length`, `thumb_to_index`); 1 mm is about 0.5 deg | within 3 mm; else fit q_at_0/q_at_1000 into `joint_map` |
 | M5 | Payload | Weigh hand, adapter and screws; centre of mass; set in Desk | force estimate at rest under 1.5 N in 3 orientations |
 | M6 | Grasp depth | Grasp-test sweep, below | the middle of the plateau into `graspgenx.calibrated_depth_m` |
 | M7 | Close and force | Close on each object in both modes; read the reports | thumb plus a finger in contact; grams per object into `grasp_forces.yaml` |

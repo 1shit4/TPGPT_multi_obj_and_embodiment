@@ -21,12 +21,14 @@ it is straight and the fingers are open. **open** is ``goto(OPEN_POSE)``.
 **close**, two ways (``close_mode``; which one holds better is measured on the
 robot, not assumed):
 
-* ``sequential`` (verified on the hand 2026-09-15, round objects near the palm):
+* ``sequential`` (reported to hold round objects near the palm on 2026-09-15, possibly
+  on another hand, so unverified; the user's rule on 2026-10-05 is this order):
   thumb rotation confirmed opposed, the four fingers wrap and push the object
   against the straight thumb, then the thumb bends to lock it.
 * ``simultaneous``: thumb rotation confirmed opposed, then the four fingers and
   the thumb bend together -- how GraspGen-X's description closes the hand
-  (``close`` drives the thumb pitch and the fingers in one pose).
+  (``close`` drives the thumb pitch and the fingers in one pose). Without an object in
+  between, the thumb can meet the fingers.
 
 Either returns a :class:`CloseReport`: which DOFs stopped on their force threshold
 (**contact**), which closed all the way (**on air**), which were still moving at the

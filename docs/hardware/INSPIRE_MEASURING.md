@@ -95,8 +95,8 @@ fingers when opening, so the thumb no longer gets in the way.
    ros2 run ycb_pointcloud_pipeline inspire_hand set 0 0 0 0 1000 1000
    ```
 3. **The measurement** (the same for every line):
-   - Hold the ruler straight down, along the hand, with **0 at the seam where the beige adapter
-     ends and the hand begins** (the same 0 as in your photos).
+   - Hold the ruler straight down, along the hand, with **0 at the seam where the beige paper
+     tape ends and the clear tape begins** (the same 0 as in your photos).
    - Look at the **middle finger's very tip** (the end of its black last segment) and read the
      ruler **at the height of that tip**. Keep your eye level with the tip: looking from above or
      below shifts the reading.
@@ -138,30 +138,42 @@ compared with the seam. That shift is itself useful; it is not an error.)
 
 ---
 
-## Step 4 -- three lengths with the ruler
+## Step 4 -- two lengths with the ruler, and how loose the hand is
 
-The hand stays open (from step 3.7). You are measuring along the hand, the way it points (down,
-at the moment). Read the ruler to the nearest millimetre.
+The hand stays open (from step 3.6). Read the ruler to the nearest millimetre.
 
-Look at the hand from the side. Going from the robot down to the fingertips you will see three
-parts: **the robot's last metal piece**, then **the adapter** (the piece someone made to hold the
-hand), then **the hand** (its round base, about 52 mm across, then the palm). Where two parts meet
-there is a joint line (a seam).
+What you see from the robot down (user, 2026-10-05):
+- **beige paper tape**: it covers the robot's flange *and* the 3D-printed mount, so the seam
+  between those two is hidden;
+- **clear tape**: it covers the hand's own round base ring (52 mm across, 8.1 mm thick by the
+  vendor's drawing). The ring is screwed on, but its holes have no thread, so the screws do not
+  grip and the tape holds it. It is still slightly loose;
+- then the hand's palm and fingers.
 
-- **A. The adapter:** from the seam between the robot and the adapter, to the seam between the
-  adapter and the hand's round base. Hold the ruler along the robot's last axis (along the hand).
-- **B. The hand:** from the seam between the adapter and the hand, to the very tip of the
-  **middle** finger (fingers straight).
-- **C. The palm's width:** across the palm at its widest, from the little-finger side to the
+The **seam** below means the line where the beige tape ends and the clear tape begins: that is
+where the mount ends and the hand's ring begins (the hand model's zero).
+
+- **A. The beige band:** from its top edge to the seam. (It holds part of the robot's flange
+  plus the mount, so it is not the mount's thickness by itself. The robot touches in step 7 find
+  that. If you know the printed mount's thickness from its print file, send it: that is better
+  than any ruler reading.)
+- **B. The palm's width:** across the palm at its widest, from the little-finger side to the
   index-finger side.
+- (The hand's length is your step 3 reading at 1000, so it is not asked again.)
 
-If the hand's round base sits *inside* the adapter (you cannot see where it ends), tell Claude that,
-and measure A and B to the edge you *can* see.
+**How loose (about one minute).** Why: the robot touches in step 7 measure where the fingers are
+once. If the hand can rock on the ring, it rocks a different way in every pose (its weight pulls
+it), and later grasps are off by that much. Each 1 mm of rock at the ring's edge is about 4 mm at
+the fingertips (they are 218 mm away, the ring's edge 26 mm from its middle).
+1. Hold the beige band firmly with one hand, so the robot does not move.
+2. With the other hand, take the palm and rock it **gently** (no force: as if testing a loose
+   tooth) left and right, then forward and back, then try to turn it about its own axis.
+3. Watch the middle fingertip **compared with the beige band**: how far does it move between
+   the two ends of each rock? About 0, about 1 mm, about 5 mm, or more?
 
-**Send:** A, B, C in mm, and "the round base is / is not hidden inside the adapter". A photo of the
-adapter and hand from the side, with the ruler held along it, helps a lot.
+**Send:** A and B in mm, and the three rock answers (left-right, forward-back, turn).
 
-(Expected: B about 218 mm, C about 81 mm. A is what we do not know.)
+(Expected: B about 81 mm.)
 
 ---
 
@@ -189,6 +201,10 @@ is squeezed.
       ros2 service call /inspire_hand/open std_srvs/srv/Trigger
       ```
    5. Do 1-4 again with `ros2 param set /inspire_hand close_mode sequential`.
+
+   `simultaneous` moves the thumb and the fingers together (how GraspGen-X's model of the hand
+   closes); `sequential` closes the fingers first and the thumb last. If the thumb gets in the
+   fingers' way in `simultaneous`, write that down: it is part of the answer.
 3. The squeeze is 400 g per finger. If an object is crushed or slips, try another force and close
    again:
    ```bash
@@ -276,7 +292,7 @@ itself from a few poses held still, so no scale is needed. Claude will send the 
 | step | becomes |
 |---|---|
 | 3 | the finger angle for each number (the hand model's joint map), and where the hand's base face is |
-| 4 | the starting guess for the adapter and the hand's length check |
+| 4 | a starting guess for the mount, and whether the hand's play matters |
 | 5 | how hard each object is squeezed, and which closing order to use |
 | 6 | which way the hand is turned on the flange |
 | 7 | the exact adapter thickness, turn and offset (to a couple of mm) |
