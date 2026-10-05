@@ -492,7 +492,33 @@ What it says:
    demonstration's approach suits a thin jaw), and the retreating thumb coming back within
    10 mm of the placed mug.
 
-These numbers move with the mount (M1-M3) and the depth (M6); re-measure after them.
+These numbers moved with the mount (M1-M3; the second run, below) and will with the depth (M6).
+
+**Second coverage, the measured hand (2026-10-05).** The same captures, demonstration, slots,
+budget and command; the mount measured by touch (yaw 137.1 deg, 12.45 mm, centred) and the
+register map measured (the fingers 5 deg short of straight at 1000, the thumb 0.08 rad: the open
+hand 27 mm narrower than GraspGen-X's), `INSPIRE_HAND.md` sections 4 and 7. Files
+`outputs/hardware/coverage_inspire/inspire_20261005_<object>.json`.
+
+| object | after the hand stage | of which the table took | after the funnel (TL / TR) | admissible of 10 (TL / TR) | the first run |
+|---|---|---|---|---|---|
+| apple | 213 of 904 | 678 | 94 / 88 | 1 / 0 | 1 / 0 |
+| banana | **0** of 1008 | 1008 | -- | -- | -- |
+| mug | 265 of 938 | 413 (and 235 `lands_on_object`) | 157 / 139 | 0 / 1 | 0 / 3 |
+| pudding box | 171 of 923 | 721 | 61 / 55 | 1 / 0 | 0 / 0 |
+| foam brick | 78 of 930 | 830 | 38 / 32 | 4 / 0 | 0 / 0 |
+
+7 of 80 planned grasps are executable (the first run: 4). What it says:
+
+1. **The table is still the first filter** (`hits_support`: the open or closing hand within 3 mm
+   of it), for 678-1008 grasps per object. The hand stage judges a grasp in its own frame, so the
+   mount cannot change this; the depth calibration (M6) and the lift question can.
+2. **top_right is the arm's problem**: its commonest fault is the arm in the shelf's right wall
+   during the carry (4 of 10 planned for the foam brick, 3 for the mug), then the wrist near full
+   stretch. top_left is reach and the hand meeting the object on the way in.
+3. **The hand meets the object on the way in** (apple 4 of 10, pudding box 3): the demonstration's
+   transported approach, which a thin jaw slid along, brushes the wider hand into the object.
+4. Single runs of 10 per slot: one or two grasps either way is noise.
 
 ## Deviation from the simulation
 
