@@ -230,7 +230,10 @@ def test_config_builds_the_mount():
         pytest.skip(str(exc))
     assert ee.controller_frame == "fr3_hand_tcp"
     assert ee.kind == "multi_finger" and ee.graspgen == "inspire_hand"
-    assert not ee.model_spec["mount_measured"]             # until M1-M3
+    # Measured by touch (M3, 2026-10-05, both fingertips): yaw 136.7, 11.0 mm, 10.6 mm off-centre.
+    assert ee.model_spec["mount_measured"]
+    assert ee.model_spec["mount_yaw_deg"] == pytest.approx(136.66)
+    assert ee.model_spec["adapter_thickness"] == pytest.approx(0.0110)
 
 
 # --------------------------------------------------------------------------- close
