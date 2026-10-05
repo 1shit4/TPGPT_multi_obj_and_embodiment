@@ -20,8 +20,9 @@ shelf). Keep the emergency stop within reach and the space around the hand clear
 
 The record is saved to ~/inspire_mount/payload_<time>.json; fit it again with
     python -m tpgpt.hardware.payload fit ~/inspire_mount/payload_<time>.json
-Run it again after typing the values into Desk: the fit should then find the payload Desk
-holds, and the joint offsets alone left.
+Desk's current end-effector values are read from the robot at the start (robot_state's
+inertia_ee), and the fit weighs the difference. Run it again after typing the values into Desk:
+it should then find the payload Desk holds.
 """
 
 import json
@@ -54,11 +55,46 @@ class PayloadMeasure(JointTargetPublisher):
         # the node moves to home itself first, and the fit uses the measured joints.
         self.declare_parameter('home_tolerance', 0.3)
         self.declare_parameter('output_dir', os.path.expanduser('~/inspire_mount'))
+        # What Desk holds while measuring: the fit weighs the difference. Read from the robot
+        # (its inertia_ee: mass, centre of mass in the flange frame, inertia), or given here
+        # (desk_mass >= 0) when robot_state cannot be read.
+        self.declare_parameter('robot_state_topic', '/franka_robot_state_broadcaster/robot_state')
+        self.declare_parameter('desk_mass', -1.0)              # kg; < 0 = read from the robot
+        self.declare_parameter('desk_com', [0.0, 0.0, 0.0])    # m, flange frame
+        self._ee = None
+        try:
+            from franka_msgs.msg import FrankaRobotState
+            self.create_subscription(FrankaRobotState,
+                                     self.get_parameter('robot_state_topic').value,
+                                     self._state_cb, 10)
+        except ImportError:                                    # no franka_msgs: desk_* needed
+            pass
         self._tau_lock = threading.Lock()
         self._tau = []                                   # (monotonic, [7]) while recording
         self._recording = False
         self.create_subscription(JointState, self.get_parameter('external_torques_topic').value,
                                  self._tau_cb, 10)
+
+    def _state_cb(self, msg):
+        i = msg.inertia_ee.inertia
+        self._ee = (float(i.m), (float(i.com.x), float(i.com.y), float(i.com.z)),
+                    ((i.ixx, i.ixy, i.ixz), (i.ixy, i.iyy, i.iyz), (i.ixz, i.iyz, i.izz)))
+
+    def desk_payload(self, pl):
+        """The end-effector values the robot uses now (Desk's), as a Payload."""
+        m = float(self.get_parameter('desk_mass').value)
+        if m >= 0.0:
+            com = tuple(float(v) for v in self.get_parameter('desk_com').value)
+            return pl.Payload(m, com), 'the desk_mass/desk_com parameters'
+        deadline = time.monotonic() + 10.0
+        while self._ee is None:
+            if time.monotonic() > deadline:
+                raise AbortMotion(f"no {self.get_parameter('robot_state_topic').value} in 10 s "
+                                  "to read Desk's end-effector values: pass -p desk_mass:=<kg> "
+                                  "-p desk_com:='[x, y, z]' (m, flange frame) as typed in Desk")
+            time.sleep(0.05)
+        m, com, inertia = self._ee
+        return pl.Payload(m, com, inertia), 'the robot (robot_state inertia_ee)'
 
     def _tau_cb(self, msg):
         if not self._recording or len(msg.effort) < 7:
@@ -128,6 +164,10 @@ class PayloadMeasure(JointTargetPublisher):
         q_start, dq = self.measured()
         if max(abs(v) for v in dq) > self.get_parameter('max_start_velocity').value:
             raise AbortMotion('Robot is moving; wait until it is still')
+        modelled, source = self.desk_payload(pl)
+        self.get_logger().info(f'Desk holds {modelled.mass:.3f} kg at '
+                               + ' '.join(f'{v * 1000:+.1f}' for v in modelled.com)
+                               + f' mm (flange frame), from {source}')
         home = list(FRANKA_HOME)
         off_home = max(abs(a - b) for a, b in zip(q_start, home))
         if off_home > self.get_parameter('home_tolerance').value:
@@ -173,11 +213,10 @@ class PayloadMeasure(JointTargetPublisher):
         os.makedirs(self.get_parameter('output_dir').value, exist_ok=True)
         path = os.path.join(self.get_parameter('output_dir').value,
                             f"payload_{time.strftime('%Y%m%d_%H%M%S')}.json")
-        modelled = pl.FRANKA_HAND_DESK
         with open(path, 'w') as f:
             json.dump({'modelled': {'mass': modelled.mass, 'com': list(modelled.com),
                                     'inertia': [list(r) for r in modelled.inertia],
-                                    'note': "Desk's end-effector values while measuring"},
+                                    'note': f"Desk's end-effector values while measuring, from {source}"},
                        'poses': [list(p) for p in pl.POSES], 'samples': samples}, f, indent=1)
         self.get_logger().info(f'saved {len(samples)} poses to {path}; at home, held')
         try:
