@@ -156,7 +156,8 @@ def fit_mount(touches: list[Touch], start: dict | None = None, base: dict | None
     """Least-squares mount from touches (module docstring).
 
     Args:
-        start: initial :data:`PARAMS` (default: -45 deg, 12 mm, 0, 0 -- the design).
+        start: initial :data:`PARAMS` (default: -45 deg, 12 mm, 0, 0 -- the first estimate;
+            the robot's tools pass the config's, since 2026-10-05 135 deg and 16 mm).
         base: the other ``inspire_end_effector`` arguments (description, joint map).
     """
     from scipy.optimize import least_squares
@@ -230,7 +231,7 @@ def _base_from_config(config_path) -> tuple[dict, dict]:
             "joint_map": joint_map_from_config(cfg),
             "adapter_radius": mount.get("adapter_radius_m", 0.0315)}
     lateral = mount.get("lateral_m", (0.0, 0.0))
-    start = {"mount_yaw_deg": float(mount.get("yaw_deg", -45.0)),
+    start = {"mount_yaw_deg": float(mount.get("yaw_deg", 135.0)),
              "adapter_thickness": float(mount.get("adapter_thickness_m", 0.012)),
              "lateral_x": float(lateral[0]), "lateral_y": float(lateral[1])}
     return base, start

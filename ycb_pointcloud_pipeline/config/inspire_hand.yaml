@@ -39,6 +39,10 @@ inspire_hand:
     close_mode: simultaneous    # simultaneous (all together) | sequential (fingers, then the thumb).
                                 # The user, 2026-10-05, five objects: simultaneous holds them;
                                 # sequential pushes them away (nothing opposes the fingers).
+    # Where an EMPTY simultaneous close stops each DOF (little ring middle index thumb_bend
+    # thumb_rot; the user, 2026-10-05, 400 g, speed 500): the thumb lands on the middle and
+    # index fingers. A close holds something when a finger stops more than 30 beyond this.
+    empty_close_angles: [0, 0, 180, 361, 493, 0]
     step_timeout_s: 3.0         # wait per motion step; still moving after it = an error
     state_rate_hz: 10.0         # /inspire_hand/joint_states while idle
 
@@ -78,10 +82,12 @@ inspire_hand:
     # Frame CRISP commands and /current_pose reports. fr3_hand_tcp needs NO change to the
     # robot bringup (the only frame the path check and the FK work in).
     controller_frame: fr3_hand_tcp
-    # The hand's axis along the flange's; its palm normal = Rz(yaw) * fr3_link8 +X. -45 = the
-    # palm faces fr3_hand_tcp +X (the red axis in RViz): at the home pose, fingers down, palm
-    # forward (robot +X), the index finger on the robot's right (-Y). MEASURE (M1).
-    yaw_deg: -45.0
+    # The hand's axis along the flange's; its palm normal = Rz(yaw) * fr3_link8 +X. 135 = the
+    # palm faces fr3_hand_tcp -X: at the home pose, fingers down, the palm towards the robot's
+    # base (-X), the thumb and index finger on the robot's left (+Y). Seen at home by the user,
+    # 2026-10-05 (M1; behind the robot: "the palm faces me, thumb on my left"); the first
+    # estimate, -45, was half a turn off. M3's touches refine it.
+    yaw_deg: 135.0
     # Flange face -> the hand's wrist face (its base ring's face). The 3D-printed mount alone,
     # by ruler (user, 2026-10-05): 16 mm, +-1-2 mm; the robot touches (M3) refine it.
     adapter_thickness_m: 0.016

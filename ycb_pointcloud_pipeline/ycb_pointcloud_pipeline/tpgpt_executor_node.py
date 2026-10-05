@@ -45,7 +45,7 @@ Hand (from the plan's metadata['end_effector'], written by tpgpt_planner_node)
   The Inspire hand closes with its object's force (config/grasp_forces.yaml inspire_grasp,
   grams per finger, set on /inspire_hand before each close; inspire_force_g > 0 overrides)
   and answers with what each finger touched: kept in <log>_hand.json, and with
-  abort_on_empty_close:=true a close without the thumb and a finger on the object aborts
+  abort_on_empty_close:=true a close that holds nothing (no finger stopped by the object) aborts
   the run (holding the arm).
 
 Aborts hold the arm at its measured pose (the gripper is left as it is, so a held
@@ -732,16 +732,19 @@ class TpgptExecutorNode(Node):
                 if not ok:
                     raise AbortRun(f'Inspire hand {label} failed: {message}')
                 if close and report is not None:
-                    text = (f"contact on {', '.join(report.get('contact', [])) or 'nothing'}"
+                    text = (f"on the object: {', '.join(report.get('on_object', [])) or 'nothing'}"
+                            f"; stopped: {', '.join(report.get('contact', [])) or 'nothing'}"
                             + (f"; on air: {', '.join(report['on_air'])}" if report.get('on_air')
                                else ''))
-                    if report.get('opposed'):
-                        self.get_logger().info(f'Inspire hand closed: {text}')
+                    # 'held': a finger stopped beyond where an empty close leaves it (an empty
+                    # fist has the thumb and two fingers stopped on each other: 'opposed').
+                    held = report.get('held', report.get('opposed'))
+                    if held:
+                        self.get_logger().info(f'Inspire hand closed, holding: {text}')
                     else:
-                        self.get_logger().warning(f'Inspire hand closed WITHOUT the thumb and a '
-                                                  f'finger on the object: {text}')
+                        self.get_logger().warning(f'Inspire hand closed ON NOTHING: {text}')
                         if self.p('abort_on_empty_close'):
-                            raise AbortRun(f'the Inspire hand closed without opposition ({text}); '
+                            raise AbortRun(f'the Inspire hand closed on nothing ({text}); '
                                            'abort_on_empty_close')
                 elif not close:
                     self.get_logger().info(f'Inspire hand: {message}')

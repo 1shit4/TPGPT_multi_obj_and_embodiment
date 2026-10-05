@@ -297,7 +297,7 @@ def flange_from_hand_base(mount_yaw_deg: float, adapter_thickness: float,
 def inspire_end_effector(
     handedness: str = "right",
     controller_frame: str = "fr3_hand_tcp",
-    mount_yaw_deg: float = -45.0,
+    mount_yaw_deg: float = 135.0,
     adapter_thickness: float = 0.016,
     lateral=(0.0, 0.0),
     calibrated_depth: float = 0.0,
@@ -315,7 +315,7 @@ def inspire_end_effector(
             description, unchanged controllers). ``"fr3_link8"`` is arithmetic only:
             the FK, IK and path check work at ``fr3_hand_tcp``.
         mount_yaw_deg: Palm normal = ``Rz(mount_yaw_deg) * fr3_link8 +X``. -45 makes
-            the palm face ``fr3_hand_tcp``'s ``+X``.
+            the palm face ``fr3_hand_tcp``'s ``+X``; 135, as mounted (seen 2026-10-05), its ``-X``.
         adapter_thickness: Flange face -> the hand's wrist face, along ``+Z``, m.
         lateral: The wrist face's centre off the flange axis, ``(x, y)`` in
             ``fr3_link8``, m.
@@ -394,7 +394,7 @@ def inspire_from_config(config: dict) -> EndEffector:
     return inspire_end_effector(
         handedness=cfg.get("handedness", "right"),
         controller_frame=mount.get("controller_frame", "fr3_hand_tcp"),
-        mount_yaw_deg=mount.get("yaw_deg", -45.0),
+        mount_yaw_deg=mount.get("yaw_deg", 135.0),
         adapter_thickness=mount.get("adapter_thickness_m", 0.016),
         lateral=tuple(mount.get("lateral_m", (0.0, 0.0))),
         calibrated_depth=gg.get("calibrated_depth_m", 0.0),

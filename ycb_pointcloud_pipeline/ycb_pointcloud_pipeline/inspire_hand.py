@@ -19,8 +19,7 @@ opening, the thumb lifts off first and then the fingers open. The thumb rotates 
 it is straight and the fingers are open.
 
 **open** (:meth:`InspireHand.grasp_open`): right after a close that **held something**
-(the thumb and a finger stopped on it, :attr:`CloseReport.opposed`), everything opens at
-once, in one stage: the object is between the thumb and the fingers, so they cannot meet,
+(:attr:`CloseReport.held`), everything opens at once, in one stage: the object is between the thumb and the fingers, so they cannot meet,
 and a staged open (the thumb first) leaves the fingers pressing the object alone, which
 shifts it at the release (the user, 2026-10-05). Otherwise -- a fist closed on air, any
 other pose, the thumb to rotate -- it is ``goto(OPEN_POSE)``.
@@ -38,6 +37,13 @@ other pose, the thumb to rotate -- it is ``goto(OPEN_POSE)``.
 Either returns a :class:`CloseReport`: which DOFs were stopped by something
 (**contact**), which closed all the way (**on air**), which were still moving at the
 timeout, and the actuator errors. A close that touches nothing is not a success.
+
+**Something is held** (:attr:`CloseReport.held`) when a finger stopped more than
+:data:`CONTACT_MARGIN` beyond where an empty close leaves it (:data:`EMPTY_CLOSE_ANGLES`):
+an empty close stops the middle and index fingers on the thumb, so the thumb and a finger
+stopping proves nothing. On every hold of 2026-10-05 a finger stopped 190-590 units beyond
+that; the empty close is within it by construction. The thumb is not used: in a palm grasp
+it closes over the fingers just as in the empty fist.
 
 **Contact is judged by where a DOF stopped, not by its STATUS.** The manual (2.4.21) has
 STATUS 3 for "stopped on the force threshold", but this hand reports 2 ("reached the
@@ -120,6 +126,11 @@ STATUS_STOPPED_ON_FORCE = 3   # the manual's; this hand reports 2 instead (modul
 #: by something. The hand reaches a free target to within ~7 (2026-10-05: [997, 996, 999,
 #: 1000, 243] for 1000 and 250); 30 is ~2.5 deg of finger, ~3 mm at the fingertip.
 CONTACT_MARGIN = 30
+#: Where an EMPTY simultaneous close stops each DOF (the user, 2026-10-05, 400 g, speed 500):
+#: little and ring curl fully; the thumb lands on the middle and index fingers and stops
+#: them -- so "the thumb and a finger stopped" is also true of an empty fist. Config
+#: ``grasp.empty_close_angles`` overrides it.
+EMPTY_CLOSE_ANGLES = [0, 0, 180, 361, 493, 0]
 ERROR_BITS = ("locked rotor", "over temperature", "over current",
               "motor abnormal", "communication")
 HOLD = -1  # ANGLE_SET value that leaves a DOF where it is (not valid for thumb rotation)
@@ -198,6 +209,7 @@ class CloseReport:
     mode: str
     contact: list = field(default_factory=list)    # stopped short of the close target
     on_air: list = field(default_factory=list)     # reached the close target untouched
+    on_object: list = field(default_factory=list)  # fingers stopped beyond the empty close
     timed_out: list = field(default_factory=list)  # still moving at the step's timeout
     errors: str = ""
     angles: list = field(default_factory=list)     # ANGLE_ACT after the close
@@ -212,8 +224,15 @@ class CloseReport:
 
     @property
     def opposed(self) -> bool:
-        """The thumb and at least one finger stopped on the object."""
+        """The thumb and at least one finger stopped -- on the object or on each other:
+        an empty fist is opposed too. :attr:`held` is the test for an object."""
         return "thumb_bend" in self.contact and bool(self.fingers_in_contact)
+
+    @property
+    def held(self) -> bool:
+        """Something is in the hand: a finger stopped beyond the empty close
+        (module docstring)."""
+        return bool(self.on_object)
 
     @property
     def ok(self) -> bool:
@@ -223,6 +242,7 @@ class CloseReport:
     def as_dict(self) -> dict:
         d = asdict(self)
         d["opposed"] = self.opposed
+        d["held"] = self.held
         return d
 
     def to_json(self) -> str:
@@ -230,7 +250,10 @@ class CloseReport:
 
     def summary(self) -> str:
         contact = ", ".join(self.contact) or "nothing"
-        text = f"{self.mode} close: contact on {contact}"
+        text = (f"{self.mode} close: "
+                + (f"HOLDING (on the object: {', '.join(self.on_object)})" if self.held
+                   else "NOTHING HELD")
+                + f"; stopped: {contact}")
         if self.on_air:
             text += f"; closed on air: {', '.join(self.on_air)}"
         if self.timed_out:
@@ -265,6 +288,9 @@ class InspireHand:
                  log=print):
         self.id = hand_id
         self.dry_run = dry_run
+        #: Where an empty close stops each DOF (:data:`EMPTY_CLOSE_ANGLES`; the node sets
+        #: the config's).
+        self.empty_close = list(EMPTY_CLOSE_ANGLES)
         #: The last close held something and the hand has not moved since (grasp_open).
         self.holding = False
         self.log = log
@@ -489,7 +515,9 @@ class InspireHand:
                 report.contact.append(name)
             else:
                 report.on_air.append(name)
-        self.holding = report.opposed and not report.errors
+            if name in FINGERS and int(stopped_at[k]) - int(self.empty_close[k]) > CONTACT_MARGIN:
+                report.on_object.append(name)
+        self.holding = report.held and not report.errors
         return report
 
     def point(self, speed: int = DEFAULT_SPEED, force=DEFAULT_FORCE, timeout: float = 3.0,

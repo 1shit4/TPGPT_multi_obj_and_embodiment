@@ -448,7 +448,9 @@ Hand's. They are judged by the hand's own stage, `judge_hand` (`docs/hardware/IN
 §1), instead of the jaw check.
 
 **First coverage.** Conditions:
-- **Mount:** the estimated one (yaw -45 deg, 12 mm adapter), not yet measured.
+- **Mount:** the estimated one (yaw -45 deg, 12 mm adapter). **Void since 2026-10-05**: the hand
+  is mounted at yaw 135 (half a turn from the estimate) on a 16 mm mount. To re-run after the
+  touches (M3).
 - **Description:** the shipped one, with no depth correction.
 - **Scenes:** the latest 10-03 capture of each object.
 - **Demonstration:** the 18:39 learned bundle.

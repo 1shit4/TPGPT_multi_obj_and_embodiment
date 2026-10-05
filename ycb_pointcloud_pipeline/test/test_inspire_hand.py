@@ -270,7 +270,8 @@ def test_the_report_names_contact_and_air_dof_by_dof(mode, contact_status):
     assert report.contact == ["middle", "index", "thumb_bend"]
     assert report.on_air == ["little", "ring"]
     assert report.timed_out == [] and report.errors == ""
-    assert report.opposed and report.ok
+    assert report.opposed and report.ok and report.held
+    assert report.on_object == ["middle"]          # index 380: within 30 of the empty fist's 361
     assert report.force_set_g == [350] * 6 and fake.force_sets[-1] == [350] * 6
     assert report.angles[MIDDLE] == 420 and report.forces_g[INDEX] == 350
     assert ih.json.loads(report.to_json())["opposed"] is True
@@ -315,7 +316,43 @@ def test_a_grasp_seen_on_the_real_hand_is_contact_not_air():
         fake.close()
     assert report.status[:5] == [2] * 5
     assert report.contact == list(ih.BENDING) and report.on_air == []
-    assert report.opposed
+    assert report.opposed and report.held
+    assert report.on_object == ["little", "ring", "middle", "index"]
+
+
+def test_an_empty_fist_is_not_held_though_the_thumb_stops_two_fingers(fake):
+    """The user's empty close, 2026-10-05: [0, 0, 180, 361, 493] -- the thumb landed on the
+    middle and index fingers. 'Opposed', and nothing in the hand."""
+    fake.contact_at = [None, None, 180, 361, 493, None]
+    hand = _hand(fake)
+    try:
+        report = hand.close("simultaneous", timeout=0.6, verbose=False)
+        assert report.contact == ["middle", "index", "thumb_bend"]
+        assert report.opposed and not report.held and report.on_object == []
+        assert "NOTHING HELD" in report.summary()
+        assert not hand.holding
+        n = len(fake.angle_sets)
+        hand.grasp_open(timeout=0.6, verbose=False)
+    finally:
+        hand.close_port()
+    assert fake.angle_sets[n][:5] == [-1, -1, -1, -1, 1000]     # the ordered open
+
+
+def test_the_mug_close_of_2026_10_05_is_held():
+    """Little and ring on air; the mug stops the middle finger 218 beyond the empty fist."""
+    fake = FakeHand(contact_at=[None, None, 398, 414, 561, None])
+    try:
+        report = _close(fake, "simultaneous")
+    finally:
+        fake.close()
+    assert report.on_air == ["little", "ring"]
+    assert report.held and report.on_object == ["middle", "index"]
+
+
+def test_the_config_holds_the_measured_empty_close():
+    cfg = ih.load_config(os.path.join(os.path.dirname(__file__), "..", "config",
+                                      "inspire_hand.yaml"))
+    assert cfg["grasp"]["empty_close_angles"] == ih.EMPTY_CLOSE_ANGLES
 
 
 def test_after_a_close_that_held_the_release_opens_everything_at_once():

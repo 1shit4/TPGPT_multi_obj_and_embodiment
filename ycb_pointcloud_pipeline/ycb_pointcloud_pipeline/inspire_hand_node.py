@@ -25,8 +25,8 @@ ROS 2 driver for the Inspire RH56DFX-2R hand: the open/close grasp as services.
 
 Both services block until the motion has finished. ``success`` is false on a serial
 error, an actuator error flag, or a DOF still moving at the step timeout. Closing on
-air is NOT a failure of the service: the report says so (``opposed`` false) and the
-caller decides.
+air is NOT a failure of the service: the report says so (``held`` false: no finger
+stopped beyond where an empty close leaves it) and the caller decides.
 
 Parameters read at every close, settable while the node runs (``ros2 param set``, or
 the executor's per-object force through rcl_interfaces/SetParameters):
@@ -115,6 +115,8 @@ class InspireHandNode(Node):
         log = self.get_logger()
         self.hand = ih.InspireHand(self.port, self.hand_id, self.baud, dry_run=self.dry,
                                    log=lambda text: log.debug(text))
+        self.hand.empty_close = [int(v) for v in grasp.get('empty_close_angles',
+                                                           ih.EMPTY_CLOSE_ANGLES)]
         self.lock = threading.Lock()
         if not self.dry:
             st = self.hand.status()      # fail at startup, not at the first grasp
@@ -229,10 +231,10 @@ class InspireHandNode(Node):
             self.state_pub.publish(String(data='unknown'))
             return response
         self.state_pub.publish(String(data='closed'))
-        if report.opposed or self.dry:
+        if report.held or self.dry:
             log.info(f'hand CLOSED: {report.summary()}')
         else:
-            log.warning(f'hand CLOSED WITHOUT OPPOSITION: {report.summary()}')
+            log.warning(f'hand CLOSED ON NOTHING: {report.summary()}')
         return response
 
     # ------------------------------------------------------------------ state

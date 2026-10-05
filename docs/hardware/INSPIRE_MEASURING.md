@@ -229,6 +229,9 @@ the force you liked.
 
 ## Step 6 -- where the palm faces at home
 
+**Done 2026-10-05:** fingers down, the palm towards the robot's base, the thumb on the robot's
+left: the yaw is 135, not the estimated -45 (`config/inspire_hand.yaml`).
+
 1. Leave the hand program running in Terminal A (the homing opens the hand through it).
 2. Make sure nothing is between the arm and its home pose. Hand on the emergency stop.
 3. Open "**Terminal C**" and paste:

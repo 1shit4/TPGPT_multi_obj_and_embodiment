@@ -56,15 +56,18 @@ fr3_link8 --[Rz(-45 deg), 103.4 mm]--> fr3_hand_tcp (what CRISP commands; a virt
 
 The mount, in `config/inspire_hand.yaml` `mount:`:
 
-- **`yaw_deg`**: the palm normal is `Rz(yaw) * fr3_link8 +X`. At -45 the palm faces
-  `fr3_hand_tcp` +X. At the home pose the hand then hangs fingers down, palm forward (robot +X),
-  index finger on the robot's right (-Y).
+- **`yaw_deg`**: the palm normal is `Rz(yaw) * fr3_link8 +X`. **135** (M1, seen at home by the
+  user, 2026-10-05: from behind the robot, "the palm faces me, fingers down, thumb on my left"):
+  the palm faces `fr3_hand_tcp` -X, so at home the hand hangs fingers down, the palm towards
+  the robot's base (-X), the thumb and index finger on the robot's left (+Y). The first
+  estimate, -45, was half a turn off: every grasp would have been executed with the hand
+  turned 180 deg about its own axis.
 - **`adapter_thickness_m`**: the flange face to the wrist face. The RH56 manual's 217.8 mm to the
   middle fingertip is measured from the wrist face, and the URDF gives 217.9.
 - **`lateral_m`**: the wrist face's centre off the flange axis.
 
-With the current values (yaw -45 deg and no lateral offset, estimates; the adapter 16 mm by
-ruler) the grasp point sits (60.1, 10.0, 64.6) mm from `fr3_hand_tcp`: 168 mm out along the
+With the current values (yaw 135 deg, seen; the adapter 16 mm by ruler; no lateral offset,
+an estimate) the grasp point sits (-60.1, -10.0, 64.6) mm from `fr3_hand_tcp`: 168 mm out along the
 flange's axis (152 of them the hand's own), against the Franka Hand's 103 mm.
 
 **How it is held (user, 2026-10-05).** A 3D-printed mount is screwed to the flange, and beige
@@ -188,7 +191,7 @@ Each measurement has a pass criterion. Results go into `config/inspire_hand.yaml
 | # | what | how | pass |
 |---|---|---|---|
 | M0 | The hand is the URDF | Caliper on the open hand, against `python -m tpgpt.hardware.inspire_model landmarks`: middle fingertip to wrist face (217.9), knuckle spacing index to little finger (57.8) | within 2 mm. **By ruler 2026-10-05:** middle tip 216 mm below the ring's face, palm 81 mm wide (the model 81.4): agrees |
-| M1 | Yaw and handedness | At home (`joint_homing`): fingers down, palm forward, index finger on the robot's right | by eye; no 90 or 180 deg error |
+| M1 | Yaw and handedness | At home (`joint_homing`): fingers down; which way the palm faces; the thumb's side | by eye; no 90 or 180 deg error. **2026-10-05: palm towards the base, thumb on the robot's left: yaw 135, not the estimated -45** (a right hand, as the box says) |
 | M2 | Adapter thickness | The flange-mount seam is under tape: from the printed part's file if there is one, else from M3's fit (the ruler gives only the beige band, flange part included) | within 1 mm; into `adapter_thickness_m`. **The printed part alone, by ruler 2026-10-05: 16 mm** (the estimate was 12); M3 refines it |
 | M2b | Play at the ring | Rock the palm gently against the held flange; how far the middle fingertip moves (`INSPIRE_MEASURING.md` step 4) | under about 1 mm, or M3's residual and the grasp tests are read with it in mind. **2026-10-05: ~5 mm across the palm only** (section 2) |
 | M3 | The mount, by touch | Below | table RMS within 2 mm, marks within 3 mm |
@@ -320,6 +323,15 @@ Measured on the 10-03 captures, with the estimated mount and GraspGen-X's shippe
   - The thumb's rotation actuator read 590-934 g while holding the apple: the apple pushes the
     thumb sideways. The little finger closed on air on four of the five objects: the thumb,
     index and middle fingers do the holding.
+
+- **An empty close is an "opposed" fist** (2026-10-05): [0, 0, 180, 361, 493] -- little and ring
+  curl fully, the thumb lands on the middle and index fingers and stops them. So "the thumb and
+  a finger stopped" does not mean an object. **Held** now means a finger stopped more than 30
+  units beyond those angles (`grasp.empty_close_angles`): every hold that day had one 190-590
+  beyond (the mug's middle finger 398-425 against 180; the banana's little finger 206-245
+  against 0). The thumb is left out: in a palm grasp it closes over the fingers as in the fist.
+  The model puts its thumb 5.5 mm into the index finger at the empty fist's angles -- the
+  ruler map's accuracy. Measured at 400 g; at the pudding box's 150 g, not yet.
 
 - **The simulation never got this hand to hold anything**, but its model barely moved
   (1.5 mm of finger travel). That says nothing about the real hand; the grasp tests are the

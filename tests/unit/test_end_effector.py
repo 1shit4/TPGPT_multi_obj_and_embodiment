@@ -54,26 +54,28 @@ class TestMount:
         assert FRANKA_HAND.graspgen == "franka_panda"
         assert FRANKA_HAND.open_state == pytest.approx(0.08)
 
-    def test_at_home_the_default_mount_hangs_the_hand_palm_forward(self, inspire):
-        """Yaw -45 deg: fingers down, palm facing robot +X, the index finger on the robot's
-        right (-Y) -- a right hand, hanging palm forward -- and the wrist face 12 mm below
-        the flange."""
+    def test_at_home_the_default_mount_hangs_the_hand_palm_towards_the_base(self, inspire):
+        """Yaw 135 deg, as seen on the robot (2026-10-05): fingers down, the palm towards the
+        robot's base (-X), the thumb and index finger on the robot's left (+Y) -- a right
+        hand -- and the wrist face 16 mm below the flange."""
         poses = default_model().link_poses(HOME_Q)
         Rg, pg = _grasp_world(inspire, poses["fr3_hand_tcp"])
         H = inspire.model.link_poses("open")["hand_base_link"]
         assert Rg @ -H[:3, 1] == pytest.approx([0.0, 0.0, -1.0], abs=1e-9)    # fingers
-        assert Rg @ -H[:3, 0] == pytest.approx([1.0, 0.0, 0.0], abs=1e-9)     # palm normal
+        assert Rg @ -H[:3, 0] == pytest.approx([-1.0, 0.0, 0.0], abs=1e-9)    # palm normal
         wrist = Rg @ H[:3, 3] + pg
         assert wrist == pytest.approx(poses["fr3_link8"][:3, 3] - [0.0, 0.0, 0.016], abs=1e-9)
         tips = inspire.model.fingertip_points("open")
-        assert (Rg @ tips["index"] + pg)[1] < (Rg @ tips["pinky"] + pg)[1]
-        # GraspGen-X's approach is the bisector of fingers-down and palm-forward.
+        assert (Rg @ tips["index"] + pg)[1] > (Rg @ tips["pinky"] + pg)[1]
+        assert (Rg @ tips["thumb"] + pg)[1] > (Rg @ tips["pinky"] + pg)[1]
+        # GraspGen-X's approach is the bisector of fingers-down and the palm's facing.
         # (to 1e-6: the URDF writes its angles to six decimals)
-        assert Rg[:, 2] == pytest.approx([np.sqrt(0.5), 0.0, -np.sqrt(0.5)], abs=1e-6)
+        assert Rg[:, 2] == pytest.approx([-np.sqrt(0.5), 0.0, -np.sqrt(0.5)], abs=1e-6)
 
     def test_the_grasp_point_from_fr3_hand_tcp(self, inspire):
-        # 60 mm out on the palm side and 65 mm along the hand from the TCP, 10 mm across (16 mm adapter).
-        assert inspire.tool_offset * 1000 == pytest.approx([60.10, 10.0, 64.63], abs=0.01)
+        # 60 mm out on the palm side (TCP -X since the yaw is 135) and 65 mm along the hand
+        # from the TCP, 10 mm across (16 mm adapter).
+        assert inspire.tool_offset * 1000 == pytest.approx([-60.10, -10.0, 64.63], abs=0.01)
         assert is_rotation(inspire.grasp_to_ee)
 
     def test_a_depth_correction_moves_the_grasp_point_back_along_the_approach(self, inspire):

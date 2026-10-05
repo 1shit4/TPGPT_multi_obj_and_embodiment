@@ -667,8 +667,9 @@ The planner's support height is: its `support_height` parameter, else the calibr
   26-DOP per link, the URDF's palm boxes, the adapter) by `grasp_selection.judge_hand`; the plan
   records where its fingers stop (`hand_closed_q`). An asymmetric hand keeps the generator's grasp:
   the demonstrating jaw takes the half turn instead (`plan.metrics["roll"]`, audit D3).
-- **Not measured yet** (all in `config/inspire_hand.yaml`, `measured: false`): the mount (yaw -45:
-  estimate; adapter 16 mm by ruler, 2026-10-05; the hand's ring is taped over loose screws and
+- **Not measured yet** (all in `config/inspire_hand.yaml`, `measured: false`): the mount (**yaw
+  135, seen at home 2026-10-05 -- the first estimate, -45, was half a turn off**; adapter 16 mm by
+  ruler; the hand's ring is taped over loose screws and
   rocks ~5 mm at the fingertips across the palm -- across the closing direction, not modelled; `inspire_touch` + `python -m tpgpt.hardware.inspire_mount fit`), the
   register map (by ruler, 2026-10-05, rough: the fingers close to the URDF's 1.47 as GraspGen-X's
   `close` does; the thumb is ~0.12 rad more bent than GraspGen-X's model at both ends, so the
@@ -676,8 +677,10 @@ The planner's support height is: its `support_height` parameter, else the calibr
   Measured on the bench (2026-10-05): the close is **simultaneous** (sequential pushes the
   object away), 400 g per finger, the pudding box 150 (`grasp_forces.yaml` `inspire_grasp`).
   **The hand reports a force stop as STATUS 2, not the manual's 3**: contact is judged by
-  where a DOF stopped (`inspire_hand.CONTACT_MARGIN`); the release after a held close opens
-  in one stage.
+  where a DOF stopped (`inspire_hand.CONTACT_MARGIN`). **An empty close is an "opposed" fist**
+  (the thumb stops the middle and index fingers): a close **holds** something only when a finger
+  stops beyond the empty close's angles (`grasp.empty_close_angles`); the release after a held
+  close opens in one stage. **Every Inspire coverage number so far had the yaw -45 and is void.**
 - **The hand's serial driver**: `sudo modprobe usbserial && sudo insmod ~/ch341/ch341.ko` after every
   boot (`insmod` alone fails with "Unknown symbol": it does not load `usbserial`). Desk is still
   configured for the Franka Hand (0.73 kg, CoM 30 mm out): the payload is to be measured (M5).
