@@ -144,6 +144,9 @@ compared with the seam. That shift is itself useful; it is not an error.)
 
 ## Step 4 -- two lengths with the ruler, and how loose the hand is
 
+**Done 2026-10-05:** the printed mount 16 mm, the palm 81 mm, the hand rocks ~5 mm at the
+fingertips across the palm only (`INSPIRE_HAND.md` section 2).
+
 The hand stays open (from step 3.6). Read the ruler to the nearest millimetre.
 
 What you see from the robot down (user, 2026-10-05):
@@ -235,9 +238,9 @@ the force you liked.
    - Do the fingers point **down**?
    - Does the palm face **away from you** (forward), **towards you**, **left** or **right**?
    - Is the thumb on your **left** or your **right**?
-5. Take 2 photos: one from the front of the robot (looking at it), one from its right side.
+5. Optional: a photo from the front of the robot, if anything looks unlike the answers above.
 
-**Send:** the three answers and the 2 photos.
+**Send:** the three answers.
 
 ---
 
@@ -263,6 +266,8 @@ far off its estimate is, and that only helps once the estimate is close.
    ```
 4. **Six table touches**, each one done like this:
    1. Guide the arm so the **index fingertip** rests on the table: touching, not pressing.
+      Hold the **robot** (its last links), never the hand: the hand rocks a little on its ring
+      (step 4), and pushing it moves the fingertip without the robot knowing.
    2. Hold it still. In Terminal D type `t` and press Enter.
    3. Lift it off.
 

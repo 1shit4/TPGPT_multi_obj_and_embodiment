@@ -667,8 +667,9 @@ The planner's support height is: its `support_height` parameter, else the calibr
   26-DOP per link, the URDF's palm boxes, the adapter) by `grasp_selection.judge_hand`; the plan
   records where its fingers stop (`hand_closed_q`). An asymmetric hand keeps the generator's grasp:
   the demonstrating jaw takes the half turn instead (`plan.metrics["roll"]`, audit D3).
-- **Not measured yet** (all in `config/inspire_hand.yaml`, `measured: false`): the mount (yaw -45,
-  adapter 12 mm: estimates; `inspire_touch` + `python -m tpgpt.hardware.inspire_mount fit`), the
+- **Not measured yet** (all in `config/inspire_hand.yaml`, `measured: false`): the mount (yaw -45:
+  estimate; adapter 16 mm by ruler, 2026-10-05; the hand's ring is taped over loose screws and
+  rocks ~5 mm at the fingertips across the palm -- across the closing direction, not modelled; `inspire_touch` + `python -m tpgpt.hardware.inspire_mount fit`), the
   register map (by ruler, 2026-10-05, rough: the fingers close to the URDF's 1.47 as GraspGen-X's
   `close` does; the thumb is ~0.12 rad more bent than GraspGen-X's model at both ends, so the
   open hand is narrower than the generator thinks), the grasp depth (`calibrated_depth_m` 0), the close mode and per-object force

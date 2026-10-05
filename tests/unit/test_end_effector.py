@@ -64,7 +64,7 @@ class TestMount:
         assert Rg @ -H[:3, 1] == pytest.approx([0.0, 0.0, -1.0], abs=1e-9)    # fingers
         assert Rg @ -H[:3, 0] == pytest.approx([1.0, 0.0, 0.0], abs=1e-9)     # palm normal
         wrist = Rg @ H[:3, 3] + pg
-        assert wrist == pytest.approx(poses["fr3_link8"][:3, 3] - [0.0, 0.0, 0.012], abs=1e-9)
+        assert wrist == pytest.approx(poses["fr3_link8"][:3, 3] - [0.0, 0.0, 0.016], abs=1e-9)
         tips = inspire.model.fingertip_points("open")
         assert (Rg @ tips["index"] + pg)[1] < (Rg @ tips["pinky"] + pg)[1]
         # GraspGen-X's approach is the bisector of fingers-down and palm-forward.
@@ -72,8 +72,8 @@ class TestMount:
         assert Rg[:, 2] == pytest.approx([np.sqrt(0.5), 0.0, -np.sqrt(0.5)], abs=1e-6)
 
     def test_the_grasp_point_from_fr3_hand_tcp(self, inspire):
-        # 60 mm out on the palm side and 61 mm along the hand from the TCP, 10 mm across.
-        assert inspire.tool_offset * 1000 == pytest.approx([60.10, 10.0, 60.63], abs=0.01)
+        # 60 mm out on the palm side and 65 mm along the hand from the TCP, 10 mm across (16 mm adapter).
+        assert inspire.tool_offset * 1000 == pytest.approx([60.10, 10.0, 64.63], abs=0.01)
         assert is_rotation(inspire.grasp_to_ee)
 
     def test_a_depth_correction_moves_the_grasp_point_back_along_the_approach(self, inspire):
@@ -100,7 +100,7 @@ class TestMount:
         R_FG = np.asarray(inspire.details["grasp_axes_in_flange"])
         p_FG = np.asarray(inspire.details["grasp_point_in_flange_m"])
         z = (adapter.corners() @ R_FG.T + p_FG)[:, 2]
-        assert z.min() == pytest.approx(0.0, abs=1e-9) and z.max() == pytest.approx(0.012, abs=1e-9)
+        assert z.min() == pytest.approx(0.0, abs=1e-9) and z.max() == pytest.approx(0.016, abs=1e-9)
 
     def test_the_round_trip_rebuilds_the_hand_and_refuses_a_changed_one(self, inspire, tmp_path):
         back = EndEffector.from_dict(inspire.to_dict())

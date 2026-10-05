@@ -63,8 +63,9 @@ The mount, in `config/inspire_hand.yaml` `mount:`:
   middle fingertip is measured from the wrist face, and the URDF gives 217.9.
 - **`lateral_m`**: the wrist face's centre off the flange axis.
 
-With the estimated values (-45 deg, 12 mm, 0) the grasp point sits (60.1, 10.0, 60.6) mm from
-`fr3_hand_tcp`, 165 mm from the flange against the Franka Hand's 103 mm.
+With the current values (yaw -45 deg and no lateral offset, estimates; the adapter 16 mm by
+ruler) the grasp point sits (60.1, 10.0, 64.6) mm from `fr3_hand_tcp`: 168 mm out along the
+flange's axis (152 of them the hand's own), against the Franka Hand's 103 mm.
 
 **How it is held (user, 2026-10-05).** A 3D-printed mount is screwed to the flange, and beige
 paper tape wraps the flange and the mount, so their seam cannot be seen: a ruler cannot give
@@ -74,6 +75,21 @@ grip; the tape holds it and it is **still slightly loose**. Play there turns int
 changes with the pose (the hand's weight takes it up a different way in each), magnified about
 218 / 26 = 8 times from the ring's edge to the fingertips. M2b measures it; M3's touch residual
 shows it too.
+
+**Measured (M2b, user, 2026-10-05): the hand rocks about one line only** -- the fingers swing
+side to side across the palm, like waving, about 5 mm at the fingertips end to end. That is
+5 / 218 = 1.3 deg in all (+-0.66 deg). Most likely the two loose screws act as a hinge pin
+and the hand turns about the line through them; it does not rock towards or away from the
+palm, nor twist. What it costs:
+- at the grasp point (152 mm along the hand from the ring) +-1.7 mm, **across the closing
+  direction** (GraspGen-X's `y`, along the object between the pads): it moves a grasp along
+  the object, not into it or off it. Small next to the camera's error (~10 mm sideways at the
+  shelf) and the arm's (4-5 mm at the grasp);
+- the hand's weight takes up the play whenever the palm's across-direction is not level, so
+  where the hand sits within it depends on the pose; the model does not include it;
+- in the touches (M3) the index tip can sit up to +-2.5 mm off between touches, so the table
+  RMS can exceed 2 mm from the play alone: read it against 3 mm, and guide the arm by the
+  robot, never by the hand.
 
 The robot bring-up is unchanged (`load_gripper:=true`, `fr3_hand_tcp` kept). The Franka gripper
 node fails without its hand, which is expected and harmless.
@@ -171,10 +187,10 @@ Each measurement has a pass criterion. Results go into `config/inspire_hand.yaml
 
 | # | what | how | pass |
 |---|---|---|---|
-| M0 | The hand is the URDF | Caliper on the open hand, against `python -m tpgpt.hardware.inspire_model landmarks`: middle fingertip to wrist face (217.9), knuckle spacing index to little finger (57.8) | within 2 mm |
+| M0 | The hand is the URDF | Caliper on the open hand, against `python -m tpgpt.hardware.inspire_model landmarks`: middle fingertip to wrist face (217.9), knuckle spacing index to little finger (57.8) | within 2 mm. **By ruler 2026-10-05:** middle tip 216 mm below the ring's face, palm 81 mm wide (the model 81.4): agrees |
 | M1 | Yaw and handedness | At home (`joint_homing`): fingers down, palm forward, index finger on the robot's right | by eye; no 90 or 180 deg error |
-| M2 | Adapter thickness | The flange-mount seam is under tape: from the printed part's file if there is one, else from M3's fit (the ruler gives only the beige band, flange part included) | within 1 mm; into `adapter_thickness_m` |
-| M2b | Play at the ring | Rock the palm gently against the held flange; how far the middle fingertip moves (`INSPIRE_MEASURING.md` step 4) | under about 1 mm, or M3's residual and the grasp tests are read with it in mind |
+| M2 | Adapter thickness | The flange-mount seam is under tape: from the printed part's file if there is one, else from M3's fit (the ruler gives only the beige band, flange part included) | within 1 mm; into `adapter_thickness_m`. **The printed part alone, by ruler 2026-10-05: 16 mm** (the estimate was 12); M3 refines it |
+| M2b | Play at the ring | Rock the palm gently against the held flange; how far the middle fingertip moves (`INSPIRE_MEASURING.md` step 4) | under about 1 mm, or M3's residual and the grasp tests are read with it in mind. **2026-10-05: ~5 mm across the palm only** (section 2) |
 | M3 | The mount, by touch | Below | table RMS within 2 mm, marks within 3 mm |
 | M4 | Register to joint map | Ruler distances at registers 1000/750/500/250/0: the middle fingertip below the ring's face (thumb swung out), the thumb tip to the index tip (fingers open), against `python -m tpgpt.hardware.inspire_model landmarks --registers ...` (`middle_length`, `thumb_to_index`); 1 mm is about 0.5 deg | within 3 mm; else fit q_at_0/q_at_1000 into `joint_map`. **Done by ruler 2026-10-05** (section 7): fitted, still unverified |
 | M5 | Payload | Weigh hand, adapter and screws; centre of mass; set in Desk | force estimate at rest under 1.5 N in 3 orientations |

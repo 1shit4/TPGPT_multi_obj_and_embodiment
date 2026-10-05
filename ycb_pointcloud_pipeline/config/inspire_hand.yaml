@@ -81,10 +81,15 @@ inspire_hand:
     # palm faces fr3_hand_tcp +X (the red axis in RViz): at the home pose, fingers down, palm
     # forward (robot +X), the index finger on the robot's right (-Y). MEASURE (M1).
     yaw_deg: -45.0
-    adapter_thickness_m: 0.012  # MEASURE (M2): flange face -> the hand's wrist face
+    # Flange face -> the hand's wrist face (its base ring's face). The 3D-printed mount alone,
+    # by ruler (user, 2026-10-05): 16 mm, +-1-2 mm; the robot touches (M3) refine it.
+    adapter_thickness_m: 0.016
     lateral_m: [0.0, 0.0]       # the wrist face's centre off the flange axis, fr3_link8 x y
     adapter_radius_m: 0.0315    # the adapter plate, a body piece of the hand (flange: 63 mm)
     measured: false             # true once M1-M3 have measured the numbers above
+    # The hand's ring is held by tape over two loose screws, and rocks about one line: the
+    # fingertips swing ~5 mm across the palm, end to end (1.3 deg; +-1.7 mm at the grasp point,
+    # across the closing direction). Not modelled (M2b, user 2026-10-05).
 
   graspgenx:
     # The GraspGen-X description the grasps come from: GraspGen-X's own (inspire_hand, the
