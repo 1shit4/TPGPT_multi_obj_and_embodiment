@@ -2,7 +2,7 @@
 """
 Weigh what hangs on the FR3's flange, for Desk's end-effector settings (plan M5).
 
-The arm starts at home (run joint_homing first), then visits the poses of
+The arm starts near home (run joint_homing first; it moves to home itself), then visits the poses of
 tpgpt.hardware.payload.POSES with the joint impedance controller -- home, pose, home, pose,
 ..., each a joint move of at most 0.8 rad that turns or tilts the hand -- and at each one,
 once still, averages the robot's external joint torques
@@ -49,7 +49,10 @@ class PayloadMeasure(JointTargetPublisher):
         self.declare_parameter('still_velocity', 0.01)   # rad/s, every joint, while sampling
         self.declare_parameter('max_joint_velocity', 0.25)  # rad/s, peak along a move
         self.declare_parameter('min_move_duration', 3.0)    # s
-        self.declare_parameter('home_tolerance', 0.05)      # rad: must start at home
+        # rad: start this close to home. The joint controller leaves the arm a few degrees
+        # off its target (2026-10-05 after joint_homing: joint 4 0.056, joint 7 0.071 rad);
+        # the node moves to home itself first, and the fit uses the measured joints.
+        self.declare_parameter('home_tolerance', 0.3)
         self.declare_parameter('output_dir', os.path.expanduser('~/inspire_mount'))
         self._tau_lock = threading.Lock()
         self._tau = []                                   # (monotonic, [7]) while recording
@@ -123,8 +126,10 @@ class PayloadMeasure(JointTargetPublisher):
         if max(abs(v) for v in dq) > self.get_parameter('max_start_velocity').value:
             raise AbortMotion('Robot is moving; wait until it is still')
         home = list(FRANKA_HOME)
-        if max(abs(a - b) for a, b in zip(q_start, home)) > self.get_parameter('home_tolerance').value:
-            raise AbortMotion('Start from home: ros2 run ycb_pointcloud_pipeline joint_homing')
+        off_home = max(abs(a - b) for a, b in zip(q_start, home))
+        if off_home > self.get_parameter('home_tolerance').value:
+            raise AbortMotion(f'{off_home:.3f} rad from home: start near home '
+                              '(ros2 run ycb_pointcloud_pipeline joint_homing)')
         margin = self.get_parameter('limit_margin').value
         from ycb_pointcloud_pipeline.joint_target_publisher import LOWER, UPPER
         targets = []
@@ -148,6 +153,7 @@ class PayloadMeasure(JointTargetPublisher):
                 return
         self.cmc.activate(self.controller, controllers)
         self.moving = True
+        self._move(q_start, home, 'to home')
         samples = []
         for k, q in enumerate(targets):
             label = f'pose {k + 1}/{len(targets)}'
@@ -191,7 +197,8 @@ def main(args=None):
     node.moving = False
     executor = SingleThreadedExecutor()
     executor.add_node(node)
-    threading.Thread(target=executor.spin, daemon=True).start()
+    spin_thread = threading.Thread(target=executor.spin, daemon=True)
+    spin_thread.start()
     exit_code = 0
     try:
         node.run()
@@ -206,6 +213,7 @@ def main(args=None):
     finally:
         time.sleep(0.2)  # let a final hold command go out
         executor.shutdown()
+        spin_thread.join(timeout=2.0)  # no live spinning thread at teardown ("terminate called")
         node.destroy_node()
         rclpy.try_shutdown()
     raise SystemExit(exit_code)
