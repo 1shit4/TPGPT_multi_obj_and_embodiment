@@ -137,18 +137,57 @@ def test_grasp_close_keeps_its_interface(fake):
     ]
 
 
-def test_open_straightens_then_opposes_and_never_sends_minus_one_to_the_thumb(fake):
+def test_open_from_rest_only_swings_the_thumb_and_never_sends_minus_one_to_it(fake):
     hand = ih.InspireHand(fake.port, 2, timeout=0.5, log=lambda *_: None)
     try:
         st = hand.grasp_open(timeout=1.0, verbose=False)
     finally:
         hand.close_port()
-    first, second = fake.angle_sets
-    assert first[:5] == [1000] * 5 and first[5] == 55       # held at its measured angle
-    assert second == ih.OPEN_POSE
+    # From the fake's rest (fingers straight, thumb rotation 55): the straight thumb rotates
+    # into opposition, nothing else moves; then the whole pose is confirmed.
+    assert fake.angle_sets == [[-1, -1, -1, -1, -1, ih.THUMB_OPPOSED], ih.OPEN_POSE]
     assert all(s[5] != -1 for s in fake.angle_sets)
     assert fake.angle[5] == ih.THUMB_OPPOSED
     assert ih.contact_dofs(st) == []
+
+
+def _goto(fake, start, target):
+    fake.angle = list(start)
+    hand = ih.InspireHand(fake.port, 2, timeout=0.5, log=lambda *_: None)
+    try:
+        hand.goto(target, timeout=0.5, verbose=False)
+    finally:
+        hand.close_port()
+    return fake.angle_sets
+
+
+def test_closing_moves_the_fingers_before_the_thumb(fake):
+    """The user, 2026-10-05: moved together the thumb obstructs the fingers. A fist: the
+    fingers close first, the thumb bends over them last."""
+    sets = _goto(fake, [1000, 1000, 1000, 1000, 1000, 0], [0, 0, 0, 0, 0, 0])
+    assert sets == [[0, 0, 0, 0, -1, 0], [-1, -1, -1, -1, 0, 0], [0, 0, 0, 0, 0, 0]]
+
+
+def test_opening_lifts_the_thumb_before_the_fingers(fake):
+    sets = _goto(fake, [0, 0, 0, 0, 0, 0], [1000, 1000, 1000, 1000, 1000, 0])
+    assert sets == [[-1, -1, -1, -1, 1000, 0], [1000, 1000, 1000, 1000, -1, 0],
+                    [1000, 1000, 1000, 1000, 1000, 0]]
+
+
+def test_the_thumb_rotates_only_straight_with_the_fingers_open(fake):
+    # From a fist to the pointing pose: thumb up, every finger open, rotate, then curl three.
+    sets = _goto(fake, [0, 0, 0, 0, 0, 0], ih.POINT_POSE)
+    assert sets == [[-1, -1, -1, -1, 1000, 0], [1000, 1000, 1000, 1000, -1, 0],
+                    [-1, -1, -1, -1, -1, 1000], [0, 0, 0, -1, -1, 1000], ih.POINT_POSE]
+
+
+def test_a_pose_is_six_values(fake):
+    hand = ih.InspireHand(fake.port, 2, timeout=0.5, log=lambda *_: None)
+    try:
+        with pytest.raises(ValueError):
+            hand.goto([0, 0, 0])
+    finally:
+        hand.close_port()
 
 
 def test_a_wrong_id_is_a_connection_error(fake):
@@ -366,9 +405,11 @@ def _stamp():
     return Time()
 
 
-def test_the_cli_sets_six_values_thumb_rotation_first(fake):
+def test_the_cli_set_goes_through_the_ordered_pose(fake):
     assert ih.main(["--port", fake.port, "--id", "2", "--timeout", "0.3",
                     "set", "500", "500", "500", "500", "500", "300"]) == 0
-    assert fake.angle_sets[-2] == [-1, -1, -1, -1, -1, 300]
-    assert fake.angle_sets[-1] == [500, 500, 500, 500, 500, 300]
+    # rest (fingers straight, rotation 55): rotate the straight thumb, close the fingers,
+    # bend the thumb, confirm
+    assert fake.angle_sets == [[-1, -1, -1, -1, -1, 300], [500, 500, 500, 500, -1, 300],
+                               [-1, -1, -1, -1, 500, 300], [500, 500, 500, 500, 500, 300]]
     assert ih.main(["--port", fake.port, "set", "500", "500"]) == 2

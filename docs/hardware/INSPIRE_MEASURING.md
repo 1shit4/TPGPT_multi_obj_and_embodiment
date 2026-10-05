@@ -65,42 +65,76 @@ The hand talks over a small USB box (the "CH340"). Its driver needs a second dri
 
 ---
 
-## Step 3 -- photos of the finger angles (6 photos)
+## Step 3 -- where the fingertips go (ruler only, no photos)
 
-Why: the hand reports each finger as a number from 0 to 1000. Claude needs to know which finger
-angle each number really is. Photos are enough.
+Why: the hand reports each finger as a number from 0 (closed) to 1000 (open). The model says where
+the fingertip is for each number. Measuring the fingertip at a few numbers checks that. One
+millimetre of ruler is about half a degree of finger angle, so a ruler is good enough.
 
-1. **Stop the hand program**: go to Terminal A and press **Ctrl-C**. (The next commands need the
-   USB line to themselves.)
-2. In Terminal B, paste:
+The commands move the fingers **before** the thumb when closing and the thumb **before** the
+fingers when opening, so the thumb no longer gets in the way.
+
+**About the thumb's sideways swing.** That is the thumb **rotation**, the last of the six numbers:
+- **0** = the thumb points out of the palm, facing the fingers: like a hand holding a can. Every
+  grasp uses this.
+- **1000** = the thumb swung back flat beside the palm, pointing outwards: like a flat "stop"
+  hand. It is used only to get the thumb out of the way: for the pointing pose, and for Part A
+  below.
+
+1. **Stop the hand program**: go to Terminal A and press **Ctrl-C** (these commands need the USB
+   line to themselves).
+
+**Part A -- the fingers** (the thumb straight and swung out of the way)
+
+2. For each line below: paste it in Terminal B, wait until the hand stops, then measure.
+   ```bash
+   ros2 run ycb_pointcloud_pipeline inspire_hand set 1000 1000 1000 1000 1000 1000
+   ros2 run ycb_pointcloud_pipeline inspire_hand set 750 750 750 750 1000 1000
+   ros2 run ycb_pointcloud_pipeline inspire_hand set 500 500 500 500 1000 1000
+   ros2 run ycb_pointcloud_pipeline inspire_hand set 250 250 250 250 1000 1000
+   ros2 run ycb_pointcloud_pipeline inspire_hand set 0 0 0 0 1000 1000
+   ```
+3. **The measurement** (the same for every line):
+   - Hold the ruler straight down, along the hand, with **0 at the seam where the beige adapter
+     ends and the hand begins** (the same 0 as in your photos).
+   - Look at the **middle finger's very tip** (the end of its black last segment) and read the
+     ruler **at the height of that tip**. Keep your eye level with the tip: looking from above or
+     below shifts the reading.
+   - When the finger is curled, the tip points sideways or up. Still read the height of the tip.
+
+**Part B -- the thumb** (the fingers open)
+
+4. For each line below: paste it, wait, then measure.
+   ```bash
+   ros2 run ycb_pointcloud_pipeline inspire_hand set 1000 1000 1000 1000 1000 0
+   ros2 run ycb_pointcloud_pipeline inspire_hand set 1000 1000 1000 1000 750 0
+   ros2 run ycb_pointcloud_pipeline inspire_hand set 1000 1000 1000 1000 500 0
+   ros2 run ycb_pointcloud_pipeline inspire_hand set 1000 1000 1000 1000 250 0
+   ```
+5. **The measurement:** the straight-line distance from **the thumb's very tip** to **the index
+   finger's very tip**. Put the ruler's 0 on one tip and read at the other.
+
+6. Open the hand when done:
    ```bash
    ros2 run ycb_pointcloud_pipeline inspire_hand set 1000 1000 1000 1000 1000 0
    ```
-   The hand goes fully open.
-3. **Photo 1 (index finger, from the side):**
-   - Hold the phone about 30 cm from the hand, **level with the index finger, looking at its side**.
-     You should see the finger in profile: the knuckle and every joint visible, the fingertip
-     pointing down.
-   - Hold the ruler flat against the palm's side, along the hand, so it shows in the photo.
-4. **Photo 2 (thumb, from the side):** the same, but for the thumb, so the thumb's bend is seen
-   in profile.
-5. Paste the next command and take photos 3 and 4 the same way:
-   ```bash
-   ros2 run ycb_pointcloud_pipeline inspire_hand set 500 500 500 500 500 0
-   ```
-6. Paste this one and take photos 5 and 6:
-   ```bash
-   ros2 run ycb_pointcloud_pipeline inspire_hand set 0 0 0 0 0 0
-   ```
-7. Open the hand again:
-   ```bash
-   ros2 run ycb_pointcloud_pipeline inspire_hand set 1000 1000 1000 1000 1000 0
-   ```
 
-Tips: keep the phone square to the finger (not from above, not from below). Same distance for all
-six. Good light.
+**Send:** the nine numbers, like this:
 
-**Send:** the 6 photos, named like `1000_index.jpg`, `1000_thumb.jpg`, `500_index.jpg`, ...
+| | your reading | the model says |
+|---|---|---|
+| A: fingers 1000 | | about 218 mm |
+| A: fingers 750 | | 196 |
+| A: fingers 500 | | 149 |
+| A: fingers 250 | | 103 |
+| A: fingers 0 | | 84 |
+| B: thumb 1000 | | 142 |
+| B: thumb 750 | | 112 |
+| B: thumb 500 | | 84 |
+| B: thumb 250 | | 66 |
+
+(Part A's numbers may all be shifted by the same few mm: where the hand's own base face really is
+compared with the seam. That shift is itself useful; it is not an error.)
 
 ---
 
@@ -241,7 +275,7 @@ itself from a few poses held still, so no scale is needed. Claude will send the 
 
 | step | becomes |
 |---|---|
-| 3 | the finger angle for each number (the hand model's joint map) |
+| 3 | the finger angle for each number (the hand model's joint map), and where the hand's base face is |
 | 4 | the starting guess for the adapter and the hand's length check |
 | 5 | how hard each object is squeezed, and which closing order to use |
 | 6 | which way the hand is turned on the flange |

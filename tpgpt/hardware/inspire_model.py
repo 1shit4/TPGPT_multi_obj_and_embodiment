@@ -668,8 +668,9 @@ def landmarks(model: InspireHandModel, q) -> dict:
     out = {}
     for chain in ("index", "middle", "ring", "pinky", "thumb"):
         out[f"{chain}_length"] = -local[chain][1] * 1000.0
-    for chain in ("index", "middle", "ring", "pinky"):
+    for chain in ("index", "middle", "ring", "pinky", "thumb"):
         out[f"{chain}_to_palm"] = (PALM_SURFACE_X - local[chain][0]) * 1000.0
+    for chain in ("index", "middle", "ring", "pinky"):
         out[f"thumb_to_{chain}"] = float(np.linalg.norm(tips["thumb"] - tips[chain])) * 1000.0
     out["knuckles_index_to_pinky"] = float(np.linalg.norm(
         T["index_proximal"][:3, 3] - T["pinky_proximal"][:3, 3])) * 1000.0

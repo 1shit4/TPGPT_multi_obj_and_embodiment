@@ -12,9 +12,11 @@ ANGLE_SET register values (0-1000, 1000 = straight/open, 0 = bent)::
     thumb bend     1000    0      the force threshold stops it on contact
     thumb rotation 0       0      opposed: pointing out of the palm, facing the fingers
 
-**open**: fingers and thumb bend straighten first (thumb rotation held), then the
-straight thumb swings into opposition over the open palm (the order keeps the
-thumb out of the index finger).
+**Every change of pose keeps the thumb and the fingers out of each other's way**
+(:meth:`InspireHand.goto`; the user, 2026-10-05: moved together, the thumb obstructs the
+fingers). Like a fist: closing, the fingers go first and the thumb bends over them last;
+opening, the thumb lifts off first and then the fingers open. The thumb rotates only while
+it is straight and the fingers are open. **open** is ``goto(OPEN_POSE)``.
 
 **close**, two ways (``close_mode``; which one holds better is measured on the
 robot, not assumed):
@@ -121,6 +123,8 @@ CLOSE_POSE = [0, 0, 0, 0, 0, THUMB_OPPOSED]                 # stops on contact
 #: Index straight, three fingers curled, thumb straight and swung out flat beside the
 #: palm: for touching with the index tip (tpgpt.hardware.inspire_mount.POINT_POSE).
 POINT_POSE = [0, 0, 0, 1000, 1000, 1000]
+#: goto() leaves a DOF alone when it is already this close to its target (register units).
+GOTO_TOLERANCE = 20
 
 #: Register -> URDF angle before measurement: the RH56 manual's angle ranges solved on
 #: the URDF (config/inspire_hand.yaml joint_map explains). UNVERIFIED on the hand
@@ -348,14 +352,62 @@ class InspireHand:
             print_status(st, self.log)
         return st
 
+    # poses
+    def goto(self, target, speed: int = DEFAULT_SPEED, force=DEFAULT_FORCE, timeout: float = 3.0,
+             verbose: bool = True, on_status=None, tolerance: int = GOTO_TOLERANCE) -> dict:
+        """Move to the register values ``target`` (DOF order) without the thumb and the
+        fingers meeting (module docstring). Each step waits for the last:
+
+        1. the thumb lifts: its bend opens to the target if that is straighter, and fully
+           if the thumb is about to rotate;
+        2. the fingers that open, open -- all curled ones, if the thumb is about to rotate;
+        3. the thumb rotates (only straight, the fingers open);
+        4. the fingers that close, close;
+        5. the thumb bends to its target, last.
+
+        Returns the last status. A step with nothing to move is skipped.
+        """
+        target = [int(v) for v in target]
+        if len(target) != 6 or not all(0 <= v <= 1000 for v in target):
+            raise ValueError(f"a pose is six values 0-1000: {target!r}")
+        self.set_speed(speed)
+        self.set_force(force)
+        if self.dry_run:
+            return self.move("goto", target, timeout, verbose, on_status)
+        now = self.read_shorts(ANGLE_ACT)
+        rotate = abs(target[5] - now[5]) > tolerance
+        st = {}
+
+        def step(label, values):
+            nonlocal st
+            st = self.move(label, values, timeout, verbose, on_status)
+            for k, v in enumerate(values):
+                if v != HOLD:
+                    now[k] = v
+
+        bend_up = 1000 if rotate else target[4]
+        if bend_up > now[4] + tolerance:
+            step("thumb lifts", [HOLD] * 4 + [bend_up, HOLD])
+        opening = {k: (1000 if rotate and now[k] < 1000 - tolerance else target[k])
+                   for k in range(4)}
+        opening = {k: v for k, v in opening.items() if v > now[k] + tolerance}
+        if opening:
+            step("fingers open", [opening.get(k, HOLD) for k in range(4)] + [HOLD, HOLD])
+        if rotate:
+            step("thumb rotates", [HOLD] * 5 + [target[5]])
+        closing = {k: target[k] for k in range(4) if target[k] < now[k] - tolerance}
+        if closing:
+            step("fingers close", [closing.get(k, HOLD) for k in range(4)] + [HOLD, HOLD])
+        if target[4] < now[4] - tolerance:
+            step("thumb bends", [HOLD] * 4 + [target[4], HOLD])
+        return self.move("pose", target, timeout, verbose, on_status)
+
     # the grasp
     def grasp_open(self, speed: int = DEFAULT_SPEED, force=DEFAULT_FORCE,
                    timeout: float = 3.0, verbose: bool = True, on_status=None) -> dict:
-        """Fingers and thumb bend straight (thumb rotation held), then thumb opposed."""
-        self.set_speed(speed)
-        self.set_force(force)
-        self.move("open fingers + thumb bend", [1000] * 5 + [HOLD], timeout, verbose, on_status)
-        return self.move("open (thumb opposed)", OPEN_POSE, timeout, verbose, on_status)
+        """Open: the thumb lifts off first, then the fingers open, then the thumb swings
+        into opposition (:meth:`goto` ``OPEN_POSE``)."""
+        return self.goto(OPEN_POSE, speed, force, timeout, verbose, on_status)
 
     def close(self, mode: str = DEFAULT_CLOSE_MODE, speed: int = DEFAULT_SPEED,
               force=DEFAULT_FORCE, timeout: float = 3.0, verbose: bool = True,
@@ -412,11 +464,8 @@ class InspireHand:
     def point(self, speed: int = DEFAULT_SPEED, force=DEFAULT_FORCE, timeout: float = 3.0,
               verbose: bool = True, on_status=None) -> dict:
         """The pointing pose for measuring the mount by touch (``POINT_POSE``): the thumb
-        swings out flat first, then three fingers curl and the index straightens."""
-        self.set_speed(speed)
-        self.set_force(force)
-        self.move("point: thumb out", [HOLD] * 5 + [POINT_POSE[5]], timeout, verbose, on_status)
-        return self.move("point", POINT_POSE, timeout, verbose, on_status)
+        swings out flat beside the palm, then three fingers curl (:meth:`goto`)."""
+        return self.goto(POINT_POSE, speed, force, timeout, verbose, on_status)
 
     def grasp_close(self, speed: int = DEFAULT_SPEED, force=DEFAULT_FORCE,
                     timeout: float = 3.0, verbose: bool = True) -> dict:
@@ -563,7 +612,7 @@ def main(argv=None) -> int:
                     help="round-* are aliases of open/close/cycle; set takes six values")
     ap.add_argument("values", nargs="*", type=int,
                     help="set: little ring middle index thumb_bend thumb_rot, 0-1000 "
-                         "(the thumb rotation first, as the open sequence does)")
+                         "(fingers before the thumb when closing, after it when opening)")
     ap.add_argument("--config", default=None,
                     help="config/inspire_hand.yaml to take defaults from (default: installed)")
     ap.add_argument("--port", default=DEFAULT_PORT)
@@ -612,9 +661,7 @@ def main(argv=None) -> int:
             print("errors cleared")
             return 0
         if command == "home":
-            hand.set_speed(args.speed)
-            hand.set_force(args.force)
-            hand.move("home (everything straight, thumb out)", [1000] * 6, args.timeout)
+            hand.goto([1000] * 6, args.speed, args.force, args.timeout)   # straight, thumb out
         elif command == "thumb":
             # Only the thumb rotation moves, fingers stay put: shows which way it turns.
             hand.set_speed(args.speed)
@@ -631,12 +678,7 @@ def main(argv=None) -> int:
                 print("set needs six values 0-1000: little ring middle index thumb_bend "
                       "thumb_rot", file=sys.stderr)
                 return 2
-            hand.set_speed(args.speed)
-            hand.set_force(args.force)
-            # The thumb rotation alone first, with the rest held, so a swinging thumb does not
-            # strike a finger on its way (the open sequence's order, reversed as needed).
-            hand.move("set: thumb rotation", [HOLD] * 5 + [args.values[5]], args.timeout)
-            st = hand.move("set", args.values, args.timeout)
+            st = hand.goto(args.values, args.speed, args.force, args.timeout)
             if st:
                 print(f"holding {args.values}; ANGLE_ACT {st['angle']}")
         elif command in ("close", "cycle"):
