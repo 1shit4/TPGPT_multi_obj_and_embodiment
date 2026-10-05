@@ -82,16 +82,21 @@ inspire_hand:
     # Frame CRISP commands and /current_pose reports. fr3_hand_tcp needs NO change to the
     # robot bringup (the only frame the path check and the FK work in).
     controller_frame: fr3_hand_tcp
-    # The hand's axis along the flange's; its palm normal = Rz(yaw) * fr3_link8 +X. 135 = the
-    # palm faces fr3_hand_tcp -X: at the home pose, fingers down, the palm towards the robot's
-    # base (-X), the thumb and index finger on the robot's left (+Y). Seen at home by the user,
-    # 2026-10-05 (M1; behind the robot: "the palm faces me, thumb on my left"); the first
-    # estimate, -45, was half a turn off. M3's touches refine it.
-    yaw_deg: 135.0
-    # Flange face -> the hand's wrist face (its base ring's face). The 3D-printed mount alone,
-    # by ruler (user, 2026-10-05): 16 mm, +-1-2 mm; the robot touches (M3) refine it.
-    adapter_thickness_m: 0.016
+    # The hand's axis along the flange's; its palm normal = Rz(yaw) * fr3_link8 +X. At home
+    # the palm faces the robot's base, the thumb on the robot's left (seen by the user,
+    # 2026-10-05, M1: yaw ~135, the first estimate -45 was half a turn off). The index-finger
+    # touches (M3, 2026-10-05 21:26, 8 touches, rms 1.9 mm) put it at 116.4 +- 2.8 deg -- the
+    # palm turned ~19 deg further -- IF the hand is centred on the flange (lateral held at 0):
+    # one fingertip cannot tell the yaw from a sideways offset. 135 with a ~9 mm offset fits
+    # them as well. The little finger's touches decide (INSPIRE_MEASURING.md step 7b).
+    yaw_deg: 116.4
+    # Flange face -> the hand's wrist face (its base ring's face), along the axis. The touches:
+    # 11.8 +- 0.75 mm (the index tip 225.6 mm from the flange). The 3D-printed mount alone, by
+    # ruler: 16 mm -- 4 mm more: a rim, a recess, or the model's finger ~2-4 mm long (step 3
+    # read the middle finger 2 mm short of the model).
+    adapter_thickness_m: 0.0118
     lateral_m: [0.0, 0.0]       # the wrist face's centre off the flange axis, fr3_link8 x y
+                                # (HELD at 0 by the index-only fit; to measure)
     adapter_radius_m: 0.0315    # the adapter plate, a body piece of the hand (flange: 63 mm)
     measured: false             # true once M1-M3 have measured the numbers above
     # The hand's ring is held by tape over two loose screws, and rocks about one line: the

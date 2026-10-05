@@ -40,26 +40,30 @@ def _orientations(n, seed=0, tilt_deg=25.0):
     return out
 
 
-def _table_touch(R, xy, label=""):
-    probe = im.Touch("table", [TABLE], [0.0, 0.0, 0.0], R.tolist(), list(im.POINT_POSE), label)
-    zmin = im.touch_points(probe, TRUE)[:, 2].min()
-    return im.Touch("table", [TABLE], [xy[0], xy[1], TABLE - zmin], R.tolist(),
-                    list(im.POINT_POSE), label)
+def _table_touch(R, xy, label="", finger="index", true=TRUE):
+    pose, link = list(im.POINT_POSES[finger]), im.TOUCH_LINKS[finger]
+    probe = im.Touch("table", [TABLE], [0.0, 0.0, 0.0], R.tolist(), pose, label, link=link)
+    zmin = im.touch_points(probe, true)[:, 2].min()
+    return im.Touch("table", [TABLE], [xy[0], xy[1], TABLE - zmin], R.tolist(), pose, label,
+                    link=link)
 
 
-def _point_touch(R, target, label=""):
-    probe = im.Touch("point", list(target), [0.0, 0.0, 0.0], R.tolist(), list(im.POINT_POSE), label)
-    tip = im.touch_residual(probe, TRUE) + np.asarray(target)        # tip with the TCP at 0
+def _point_touch(R, target, label="", finger="index", true=TRUE):
+    pose, link = list(im.POINT_POSES[finger]), im.TOUCH_LINKS[finger]
+    probe = im.Touch("point", list(target), [0.0, 0.0, 0.0], R.tolist(), pose, label, link=link)
+    tip = im.touch_residual(probe, true) + np.asarray(target)        # tip with the TCP at 0
     return im.Touch("point", list(target), (np.asarray(target) - tip).tolist(), R.tolist(),
-                    list(im.POINT_POSE), label)
+                    pose, label, link=link)
 
 
-def _touches():
-    Rs = _orientations(8)
-    table = [_table_touch(R, (0.45 + 0.02 * k, -0.1 + 0.03 * k), f"t{k}")
-             for k, R in enumerate(Rs[:6])]
-    points = [_point_touch(Rs[6], (0.55, 0.20, 0.33), "top_left"),
-              _point_touch(Rs[7], (0.60, -0.20, 0.33), "top_right")]
+def _touches(fingers=("index", "little"), true=TRUE):
+    """Six table touches per finger, tilted, and the two slot marks with the first finger."""
+    Rs = _orientations(14)
+    table = [_table_touch(Rs[6 * j + k], (0.45 + 0.02 * k, -0.1 + 0.03 * k), f"t{k}{f[0]}",
+                          finger=f, true=true)
+             for j, f in enumerate(fingers) for k in range(6)]
+    points = [_point_touch(Rs[12], (0.55, 0.20, 0.33), "top_left", fingers[0], true),
+              _point_touch(Rs[13], (0.60, -0.20, 0.33), "top_right", fingers[0], true)]
     return table + points
 
 
@@ -76,6 +80,7 @@ def test_the_fit_recovers_the_mount_from_the_design_values():
     assert p["lateral_x"] == pytest.approx(TRUE[2], abs=1e-4)
     assert p["lateral_y"] == pytest.approx(TRUE[3], abs=1e-4)
     assert fit.rms_mm["all"] < 0.01
+    assert fit.held == [] and len(fit.fingers) == 2      # both fingers: nothing held
     assert fit.start["mount_yaw_deg"] == -45.0
     assert "measured: true" in fit.yaml_block()
 
@@ -88,6 +93,29 @@ def test_a_bad_touch_is_shown_not_hidden():
     fit = im.fit_mount(touches)
     text = fit.describe(touches)
     assert "disagrees" in text.split("bad")[1].splitlines()[0]
+
+
+def test_one_finger_cannot_tell_yaw_from_lateral_so_the_offset_is_held():
+    """The live fit of 2026-10-05 (index only): yaw +-405 deg, offset +-160 mm. With one
+    finger the fit holds the offset at its start and says so; it then recovers the yaw and
+    the thickness of a hand that is centred."""
+    centred = (TRUE[0], TRUE[1], 0.0, 0.0)
+    touches = _touches(fingers=("index",), true=centred)
+    fit = im.fit_mount(touches)
+    assert fit.held == ["lateral_x", "lateral_y"] and fit.fingers == ["index_intermediate"]
+    assert any("HELD" in n for n in fit.notes)
+    assert fit.params["mount_yaw_deg"] == pytest.approx(TRUE[0], abs=0.05)
+    assert fit.params["adapter_thickness"] == pytest.approx(TRUE[1], abs=5e-5)
+    assert "HELD" in fit.describe(touches)
+    # Freed, the four are not all determined: the yaw's spread is wide.
+    free = im.fit_mount(touches, hold=())
+    assert not free.held and free.stderr["mount_yaw_deg"] > 1.0 or free.condition > 100
+
+
+def test_the_pointing_finger_is_read_from_the_registers():
+    assert im.pointing_finger([0, 0, 0, 998, 1000, 989]) == "index"     # a live touch
+    assert im.pointing_finger([1000, 0, 0, 0, 1000, 1000]) == "little"
+    assert im.pointing_finger([1000, 1000, 1000, 1000, 1000, 0]) is None
 
 
 def test_touches_straight_down_cannot_tell_yaw_from_lateral():

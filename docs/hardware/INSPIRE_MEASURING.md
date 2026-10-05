@@ -292,6 +292,37 @@ far off its estimate is, and that only helps once the estimate is close.
 
 **Send:** what `f` printed, and the file name it saved (`~/inspire_mount/touches_<time>.json`).
 
+**Done with the index finger 2026-10-05 21:26** (`touches_20261005_212605.json`): the mount's
+thickness came out (11.8 +- 0.8 mm), but **one fingertip cannot tell the hand's turn (yaw) from
+a sideways shift**: both just move that one point. Yaw 116 deg with the hand centred, or 135 with
+it ~9 mm off-centre, fit the touches equally well -- yet they put the grasp point 20 mm apart.
+Step 7b settles it.
+
+## Step 7b -- the same with the little finger
+
+The little fingertip is 68 mm across the palm from the index tip: the two explanations put it
+**23 mm apart**, so a few touches decide. The config now holds "116 deg, centred": if the status
+line in Terminal D says the little tip is within a few mm of where it should be, that is right;
+if ~20 mm, it is the other.
+
+1. Terminals A and C as in step 7 (hand program; free_drive, `yes`, **hold the arm**).
+2. In Terminal B, point with the little finger:
+   ```bash
+   ros2 service call /inspire_hand/point_little std_srvs/srv/Trigger
+   ```
+3. In Terminal D, continue from the index touches (they are kept):
+   ```bash
+   source ~/venvs/tpgpt/bin/activate
+   ros2 run --prefix python3 ycb_pointcloud_pipeline inspire_touch --ros-args \
+       -p resume:=$HOME/inspire_mount/touches_20261005_212605.json
+   ```
+4. **Six table touches with the little fingertip**, tilted as in step 7 (`t` each time). Hold the
+   robot, not the hand.
+5. Optional: a slot mark with the little finger too (`p top_left`).
+6. `f`, then `q`. Stop free_drive with Ctrl-C.
+
+**Send:** what `f` printed.
+
 ---
 
 ## Step 8 -- the hand's weight (later; Claude will send a small tool)

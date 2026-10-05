@@ -154,8 +154,12 @@ THUMB_OPPOSED = 0
 OPEN_POSE = [1000, 1000, 1000, 1000, 1000, THUMB_OPPOSED]   # wide C-shape
 CLOSE_POSE = [0, 0, 0, 0, 0, THUMB_OPPOSED]                 # stops on contact
 #: Index straight, three fingers curled, thumb straight and swung out flat beside the
-#: palm: for touching with the index tip (tpgpt.hardware.inspire_mount.POINT_POSE).
+#: palm: for touching with the index tip (tpgpt.hardware.inspire_mount.POINT_POSES).
 POINT_POSE = [0, 0, 0, 1000, 1000, 1000]
+#: The same with the little finger straight instead: its tip is 68 mm across the palm from
+#: the index tip, which is what tells the mount's yaw from its sideways offset.
+POINT_POSE_LITTLE = [1000, 0, 0, 0, 1000, 1000]
+POINT_POSES = {"index": POINT_POSE, "little": POINT_POSE_LITTLE}
 #: goto() leaves a DOF alone when it is already this close to its target (register units).
 GOTO_TOLERANCE = 20
 
@@ -533,10 +537,13 @@ class InspireHand:
         return report
 
     def point(self, speed: int = DEFAULT_SPEED, force=DEFAULT_FORCE, timeout: float = 3.0,
-              verbose: bool = True, on_status=None) -> dict:
-        """The pointing pose for measuring the mount by touch (``POINT_POSE``): the thumb
-        swings out flat beside the palm, then three fingers curl (:meth:`goto`)."""
-        return self.goto(POINT_POSE, speed, force, timeout, verbose, on_status)
+              verbose: bool = True, on_status=None, finger: str = "index") -> dict:
+        """A pointing pose for measuring the mount by touch (:data:`POINT_POSES`: the
+        ``index`` or the ``little`` finger straight): the thumb swings out flat beside the
+        palm, then the other three fingers curl (:meth:`goto`)."""
+        if finger not in POINT_POSES:
+            raise ValueError(f"point with one of {sorted(POINT_POSES)}, not {finger!r}")
+        return self.goto(POINT_POSES[finger], speed, force, timeout, verbose, on_status)
 
     def grasp_close(self, speed: int = DEFAULT_SPEED, force=DEFAULT_FORCE,
                     timeout: float = 3.0, verbose: bool = True) -> dict:
@@ -687,7 +694,7 @@ def _config_defaults(argv) -> dict:
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("command", choices=["ports", "scan", "status", "open", "close", "cycle",
-                                        "thumb", "home", "point", "set", "clear-error",
+                                        "thumb", "home", "point", "point-little", "set", "clear-error",
                                         "round-open", "round-close", "round-cycle"],
                     help="round-* are aliases of open/close/cycle; set takes six values")
     ap.add_argument("values", nargs="*", type=int,
@@ -753,6 +760,8 @@ def main(argv=None) -> int:
             hand.grasp_open(args.speed, args.force, args.timeout)
         elif command == "point":
             hand.point(args.speed, args.force, args.timeout)
+        elif command == "point-little":
+            hand.point(args.speed, args.force, args.timeout, finger="little")
         elif command == "set":
             if len(args.values) != 6 or not all(0 <= v <= 1000 for v in args.values):
                 print("set needs six values 0-1000: little ring middle index thumb_bend "

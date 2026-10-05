@@ -21,6 +21,7 @@ ROS 2 driver for the Inspire RH56DFX-2R hand: the open/close grasp as services.
                                thumb_bend, thumb_rot) -- the raw values, for the record.
     /inspire_hand/point        std_srvs/Trigger  the pointing pose for measuring the mount
                                                  (index straight, others curled, thumb out)
+    /inspire_hand/point_little std_srvs/Trigger  the same with the little finger straight
     /inspire_hand/grasp_state  std_msgs/String (latched): open | closed | pointing | unknown
 
 Both services block until the motion has finished. ``success`` is false on a serial
@@ -141,6 +142,9 @@ class InspireHandNode(Node):
         self.create_service(Trigger, '~/open', self._open, callback_group=services)
         self.create_service(Trigger, '~/close', self._close, callback_group=services)
         self.create_service(Trigger, '~/point', self._point, callback_group=services)
+        self.create_service(Trigger, '~/point_little',
+                            lambda req, res: self._point(req, res, finger='little'),
+                            callback_group=services)
         rate = float(grasp.get('state_rate_hz', 10.0))
         if rate > 0 and not self.dry:
             self.create_timer(1.0 / rate, self._poll, callback_group=ReentrantCallbackGroup())
@@ -196,11 +200,11 @@ class InspireHandNode(Node):
         log.info('hand OPEN (thumb opposed)')
         return response
 
-    def _point(self, request, response):
+    def _point(self, request, response, finger='index'):
         with self.lock:
             try:
                 st = self.hand.point(self.speed, self._force(), self.step_timeout,
-                                     verbose=False, on_status=self._publish)
+                                     verbose=False, on_status=self._publish, finger=finger)
             except IOError as exc:
                 response.success, response.message = False, f'point failed: {exc}'
                 self.get_logger().error(response.message)

@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 """
-Record index-fingertip touches for measuring the Inspire hand's mount (plan M3), and fit it.
+Record fingertip touches for measuring the Inspire hand's mount (plan M3), and fit it.
 
-The hand is put in the pointing pose (`ros2 service call /inspire_hand/point
-std_srvs/srv/Trigger`: index straight, the others curled, thumb out of the way) and the
-arm hand-guided with free_drive until the index fingertip rests on something whose
-position is known. At each touch, type a command and press Enter:
+The hand is put in a pointing pose -- `ros2 service call /inspire_hand/point
+std_srvs/srv/Trigger` (index straight) or `/inspire_hand/point_little` (little finger
+straight); the others curled, thumb out of the way -- and the arm hand-guided with
+free_drive until that fingertip rests on something whose position is known. Which finger
+touched is read from the hand's registers. At each touch, type a command and press Enter:
 
     t [label]        the fingertip rests on the TABLE (its touched height, shelf.yaml)
     p <slot>         the fingertip is on a touched SLOT MARK (top_left, top_right, ...)
@@ -15,16 +16,20 @@ position is known. At each touch, type a command and press Enter:
     s                save
     q                save and quit
 
-Tilt the hand 15-30 deg in a different direction for each table touch: touches made
-straight down cannot tell the mount's yaw from its offset (the fit says so). Six
-table touches and the two top slot marks are enough; more is better.
+Touch with BOTH fingers: one fingertip only says where that one point is, which cannot
+tell the mount's yaw from a sideways offset (with one finger the fit holds the offset at
+0 and says so). Tilt the hand 15-30 deg in a different direction for each table touch.
+Six table touches with each finger, and the two top slot marks with either, are enough.
 
 Between touches a status line shows where the CURRENT mount estimate (the yaml's) puts
 the index tip: its height above the table, and its distance to the nearest slot mark.
 A touch the estimate already agrees with to a millimetre or two needs no fit.
 
 Touches are saved to ~/inspire_mount/touches_<time>.json; fit them again any time with
-    python -m tpgpt.hardware.inspire_mount fit ~/inspire_mount/touches_<time>.json
+    python -m tpgpt.hardware.inspire_mount fit ~/inspire_mount/touches_<time>.json [more.json]
+Continue an earlier session (its touches are kept and saved again with the new ones):
+    ros2 run --prefix python3 ycb_pointcloud_pipeline inspire_touch --ros-args \
+        -p resume:=$HOME/inspire_mount/touches_<time>.json
 
 Needs tpgpt: run it from the tpgpt venv with --prefix python3.
     source ~/venvs/tpgpt/bin/activate
@@ -48,7 +53,6 @@ from ycb_pointcloud_pipeline.ros_utils import pose_to_matrix
 
 MAX_POSE_AGE = 0.5          # s
 MAX_HAND_AGE = 1.0          # s
-POSE_TOLERANCE = 40         # register units from POINT_POSE before a warning
 
 
 def installed_config(name):
@@ -68,6 +72,7 @@ class TouchRecorder(Node):
         self.declare_parameter('hand_config', '')       # '' -> installed inspire_hand.yaml
         self.declare_parameter('shelf_config', '')      # '' -> installed shelf.yaml
         self.declare_parameter('output_dir', os.path.expanduser('~/inspire_mount'))
+        self.declare_parameter('resume', '')            # a touches_<time>.json to continue from
         p = lambda n: self.get_parameter(n).value  # noqa: E731
         from tpgpt.hardware import inspire_mount as im
         from tpgpt.hardware.shelf import slots
@@ -80,6 +85,10 @@ class TouchRecorder(Node):
         self.params = [self.start[k] for k in im.PARAMS]
         self.pose = self.registers = None
         self.touches = []
+        if p('resume'):
+            self.touches = im.load_touches(p('resume'))
+            print(f"resumed {len(self.touches)} touches from {p('resume')} "
+                  f"({', '.join(sorted({t.label for t in self.touches}))})")
         os.makedirs(p('output_dir'), exist_ok=True)
         self.path = os.path.join(p('output_dir'), f"touches_{time.strftime('%Y%m%d_%H%M%S')}.json")
         self.create_subscription(PoseStamped, '/current_pose', self._pose, 10)
@@ -110,31 +119,34 @@ class TouchRecorder(Node):
             print(f'  NOT recorded: {why}')
             return
         T, regs = state
-        off = max(abs(a - b) for a, b in zip(regs, self.im.POINT_POSE))
-        if off > POSE_TOLERANCE:
-            print(f'  WARNING: the hand is not in the pointing pose (registers {regs}, '
-                  f'{off} off): call /inspire_hand/point first. Recorded anyway.')
+        finger = self.im.pointing_finger(regs)
+        if finger is None:
+            print(f'  NOT recorded: the hand is in neither pointing pose (registers {regs}): '
+                  'call /inspire_hand/point or /inspire_hand/point_little first')
+            return
         t = self.im.Touch(kind, list(map(float, target)), T[:3, 3].tolist(),
-                          T[:3, :3].tolist(), regs, label)
+                          T[:3, :3].tolist(), regs, label, link=self.im.TOUCH_LINKS[finger])
         self.touches.append(t)
         r = self.im.touch_residual(t, self.params, self.base) * 1000.0
-        print(f'  touch {len(self.touches)} ({kind} {label}): the current estimate is off by '
-              f'{np.round(r, 1).tolist()} mm')
+        print(f'  touch {len(self.touches)} ({kind} {label}, {finger} finger): the current '
+              f'estimate is off by {np.round(r, 1).tolist()} mm')
 
     def status(self):
         state, why = self.current()
         if state is None:
             return why
         T, regs = state
+        finger = self.im.pointing_finger(regs) or 'index'
+        link = self.im.TOUCH_LINKS[finger]
         probe = self.im.Touch('point', [0.0, 0.0, 0.0], T[:3, 3].tolist(), T[:3, :3].tolist(),
-                              regs)
+                              regs, link=link)
         W = self.im.touch_points(probe, self.params, self.base)
         from tpgpt.hardware.end_effector import inspire_end_effector
         model = inspire_end_effector(**{**self.base, **self.im._mount(self.params)}).model
-        tip = W[self.im._tip_index(model, self.im.TOUCH_LINK)]
+        tip = W[self.im._tip_index(model, link)]
         name, mark = min(self.slots.items(), key=lambda kv: np.linalg.norm(kv[1] - tip))
-        return (f'index lowest point {(W[:, 2].min() - self.table) * 1000:+6.1f} mm above the '
-                f'table; tip {np.linalg.norm(mark - tip) * 1000:6.1f} mm from {name}')
+        return (f'{finger} lowest point {(W[:, 2].min() - self.table) * 1000:+6.1f} mm above '
+                f'the table; tip {np.linalg.norm(mark - tip) * 1000:6.1f} mm from {name}')
 
     def fit(self):
         if not self.touches:

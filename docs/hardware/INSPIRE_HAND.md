@@ -194,7 +194,7 @@ Each measurement has a pass criterion. Results go into `config/inspire_hand.yaml
 | M1 | Yaw and handedness | At home (`joint_homing`): fingers down; which way the palm faces; the thumb's side | by eye; no 90 or 180 deg error. **2026-10-05: palm towards the base, thumb on the robot's left: yaw 135, not the estimated -45** (a right hand, as the box says) |
 | M2 | Adapter thickness | The flange-mount seam is under tape: from the printed part's file if there is one, else from M3's fit (the ruler gives only the beige band, flange part included) | within 1 mm; into `adapter_thickness_m`. **The printed part alone, by ruler 2026-10-05: 16 mm** (the estimate was 12); M3 refines it |
 | M2b | Play at the ring | Rock the palm gently against the held flange; how far the middle fingertip moves (`INSPIRE_MEASURING.md` step 4) | under about 1 mm, or M3's residual and the grasp tests are read with it in mind. **2026-10-05: ~5 mm across the palm only** (section 2) |
-| M3 | The mount, by touch | Below | table RMS within 2 mm, marks within 3 mm |
+| M3 | The mount, by touch | Below | table RMS within 2 mm, marks within 3 mm (the ring's play adds up to ~2.5 mm). **Index only, 2026-10-05**: thickness 11.8 +- 0.75 mm; yaw 116.4 +- 2.8 deg *if* centred -- one finger cannot separate yaw from offset; the little finger's touches decide |
 | M4 | Register to joint map | Ruler distances at registers 1000/750/500/250/0: the middle fingertip below the ring's face (thumb swung out), the thumb tip to the index tip (fingers open), against `python -m tpgpt.hardware.inspire_model landmarks --registers ...` (`middle_length`, `thumb_to_index`); 1 mm is about 0.5 deg | within 3 mm; else fit q_at_0/q_at_1000 into `joint_map`. **Done by ruler 2026-10-05** (section 7): fitted, still unverified |
 | M5 | Payload | Weigh hand, adapter and screws; centre of mass; set in Desk | force estimate at rest under 1.5 N in 3 orientations |
 | M6 | Grasp depth | Grasp-test sweep, below | the middle of the plateau into `graspgenx.calibrated_depth_m` |
@@ -212,8 +212,25 @@ ros2 run --prefix python3 ycb_pointcloud_pipeline inspire_touch
 ```
 Rest the index fingertip on the table and type `t`. Do it six times or more, each with the hand
 tilted 15-30 deg in a different direction. Then touch each top slot mark: `p top_left`,
-`p top_right`. `f` fits; the yaml block it prints goes into `config/inspire_hand.yaml`. Touches
-made straight down cannot separate the yaw from the offset, and the fit says so.
+`p top_right`. Then the same table touches with the little finger
+(`ros2 service call /inspire_hand/point_little std_srvs/srv/Trigger`; the recorder reads which
+finger from the hand's registers). `f` fits; the yaml block it prints goes into
+`config/inspire_hand.yaml`.
+
+**Why both fingers.** Touches with one fingertip only say where that one point is relative to
+the flange: three numbers, however the wrist is tilted. The mount has four, and turning the hand
+about the flange axis or shifting it sideways both just move that point. The first live fit
+(index only, 2026-10-05 21:26, 8 touches) showed it: yaw +-405 deg, offset +-160 mm, thickness
++-0.8 mm. Held centred, the yaw is 116.4 +- 2.8 deg; held at the eye's 135, the hand is 9.8 mm
+off-centre; both fit to 1.7-1.9 mm, and they put the grasp point **20 mm** apart. The little
+fingertip, 68 mm across the palm, is 23 mm apart in the two -- easy to see. With one finger's
+touches the fit holds the offset (at the config's) and says so (`--free` frees it).
+
+**The thickness, 11.8 mm, against the ruler's 16.** The touches measure flange to index tip,
+225.6 mm along the axis; the model's index is 213.8 of it. Either the hand sits 4 mm deeper
+than the printed part's length (a rim, or the ring in a recess), or the model's finger is a
+little long (step 3 read the middle finger 2 mm short of it). For the fingertips the touched
+value is right whichever it is; for the palm it is within those 4 mm.
 
 ## 5. Grasp tests (the grasp on its own, before any transport)
 
