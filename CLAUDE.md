@@ -672,6 +672,10 @@ The planner's support height is: its `support_height` parameter, else the calibr
   register map (the manual's ranges solved on the URDF; the real hand closes further than the
   URDF's limits), the grasp depth (`calibrated_depth_m` 0), the close mode and per-object force
   (`grasp_forces.yaml` `inspire_grasp`), Desk's payload. **Nothing has run on the robot.**
+- **The hand's serial driver**: `sudo modprobe usbserial && sudo insmod ~/ch341/ch341.ko` after every
+  boot (`insmod` alone fails with "Unknown symbol": it does not load `usbserial`). Desk is still
+  configured for the Franka Hand (0.73 kg, CoM 30 mm out): the payload is to be measured (M5).
+  Step-by-step measuring: `docs/hardware/INSPIRE_MEASURING.md`.
 - **Grasp-only tests come first**: `-p task:=grasp_test` (`tpgpt/hardware/grasp_test.py`), with
   `grasp_test_constructed`, `grasp_test_library_index` and `grasp_test_depth_offset` for the frame
   check and the depth sweep. Dry-run tested offline end to end (`scripts/fake_scene.py`).

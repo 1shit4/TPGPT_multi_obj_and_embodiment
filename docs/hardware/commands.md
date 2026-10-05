@@ -338,7 +338,7 @@ measurements (`docs/hardware/INSPIRE_HAND.md`).
 Bring-up, measurements, grasp tests and transport: `docs/hardware/INSPIRE_HAND.md`. The
 usual ones:
 ```bash
-sudo insmod ~/ch341/ch341.ko                                    # once per boot: /dev/ttyUSB0
+sudo modprobe usbserial && sudo insmod ~/ch341/ch341.ko         # once per boot: /dev/ttyUSB0
 ros2 launch ycb_pointcloud_pipeline inspire_hand.launch.py      # the hand, its own terminal
 # a grasp on its own (dry_run true by default)
 ros2 run --prefix python3 ycb_pointcloud_pipeline tpgpt_pick_place --ros-args \

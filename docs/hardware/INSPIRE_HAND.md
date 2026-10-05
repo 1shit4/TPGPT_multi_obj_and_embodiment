@@ -119,7 +119,9 @@ register map (`joint_map`) stays ours to measure (M4).
 Every terminal as `docs/hardware/commands.md` §1 (sourcing, venvs), then:
 
 ```bash
-# once after every boot: the USB-RS485 adapter's driver (the kernel lacks it)
+# once after every boot: the USB-RS485 adapter's driver (the kernel lacks it). It depends on the
+# kernel's usbserial module, which insmod does not load: without it, "Unknown symbol in module".
+sudo modprobe usbserial
 sudo insmod ~/ch341/ch341.ko
 ls /dev/ttyUSB0
 ```
@@ -135,7 +137,10 @@ ros2 param set /inspire_hand close_mode simultaneous            # or sequential
 ros2 param set /inspire_hand force_g 300                        # grams per finger
 ```
 `free_drive` and `joint_homing` open this hand by themselves (`gripper_type` auto reads X6's
-`hands.mounted: inspire`).
+`hands.mounted: inspire`), so they need the hand node running; without it, or to keep the hand
+as it is (the pointing pose for M3), pass `-p open_gripper:=false`.
+
+The step-by-step measuring guide: `docs/hardware/INSPIRE_MEASURING.md`.
 
 **Desk**: set the end effector to the Inspire hand plus adapter, with its mass and centre of mass
 (M5). Without them, gravity compensation is wrong by the difference.
