@@ -16,23 +16,35 @@ ANGLE_SET register values (0-1000, 1000 = straight/open, 0 = bent)::
 (:meth:`InspireHand.goto`; the user, 2026-10-05: moved together, the thumb obstructs the
 fingers). Like a fist: closing, the fingers go first and the thumb bends over them last;
 opening, the thumb lifts off first and then the fingers open. The thumb rotates only while
-it is straight and the fingers are open. **open** is ``goto(OPEN_POSE)``.
+it is straight and the fingers are open.
 
-**close**, two ways (``close_mode``; which one holds better is measured on the
-robot, not assumed):
+**open** (:meth:`InspireHand.grasp_open`): right after a close that **held something**
+(the thumb and a finger stopped on it, :attr:`CloseReport.opposed`), everything opens at
+once, in one stage: the object is between the thumb and the fingers, so they cannot meet,
+and a staged open (the thumb first) leaves the fingers pressing the object alone, which
+shifts it at the release (the user, 2026-10-05). Otherwise -- a fist closed on air, any
+other pose, the thumb to rotate -- it is ``goto(OPEN_POSE)``.
 
-* ``sequential`` (reported to hold round objects near the palm on 2026-09-15, possibly
-  on another hand, so unverified; the user's rule on 2026-10-05 is this order):
-  thumb rotation confirmed opposed, the four fingers wrap and push the object
-  against the straight thumb, then the thumb bends to lock it.
-* ``simultaneous``: thumb rotation confirmed opposed, then the four fingers and
-  the thumb bend together -- how GraspGen-X's description closes the hand
-  (``close`` drives the thumb pitch and the fingers in one pose). Without an object in
-  between, the thumb can meet the fingers.
+**close**, two ways (``close_mode``):
 
-Either returns a :class:`CloseReport`: which DOFs stopped on their force threshold
+* ``simultaneous`` (**the one to use**: the user, 2026-10-05, on all five objects):
+  thumb rotation confirmed opposed, then the four fingers and the thumb bend together --
+  how GraspGen-X's description closes the hand (``close`` drives the thumb pitch and the
+  fingers in one pose). Without an object in between, the thumb can meet the fingers.
+* ``sequential``: the four fingers close first, then the thumb. **It pushes the object
+  away**: nothing opposes the fingers until the thumb comes (the user, 2026-10-05). Kept
+  only to show that.
+
+Either returns a :class:`CloseReport`: which DOFs were stopped by something
 (**contact**), which closed all the way (**on air**), which were still moving at the
 timeout, and the actuator errors. A close that touches nothing is not a success.
+
+**Contact is judged by where a DOF stopped, not by its STATUS.** The manual (2.4.21) has
+STATUS 3 for "stopped on the force threshold", but this hand reports 2 ("reached the
+target") for a DOF stopped by an object as well (2026-10-05: every DOF of every grasp on
+five objects read 2, stopped 400-800 units short of 0 at 400-800 g). A close commands 0;
+a DOF that ends more than :data:`CONTACT_MARGIN` short of it was stopped by something.
+The hand reaches a free target to within ~7 units.
 
 Each DOF's angle in the URDF joint the hand model uses comes from the ``joint_map``
 block of config/inspire_hand.yaml (:func:`joint_map_from_config`,
@@ -103,7 +115,11 @@ STATUS_TEXT = {
     0: "opening", 1: "closing", 2: "at target", 3: "stopped on force",
     5: "current limit", 6: "locked rotor", 7: "actuator fault",
 }
-STATUS_STOPPED_ON_FORCE = 3
+STATUS_STOPPED_ON_FORCE = 3   # the manual's; this hand reports 2 instead (module docstring)
+#: A closing DOF that stops more than this short of its target (register units) was stopped
+#: by something. The hand reaches a free target to within ~7 (2026-10-05: [997, 996, 999,
+#: 1000, 243] for 1000 and 250); 30 is ~2.5 deg of finger, ~3 mm at the fingertip.
+CONTACT_MARGIN = 30
 ERROR_BITS = ("locked rotor", "over temperature", "over current",
               "motor abnormal", "communication")
 HOLD = -1  # ANGLE_SET value that leaves a DOF where it is (not valid for thumb rotation)
@@ -113,7 +129,7 @@ DEFAULT_PORT = "/dev/ttyUSB0"
 DEFAULT_ID = 1          # this lab's hand since 2026-10-05 (it answered at 2 on 09-15); factory default
 DEFAULT_SPEED = 500     # 0-1000, 1000 = 0.8 s full stroke
 DEFAULT_FORCE = 400     # grams per finger before it stops
-DEFAULT_CLOSE_MODE = "sequential"
+DEFAULT_CLOSE_MODE = "simultaneous"   # the user, 2026-10-05: sequential pushes the object
 
 # --- the fixed grasp ------------------------------------------------------------
 # Thumb rotation (manual 2.4.11, top view): 1000 = beta 165 deg, thumb swung out
@@ -180,7 +196,7 @@ class CloseReport:
     """
 
     mode: str
-    contact: list = field(default_factory=list)    # stopped on the force threshold
+    contact: list = field(default_factory=list)    # stopped short of the close target
     on_air: list = field(default_factory=list)     # reached the close target untouched
     timed_out: list = field(default_factory=list)  # still moving at the step's timeout
     errors: str = ""
@@ -249,6 +265,8 @@ class InspireHand:
                  log=print):
         self.id = hand_id
         self.dry_run = dry_run
+        #: The last close held something and the hand has not moved since (grasp_open).
+        self.holding = False
         self.log = log
         self.ser = None
         if not dry_run:
@@ -372,6 +390,7 @@ class InspireHand:
         target = [int(v) for v in target]
         if len(target) != 6 or not all(0 <= v <= 1000 for v in target):
             raise ValueError(f"a pose is six values 0-1000: {target!r}")
+        self.holding = False
         self.set_speed(speed)
         self.set_force(force)
         if self.dry_run:
@@ -407,8 +426,17 @@ class InspireHand:
     # the grasp
     def grasp_open(self, speed: int = DEFAULT_SPEED, force=DEFAULT_FORCE,
                    timeout: float = 3.0, verbose: bool = True, on_status=None) -> dict:
-        """Open: the thumb lifts off first, then the fingers open, then the thumb swings
-        into opposition (:meth:`goto` ``OPEN_POSE``)."""
+        """Open. Right after a close that held something (:attr:`holding`), with the
+        thumb still opposed: everything opens at once, so the release does not push the
+        object. Otherwise (a fist, any other pose): :meth:`goto` ``OPEN_POSE``, the thumb
+        first."""
+        if self.holding and not self.dry_run:
+            self.holding = False
+            if abs(self.read_shorts(ANGLE_ACT)[5] - OPEN_POSE[5]) <= GOTO_TOLERANCE:
+                self.set_speed(speed)
+                self.set_force(force)
+                return self.move("open: release, all at once", OPEN_POSE, timeout, verbose,
+                                 on_status)
         return self.goto(OPEN_POSE, speed, force, timeout, verbose, on_status)
 
     def close(self, mode: str = DEFAULT_CLOSE_MODE, speed: int = DEFAULT_SPEED,
@@ -441,13 +469,13 @@ class InspireHand:
         else:
             steps = [("thumb rotation opposed", [HOLD] * 5 + [THUMB_OPPOSED], ("thumb_rot",)),
                      ("close: fingers and thumb", CLOSE_POSE, BENDING)]
-        status = [None] * 6
+        status, stopped_at = [None] * 6, [None] * 6
         st = {}
         for label, angles, moved in steps:
             st = self.move(label, angles, timeout, verbose, on_status)
             for name in moved:
                 k = DOF_NAMES.index(name)
-                status[k] = st["status"][k]
+                status[k], stopped_at[k] = st["status"][k], st["angle"][k]
                 if name in st.get("timed_out", []):
                     report.timed_out.append(name)
         report.status = [s if s is not None else st["status"][k] for k, s in enumerate(status)]
@@ -457,10 +485,11 @@ class InspireHand:
         for k, name in enumerate(BENDING):
             if name in report.timed_out:
                 continue
-            if report.status[k] == STATUS_STOPPED_ON_FORCE:
+            if stopped_short(stopped_at[k], CLOSE_POSE[k], report.status[k]):
                 report.contact.append(name)
-            elif report.status[k] == 2:
+            else:
                 report.on_air.append(name)
+        self.holding = report.opposed and not report.errors
         return report
 
     def point(self, speed: int = DEFAULT_SPEED, force=DEFAULT_FORCE, timeout: float = 3.0,
@@ -504,11 +533,20 @@ def load_config(path: str | None = None) -> dict:
     return cfg
 
 
-def contact_dofs(st: dict) -> list[str]:
-    """DOFs that stopped on their force threshold, i.e. touched something."""
+def stopped_short(angle: int, target: int, status: int | None = None) -> bool:
+    """A closing DOF was stopped by something: it ended more than :data:`CONTACT_MARGIN`
+    short of its target, or reported the manual's STATUS 3 (module docstring)."""
+    return status == STATUS_STOPPED_ON_FORCE or int(angle) - int(target) > CONTACT_MARGIN
+
+
+def contact_dofs(st: dict, target=CLOSE_POSE) -> list[str]:
+    """The bending DOFs a status after a close shows stopped by something
+    (:func:`stopped_short` against ``target``, the close's)."""
     if not st:
         return []
-    return [n for n, s in zip(DOF_NAMES, st["status"]) if s == STATUS_STOPPED_ON_FORCE]
+    return [n for k, n in enumerate(BENDING)
+            if stopped_short(st["angle"][k], target[k], st["status"][k])]
+
 
 
 def closure(st: dict) -> list[float]:

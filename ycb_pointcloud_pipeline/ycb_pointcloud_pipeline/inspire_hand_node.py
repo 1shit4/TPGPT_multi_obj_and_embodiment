@@ -2,12 +2,15 @@
 """
 ROS 2 driver for the Inspire RH56DFX-2R hand: the open/close grasp as services.
 
-    /inspire_hand/open         std_srvs/Trigger  fingers + thumb bend straight, then the
-                                                 thumb swings into opposition
+    /inspire_hand/open         std_srvs/Trigger  right after a close that held something:
+                                                 everything at once (the release); else the
+                                                 thumb lifts, the fingers open, the thumb
+                                                 swings into opposition
     /inspire_hand/close        std_srvs/Trigger  close (``close_mode``); every bending DOF
                                                  stops on its force threshold. ``message``
-                                                 is the CloseReport as JSON (contact, on
-                                                 air, timed out, errors, angles, forces).
+                                                 is the CloseReport as JSON (contact = the
+                                                 DOFs stopped short of the close, on air,
+                                                 timed out, errors, angles, forces).
     /inspire_hand/joint_states sensor_msgs/JointState: the six driven URDF joints of
                                GraspGen-X's inspire_hand description, position in rad
                                (config joint_map), effort = measured force in GRAMS.
@@ -29,7 +32,7 @@ Parameters read at every close, settable while the node runs (``ros2 param set``
 the executor's per-object force through rcl_interfaces/SetParameters):
     force_g          per-DOF stop threshold, grams, 0-1000 (one value for all six)
     force_g_per_dof  six values in DOF order; empty = force_g for all
-    close_mode       sequential | simultaneous
+    close_mode       simultaneous (the default: it holds) | sequential (pushes the object)
 
 The speed, serial port and hand ID come from config/inspire_hand.yaml (parameter
 `config_file`); `port`, `hand_id`, `baud`, `speed`, `force_g` and `close_mode`

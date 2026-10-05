@@ -36,8 +36,9 @@ inspire_hand:
     speed: 500                  # 0-1000; 1000 = 0.8 s full stroke
     force_g: 400                # per-finger stop threshold, grams (0-1000); per object:
                                 # config/grasp_forces.yaml inspire_grasp (set at each close)
-    close_mode: sequential      # sequential (fingers, then the thumb) | simultaneous -- which one
-                                # GraspGen-X grasps need is measured on the robot (plan M9)
+    close_mode: simultaneous    # simultaneous (all together) | sequential (fingers, then the thumb).
+                                # The user, 2026-10-05, five objects: simultaneous holds them;
+                                # sequential pushes them away (nothing opposes the fingers).
     step_timeout_s: 3.0         # wait per motion step; still moving after it = an error
     state_rate_hz: 10.0         # /inspire_hand/joint_states while idle
 

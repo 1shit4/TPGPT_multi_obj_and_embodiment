@@ -672,8 +672,12 @@ The planner's support height is: its `support_height` parameter, else the calibr
   rocks ~5 mm at the fingertips across the palm -- across the closing direction, not modelled; `inspire_touch` + `python -m tpgpt.hardware.inspire_mount fit`), the
   register map (by ruler, 2026-10-05, rough: the fingers close to the URDF's 1.47 as GraspGen-X's
   `close` does; the thumb is ~0.12 rad more bent than GraspGen-X's model at both ends, so the
-  open hand is narrower than the generator thinks), the grasp depth (`calibrated_depth_m` 0), the close mode and per-object force
-  (`grasp_forces.yaml` `inspire_grasp`), Desk's payload. **Nothing has run on the robot.**
+  open hand is narrower than the generator thinks), the grasp depth (`calibrated_depth_m` 0), Desk's payload. **Nothing has run on the robot.**
+  Measured on the bench (2026-10-05): the close is **simultaneous** (sequential pushes the
+  object away), 400 g per finger, the pudding box 150 (`grasp_forces.yaml` `inspire_grasp`).
+  **The hand reports a force stop as STATUS 2, not the manual's 3**: contact is judged by
+  where a DOF stopped (`inspire_hand.CONTACT_MARGIN`); the release after a held close opens
+  in one stage.
 - **The hand's serial driver**: `sudo modprobe usbserial && sudo insmod ~/ch341/ch341.ko` after every
   boot (`insmod` alone fails with "Unknown symbol": it does not load `usbserial`). Desk is still
   configured for the Franka Hand (0.73 kg, CoM 30 mm out): the payload is to be measured (M5).

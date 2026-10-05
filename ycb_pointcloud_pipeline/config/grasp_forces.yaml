@@ -19,6 +19,12 @@ franka_grasp:
 # The Inspire hand's per-finger force threshold per object, GRAMS (0-1000; each finger stops
 # when its sensor reads this). The executor sets it on /inspire_hand before each close
 # (tpgpt_executor_node.inspire_force); -p inspire_force_g:=G > 0 overrides it for one run.
-# 400 g is the 2026-09-15 bench value; per-object values are to be set on the bench (plan M7).
+# Set on the bench by the user, 2026-10-05 (plan M7; simultaneous close, the object held in
+# the hand by the user):
+#   banana, apple  held at 400, also by the fingertips alone (as from a table)
+#   mug            held at 400
+#   foam_brick     400: it still turns about the contact points at any force tried
+#   pudding_box    150: a light cardboard box
 inspire_grasp:
   default: 400
+  pudding_box: 150

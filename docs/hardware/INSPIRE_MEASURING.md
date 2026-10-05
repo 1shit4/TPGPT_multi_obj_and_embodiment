@@ -186,6 +186,9 @@ the fingertips (they are 218 mm away, the ring's edge 26 mm from its middle).
 
 ## Step 5 -- closing on each object
 
+**Done 2026-10-05:** `simultaneous` holds every object; `sequential` pushes them away. Forces:
+400 g, the pudding box 150 (`INSPIRE_HAND.md` section 7).
+
 Why: this checks that each finger stops when it touches, and lets you pick how hard each object
 is squeezed.
 

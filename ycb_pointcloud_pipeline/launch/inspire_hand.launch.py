@@ -32,7 +32,7 @@ def generate_launch_description():
         DeclareLaunchArgument('speed', default_value='-1', description='-1 = config grasp.speed'),
         DeclareLaunchArgument('force_g', default_value='-1', description='-1 = config grasp.force_g'),
         DeclareLaunchArgument('close_mode', default_value='',
-                              description="sequential | simultaneous; '' = config grasp.close_mode"),
+                              description="simultaneous | sequential; '' = config grasp.close_mode (simultaneous)"),
         DeclareLaunchArgument('dry_run', default_value='false'),
         Node(package='ycb_pointcloud_pipeline', executable='inspire_hand_node', output='screen',
              emulate_tty=True,

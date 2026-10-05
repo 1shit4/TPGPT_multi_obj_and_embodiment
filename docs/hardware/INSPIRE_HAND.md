@@ -161,7 +161,7 @@ ros2 service call /inspire_hand/open std_srvs/srv/Trigger
 ros2 service call /inspire_hand/close std_srvs/srv/Trigger     # answers the close report (JSON)
 ros2 service call /inspire_hand/point std_srvs/srv/Trigger
 # settable while it runs (read at each close):
-ros2 param set /inspire_hand close_mode simultaneous            # or sequential
+ros2 param set /inspire_hand close_mode simultaneous            # the default; sequential pushes the object
 ros2 param set /inspire_hand force_g 300                        # grams per finger
 ```
 Every pose change (open, point, `inspire_hand set`) moves the thumb and the fingers in turn, as a
@@ -195,8 +195,8 @@ Each measurement has a pass criterion. Results go into `config/inspire_hand.yaml
 | M4 | Register to joint map | Ruler distances at registers 1000/750/500/250/0: the middle fingertip below the ring's face (thumb swung out), the thumb tip to the index tip (fingers open), against `python -m tpgpt.hardware.inspire_model landmarks --registers ...` (`middle_length`, `thumb_to_index`); 1 mm is about 0.5 deg | within 3 mm; else fit q_at_0/q_at_1000 into `joint_map`. **Done by ruler 2026-10-05** (section 7): fitted, still unverified |
 | M5 | Payload | Weigh hand, adapter and screws; centre of mass; set in Desk | force estimate at rest under 1.5 N in 3 orientations |
 | M6 | Grasp depth | Grasp-test sweep, below | the middle of the plateau into `graspgenx.calibrated_depth_m` |
-| M7 | Close and force | Close on each object in both modes; read the reports | thumb plus a finger in contact; grams per object into `grasp_forces.yaml` |
-| M8/M9 | Description and close mode | The same grasp tests with the shipped vs a measured description, sequential vs simultaneous | keep what holds more |
+| M7 | Close and force | Close on each object in both modes; read the reports | thumb plus a finger in contact; grams per object into `grasp_forces.yaml`. **Done on the bench 2026-10-05** (section 7): 400 g, the pudding box 150 |
+| M8/M9 | Description and close mode | The same grasp tests with the shipped vs a measured description, sequential vs simultaneous | keep what holds more. **Close mode decided on the bench 2026-10-05: simultaneous** (sequential pushes the object); the description is still to compare |
 
 **M3, the mount by touch.** The hand in its pointing pose, the arm floating:
 ```bash
@@ -293,6 +293,34 @@ Measured on the 10-03 captures, with the estimated mount and GraspGen-X's shippe
   - What the map changes: the planner uses only each DOF's two ends (the open hand and the
     farthest close); the middle of the map only turns the hand's reported registers into angles
     (`/inspire_hand/joint_states`, the logs). The coverage numbers above predate it.
+- **Closing on the five objects, by hand on the bench (M7/M9, the user, 2026-10-05).** Each
+  object held between thumb and fingers, then `close`:
+
+  | object | force | held | where the DOFs stopped (little ring middle index thumb; 0 = full curl) |
+  |---|---|---|---|
+  | banana, in the palm | 400 g | yes | 220-245, 191-244, 219-244, 369-406, 499-508 (three closes) |
+  | banana, by the fingertips (as from a table) | 400 g | yes | 0 (air), 537, 585, 588, 698 |
+  | apple | 400 g | yes | 545-586, 671-745, 687-769, 617-705, 795-826 |
+  | mug | 400 g | yes | 0, 0 (air), 425, 411, 542 |
+  | foam brick | 400 g | yes, but it turns about the contact points at any force | 0 (air), 517-519, 621-667, 659-716, 731-772 |
+  | pudding box | 150 g | yes | 0-268, 394-430, 474-478, 410-516, 572-641 |
+
+  - **`simultaneous` is the close** (default since then). `sequential` pushes every object
+    away: the fingers close with nothing opposing them until the thumb comes.
+  - **The hand reports a force stop as STATUS 2** ("reached the target"), not the manual's 3:
+    every DOF of every close above read 2, stopped 190-830 units short of 0. The first close
+    reports therefore called every grasp "closed on air". Contact is now judged by where a DOF
+    stopped (more than 30 units short of 0, `inspire_hand.CONTACT_MARGIN`); the force reading
+    after a stop cannot tell either (it read -77 to 785 g on stopped fingers at a 400 g
+    threshold). Without the fix the grasp tests' `abort_on_empty_close` would have aborted
+    every grasp.
+  - **The release opens in one stage** after a close that held something: the open had gone
+    in two (the thumb lifted first), which leaves the fingers pressing the object alone at the
+    place (the user). From a fist closed on air it is still the thumb first.
+  - The thumb's rotation actuator read 590-934 g while holding the apple: the apple pushes the
+    thumb sideways. The little finger closed on air on four of the five objects: the thumb,
+    index and middle fingers do the holding.
+
 - **The simulation never got this hand to hold anything**, but its model barely moved
   (1.5 mm of finger travel). That says nothing about the real hand; the grasp tests are the
   first evidence.

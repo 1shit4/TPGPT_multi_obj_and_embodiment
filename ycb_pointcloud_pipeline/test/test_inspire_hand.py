@@ -20,14 +20,15 @@ class FakeHand:
     """RH56 register protocol on a pty. Thumb rotation (DOF 5) is driven to 1000 by a
     -1 set value, as the real hand did.
 
-    ``contact_at[k]``: a DOF commanded below this angle stops there, STATUS 3 (on
-    force), FORCE_ACT = its threshold. ``stuck[k]``: a commanded DOF reports STATUS 1
-    (moving) for ever. A DOF held with -1 has its STATUS reset to 2 by the next
+    ``contact_at[k]``: a DOF commanded below this angle stops there with FORCE_ACT = its
+    threshold and STATUS ``contact_status``: 2 ("at target"), as the real hand reports a
+    force stop (2026-10-05), or 3, the manual's. ``stuck[k]``: a commanded DOF reports
+    STATUS 1 (moving) for ever. A DOF held with -1 has its STATUS reset to 2 by the next
     ANGLE_SET -- the worst case for judging a DOF by the final status, which the
     driver must not do.
     """
 
-    def __init__(self, hand_id=2, contact_at=None, stuck=None):
+    def __init__(self, hand_id=2, contact_at=None, stuck=None, contact_status=2):
         self.id = hand_id
         self.master, slave = pty.openpty()
         tty.setraw(slave)
@@ -39,6 +40,7 @@ class FakeHand:
         self.force_set = [400] * 6
         self.contact_at = list(contact_at or [None] * 6)
         self.stuck = list(stuck or [False] * 6)
+        self.contact_status = contact_status
         self.angle_sets = []
         self.force_sets = []
         self._stop = False
@@ -71,7 +73,7 @@ class FakeHand:
                 continue
             stop = self.contact_at[k]
             if stop is not None and v < stop:
-                self.angle[k], self.status[k], self.force[k] = stop, 3, self.force_set[k]
+                self.angle[k], self.status[k], self.force[k] = stop, self.contact_status, self.force_set[k]
             else:
                 self.angle[k], self.status[k], self.force[k] = v, 2, 0
 
@@ -148,7 +150,7 @@ def test_open_from_rest_only_swings_the_thumb_and_never_sends_minus_one_to_it(fa
     assert fake.angle_sets == [[-1, -1, -1, -1, -1, ih.THUMB_OPPOSED], ih.OPEN_POSE]
     assert all(s[5] != -1 for s in fake.angle_sets)
     assert fake.angle[5] == ih.THUMB_OPPOSED
-    assert ih.contact_dofs(st) == []
+    assert not hand.holding
 
 
 def _goto(fake, start, target):
@@ -202,7 +204,9 @@ def test_a_wrong_id_is_a_connection_error(fake):
 def test_contact_and_closure_helpers():
     st = {"status": [3, 3, 2, 2, 3, 2], "angle": [400, 1000, 0, 500, 1200, -5],
           "error": [0, 0, 1, 0, 0, 0]}
-    assert ih.contact_dofs(st) == ["little", "ring", "thumb_bend"]
+    # Stopped short of the close's 0 (index at 500, status 2 as this hand reports a force
+    # stop), or the manual's STATUS 3 (ring, at 1000): contact. Little at 400 too.
+    assert ih.contact_dofs(st) == ["little", "ring", "index", "thumb_bend"]
     assert ih.closure(st) == [0.6, 0.0, 1.0, 0.5, 0.0, 1.0]
     assert ih.error_text(st) == "middle: locked rotor"
 
@@ -253,11 +257,12 @@ def test_the_sequential_close_keeps_the_verified_order(fake):
     ]
 
 
+@pytest.mark.parametrize("contact_status", [2, 3])     # this hand's (2026-10-05); the manual's
 @pytest.mark.parametrize("mode", ih.CLOSE_MODES)
-def test_the_report_names_contact_and_air_dof_by_dof(mode):
+def test_the_report_names_contact_and_air_dof_by_dof(mode, contact_status):
     # An object between the thumb and the index and middle fingers; little and ring miss it.
     contact = [None, None, 420, 380, 300, None]
-    fake = FakeHand(contact_at=contact)
+    fake = FakeHand(contact_at=contact, contact_status=contact_status)
     try:
         report = _close(fake, mode, force=350)
     finally:
@@ -292,6 +297,57 @@ def test_fingers_without_the_thumb_are_not_opposed():
     assert report.fingers_in_contact == ["middle", "index"]
     assert "thumb_bend" in report.on_air
     assert not report.opposed and report.ok
+
+
+def test_the_default_close_is_simultaneous():
+    """The user, 2026-10-05: sequential pushes the object away; simultaneous holds it."""
+    assert ih.DEFAULT_CLOSE_MODE == "simultaneous"
+    assert ih.load_config(os.path.join(os.path.dirname(__file__), "..", "config",
+                                       "inspire_hand.yaml"))["grasp"]["close_mode"] == "simultaneous"
+
+
+def test_a_grasp_seen_on_the_real_hand_is_contact_not_air():
+    """The 2026-10-05 banana: every DOF read STATUS 2, stopped 216-508 short of 0."""
+    fake = FakeHand(contact_at=[245, 216, 243, 406, 508, None])
+    try:
+        report = _close(fake, "simultaneous")
+    finally:
+        fake.close()
+    assert report.status[:5] == [2] * 5
+    assert report.contact == list(ih.BENDING) and report.on_air == []
+    assert report.opposed
+
+
+def test_after_a_close_that_held_the_release_opens_everything_at_once():
+    """The user, 2026-10-05: an open in stages (the thumb first) shifts the object at the
+    place. With the object between thumb and fingers they cannot meet: one stage."""
+    fake = FakeHand(contact_at=[None, 600, 550, 500, 650, None])
+    hand = _hand(fake)
+    try:
+        assert hand.close("simultaneous", timeout=0.6, verbose=False).opposed
+        assert hand.holding
+        n = len(fake.angle_sets)
+        hand.grasp_open(timeout=0.6, verbose=False)
+    finally:
+        hand.close_port()
+        fake.close()
+    assert fake.angle_sets[n:] == [ih.OPEN_POSE]
+    assert not hand.holding
+
+
+def test_after_a_close_on_air_the_open_still_lifts_the_thumb_first(fake):
+    """A fist closed on air may have the thumb over the fingers: the ordered open."""
+    hand = _hand(fake)
+    try:
+        assert not hand.close("simultaneous", timeout=0.6, verbose=False).opposed
+        n = len(fake.angle_sets)
+        hand.grasp_open(timeout=0.6, verbose=False)
+    finally:
+        hand.close_port()
+    sets = fake.angle_sets[n:]
+    assert sets[0][:5] == [-1, -1, -1, -1, 1000]                # the thumb lifts first
+    assert sets[1][:5] == [1000, 1000, 1000, 1000, -1]          # then the fingers open
+    assert sets[-1] == ih.OPEN_POSE
 
 
 def test_closing_on_air_is_reported_as_such(fake):
