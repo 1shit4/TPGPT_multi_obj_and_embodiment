@@ -80,16 +80,31 @@ thickness and the yaw still have to be measured (M2, M3).
   width, and finger segments of 32.0 and 49.3 mm. GraspGen-X's URDF, which the model uses, puts
   its origin at the same face and agrees: 217.9 mm, a 32.1 mm proximal segment.
 
-**The vendor's URDFs, against GraspGen-X's.**
+**The vendor's URDFs, against GraspGen-X's.** The hand on the robot has plain pads, not the
+ripple ones (user, 2026-10-05), so of the vendor's files `urdf_right_2025_4_18` is its model;
+`RH56DFX_R_8_19` is the ripple-pad version.
 
-| | joint positions vs GraspGen-X's | joint limits |
-|---|---|---|
-| `RH56DFX_R_8_19` ("水波纹款", the ripple-pad RH56D(B)FX) | knuckles within 2 mm across the palm and 0.1 mm along it; the thumb pivot 2.75 mm nearer the wrist (66.35 against 69.1 mm); models the rubber pads and tips | placeholders [0, 1] |
-| `urdf_right_2025_4_18` | the finger row 10-12 mm further across the palm: another variant | fingers 1.333 rad, thumb pitch 0.48, distal coupling x1.117 |
-| the wrist-module URDF | -- | index 1.7 rad: what the manual's ranges give (1.70), against GraspGen-X's 1.47 |
+- **Geometry, compared by the finger meshes themselves** in the hand's base frame (all three share
+  the base face and the palm outline, -38.7..42.8 mm across):
+  - Across the palm the proximal segments agree to 0.4 mm (index -26.7, middle -6.9, ring 13.0,
+    little 32.9 mm in all three).
+  - Along the hand GraspGen-X's sit 1-2 mm nearer the wrist; normal to the palm, 3 mm further out.
+  - The thumb base agrees to 2 mm.
+  - The joint origins look 10-12 mm apart across the palm. That is only where each file puts them
+    along the knuckle hinge, which runs across the palm, and means nothing.
+  - **GraspGen-X's geometry stays the model**: within 3 mm of the manufacturer's, and the one its
+    grasps are generated for.
+- **Kinematics: none of the URDFs reproduces the manual's angle ranges.**
 
-GraspGen-X's geometry stays the model: it is what the grasps are generated for, and it is
-within 2-3 mm of the vendor's latest.
+  | URDF | index finger at its limits | thumb bend at its limits |
+  |---|---|---|
+  | `urdf_right_2025_4_18` (0..1.333 rad, distal x1.117) | 163 -> 35 deg | -40 -> +7 deg |
+  | `RH56DFX_R_8_19` | placeholder limits [0, 1], no coupling | -- |
+  | the wrist-module URDF | its 1.7 rad limit matches the manual-derived 1.70 | -- |
+  | the manual | 176.7 -> 19 deg | 53.6 -> -13 deg |
+
+  The register map (`joint_map`: the manual's ranges solved on GraspGen-X's linkage) is the prior,
+  and only measuring the real hand settles it (M4).
 
 **The wrist module.** It is a 2-DOF wrist (pitch -22.7..+22.1 deg, yaw ±25.5 deg) between the arm
 and the hand; its first joint is ~78 mm out from the mounting face, and its registers are
