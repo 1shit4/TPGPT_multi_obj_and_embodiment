@@ -172,7 +172,7 @@ def test_config_builds_the_mount():
     cfg = ih.load_config(os.path.join(os.path.dirname(__file__), "..", "config",
                                       "inspire_hand.yaml"))
     assert cfg["handedness"] == "right"
-    assert cfg["serial"]["hand_id"] == 2
+    assert cfg["serial"]["hand_id"] == 1                    # 2 until 2026-10-05
     ee_mod = pytest.importorskip("tpgpt.hardware.end_effector")
     try:
         ee = ee_mod.inspire_from_config(cfg)
@@ -338,7 +338,7 @@ def test_registers_and_joint_angles_round_trip():
 def test_the_cli_takes_its_defaults_from_the_config():
     path = os.path.join(os.path.dirname(__file__), "..", "config", "inspire_hand.yaml")
     d = ih._config_defaults(["--config", path, "status"])
-    assert d["id"] == 2 and d["baud"] == 115200 and d["close_mode"] in ih.CLOSE_MODES
+    assert d["id"] == 1 and d["baud"] == 115200 and d["close_mode"] in ih.CLOSE_MODES
 
 
 # -------------------------------------------------------------------- the node

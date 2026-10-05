@@ -106,7 +106,7 @@ HOLD = -1  # ANGLE_SET value that leaves a DOF where it is (not valid for thumb 
 BAUDS = (115200, 57600, 19200)  # REDU_RATIO 0, 1, 2
 
 DEFAULT_PORT = "/dev/ttyUSB0"
-DEFAULT_ID = 2          # this lab's hand (factory default is 1)
+DEFAULT_ID = 1          # this lab's hand since 2026-10-05 (it answered at 2 on 09-15); factory default
 DEFAULT_SPEED = 500     # 0-1000, 1000 = 0.8 s full stroke
 DEFAULT_FORCE = 400     # grams per finger before it stops
 DEFAULT_CLOSE_MODE = "sequential"

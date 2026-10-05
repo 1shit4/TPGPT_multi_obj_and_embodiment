@@ -30,7 +30,7 @@ inspire_hand:
   serial:
     port: /dev/ttyUSB0          # CH340 USB-RS485 adapter (1a86:7523), needs the ch341 driver
     baud: 115200
-    hand_id: 2                  # found with `inspire_hand scan`; factory default is 1
+    hand_id: 1                  # `inspire_hand scan`: 2 on 2026-09-15, 1 (the factory default) on 2026-10-05
 
   grasp:                        # open/close (inspire_hand.py docstring)
     speed: 500                  # 0-1000; 1000 = 0.8 s full stroke
