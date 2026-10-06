@@ -298,7 +298,33 @@ ros2 run --prefix python3 ycb_pointcloud_pipeline tpgpt_pick_place --ros-args \
   default bundle, so still 400 N/m) both reached 3.8 mm in 2.1 s, the push at 24-29 mm of its
   30.
 - `-p grasp_test_library_index:=N -p grasp_test_depth_offset:=0.01`: the same library grasp,
-  1 cm deeper. For the depth sweep (M6): 6 depths 10 mm apart, 3 tries each. Never in X6.
+  1 cm deeper (negative: further back). For the depth sweep (M6). Never in X6.
+- **The depth sweep (M6), and holding at the fingertips** (2026-10-06). The user's view: every
+  object should be held between the fingertips -- thumb, index, middle, sometimes ring and
+  little -- the closest the hand comes to the two-finger grasps of the demonstration, and the
+  banana must be held too. Counted offline on each object's 2000 GraspGen-X `inspire_hand`
+  grasps (the object on the table in its protocol pose, the grasp test's screening, then the
+  modelled hand closed and the segments touching the object noted):
+
+  | hand moved back along its approach | brick: pass / fingertips only | banana: pass (all fingertips only) |
+  |---|---|---|
+  | 0 (GraspGen-X's own depth) | 37 / 6 | 0 (992 from below, 1008 into the table) |
+  | 10 mm | 82 / 49 | 1 |
+  | 20 mm | 101 / 84 | 6 |
+  | 30 mm | 85 / 82 | 14 |
+
+  At GraspGen-X's own depth the apple, mug and pudding box pass 107 / 21 / 58, of which 18 /
+  14 / 35 hold with fingertips only. GraspGen-X's grasp point sits between thumb and fingers,
+  ~15 mm short of the open fingertips (more when closing): holding at the fingertips is the hand
+  stopping 20-30 mm further back, which is what the sweep measures -- one depth for the hand
+  (`calibrated_depth_m`, the simulation's rule), not a rule per object. The plan: brick, library
+  grasp **#292** (score 0.87; it passes at 0-30 mm back whatever the brick's heading, fingertips
+  only at 20 and 30; next 670, 928, 1191, 1297, 1556 if the arm cannot reach it), at 0, -10,
+  -20, -30 mm (and -40 if -30 holds), 3 tries each, the brick put back on the same mark; then
+  apple, mug, pudding box and banana at the chosen depth and +-10 mm, 2 tries each. The table:
+  `~/venvs/tpgpt/bin/python -m tpgpt.hardware.grasp_test summary --object foam_brick --since
+  <date_time>` (the depth asked for, where the hand really closed along and across the
+  approach, held, the digits on the object).
 - Dry runs (`dry_run` true, the default) simulate the motion. Offline, with no camera or robot,
   replay a recorded capture on another ROS domain:
   ```bash
