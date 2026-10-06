@@ -449,7 +449,9 @@ The planner's support height is: its `support_height` parameter, else the calibr
   only inside the cup, and the fit chose upside-down on 15 of 20 live frames, so the fit only tries
   the protocol poses (`object_model.PROTOCOL_RESTS`: mug 0; pudding box 1 or 3, on its 88 x 35 face; banana 0, stem
   on the table -- its two faces fit within 0.03 on 42 of 51 captures, at headings up to 41 deg apart;
-  apple 0, upright -- nearly round, so the camera cannot tell how it is turned);
+  apple 0, upright -- nearly round, so the camera cannot tell how it is turned; foam brick 0, 1,
+  2 or 5, on a long face, 52 mm tall -- since 10-01 the camera reads part of its top 15-28 mm
+  high, and on 10-06 18:07 the fit stood it on its end, 53 mm across where it is 78);
   (2) the D435's infrared bounces inside the glossy cup and puts 15-30 % of the mug's cloud ~80 mm
   too far, behind the mug near the table, and the fit turned the handle onto those points (and
   leaned the mug 13 deg). For the mug (`OPEN_VESSELS`) the fit now has no rest tilt and is run a
@@ -717,6 +719,11 @@ The planner's support height is: its `support_height` parameter, else the calibr
 - **The first grasp test on the robot (brick, constructed, 2026-10-06 17:50) reached its start
   but never descended**: the sim's clamp held the command 6 mm from a stuck arm. Grasp tests
   now run in follow mode (audit D12); re-run with a fresh plan.
+- **The foam brick is fitted lying on a long face only** (`PROTOCOL_RESTS`, `HEIGHT_EXCESS` 22 mm,
+  2026-10-06): the camera reads a patch of its top 55-80 mm up (it is 52), growing since 09-26
+  (+2 mm then, +18.5 at 18:07), and at 18:07 the fit stood it on its end; the fingers met it
+  before closing. All 13 recorded brick captures fit lying. Why the patch grew is not known
+  (the brick's clouds also went from ~680 points on 09-26 to ~1700 from 10-01).
 - **The foam brick's fit starts along the camera's top face** (`object_model.TOP_FACE_HEADING`,
   2026-10-06): its smeared cloud let a brick turned 90 deg fit as well, and the user saw it turned.
 - **Not measured yet:** the grasp depth (`calibrated_depth_m` 0).
