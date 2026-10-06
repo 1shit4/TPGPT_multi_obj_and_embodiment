@@ -292,3 +292,34 @@ def test_the_plan_keeps_the_route_onto_its_path(inspire, tmp_path):
     assert "postures" not in (sel.chosen.path_check["approach_in"] or {})
     sel.plan.save(tmp_path / "p")
     assert Plan.load(tmp_path / "p").approach_postures == pytest.approx(route)
+
+
+def test_the_summary_measures_how_deep_the_hand_closed(inspire, tmp_path):
+    """A sweep's table: where the grasp point was at the end of the grasp hold, along the
+    approach from the planned one (+ deeper) and across it."""
+    import csv
+    import json
+
+    from tpgpt.hardware.grasp_test import run_record, summary
+
+    plan = grasp_test_plan(TOP_DOWN, ball(), TABLE, inspire, "ball", depth_offset=-0.02)
+    d = tmp_path / "ball_20261006_120000_grasptest"
+    plan.save(d)
+    (d / "executions").mkdir()
+    R = plan.marks["orientations"][0]
+    point = plan.marks["positions"][0] + 0.005 * plan.grasp.approach + np.array([0.003, 0.0, 0.0])
+    tcp = point - R @ np.asarray(inspire.tool_offset)
+    with open(d / "executions" / "robot_20261006_120001.csv", "w", newline="") as f:
+        w = csv.writer(f)
+        w.writerow(["t", "stage", "meas_x", "meas_y", "meas_z"])
+        w.writerow(["0.0", "arrive_grasp", *tcp])
+    json.dump({"outcome": "held through the lift", "object_name": "ball",
+               "grasp_test": {"depth_offset_m": -0.02}, "library_index": 292,
+               "close_report": {"held": True, "on_object": ["index", "middle"]}},
+              open(d / "executions" / "robot_20261006_120001_outcome.json", "w"))
+    (row,) = run_record(d)
+    assert row["grasp"] == "#292" and row["depth_offset_mm"] == pytest.approx(-20.0)
+    assert row["depth_closed_mm"] == pytest.approx(5.0, abs=1e-6)      # 5 mm deeper (down)
+    assert row["off_closed_mm"] == pytest.approx(3.0, abs=1e-6)
+    assert summary(tmp_path, "ball", since="20261006_1100") == [row]
+    assert summary(tmp_path, "ball", since="20261006_1300") == []

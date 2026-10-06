@@ -415,5 +415,102 @@ def constructed_grasp(points: np.ndarray, support_height: float, end_effector=No
                       closing=narrow / np.linalg.norm(narrow))
 
 
+def run_record(plan_dir) -> list:
+    """One row per robot run of a grasp-test plan (``<plan>/executions/*_outcome.json``):
+    the object, the grasp (library index, or constructed), the depth offset asked for, the
+    outcome, the digits on the object, and **where the hand was when it closed**: the grasp
+    point measured at the end of the grasp hold against the planned one, along the approach
+    (``depth_closed_mm``: + deeper than planned) and across it (``off_closed_mm``) -- the depth
+    a sweep actually tested, which the hold leaves a few mm off the one asked for.
+    """
+    import csv
+    import json
+    from pathlib import Path
+
+    from tpgpt.hardware.end_effector import end_effector_for_plan
+
+    plan_dir = Path(plan_dir)
+    if not (plan_dir / "executions").exists():
+        return []
+    plan = Plan.load(plan_dir)
+    if plan.metadata.get("task") != "grasp_test":
+        return []
+    hand = end_effector_for_plan(plan.metadata)
+    rows = []
+    for outcome_path in sorted((plan_dir / "executions").glob("*_outcome.json")):
+        o = json.load(open(outcome_path))
+        log = Path(str(outcome_path).replace("_outcome.json", ".csv"))
+        depth = off = None
+        if log.exists() and plan.marks is not None:
+            hold = [r for r in csv.DictReader(open(log)) if r["stage"] == "arrive_grasp"]
+            if hold:
+                tcp = np.array([float(hold[-1][f"meas_{c}"]) for c in "xyz"])
+                R = np.asarray(plan.marks["orientations"][0], dtype=float)
+                point = tcp + R @ np.asarray(hand.tool_offset, dtype=float)
+                miss = point - np.asarray(plan.marks["positions"][0], dtype=float)
+                a = np.asarray(plan.grasp.approach, dtype=float)
+                depth = float(miss @ a) * 1000.0
+                off = float(np.linalg.norm(miss - (miss @ a) * a)) * 1000.0
+        report = o.get("close_report") or {}
+        rows.append({
+            "plan": plan_dir.name, "run": outcome_path.name.split("_outcome")[0],
+            "object": o.get("object_name"),
+            "grasp": ("constructed" if o.get("library_index") is None
+                      else f"#{o.get('library_index')}"),
+            "depth_offset_mm": 1000.0 * float((o.get("grasp_test") or {}).get("depth_offset_m", 0.0)),
+            "depth_closed_mm": depth, "off_closed_mm": off,
+            "outcome": o.get("outcome"), "held": report.get("held"),
+            "on_object": report.get("on_object") or report.get("contact"),
+        })
+    return rows
+
+
+def summary(root="~/tpgpt_plans", object_name: str | None = None, since: str = "") -> list:
+    """:func:`run_record` over every grasp-test plan under ``root`` (name order), optionally one
+    object's and from a date-time on (``since``, as in the plan names: ``20261006_2100``)."""
+    from pathlib import Path
+
+    out = []
+    for d in sorted(Path(root).expanduser().glob("*_grasptest")):
+        stamp = d.name[:-len("_grasptest")].rsplit("_", 2)
+        stamp = "_".join(stamp[-2:]) if len(stamp) >= 3 else ""
+        if since and stamp < since:
+            continue
+        for row in run_record(d):
+            if object_name is None or row["object"] == object_name:
+                out.append(row)
+    return out
+
+
+def _main(argv=None) -> int:
+    import argparse
+
+    parser = argparse.ArgumentParser(
+        prog="python -m tpgpt.hardware.grasp_test",
+        description="Grasp tests run on the robot, one line each (a depth sweep's table).")
+    parser.add_argument("command", choices=["summary"])
+    parser.add_argument("--root", default="~/tpgpt_plans")
+    parser.add_argument("--object", default=None)
+    parser.add_argument("--since", default="", help="plans from this time on, e.g. 20261006_2100")
+    a = parser.parse_args(argv)
+    rows = summary(a.root, a.object, a.since)
+    fmt = lambda v, f: "-" if v is None else format(v, f)  # noqa: E731
+    print(f"{'run':16s} {'object':12s} {'grasp':12s} {'asked':>6s} {'closed':>7s} {'across':>7s}  "
+          f"{'held':5s} outcome / on the object")
+    for r in rows:
+        print(f"{r['run'][-15:]:16s} {str(r['object']):12s} {r['grasp']:12s} "
+              f"{r['depth_offset_mm']:+6.0f} {fmt(r['depth_closed_mm'], '+7.1f')} "
+              f"{fmt(r['off_closed_mm'], '7.1f')}  {str(r['held']):5s} {r['outcome']} / "
+              f"{', '.join(r['on_object'] or [])}")
+    print(f"{len(rows)} runs. asked: the depth offset (mm, + deeper); closed: where the grasp "
+          "point was when the hand closed, along the approach from the planned one (+ deeper); "
+          "across: off it sideways.")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(_main())
+
+
 __all__ = ["constructed_grasp", "constructed_closings", "grasp_test_labels", "grasp_test_plan",
-           "select_grasp_test", "constructed_grasp_test"]
+           "select_grasp_test", "constructed_grasp_test", "run_record", "summary"]
