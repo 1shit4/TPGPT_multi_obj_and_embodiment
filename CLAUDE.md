@@ -722,7 +722,9 @@ The planner's support height is: its `support_height` parameter, else the calibr
   it in Desk agreed within the method's +-0.04 kg / +-15 mm (the arm's own model error at joint 2,
   friction). `payload_measure` reads Desk's values from the robot at its start.
 - **The Inspire's grasp-test starts sit at the shoulder's straight point** (joint 2 ~0;
-  2026-10-06; answered by the approach in joints, cf243d7, not yet run on the robot). The start
+  2026-10-06; answered by the approach in joints, cf243d7 + the lead 22a4cf8: on the robot at
+  21:18 the route took 7.5 s, joints within 0.03-0.11 rad of it, 0.031 rad from the checked
+  start, and the grasp test held). The start
   posture is where the planner's own path from the arm's joints ends --
   the rule the Franka runs used, and it matched where their arm arrived to 0.06-0.51 rad
   (largest joint). The same brick grasp test puts the Franka's shoulder at +0.30, the Inspire's
@@ -737,6 +739,10 @@ The planner's support height is: its `support_height` parameter, else the calibr
   plans' starts of 10-02/10-03 exactly. (The earlier "Franka unchanged" check compared
   admissible counts, not start postures.) The constructed grasp test still tries both sides
   of the object, each thumb side, and ranks them by their start's distance from the arm.
+- **The first run at the transport's settings and in joints: 2026-10-06 21:18** (brick,
+  constructed; `~/tpgpt_plans/foam_brick_20261006_211807_grasptest`): held through the lift
+  (thumb, index, middle); arrival holds 0.8-0.9 s to 3.7-3.8 mm (at 400 N/m they had run out
+  their 4 s); beside the path median 1.4 mm, at most 7.9; stiffness 456-607 N/m.
 - **The first held grasp: 2026-10-06 18:27** (brick, constructed, fitted lying, 0.87 explained;
   `~/tpgpt_plans/foam_brick_20261006_182715_grasptest`): thumb, index and middle on the brick
   (ring and little on air; the plan expected the ring too), held through the lift, set down,
