@@ -739,6 +739,13 @@ The planner's support height is: its `support_height` parameter, else the calibr
   plans' starts of 10-02/10-03 exactly. (The earlier "Franka unchanged" check compared
   admissible counts, not start postures.) The constructed grasp test still tries both sides
   of the object, each thumb side, and ranks them by their start's distance from the arm.
+- **The depth sweep's phase 1 (brick, 2026-10-07 00:40; `INSPIRE_HAND.md`): library grasp
+  #292 held 3/3 at 0, -20 and -30 mm, 1/1 at -10, 0/1 at -40: the band is 0 to -30.** A pinned
+  library index is not a fixed physical grasp on the brick: its four long faces look alike and
+  the fit picks rest 0, 2 or 5 by capture, so #292 became a grasp from below or into the table
+  on 11 of 24 plans (normal selection is unaffected). The brick's height allowance is now
+  26 mm (its top read up to +23 lying); a held close no longer fails on one finger still
+  creeping into soft foam.
 - **The first run at the transport's settings and in joints: 2026-10-06 21:18** (brick,
   constructed; `~/tpgpt_plans/foam_brick_20261006_211807_grasptest`): held through the lift
   (thumb, index, middle); arrival holds 0.8-0.9 s to 3.7-3.8 mm (at 400 N/m they had run out

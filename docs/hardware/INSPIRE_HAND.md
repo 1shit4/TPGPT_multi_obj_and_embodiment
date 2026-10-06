@@ -325,6 +325,25 @@ ros2 run --prefix python3 ycb_pointcloud_pipeline tpgpt_pick_place --ros-args \
   `~/venvs/tpgpt/bin/python -m tpgpt.hardware.grasp_test summary --object foam_brick --since
   <date_time>` (the depth asked for, where the hand really closed along and across the
   approach, held, the digits on the object).
+- **Phase 1, the brick (2026-10-06 22:20 - 10-07 00:40), #292** (approach 19 deg off vertical,
+  closing along the brick's length): held 3/3 at 0, 3/3 at -20, 3/3 at -30 (+1 held but aborted,
+  below), 1/1 at -10 (#670), 0/1 at -40 (only the index reached it). The hand closed 0.5-1.9 mm
+  short of the depth asked for and 2.6-3.8 mm across. **The band that holds is 0 to -30 mm.**
+  What went wrong, and why:
+  - **A pinned library index is not a fixed grasp on the brick.** Its four long faces look
+    alike to the camera, and the fit put it on rest 0, 2 or 5 from capture to capture; #292
+    belongs to the scan, so on rest 2 or 5 it is a grasp from below (109 deg) or through the
+    table, and the plan was refused (11 of 24 plans). The fit cannot tell the faces apart;
+    which it picks is close to chance. Normal selection is unaffected (it screens every grasp
+    on the fitted pose); only a pinned sweep is.
+  - **One fit turned 35 deg from the camera's top face** (00:23, heading 68 against 183-199,
+    0.76 explained against 0.80-0.89): the hint filters the starts, not the refined fit. #292
+    then landed on the real brick differently ("a completely different grasp"). Open.
+  - **One fit refused** (23:54): the top read +23.0 mm against the 22 allowed; now 26 (all 56
+    brick captures: median +14). The planner then fell back to a fresh draw on the camera cloud,
+    where #292 does not exist ("no candidate 292 in 200"); a pinned grasp now says why.
+  - **One held close aborted** (00:06): the ring still creeping into the foam at the timeout
+    (435, 51 g, below its force stop); a close now fails on that only when nothing is held.
 - Dry runs (`dry_run` true, the default) simulate the motion. Offline, with no camera or robot,
   replay a recorded capture on another ROS domain:
   ```bash
