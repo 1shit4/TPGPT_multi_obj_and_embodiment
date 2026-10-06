@@ -234,6 +234,9 @@ class TpgptPlannerNode(Node):
         # blocked the planner stops with approach_blocked and asks for a re-home. True brings
         # back rejecting the grasp.
         d('approach_rejects_grasp', False)
+        # Already at joint_homing's home (every joint within this, rad): a blocked move onto a
+        # grasp's path then rejects that grasp, as re-homing cannot help (the user, 2026-10-07).
+        d('home_tolerance', 0.1)
         # rad; > 0 refuses a path with joints 1-6 that close to a limit (CRISP pushes back
         # there; path_check.JOINT_MARGIN = 0.1). 0 = off.
         d('grasp_joint_margin', 0.0)
@@ -429,6 +432,24 @@ class TpgptPlannerNode(Node):
                                                    f"{p('scene_max_age')} s")
         return world
 
+    def _arm_at_home(self) -> bool:
+        """Whether the arm is at ``joint_homing``'s home, every joint within ``home_tolerance``
+        (homing stops 0.05-0.08 rad short, on the side it came from). Then a grasp whose move
+        onto its path is blocked is rejected and selection moves on: asking to re-home a homed
+        arm achieves nothing (the user, 2026-10-07; on 01:35 an apple plan from home stopped
+        with "re-home", link 5 against link 1 on its route). Away from home it still stops and
+        asks for a re-home (the user, 2026-09-29: a badly parked arm is not the grasp's fault)."""
+        from ycb_pointcloud_pipeline.joint_homing import FRANKA_HOME
+        q = self.joints[1] if self.joints is not None else None
+        if q is None:
+            return False
+        off = float(np.max(np.abs(np.asarray(q, dtype=float)[:7] - np.asarray(FRANKA_HOME))))
+        at_home = off <= float(self.get_parameter('home_tolerance').value)
+        if at_home:
+            self.get_logger().info(f'The arm is at home ({off:.3f} rad at most): a grasp whose move '
+                                   'onto its path is blocked is passed over')
+        return at_home
+
     @staticmethod
     def _approach_blocked(selection):
         """Why the chosen grasp's move onto the path is blocked, or ``None``."""
@@ -562,7 +583,7 @@ class TpgptPlannerNode(Node):
             check_path=bool(p('check_path')),
             min_reachable_fraction=float(p('min_reachable_fraction')),
             kinematic_criterion=str(p('kinematic_criterion')),
-            approach_rejects=bool(p('approach_rejects_grasp')),
+            approach_rejects=bool(p('approach_rejects_grasp')) or self._arm_at_home(),
             joint_margin=(float(p('grasp_joint_margin')) if float(p('grasp_joint_margin')) > 0
                           else None),
             reach_margin=(float(p('grasp_reach_margin')) if float(p('grasp_reach_margin')) > 0

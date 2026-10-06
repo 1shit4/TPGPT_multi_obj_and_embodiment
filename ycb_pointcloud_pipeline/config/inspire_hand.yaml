@@ -104,5 +104,8 @@ inspire_hand:
     # same right hand) or one measured on this hand (plan stage 5, assets/x_grippers).
     gripper: inspire_hand
     # How much further along the approach the hand goes than the description says, m
-    # (plan M6, a depth sweep on the robot). 0 until measured.
-    calibrated_depth_m: 0.0
+    # (plan M6, the depth sweep on the robot, 2026-10-06/07; docs/hardware/INSPIRE_HAND.md):
+    # 20 mm back. Held at every depth tried from 10 to 30 mm back on all five objects (24 of
+    # 24 runs; the brick also at 0, not at 40): the middle of the band they share. Further
+    # back the object sits nearer the fingertips (the user: hold between the fingertips).
+    calibrated_depth_m: -0.02

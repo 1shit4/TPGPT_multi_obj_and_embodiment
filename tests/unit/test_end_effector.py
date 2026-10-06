@@ -263,3 +263,24 @@ class TestInspirePlan:
                               ExecutorSettings(tool_offset=tuple(hand.tool_offset)))
         tcp, R = ex.start_pose
         assert np.allclose(hand.grasp_point(tcp, R)[0], loaded.labels.positions[0], atol=1e-9)
+
+
+def test_the_configured_inspire_hand_grasps_20_mm_further_back():
+    """config/inspire_hand.yaml: calibrated_depth_m -0.02, the depth sweep's result (2026-10-07):
+    over a top-down grasp the open hand stops 20 mm higher than GraspGen-X's own pose puts it."""
+    import yaml
+    from pathlib import Path
+
+    from tpgpt.hardware.end_effector import inspire_from_config
+    cfg = yaml.safe_load(open(Path(__file__).resolve().parents[2] / "ycb_pointcloud_pipeline"
+                              / "config" / "inspire_hand.yaml"))
+    try:
+        hand = inspire_from_config(cfg)
+    except FileNotFoundError as exc:
+        pytest.skip(str(exc))
+    assert hand.calibrated_depth == pytest.approx(-0.02)
+    cfg["inspire_hand"]["graspgenx"]["calibrated_depth_m"] = 0.0
+    generator = inspire_from_config(cfg)
+    R, t = np.diag([1.0, -1.0, -1.0]), np.array([0.5, 0.0, 0.05])    # approach straight down
+    assert hand.lowest_point(t, R, "open") - generator.lowest_point(t, R, "open") == \
+        pytest.approx(0.02, abs=1e-9)
