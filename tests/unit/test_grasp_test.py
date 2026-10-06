@@ -178,10 +178,30 @@ def test_a_refused_way_falls_through_to_the_next(inspire, monkeypatch):
                                inspire, "ball")
 
 
-def test_the_labels_carry_the_static_stiffness_the_gate_reads():
+def test_the_labels_carry_a_taught_demonstrations_stiffness():
+    """As the Franka Hand's transport runs: 600 N/m in every direction while still, 350
+    along the motion and 600 across it while moving (teach.directional_stiffness)."""
     L = grasp_test_labels(TOP_DOWN)
-    assert L.stiffness[0] == pytest.approx(400.0 * np.eye(3))
-    assert L.damping[0] == pytest.approx(40.0 * np.eye(3))
+    gi, _ = carry_indices(L)
+    assert L.stiffness[0] == pytest.approx(600.0 * np.eye(3), abs=1.0)       # still, above
+    assert L.stiffness[gi] == pytest.approx(600.0 * np.eye(3), abs=1.0)      # still, closing
+    speed = np.linalg.norm(L.velocities, axis=1)
+    moving = np.flatnonzero(speed[:gi] > 0.5 * speed[:gi].max())
+    k = int(moving[len(moving) // 2])                                       # mid-descent
+    assert L.stiffness[k][2, 2] == pytest.approx(350.0, abs=5.0)
+    assert L.stiffness[k][0, 0] == pytest.approx(600.0, abs=5.0)
+    w, v = np.linalg.eigh(L.stiffness[k])
+    assert L.damping[k] == pytest.approx(v @ np.diag(2.0 * np.sqrt(w)) @ v.T)
+
+
+def test_the_plan_carries_the_transport_execution_settings(inspire):
+    execution = {"speed_scale": 0.35, "rotational_stiffness": 30.0,
+                 "transit_rotational_scale": 1.0, "use_transported_stiffness": True,
+                 "offset_compensation": "none", "arrival_hold": False}
+    plan = grasp_test_plan(TOP_DOWN, ball(), TABLE, inspire, "ball", execution=execution)
+    assert plan.metadata["learned_execution"] == execution
+    assert grasp_test_plan(TOP_DOWN, ball(), TABLE, inspire, "ball").metadata[
+        "learned_execution"] is None
 
 
 def test_the_phase_advances_at_the_labels_pace():
@@ -207,9 +227,9 @@ def test_the_plan_is_followed_against_its_own_path(inspire, tmp_path):
 
 
 def _sticky_run(plan, hand, follow: bool, static_force=3.0, tau=0.3, n_steps=4000):
-    """The test run on an arm that does not move until the spring pulls harder than
-    ``static_force`` (N), then closes the rest at ``tau`` (s) -- the 2026-10-06 17:50 arm,
-    which a 2.4 N pull (6 mm at 400 N/m) did not move."""
+    """The test run on an arm that does not move until the spring (the labels' stiffness)
+    pulls harder than ``static_force`` (N), then closes the rest at ``tau`` (s) -- the
+    2026-10-06 17:50 arm, which a 2.4 N pull (6 mm at 400 N/m) did not move."""
     from tpgpt.hardware.ilc import frozen_mask
     from tpgpt.hardware.executor import ArmPathSettings
     from tpgpt.hardware.replay import contact_windows
@@ -229,7 +249,7 @@ def _sticky_run(plan, hand, follow: bool, static_force=3.0, tau=0.3, n_steps=400
     for _ in range(n_steps):
         cmd = ex.step(x, R)
         gap = cmd.tcp_position - x
-        pull = 400.0 * float(np.linalg.norm(gap))
+        pull = float(np.linalg.norm(cmd.stiffness @ gap))
         if pull > static_force:
             x = x + gap * (1.0 - static_force / pull) * plan.dt / tau
         lowest = min(lowest, float(hand.grasp_point(x, R)[0][2]))

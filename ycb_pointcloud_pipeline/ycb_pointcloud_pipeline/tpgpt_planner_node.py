@@ -607,10 +607,13 @@ class TpgptPlannerNode(Node):
                 from tpgpt.hardware import grasp_test as gt
                 support = float(scene.support_height if scene.support_height is not None
                                 else np.percentile(points[:, 2], 1.0))
+                # executed at the transport's settings: the source bundle's (the user,
+                # 2026-10-06: as the Franka Hand's transport runs were)
+                execution = (self.source.metadata.get('learned') or {}).get('execution')
                 if p('grasp_test_constructed'):
                     selection = gt.constructed_grasp_test(
                         points, support, settings, path_ctx, self.end_effector,
-                        p('object_name'), float(p('grasp_test_depth_offset')))
+                        p('object_name'), float(p('grasp_test_depth_offset')), execution)
                 elif poses is None or not len(poses):
                     raise PlanningError(f'no_executable_grasp: no GraspGen-X candidates '
                                         f'({unavailable})')
@@ -619,7 +622,7 @@ class TpgptPlannerNode(Node):
                     selection = gt.select_grasp_test(
                         points, poses, scores, support, settings, context, path_ctx,
                         self.end_effector, p('object_name'), float(p('grasp_test_depth_offset')),
-                        None if index < 0 else index)
+                        None if index < 0 else index, execution)
             elif task == 'transport':
                 selection = select_and_plan(
                     self.source, scene, poses, scores, settings, unavailable_reason=unavailable,

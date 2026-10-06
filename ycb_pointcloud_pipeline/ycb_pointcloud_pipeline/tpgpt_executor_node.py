@@ -181,7 +181,8 @@ def learned_settings(plan_dir: str, given: dict, defaults: dict) -> dict:
             info = json.load(f)
     except (OSError, ValueError):
         return {}
-    learned = (info.get('metadata') or {}).get('learned_execution') or {}
+    meta = info.get('metadata') or {}
+    learned = meta.get('learned_execution') or {}
     out, clashes = {}, []
     for name in LEARNED_SETTINGS:
         if name not in learned:
@@ -191,6 +192,9 @@ def learned_settings(plan_dir: str, given: dict, defaults: dict) -> dict:
             clashes.append(f'{name}:={given[name]!r} (learned at {want!r})')
         out[name] = type(default)(want)
     if clashes:
+        if meta.get('task') == 'grasp_test':
+            raise SystemExit("a grasp test runs at the transport's execution settings (its source "
+                             f"bundle's): {', '.join(clashes)}. Leave these at their defaults.")
         raise SystemExit("this plan's labels are a learned attractor, right only at the settings "
                          f"they were learned under: {', '.join(clashes)}. Leave these at their "
                          'defaults (the learned values are then used).')
@@ -405,7 +409,7 @@ class TpgptExecutorNode(Node):
                 p('plan_dir'), {n: p(n) for n in LEARNED_SETTINGS}, self._defaults)
             if self._learned:
                 self.get_logger().info(
-                    'Learned labels: running at the settings they were learned under: ' +
+                    'Running at the settings the transport bundle was learned under: ' +
                     ', '.join(f'{n} {v}' for n, v in self._learned.items()))
         self.dry = bool(p('dry_run'))
         # a replay always sends the demonstration's own stiffness labels

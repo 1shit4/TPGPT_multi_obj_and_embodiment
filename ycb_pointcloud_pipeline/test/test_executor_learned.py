@@ -93,3 +93,15 @@ def test_a_learned_plan_keeps_the_tracking_guard_but_not_the_not_following_one()
             reasons[name] = reasons[name] or mon.check(arm, command)
     assert reasons['learned'] is None and 'not following' in reasons['taught']
     assert 'exceeds' in ex.safety_monitor(p, True).check(np.zeros(3), np.array([0.09, 0, 0]))
+
+
+def test_a_grasp_test_runs_at_the_transport_settings_and_says_so(tmp_path):
+    """A grasp test carries its source bundle's settings (as the Franka Hand's transport runs
+    were executed); the refusal names the grasp test, not a learned attractor."""
+    ex = _module()
+    (tmp_path / 'plan.json').write_text(json.dumps(
+        {'metadata': {'learned_execution': LEARNED, 'task': 'grasp_test'}}))
+    assert ex.learned_settings(str(tmp_path), _defaults(), _defaults()) == {
+        k: v for k, v in LEARNED.items() if k != 'arrival_hold'}
+    with pytest.raises(SystemExit, match="grasp test runs at the transport's"):
+        ex.learned_settings(str(tmp_path), {**_defaults(), 'speed_scale': 0.5}, _defaults())

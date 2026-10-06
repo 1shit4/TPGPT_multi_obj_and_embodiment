@@ -52,17 +52,25 @@ LIFT = 0.10                   # m straight up once closed
 SPEED = 0.06                  # m/s at the labels (the executor's speed_scale slows it)
 DWELL = 1.0                   # s at the grasp, open and closed, and after the release
 HOLD_LIFTED = 2.0             # s held up
-#: The labels' stiffness, N/m, the same in every direction, critically damped
-#: (2 sqrt(K)): the static profile of a taught demonstration
-#: (``teach --stiffness-profile static``).
-STIFFNESS = 400.0
+#: The labels' stiffness is a taught demonstration's (:func:`tpgpt.hardware.teach.
+#: directional_stiffness`: 350 N/m along the motion, 600 across it and in every direction
+#: while the hand is still, ``D = 2 K^(1/2)``), and the plan is executed at the transport's
+#: settings (:func:`grasp_test_plan` ``execution``): a grasp test runs as the Franka Hand's
+#: transport runs did on the robot (the user, 2026-10-06). Until then it ran at 400 N/m in
+#: every direction with the executor's default offset compensation, and on 2026-10-06 18:07
+#: and 18:27 all four arrival holds ran out their 4 s 5.4-20.7 mm from the mark, the hold's
+#: push at its 30 mm cap (12 N at 400 N/m); the Franka runs' 56 holds (10-01 to 10-03), at
+#: 600 N/m when still, never needed more than 22.6 mm. One difference stays: a transport's
+#: command was learned by replaying it, so it already leads the arm; a grasp test's lead is
+#: built by the follow correction while the hand moves (350 N/m along it) and, when the hand
+#: stops and stiffens to 600, carries it on past the mark (a model arm with 9 N of friction:
+#: 7 mm at the grasp, 12 at the set-down), which the arrival hold then takes back.
 
 
 def grasp_test_labels(grasp: GraspFrame, dt: float = DT,
                       approach_distance: float = APPROACH_DISTANCE, lift: float = LIFT,
                       speed: float = SPEED, dwell: float = DWELL,
-                      hold_lifted: float = HOLD_LIFTED,
-                      stiffness: float = STIFFNESS) -> PolicyLabels:
+                      hold_lifted: float = HOLD_LIFTED) -> PolicyLabels:
     """The test's labels in the grasp convention (grasp point, grasp-frame orientations)."""
     a = np.asarray(grasp.approach, dtype=float)
     tcp = np.asarray(grasp.tcp, dtype=float)
@@ -92,14 +100,17 @@ def grasp_test_labels(grasp: GraspFrame, dt: float = DT,
     stay(tcp, dwell / 2.0, 1.0)                # set down, still closed
     stay(tcp, dwell, -1.0)                     # released
     move(tcp, pre, -1.0)
+    from tpgpt.hardware.teach import directional_stiffness
+
     P = np.asarray(positions, dtype=float)
-    eye = np.repeat(np.eye(3)[None], len(P), axis=0)
+    V = np.gradient(P, float(dt), axis=0)
+    K, D = directional_stiffness(P, V)
     return PolicyLabels(
         positions=P,
-        velocities=np.gradient(P, float(dt), axis=0),
+        velocities=V,
         orientations=np.repeat(grasp.rotation[None], len(P), axis=0),
-        stiffness=eye * float(stiffness),
-        damping=eye * 2.0 * np.sqrt(float(stiffness)),
+        stiffness=K,
+        damping=D,
         gripper=np.asarray(gripper, dtype=float),
         # The phase, and its rate per second at the labels' own pace: the executor advances
         # the phase by it (without it the phase runs one whole test per second).
@@ -118,11 +129,14 @@ def _grasp_cube(grasp: GraspFrame, half: float = GRASP_CUBE_HALF_EXTENT) -> Keyp
 
 def grasp_test_plan(grasp: GraspFrame, points: np.ndarray, support_height: float,
                     end_effector=None, object_name: str = "", depth_offset: float = 0.0,
-                    **label_kwargs) -> Plan:
+                    execution: dict | None = None, **label_kwargs) -> Plan:
     """The test of one grasp as a :class:`Plan` (module docstring).
 
     ``depth_offset``: the hand goes that much further along the approach than ``grasp``
-    (m; a depth sweep), recorded in the metadata.
+    (m; a depth sweep), recorded in the metadata. ``execution``: the settings the transport
+    is executed at -- the source bundle's (``SourceBundle.metadata["learned"]["execution"]``,
+    what the planner records as a transport plan's ``learned_execution``) -- recorded the
+    same way, so the executor runs the test at them.
     """
     from tpgpt.hardware import hand as franka_hand
 
@@ -220,8 +234,8 @@ def grasp_test_plan(grasp: GraspFrame, points: np.ndarray, support_height: float
             "grasp_to_fr3_tcp": ee.grasp_to_ee.tolist(),
             "end_effector": ee.to_dict(),
             "source": "grasp_test",
-            "source_stiffness": "static",
-            "learned_execution": None,
+            "source_stiffness": "directional",
+            "learned_execution": None if execution is None else dict(execution),
             "grasp_test": {"depth_offset_m": float(depth_offset),
                            "approach_distance_m": label_kwargs.get("approach_distance",
                                                                    APPROACH_DISTANCE),
@@ -237,7 +251,8 @@ def grasp_test_plan(grasp: GraspFrame, points: np.ndarray, support_height: float
 
 def select_grasp_test(points, poses, scores, support_height, settings=None, context=None,
                       path=None, end_effector=None, object_name: str = "",
-                      depth_offset: float = 0.0, library_index: int | None = None):
+                      depth_offset: float = 0.0, library_index: int | None = None,
+                      execution: dict | None = None):
     """The first screened GraspGen-X candidate whose test passes the whole-path check.
 
     ``library_index``: test only the candidate at this index of the generator's output
@@ -275,7 +290,8 @@ def select_grasp_test(points, poses, scores, support_height, settings=None, cont
     else:
         pool = [c for c in candidates if c.rejected is None][:max(int(s.max_plans), 0)]
     for rank, c in enumerate(pool, start=1):
-        result = grasp_test_plan(c.grasp, points, support_height, ee, object_name, depth_offset)
+        result = grasp_test_plan(c.grasp, points, support_height, ee, object_name, depth_offset,
+                                 execution)
         result.metrics["grasp_score"] = float(c.score)
         result.metrics["library_index"] = int(c.index)
         if not s.check_path:
@@ -291,7 +307,8 @@ def select_grasp_test(points, poses, scores, support_height, settings=None, cont
 
 
 def constructed_grasp_test(points, support_height, settings=None, path=None, end_effector=None,
-                           object_name: str = "", depth_offset: float = 0.0):
+                           object_name: str = "", depth_offset: float = 0.0,
+                           execution: dict | None = None):
     """:func:`constructed_grasp`'s test, path-checked: a
     :class:`~tpgpt.hardware.grasp_selection.Selection` with ``source`` ``"constructed"``.
 
@@ -323,7 +340,8 @@ def constructed_grasp_test(points, support_height, settings=None, path=None, end
     for name, closing in closings:
         grasp = constructed_grasp(points, support_height, ee, closing=closing)
         c = Candidate(index=-1, score=float("nan"), grasp=grasp, tilt_deg=_tilt_deg(grasp.approach))
-        result = grasp_test_plan(grasp, points, support_height, ee, object_name, depth_offset)
+        result = grasp_test_plan(grasp, points, support_height, ee, object_name, depth_offset,
+                                 execution)
         if not s.check_path:
             best = (0.0, name, result, c)
             break
