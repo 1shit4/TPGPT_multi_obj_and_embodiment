@@ -115,8 +115,17 @@ and, since this change, between them (straight in joint space, every 0.05 rad,
 controller and drives the joints from where they are through every one of them and onto the
 checked start posture (`executor.joint_route`: one cosine profile over the whole route, its
 joints' mean speed `start_joint_speed`, 0.25 rad/s; 6-17 s on the recorded plans), then steps
-5-7 below. A joint more than `route_max_lag` (0.3 rad) behind its command aborts: something holds
-the arm.
+5-7 below. **Each joint's target is led** by the joint controller's own delay times the joint's
+speed: the controller is a spring with damping on the joint's own speed (K 40/40/40/40/20/15/8
+N m/rad, D = 2 sqrt(K)), so a joint moving at `v` trails its target by `(D/K) v`, 0.32 s x `v`
+for joints 1-4 and 0.71 s x `v` for joint 7:
+
+    target_j = route_j + (2 / sqrt(K_j)) · v_j
+
+Without it, the first robot run (2026-10-06 21:11) had every joint 0.5-0.9 s x its speed
+behind, joint 7 0.30 rad behind at 0.35 rad/s, the hand turned 17 deg off the checked postures.
+A joint more than `route_max_lag` (0.3 rad) from the route itself aborts: something holds the
+arm.
 
 Why: before, only the hand was commanded on the way, the joints given a hint toward the
 planner's posture -- CRISP's null-space target, which acts only on motion that leaves the hand
