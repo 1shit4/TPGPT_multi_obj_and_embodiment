@@ -278,8 +278,9 @@ def constructed_grasp_test(points, support_height, settings=None, path=None, end
     joint 7 has -- the arm then contorts (2026-10-06, the foam brick at 294 deg: closing +x
     needed joint 7 at its limit and the shoulder at +1.7 rad, links 5 and 7 touched; closing
     -x passed). Of those that pass the whole-path check, the one whose start posture is
-    nearest the arm's joints (``path.start_q``) is taken: the executor moves the joints there
-    and refuses a move over ``start_joint_max_move`` (0.5 rad).
+    nearest the arm's joints (``path.start_q``, over all joints) and not at a joint limit is
+    taken: the executor steers the elbow there from the arm's joints and refuses a start
+    further than ``start_joint_max_move`` (0.5 rad).
 
     Raises:
         PlanningError: the whole-path check refused every one.
@@ -308,12 +309,21 @@ def constructed_grasp_test(points, support_height, settings=None, path=None, end
             c.rejected = reason
             tried.append(f"{name}: {reason}")
             continue
-        move = 0.0
+        move, near_limit = 0.0, False
         postures = getattr(result, "checked_postures", None)
         if pc.start_q is not None and postures is not None and len(postures["q"]):
             first = np.asarray(postures["q"])[int(np.argmin(np.asarray(postures["labels"])))]
-            move = float(np.max(np.abs(first - np.asarray(pc.start_q, dtype=float))))
-        tried.append(f"{name}: passes, its start {move:.2f} rad (largest joint) from the arm")
+            # Over all joints: the wrist travels ~2 rad whichever way the elbow goes, so the
+            # largest single joint cannot tell the branches apart (path_check.start_branch).
+            move = float(np.sqrt(np.sum((first - np.asarray(pc.start_q, dtype=float)) ** 2)))
+            from tpgpt.hardware.fr3 import default_model
+            from tpgpt.hardware.path_check import LIMIT_ROOM
+            fr3 = default_model()
+            near_limit = bool(np.any(first <= fr3.lower + LIMIT_ROOM)
+                              or np.any(first >= fr3.upper - LIMIT_ROOM))
+            move += 10.0 if near_limit else 0.0
+        tried.append(f"{name}: passes, its start {move:.2f} rad from the arm (all joints)"
+                     + (" -- a joint at its limit" if near_limit else ""))
         if best is None or move < best[0]:
             best = (move, name, result, c)
     if best is None:

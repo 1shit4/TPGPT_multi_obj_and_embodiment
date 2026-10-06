@@ -139,6 +139,56 @@ REACH_MARGIN = 0.02
 RETREAT_CLEARANCE = 0.010
 
 
+#: A start posture this close to a joint limit is avoided (CRISP's repulsion zone), rad.
+LIMIT_ROOM = 0.1
+#: Wrist variations tried around an un-swivelled start (:func:`start_branch`), rad.
+BRANCH_WRIST_STEPS = (-0.5, 0.0, 0.5)
+BRANCH_TWIST_STEPS = (-0.8, 0.0, 0.8)
+
+
+def start_branch(fr3: FR3, target_p, target_R, start_q, seed=None) -> np.ndarray | None:
+    """The posture the path should start in: of the IK solutions for its first pose, the one
+    nearest the arm's joints ``start_q`` over all joints (sum of squares), or ``seed`` when
+    nothing better is found.
+
+    Seven joints leave the elbow free to swing about the shoulder-wrist line, and the joint
+    limits split those swings into branches. The executor steers the elbow with a null-space
+    target blended from the arm's joints to the planned start (``PostureTarget.approach``),
+    which can pull an arm along its branch but not across to another. The path check's IK,
+    following the hand from ``start_q`` (``seed``, the move-onto-the-path chain's end), can
+    end on another branch: on the Inspire's constructed brick grasp (2026-10-06 17:18) it
+    swung joints 1 and 3 to -1.52 / +1.81 rad while the arm, keeping them near home (-0.06 /
+    +0.31), took the other, and the executor refused the start (joint 3 1.5 rad off). So
+    candidates are also solved from the chain's end with joint 1 turned to face the target
+    and joint 3 back at the arm's (the swing undone), each with a few wrist variations. The
+    largest single joint does not rank them: the wrist travels ~2 rad on either branch;
+    the sum does (2.5 against 3.2 rad there).
+    """
+    q0 = np.asarray(start_q, dtype=float).reshape(7)
+    base = q0 if seed is None else np.asarray(seed, dtype=float).reshape(7)
+    candidates = [] if seed is None else [base]
+    p0 = fr3.tcp(q0)[:3, 3]
+    turn = float(np.arctan2(target_p[1], target_p[0]) - np.arctan2(p0[1], p0[0]))
+    for d5 in BRANCH_WRIST_STEPS:
+        for d7 in BRANCH_TWIST_STEPS:
+            trial = base.copy()
+            trial[0], trial[2] = q0[0] + turn, q0[2]
+            trial[4] += d5
+            trial[6] += d7
+            r = fr3.solve_ik(target_p, target_R, seed=np.clip(trial, fr3.lower, fr3.upper),
+                             max_iterations=POSE_ITERATIONS, position_tolerance=POSE_TOLERANCE,
+                             rotation_tolerance=POSE_ROTATION_TOLERANCE)
+            if r.reachable:
+                candidates.append(np.asarray(r.qpos, dtype=float))
+    if not candidates:
+        return seed
+    # Not inside CRISP's joint-limit repulsion (0.1 rad): the executor keeps its targets out
+    # of it, so a start there is never reached (joint 7 at 3.02 rad, 2026-10-06).
+    room = [q for q in candidates
+            if np.all(q > fr3.lower + LIMIT_ROOM) and np.all(q < fr3.upper - LIMIT_ROOM)]
+    return min(room or candidates, key=lambda q: float(np.sum((q - q0) ** 2)))
+
+
 def stretch_room(fr3: FR3, q) -> float:
     """How far the wrist is inside full stretch, m: the longest shoulder-to-wrist distance
     the elbow allows minus this posture's (fr3_link2 to fr3_link6 origins; it depends only on
@@ -686,6 +736,11 @@ def path_feasibility(
             return _result(1, 0, violations, first, faults, approach_in, criterion=criterion,
                            first_kinematic=first_kin, **counts)
 
+    # --- the path's first posture: the branch the arm will be on --------------------
+    if start_q is not None:
+        seed = start_branch(fr3, positions[0] - rotations[0] @ offset, rotations[0], start_q,
+                            seed)
+
     # --- the path -----------------------------------------------------------------
     indices = np.arange(0, len(positions), max(int(stride), 1))
     if retreat_clearance is not None:          # the retreat at every label
@@ -1036,4 +1091,4 @@ __all__ = [
     "JOINT_MARGIN", "REACH_MARGIN", "stretch_room", "BASE_BAND", "penetration", "CLOUD_CONTACT_RADIUS", "CLOUD_CONTACT_SLACK",
            "MIN_CLOUD_CONTACT_POINTS", "CONTACT_DEPTH_TOLERANCE", "GRASP_CONTACT_WINDOW",
            "MIN_REACHABLE_FRACTION", "PLACE_WINDOW", "REACH_TOLERANCE", "STRIDE",
-           "check_plan", "path_feasibility", "robot_pieces", "verdict"]
+           "check_plan", "path_feasibility", "robot_pieces", "start_branch", "verdict"]
