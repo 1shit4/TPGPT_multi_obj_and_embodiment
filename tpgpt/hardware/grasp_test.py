@@ -355,7 +355,7 @@ def constructed_grasp_test(points, support_height, settings=None, path=None, end
         if pc.start_q is not None and postures is not None and len(postures["q"]):
             first = np.asarray(postures["q"])[int(np.argmin(np.asarray(postures["labels"])))]
             # Over all joints: the wrist travels ~2 rad whichever way the elbow goes, so the
-            # largest single joint cannot tell the branches apart (path_check.start_branch).
+            # largest single joint cannot tell the branches apart.
             move = float(np.sqrt(np.sum((first - np.asarray(pc.start_q, dtype=float)) ** 2)))
             from tpgpt.hardware.fr3 import default_model
             from tpgpt.hardware.path_check import LIMIT_ROOM

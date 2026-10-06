@@ -650,22 +650,3 @@ def test_a_retreat_that_comes_back_near_the_placed_object_is_refused_only_when_a
     assert pc.verdict(r10) is not None
     # with the clearance on, every retreat label is posed (stride 2 elsewhere)
     assert r10["tested"] == len(range(0, 30, 2)) + 30
-
-
-def test_the_path_starts_on_the_branch_the_arm_is_on():
-    """The Inspire's constructed brick grasp (2026-10-06 17:18): the IK chain from home ended
-    with joints 1 and 3 swung to -1.52 / +1.81 rad, the arm kept them near home and the
-    executor refused the start. start_branch takes the solution nearest the arm's joints
-    over all joints, from the chain's end with the swing undone."""
-    from tpgpt.hardware.fr3 import HOME_Q, default_model
-    from tpgpt.hardware.path_check import start_branch
-
-    fr3 = default_model()
-    natural = np.array([0.47, 0.15, 0.02, -2.66, 0.76, 3.66, 0.42])
-    T = fr3.tcp(natural)
-    swung = fr3.solve_ik(T[:3, 3], T[:3, :3], seed=np.array([-1.5, -0.4, 1.8, -2.7, 0.0, 3.5, 1.3]),
-                         max_iterations=200, position_tolerance=0.001, rotation_tolerance=0.01)
-    assert swung.reachable and abs(swung.qpos[0]) > 1.0          # the other branch exists
-    q = start_branch(fr3, T[:3, 3], T[:3, :3], HOME_Q, seed=swung.qpos)
-    assert abs(q[0] - HOME_Q[0]) < 0.6 and abs(q[2] - HOME_Q[2]) < 0.3
-    assert np.allclose(fr3.tcp(q)[:3, 3], T[:3, 3], atol=0.002)
