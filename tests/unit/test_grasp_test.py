@@ -323,3 +323,18 @@ def test_the_summary_measures_how_deep_the_hand_closed(inspire, tmp_path):
     assert row["off_closed_mm"] == pytest.approx(3.0, abs=1e-6)
     assert summary(tmp_path, "ball", since="20261006_1100") == [row]
     assert summary(tmp_path, "ball", since="20261006_1300") == []
+
+
+def test_a_depth_offset_is_applied_before_the_screening(inspire):
+    """A grasp that only works further back is screened at the depth under test: 60 mm too
+    deep, the palm is in the ball; 60 mm back it is the good top-down grasp."""
+    deep = GraspFrame(tcp=CENTRE - [0.0, 0.0, 0.06], approach=TOP_DOWN.approach,
+                      closing=TOP_DOWN.closing)
+    args = (ball(), np.stack([_pose(deep)]), np.array([0.9]), TABLE,
+            SelectionSettings(max_tilt_deg=90.0, check_visibility=False))
+    kw = dict(path=PathContext(world=_world()), end_effector=inspire, object_name="ball")
+    with pytest.raises(PlanningError):
+        select_grasp_test(*args, **kw)
+    sel = select_grasp_test(*args, depth_offset=-0.06, **kw)
+    assert sel.plan.grasp.tcp == pytest.approx(CENTRE, abs=1e-9)
+    assert sel.plan.metadata["grasp_test"]["depth_offset_m"] == pytest.approx(-0.06)

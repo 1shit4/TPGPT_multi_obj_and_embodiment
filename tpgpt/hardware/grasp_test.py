@@ -274,6 +274,13 @@ def select_grasp_test(points, poses, scores, support_height, settings=None, cont
                               destination_height=None)
     pc = dataclasses.replace(path or PathContext(), end_effector=ee)
     points = np.atleast_2d(np.asarray(points, dtype=float))
+    if depth_offset:
+        # The hand at the depth under test for the screening too (its table, pocket and
+        # opposition checks), as a calibrated depth is: shifted only afterwards, a grasp that
+        # works only further back was screened out first (2026-10-07: no banana grasp passes at
+        # GraspGen-X's own depth, six do 20 mm back). Each pose's +Z is its approach.
+        poses = np.asarray(poses, dtype=float).copy()
+        poses[:, :3, 3] += poses[:, :3, 2] * float(depth_offset)
     candidates = screen_candidates(points, poses, scores, float(support_height), s,
                                    context=ctx, end_effector=ee)
     notes = []
@@ -290,8 +297,9 @@ def select_grasp_test(points, poses, scores, support_height, settings=None, cont
     else:
         pool = [c for c in candidates if c.rejected is None][:max(int(s.max_plans), 0)]
     for rank, c in enumerate(pool, start=1):
-        result = grasp_test_plan(c.grasp, points, support_height, ee, object_name, depth_offset,
-                                 execution)
+        # the candidate's grasp is already at the depth under test (above)
+        result = grasp_test_plan(c.grasp, points, support_height, ee, object_name, 0.0, execution)
+        result.metadata["grasp_test"]["depth_offset_m"] = float(depth_offset)
         result.metrics["grasp_score"] = float(c.score)
         result.metrics["library_index"] = int(c.index)
         if not s.check_path:
