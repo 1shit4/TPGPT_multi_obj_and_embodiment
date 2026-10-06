@@ -739,6 +739,12 @@ The planner's support height is: its `support_height` parameter, else the calibr
   plans' starts of 10-02/10-03 exactly. (The earlier "Franka unchanged" check compared
   admissible counts, not start postures.) The constructed grasp test still tries both sides
   of the object, each thumb side, and ranks them by their start's distance from the arm.
+- **The depth sweep's phase 2 (2026-10-07 03:01): apple, mug, pudding box and banana held on
+  all 19 runs at 10, 20 and 30 mm back; with the brick (0 to 30) every object holds from 10 to 30
+  mm back, middle 20.** `calibrated_depth_m` still 0 pending the user's choice. In grasp tests the
+  hand goes 4-13 mm past the grasp mark (no learned lead; the stored push meets the 350 -> 600
+  stiffness step), enough for the thumb to meet the table under a banana grasp planned 4-5 mm
+  above it. The apple's misses were `caption_mode: joint` ("red apple red cup").
 - **The depth sweep's phase 1 (brick, 2026-10-07 00:40; `INSPIRE_HAND.md`): library grasp
   #292 held 3/3 at 0, -20 and -30 mm, 1/1 at -10, 0/1 at -40: the band is 0 to -30.** A pinned
   library index is not a fixed physical grasp on the brick: its four long faces look alike and

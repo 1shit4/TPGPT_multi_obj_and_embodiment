@@ -344,6 +344,33 @@ ros2 run --prefix python3 ycb_pointcloud_pipeline tpgpt_pick_place --ros-args \
     where #292 does not exist ("no candidate 292 in 200"); a pinned grasp now says why.
   - **One held close aborted** (00:06): the ring still creeping into the foam at the timeout
     (435, 51 g, below its force stop); a close now fails on that only when nothing is held.
+- **Phase 2, the other objects (2026-10-07 01:28-03:01), normal selection: all 19 runs held.**
+  Apple 2/2 at -10, 1/1 at -20, 1/1 at -30; mug 1/1, 3/3, 1/1; pudding box 1/1 each; banana
+  1/1, 4/4, 2/2. With the brick's 0 to -30, **every object holds from 10 to 30 mm back**; the
+  middle of the band they share is **-20 mm**. The hand closed within 2.7 mm of the depth asked.
+  What the runs showed:
+  - **The hand goes 4-13 mm past the grasp mark on the way down** (median ~6; pudding box
+    10-12), then the hold lifts it back before the close; the Franka's transport runs went at
+    most 7 mm past, mostly 1-4 and in the hold. The cause, as predicted: a grasp test's
+    command has no learned lead, so the push that moves the arm down is stored in the follow
+    correction (350 N/m along the motion) and carries the hand on when it stops and stiffens
+    to 600. On the banana the planner left the hand 4-5 mm above the table at the grasp (its
+    minimum is 3), so the thumb met the table before the close (the user saw it, more with the
+    thumb on the inner curve and a steeper tilt: #284, 12 deg). Open; an execution change, the
+    user's call.
+  - **The apple was not detected without a mug in view**: the segmentation node ran
+    `caption_mode: joint` until the 02:30 restart (the saved frames say so; the mode is read only
+    at start), and in one caption "red apple" and "red cup with a handle" both matched the apple
+    ("red apple red cup", refused as ambiguous: 167 of 199 frames missed, best 0.59). With the mug
+    in view "red cup" went to it and the apple was published on 143 of 177. Launch with
+    `caption_mode:=per_object` and check: `ros2 param get /ycb_segmentation_node caption_mode`.
+  - **One apple plan was refused with the arm at home** (01:35, `approach_blocked`: link 5 against
+    link 1 on the planned move onto grasp #19's path, 3 at the postures, 29 between them); the
+    next capture planned the same grasp. Re-homing, which the message advises, cannot help a
+    homed arm.
+  - **The pudding box at -10 and -20 looked alike** because they were different grasps (#187,
+    #89): normal selection takes the first testable grasp at each depth. They closed 9.4 and
+    21.4 mm back along their own approaches.
 - Dry runs (`dry_run` true, the default) simulate the motion. Offline, with no camera or robot,
   replay a recorded capture on another ROS domain:
   ```bash
