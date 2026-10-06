@@ -280,7 +280,9 @@ The planner's support height is: its `support_height` parameter, else the calibr
   its path alone; if the chosen grasp's move is blocked the planner stops with `approach_blocked`
   and a `joint_homing` hint. The path's IK is still seeded from the measured joints, so a poorly
   parked arm can still cost grasps on the path itself (the arm against the right wall, 2026-09-26)
-  -- **home the arm before planning.**
+  -- **home the arm before planning.** **Except with the arm already at home** (every joint within
+  `home_tolerance`, 0.1 rad, of `joint_homing`'s; the user, 2026-10-07): then a blocked move
+  rejects that grasp and selection moves on, since re-homing a homed arm achieves nothing.
 - **Selection stays in GraspGen-X's score order** (user, 2026-09-29): near-upright grasps are not
   moved ahead, even though steep ones fold more often and cost planning time.
 - **Other executor guards still apply**, and they are not the box: `max_start_distance` (0.6 m
@@ -741,10 +743,13 @@ The planner's support height is: its `support_height` parameter, else the calibr
   of the object, each thumb side, and ranks them by their start's distance from the arm.
 - **The depth sweep's phase 2 (2026-10-07 03:01): apple, mug, pudding box and banana held on
   all 19 runs at 10, 20 and 30 mm back; with the brick (0 to 30) every object holds from 10 to 30
-  mm back, middle 20.** `calibrated_depth_m` still 0 pending the user's choice. In grasp tests the
+  mm back, middle 20.** **`calibrated_depth_m` is -0.02** (the user, 2026-10-07; a grasp test's
+  `grasp_test_depth_offset` now adds to it). In grasp tests the
   hand goes 4-13 mm past the grasp mark (no learned lead; the stored push meets the 350 -> 600
   stiffness step), enough for the thumb to meet the table under a banana grasp planned 4-5 mm
-  above it. The apple's misses were `caption_mode: joint` ("red apple red cup").
+  above it -- left as is for now (the user, 2026-10-07): measure it on the first Inspire
+  transport runs, whose command carries the learned lead. The apple's misses were
+  `caption_mode: joint` ("red apple red cup").
 - **The depth sweep's phase 1 (brick, 2026-10-07 00:40; `INSPIRE_HAND.md`): library grasp
   #292 held 3/3 at 0, -20 and -30 mm, 1/1 at -10, 0/1 at -40: the band is 0 to -30.** A pinned
   library index is not a fixed physical grasp on the brick: its four long faces look alike and
@@ -771,7 +776,7 @@ The planner's support height is: its `support_height` parameter, else the calibr
   (the brick's clouds also went from ~680 points on 09-26 to ~1700 from 10-01).
 - **The foam brick's fit starts along the camera's top face** (`object_model.TOP_FACE_HEADING`,
   2026-10-06): its smeared cloud let a brick turned 90 deg fit as well, and the user saw it turned.
-- **Not measured yet:** the grasp depth (`calibrated_depth_m` 0).
+- **The grasp depth is measured:** `calibrated_depth_m` -0.02 (the depth sweep, 2026-10-07).
 - **The robot's external torques and wrench are the force it applies, not the push on it**
   (push test 2026-10-05, `wrench_watch`: pushing the hand up made Fz go down). Anything reading
   `external_wrench_in_base_frame` or `external_joint_torques` (the X6 recorder too) must flip

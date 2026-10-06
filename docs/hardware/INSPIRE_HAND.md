@@ -368,6 +368,10 @@ ros2 run --prefix python3 ycb_pointcloud_pipeline tpgpt_pick_place --ros-args \
     link 1 on the planned move onto grasp #19's path, 3 at the postures, 29 between them); the
     next capture planned the same grasp. Re-homing, which the message advises, cannot help a
     homed arm.
+  - **Decided (the user, 2026-10-07): `calibrated_depth_m` -0.02**, the middle of the shared
+    band; `grasp_test_depth_offset` now adds to it. The overshoot is left for now, to be measured
+    on the first transport runs. With the arm at home, a grasp whose route is blocked is passed
+    over instead of stopping the plan.
   - **The pudding box at -10 and -20 looked alike** because they were different grasps (#187,
     #89): normal selection takes the first testable grasp at each depth. They closed 9.4 and
     21.4 mm back along their own approaches.
