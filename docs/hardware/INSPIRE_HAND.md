@@ -9,9 +9,10 @@ has its record.
 **Every hand fact recorded on 2026-09-15 is unverified** (the user, 2026-10-05: that may
 have been a different, left hand). Each is measured again here.
 
-**State (2026-10-04):** code done and tested offline, including a full offline ROS dry run of a
-grasp test. **Nothing has run on the robot**, and the mount, the register map, the grasp depth
-and the close are not measured yet (section 4). Every deviation from the simulation is in
+**State (2026-10-06):** the mount, the register map, the close and the payload are measured
+(section 4). **The first constructed grasp test held the foam brick** (18:27: thumb, index and
+middle on it, held through the lift; both arrival holds ended 5.7-5.8 mm from their marks, 4 mm
+too deep). The grasp depth (M6) and the description (M8) are not measured yet. Every deviation from the simulation is in
 `docs/hardware/FAITHFULNESS_AUDIT.md`, section D.
 
 ## 1. What the pipeline does with this hand

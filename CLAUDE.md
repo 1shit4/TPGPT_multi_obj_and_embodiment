@@ -716,9 +716,14 @@ The planner's support height is: its `support_height` parameter, else the calibr
   branch for the Inspire's top-down grasps). The constructed grasp test tries both sides of the
   object, each thumb-side, and ranks them the same way. The Franka Hand's planning is unchanged
   by it (coverage, old vs new code: banana 09-26 4/10 and 1/10, apple 10-03 0/0, same faults).
-- **The first grasp test on the robot (brick, constructed, 2026-10-06 17:50) reached its start
-  but never descended**: the sim's clamp held the command 6 mm from a stuck arm. Grasp tests
-  now run in follow mode (audit D12); re-run with a fresh plan.
+- **The first held grasp: 2026-10-06 18:27** (brick, constructed, fitted lying, 0.87 explained;
+  `~/tpgpt_plans/foam_brick_20261006_182715_grasptest`): thumb, index and middle on the brick
+  (ring and little on air; the plan expected the ring too), held through the lift, set down,
+  released. The arm stayed within 6.4 mm of its path (correction up to 28 mm). **Both arrival
+  holds timed out (4 s) 5.7-5.8 mm from their marks, the same way both times** (4 mm along base
+  +x, 4 mm too deep): a bias the depth sweep (M6) must account for. Before it: 17:50 never
+  descended (the sim's clamp; grasp tests now follow their path, audit D12), 18:07 fitted the
+  brick standing and pushed it.
 - **The foam brick is fitted lying on a long face only** (`PROTOCOL_RESTS`, `HEIGHT_EXCESS` 22 mm,
   2026-10-06): the camera reads a patch of its top 55-80 mm up (it is 52), growing since 09-26
   (+2 mm then, +18.5 at 18:07), and at 18:07 the fit stood it on its end; the fingers met it
@@ -736,11 +741,9 @@ The planner's support height is: its `support_height` parameter, else the calibr
   from (joint 7 0.07 rad after `joint_homing`), and friction holds up to ~0.6 N m, which the
   robot reports as external torque. Anything read from `external_joint_torques` or the external
   wrench at rest carries it: model it by the approach direction, as `payload.fit_payload` does.
-  **Nothing has run on the robot. Every Inspire coverage number so far is void** (the mount was
-  the -45 deg estimate).
+  **Every Inspire coverage number so far is void** (the mount was the -45 deg estimate).
 - **The hand's serial driver**: `sudo modprobe usbserial && sudo insmod ~/ch341/ch341.ko` after every
-  boot (`insmod` alone fails with "Unknown symbol": it does not load `usbserial`). Desk is still
-  configured for the Franka Hand (0.73 kg, CoM 30 mm out): the payload is to be measured (M5).
+  boot (`insmod` alone fails with "Unknown symbol": it does not load `usbserial`).
   Step-by-step measuring: `docs/hardware/INSPIRE_MEASURING.md`.
 - **Grasp-only tests come first**: `-p task:=grasp_test` (`tpgpt/hardware/grasp_test.py`), with
   `grasp_test_constructed`, `grasp_test_library_index` and `grasp_test_depth_offset` for the frame
