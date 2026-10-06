@@ -38,6 +38,19 @@ checks the **arm path** of a learned plan (not its command), and records the joi
 checked the arm in at every 4th label. **Every plan we run now is a learned plan.** Taught plans
 are run by the simulation's rules, described at the end for completeness.
 
+A **grasp test** (`tpgpt/hardware/grasp_test.py`: one grasp approached, closed, lifted, set down
+and released, no transport) is followed the same way, with its own labels as its arm path -- no
+lead, no margin -- and the grasp and the set-down as its marks (2026-10-06). Under the
+simulation's rules the first one on the robot never started its descent. The clamp kept the
+command within ~6 mm of the arm (its radius scales with the fastest label speed, and the test's
+descent is slow: 21 mm/s at `speed_scale` 0.35). At 400 N/m that is a 2.4 N pull, and the arm
+did not move for it: it left the pre-grasp by 1.1 mm and stayed there 100 mm above the grasp
+for 101 s, until the watchdog fired at phase 0.096. Followed, the held clock hands the gap to
+the correction (below) until the pull breaks the arm free. On a model arm that does not move
+below a 3 N pull, the gated run never leaves the pre-grasp. The followed one finishes in 870
+steps against 757 nominal and dips at most 4.3 mm past a mark (the lag, not the friction:
+4.3 mm with no friction too), which the arrival hold then corrects.
+
 Why the learned command: sent the taught path as its command, this arm strayed 17 mm RMS from it
 (10-15 mm sideways), because joint friction leaves it 6-9 N short of where the spring points and
 it lags about twice what the spring model predicts. Three replay passes, each correcting the

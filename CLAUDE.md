@@ -152,6 +152,10 @@ Two facts that need several files to see, and that decide whether a change is fa
   by 15 mm and the release by 16, with it by 4 and 2. Both guards judge normal lag by the spring model (2-6 mm), and
   the learned command must lead this arm by 17-35 mm: they would slow it to 0.67 and cut it on 262
   of 488 labels. The policy query, the speed cap and the clock's update are still the shared code.
+  **A grasp test is followed too** (2026-10-06, audit D12): its labels are its own arm path (no
+  lead, no margin), its grasp and set-down the marks. Under the clamp the first one never left
+  the pre-grasp: the command sat 6 mm below the arm (2.4 N at 400 N/m), and static friction held
+  it for 101 s. Grasp-test plans made before then have no arm path: re-plan.
 - **The elbow is held on the posture the path check verified** (2026-10-02, audit C8;
   executor `posture_target`). The check records the posture it posed the arm in at each tested
   label (`checked_postures.npz` in the plan) and the executor sends it as CRISP's `target_joint`
@@ -710,6 +714,9 @@ The planner's support height is: its `support_height` parameter, else the calibr
   branch for the Inspire's top-down grasps). The constructed grasp test tries both sides of the
   object, each thumb-side, and ranks them the same way. The Franka Hand's planning is unchanged
   by it (coverage, old vs new code: banana 09-26 4/10 and 1/10, apple 10-03 0/0, same faults).
+- **The first grasp test on the robot (brick, constructed, 2026-10-06 17:50) reached its start
+  but never descended**: the sim's clamp held the command 6 mm from a stuck arm. Grasp tests
+  now run in follow mode (audit D12); re-run with a fresh plan.
 - **The foam brick's fit starts along the camera's top face** (`object_model.TOP_FACE_HEADING`,
   2026-10-06): its smeared cloud let a brick turned 90 deg fit as well, and the user saw it turned.
 - **Not measured yet:** the grasp depth (`calibrated_depth_m` 0).

@@ -283,6 +283,11 @@ ros2 run --prefix python3 ycb_pointcloud_pipeline tpgpt_pick_place --ros-args \
   on the live brick of 2026-10-06 the arm then contorted (shoulder +1.7 rad, links 5 and 7 1.9 mm
   into each other) and the plan was refused. The planned postures can look far from home in
   joints 1 and 3 together: the elbow swivels (the arm has a seventh joint), not a contortion.
+- **It is executed in follow mode** (`HOW_EXECUTION_WORKS.md`, "Which plan is executed"): the
+  test's labels are its own arm path, and it holds at the grasp and the set-down before the
+  hand acts. Plans made before 2026-10-06 18:00 have no arm path: the simulation's clamp then
+  holds the command within ~6 mm of the arm, and on the first brick test the arm never left the
+  pre-grasp (the static friction held it against a 2.4 N pull). Re-plan.
 - `-p grasp_test_library_index:=N -p grasp_test_depth_offset:=0.01`: the same library grasp,
   1 cm deeper. For the depth sweep (M6): 6 depths 10 mm apart, 3 tries each. Never in X6.
 - Dry runs (`dry_run` true, the default) simulate the motion. Offline, with no camera or robot,
