@@ -708,7 +708,8 @@ The planner's support height is: its `support_height` parameter, else the calibr
   steering cannot reach, and it refused the start ("the elbow is on another branch"). The start
   is the solution nearest the arm's joints over all joints (the wrist turns ~2 rad on every
   branch for the Inspire's top-down grasps). The constructed grasp test tries both sides of the
-  object, each thumb-side, and ranks them the same way.
+  object, each thumb-side, and ranks them the same way. The Franka Hand's planning is unchanged
+  by it (coverage, old vs new code: banana 09-26 4/10 and 1/10, apple 10-03 0/0, same faults).
 - **The foam brick's fit starts along the camera's top face** (`object_model.TOP_FACE_HEADING`,
   2026-10-06): its smeared cloud let a brick turned 90 deg fit as well, and the user saw it turned.
 - **Not measured yet:** the grasp depth (`calibrated_depth_m` 0).
