@@ -716,13 +716,19 @@ The planner's support height is: its `support_height` parameter, else the calibr
   flange-to-TCP stays the Franka Hand's (`fr3_hand_tcp`, what every tool commands). A re-weigh with
   it in Desk agreed within the method's +-0.04 kg / +-15 mm (the arm's own model error at joint 2,
   friction). `payload_measure` reads Desk's values from the robot at its start.
-- **The path starts on the elbow branch the arm is on** (`path_check.start_branch`, 2026-10-06):
-  the IK chain from home could swing joints 1 and 3 to another branch, which the executor's elbow
-  steering cannot reach, and it refused the start ("the elbow is on another branch"). The start
-  is the solution nearest the arm's joints over all joints (the wrist turns ~2 rad on every
-  branch for the Inspire's top-down grasps). The constructed grasp test tries both sides of the
-  object, each thumb-side, and ranks them the same way. The Franka Hand's planning is unchanged
-  by it (coverage, old vs new code: banana 09-26 4/10 and 1/10, apple 10-03 0/0, same faults).
+- **The Inspire's grasp-test starts sit at the shoulder's straight point** (joint 2 ~0; open,
+  2026-10-06). The start posture is where the planner's own path from the arm's joints ends --
+  the rule the Franka runs used, and it matched where their arm arrived to 0.06-0.51 rad
+  (largest joint). The same brick grasp test puts the Franka's shoulder at +0.30, the Inspire's
+  at 0 (its wrist at 3.6 rad, not 2.6; the flange 90 mm higher): there joints 1 and 3 turn about
+  one line, the hand's pose does not fix the arm's, and the planner's path and the arm ended on
+  opposite sides (19:05: planner -0.48, arm +0.03; the executor refused, 0.76 rad). The
+  execution is not to change (the user: tested on the Franka). `start_branch` (nearest the
+  arm's joints; 3dd8985) was reverted in 0b0ba0b: it would have moved Franka starts up to
+  1.44 rad off the arm (apple 10-03 22:18); the reverted planner reproduces all 29 Franka
+  plans' starts of 10-02/10-03 exactly. (The earlier "Franka unchanged" check compared
+  admissible counts, not start postures.) The constructed grasp test still tries both sides
+  of the object, each thumb side, and ranks them by their start's distance from the arm.
 - **The first held grasp: 2026-10-06 18:27** (brick, constructed, fitted lying, 0.87 explained;
   `~/tpgpt_plans/foam_brick_20261006_182715_grasptest`): thumb, index and middle on the brick
   (ring and little on air; the plan expected the ring too), held through the lift, set down,

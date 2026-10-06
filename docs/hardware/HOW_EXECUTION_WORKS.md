@@ -131,12 +131,15 @@ leave the elbow free to swing about the line from the shoulder to the wrist with
 and the joint limits split that swing into separate branches. On the way onto the path the arm
 keeps its elbow where its null-space target pulls it -- blended from where it started to the
 planned start (`PostureTarget.approach`) -- which moves it along its branch, never across. The
-planner's IK, following the hand from the arm's joints, can end on another branch: on the
-Inspire's first brick grasp test (2026-10-06) it swung joints 1 and 3 to -1.52 / +1.81 rad, the
-real arm kept them near home, and step 2 refused (joint 3 1.5 rad off). So the planner takes, of
-the solutions for the start, the one nearest the arm's joints counted over all joints
-(`path_check.start_branch`); the largest single joint cannot choose, since the wrist turns ~2 rad
-on every branch. A start inside a joint limit's repulsion zone is avoided.
+planner's start is where its own path from the arm's joints ends (its IK followed along the
+same straight move the executor makes). On the Franka runs that matched where the arm arrived to
+0.06-0.51 rad, and step 2 closed the rest. It fails where the start puts the shoulder at its
+straight point (joint 2 near 0: joints 1 and 3 then turn about one line, and the hand's pose
+does not fix the arm's posture), as the Inspire's top-down brick grasp tests do: there the
+planner's path and the arm ended on opposite sides of it (2026-10-06 17:18: joints 1 and 3 1.5
+rad apart; 19:05: joint 2 at -0.48 planned, +0.03 on the arm; step 2 refused both). Open. A rule
+that took the IK solution nearest the arm's joints instead (`start_branch`, 3dd8985) was
+reverted: it would have put Franka starts up to 1.44 rad off the arm.
 
 ## Following a learned plan, every 50 ms
 
