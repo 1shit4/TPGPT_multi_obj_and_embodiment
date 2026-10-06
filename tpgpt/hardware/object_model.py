@@ -145,8 +145,10 @@ MAX_HEIGHT_EXCESS = 0.020
 #: 2a196a4), until the user's 18:14 run.
 #: The foam brick's high patch reads +1.9 to +18.5 mm above the brick fitted lying (13
 #: captures, 09-26 to 10-06, growing: ~2 on 09-26, 5-9 on 10-01, 9-16 on 10-03, 5-18.5
-#: on 10-06); stood on its end it would read at least +25 (78 against 52 mm): 22.
-HEIGHT_EXCESS = {"pudding_box": 0.038, "banana": 0.030, "foam_brick": 0.022}
+#: on 10-06): 22 until 2026-10-07, when the depth sweep's captures read up to +23.0 (median
+#: +14 over all 56 brick captures) and one fit was refused. Stood on its end the brick reads
+#: +26 (78 against 52 mm) plus the same patch, ~+40: 26.
+HEIGHT_EXCESS = {"pudding_box": 0.038, "banana": 0.030, "foam_brick": 0.026}
 
 #: Camera points further than this *behind* the fitted surface, along their own
 #: ray, are refused as impossible and the pose is fitted again without them. The

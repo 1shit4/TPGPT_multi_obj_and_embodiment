@@ -377,12 +377,14 @@ def test_the_brick_of_18_07_lies_on_its_long_face():
 
 
 def test_a_brick_stood_on_its_end_is_refused():
+    """The camera reads a patch of the brick's top high (median +14 mm, up to +23 lying): with
+    it, a lying brick is accepted and one stood on its end (+26 before the patch) refused."""
     brick = ObjectModel.load("foam_brick")
     pts = brick.sample(2000)[0]
     on_end = next(k for k, r in enumerate(brick.rests) if np.ptp((pts @ np.asarray(r).T)[:, 2]) > 0.07)
     R, t = _placed(brick, on_end, 0.8, (0.52, 0.18))
-    fit = fit_object(brick, _view(brick, R, t), TABLE, CAMERA)
+    fit = fit_object(brick, _with_silver_top(_view(brick, R, t), rise=0.02), TABLE, CAMERA)
     assert not fit.accepted and "standing another way" in fit.reason
     R, t = _placed(brick, PROTOCOL_RESTS["foam_brick"][0], 0.8, (0.52, 0.18))
-    fit = fit_object(brick, _view(brick, R, t), TABLE, CAMERA)
+    fit = fit_object(brick, _with_silver_top(_view(brick, R, t), rise=0.02), TABLE, CAMERA)
     assert fit.accepted, fit.reason

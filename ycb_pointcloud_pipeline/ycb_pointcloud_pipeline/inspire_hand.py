@@ -244,8 +244,12 @@ class CloseReport:
 
     @property
     def ok(self) -> bool:
-        """No actuator error and nothing left moving."""
-        return not self.errors and not self.timed_out
+        """No actuator error, and nothing left moving unless the hand holds. A finger still
+        creeping when the others hold is a held close, not a failed one: on the foam brick
+        (2026-10-07 00:06) the ring was still moving after 3 s at 435, 51 g -- below its
+        400 g force stop, pressing into the foam -- with the middle and index on the brick,
+        and the run was aborted on a grasp that held."""
+        return not self.errors and (not self.timed_out or self.held)
 
     def as_dict(self) -> dict:
         d = asdict(self)

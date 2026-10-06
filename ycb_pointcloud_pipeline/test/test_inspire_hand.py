@@ -40,7 +40,7 @@ class FakeHand:
         self.force = [0] * 6
         self.force_set = [400] * 6
         self.contact_at = list(contact_at or [None] * 6)
-        self.stuck = list(stuck or [False] * 6)
+        self.stuck = list(stuck or [False] * 6)     # True: never moves; an angle: creeps there
         self.contact_status = contact_status
         # The thumb lying on the fingers: an ANGLE_SET that opens fingers and the thumb
         # bend together leaves the fingers where they are (what the user saw, 2026-10-05).
@@ -75,7 +75,9 @@ class FakeHand:
                 else:
                     self.status[k] = 2      # held: status reset (worst case)
                 continue
-            if self.stuck[k]:
+            if self.stuck[k] is not None and self.stuck[k] is not False:
+                if not isinstance(self.stuck[k], bool):
+                    self.angle[k] = int(self.stuck[k])     # crept this far, still moving
                 self.status[k] = 1
                 continue
             stop = self.contact_at[k]
@@ -424,6 +426,20 @@ def test_closing_on_air_is_reported_as_such(fake):
     assert report.contact == [] and report.on_air == list(ih.BENDING)
     assert not report.opposed and report.ok
     assert "closed on air" in report.summary()
+
+
+def test_a_finger_still_creeping_while_the_others_hold_is_a_held_close():
+    """The foam brick, 2026-10-07 00:06: the ring still moving after the timeout (into the
+    foam, below its force stop) while the middle and index were stopped on the brick."""
+    fake = FakeHand(contact_at=[None, None, 600, 650, 700, None],
+                    stuck=[False, 435, False, False, False, False])
+    try:
+        report = _close(fake, "simultaneous", timeout=0.3)
+    finally:
+        fake.close()
+    assert report.timed_out == ["ring"]
+    assert report.held and report.ok
+    assert set(report.on_object) == {"middle", "index"}
 
 
 def test_a_dof_still_moving_at_the_timeout_is_an_error():

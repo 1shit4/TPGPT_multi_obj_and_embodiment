@@ -627,6 +627,16 @@ class TpgptPlannerNode(Node):
                                         f'({unavailable})')
                 else:
                     index = int(p('grasp_test_library_index'))
+                    if index >= 0 and not str(self.grasp_origin or '').startswith('library'):
+                        # a library index names a grasp on the object's scan: without an accepted
+                        # fit the candidates are a fresh draw on the camera cloud, where it means
+                        # nothing (2026-10-06 23:54: 'no candidate 292 in 200')
+                        raise PlanningError(
+                            f'no_executable_grasp: grasp_test_library_index {index} pins a grasp of '
+                            f"the {p('object_name')}'s library, used only when its scan fit is "
+                            f'accepted; here the candidates are {self.grasp_origin} '
+                            f"(the fit: {(info.get('object_model') or {}).get('reason') or 'none'}). "
+                            'Re-place the object and re-plan.')
                     selection = gt.select_grasp_test(
                         points, poses, scores, support, settings, context, path_ctx,
                         self.end_effector, p('object_name'), float(p('grasp_test_depth_offset')),
