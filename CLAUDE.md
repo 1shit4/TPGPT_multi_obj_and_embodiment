@@ -703,6 +703,14 @@ The planner's support height is: its `support_height` parameter, else the calibr
   flange-to-TCP stays the Franka Hand's (`fr3_hand_tcp`, what every tool commands). A re-weigh with
   it in Desk agreed within the method's +-0.04 kg / +-15 mm (the arm's own model error at joint 2,
   friction). `payload_measure` reads Desk's values from the robot at its start.
+- **The path starts on the elbow branch the arm is on** (`path_check.start_branch`, 2026-10-06):
+  the IK chain from home could swing joints 1 and 3 to another branch, which the executor's elbow
+  steering cannot reach, and it refused the start ("the elbow is on another branch"). The start
+  is the solution nearest the arm's joints over all joints (the wrist turns ~2 rad on every
+  branch for the Inspire's top-down grasps). The constructed grasp test tries both sides of the
+  object, each thumb-side, and ranks them the same way.
+- **The foam brick's fit starts along the camera's top face** (`object_model.TOP_FACE_HEADING`,
+  2026-10-06): its smeared cloud let a brick turned 90 deg fit as well, and the user saw it turned.
 - **Not measured yet:** the grasp depth (`calibrated_depth_m` 0).
 - **The robot's external torques and wrench are the force it applies, not the push on it**
   (push test 2026-10-05, `wrench_watch`: pushing the hand up made Fz go down). Anything reading

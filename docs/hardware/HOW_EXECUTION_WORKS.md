@@ -96,6 +96,18 @@ is reached in joint space:
 7. Switch back to the Cartesian controller. CRISP seeds its target with the measured pose on every
    switch, so neither switch moves the arm.
 
+**Which posture the planner checks at the start** decides whether step 2 passes. Seven joints
+leave the elbow free to swing about the line from the shoulder to the wrist with the hand still,
+and the joint limits split that swing into separate branches. On the way onto the path the arm
+keeps its elbow where its null-space target pulls it -- blended from where it started to the
+planned start (`PostureTarget.approach`) -- which moves it along its branch, never across. The
+planner's IK, following the hand from the arm's joints, can end on another branch: on the
+Inspire's first brick grasp test (2026-10-06) it swung joints 1 and 3 to -1.52 / +1.81 rad, the
+real arm kept them near home, and step 2 refused (joint 3 1.5 rad off). So the planner takes, of
+the solutions for the start, the one nearest the arm's joints counted over all joints
+(`path_check.start_branch`); the largest single joint cannot choose, since the wrist turns ~2 rad
+on every branch. A start inside a joint limit's repulsion zone is avoided.
+
 ## Following a learned plan, every 50 ms
 
 Symbols: `p` = where the hand is (measured), `a` = the policy's command, `c` = the correction,
