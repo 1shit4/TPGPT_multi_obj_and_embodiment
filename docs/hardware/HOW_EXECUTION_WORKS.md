@@ -85,13 +85,18 @@ not known. The follow mode below exists to keep the arm on that path anyway.
    gripper command (the paper's method: transport the labels, refit a policy, execute it).
 2. **Checks before moving**: the arm within 0.6 m of the start, fresh joint readings, no other
    publisher on the controller's topics; a summary; you type `yes`.
-3. **Approach**: a straight line from where the arm is to the plan's start (the first label of the
-   learned command), at most 5 cm/s and 0.3 rad/s, at a fixed 400 N/m. The elbow's target walks
-   from the posture at activation to the first checked posture.
-4. **Onto the start** (`start_on_path`). The approach ends wherever friction stops the arm, often
-   a few centimetres short (a check only that it got within 200 mm, `approach_settle_tolerance`).
-   **The run does not begin until the hand is within 4 mm of the start of its path**
-   (`start_tolerance`): see "Onto the start" below.
+3. **Approach, in joints** (since 2026-10-06): the joint controller drives all seven joints
+   through the postures the planner checked for the move from the arm's joints to the start
+   (`Plan.approach_postures`), then onto the start: see "Onto the start" below. Only when the arm
+   is still where the plan was made from (every joint within `plan_joint_tolerance`, 0.05 rad);
+   otherwise, and for plans made before, the hand is moved instead: a straight line to the
+   plan's start (the first label of the learned command), at most 5 cm/s and 0.3 rad/s, at a
+   fixed 400 N/m, the elbow's target walking from the posture at activation to the first
+   checked posture, followed by step 4.
+4. **Onto the start** (`start_on_path`, after a hand approach). That approach ends wherever
+   friction stops the arm, often a few centimetres short (a check only that it got within
+   200 mm, `approach_settle_tolerance`). **The run does not begin until the hand is within 4 mm
+   of the start of its path** (`start_tolerance`): see "Onto the start" below.
 5. **Settle**: back on the Cartesian controller, hold the plan's first command 1.5 s and log how
    far off the arm rests from it.
 6. **Follow the plan** every 50 ms (next section) until the clock reaches the end.
@@ -102,6 +107,33 @@ not known. The follow mode below exists to keep the arm on that path anyway.
 
 ## Onto the start
 
+**From where the plan was made, in joints** (2026-10-06, the user). The planner solves the move
+from the arm's joints to the path's start posture by posture: its IK follows the hand along the
+straight line in 20 mm steps, each step seeded from the last, and checks the arm at each posture
+and, since this change, between them (straight in joint space, every 0.05 rad,
+`path_check.joint_path`). The plan keeps those postures. The executor switches to the joint
+controller and drives the joints from where they are through every one of them and onto the
+checked start posture (`executor.joint_route`: one cosine profile over the whole route, its
+joints' mean speed `start_joint_speed`, 0.25 rad/s; 6-17 s on the recorded plans), then steps
+5-7 below. A joint more than `route_max_lag` (0.3 rad) behind its command aborts: something holds
+the arm.
+
+Why: before, only the hand was commanded on the way, the joints given a hint toward the
+planner's posture -- CRISP's null-space target, which acts only on motion that leaves the hand
+still, as a 2 N m/rad spring the executor keeps within 0.5 rad of the arm (about 1 N m, near the
+joints' static friction). Two things then let the arm differ from the planner. (1) The
+approach stops 15-50 mm short (friction); with a bent shoulder that is 0.06-0.51 rad of joints
+(the Franka runs), and step 4 closed it; with the shoulder straight (joint 2 near 0, joints 1
+and 3 on one line) small hand motions need large joint motions, and the same gap was 0.68-1.88
+rad (the Inspire's brick tests). (2) At a straight shoulder the only hand-still motion is
+joint 1 and joint 3 turning against each other, which moves nothing; the hint cannot tip the
+shoulder, and the arm and the planner can take the two different sets of postures that put the
+hand there. Measured: pulled through hand-still motion with no strength limit, every Franka
+start was reachable from where its arm arrived; of the five Inspire brick tests, 18:57 and 19:05
+were not (0.66 and 1.06 rad left). Driven through the planner's postures, the arm takes the
+planner's.
+
+**After a hand approach** (an arm moved since planning, or an old plan):
 The Cartesian controller can only pull on the hand. Near full stretch a pull on the hand barely
 turns the joints (a lever of a few centimetres instead of the forearm's ~40), so it cannot bring
 a nearly straight arm the last way out. A joint controller turns each joint itself, so the start
@@ -126,7 +158,8 @@ is reached in joint space:
 7. Switch back to the Cartesian controller. CRISP seeds its target with the measured pose on every
    switch, so neither switch moves the arm.
 
-**Which posture the planner checks at the start** decides whether step 2 passes. Seven joints
+**Which posture the planner checks at the start** decides whether step 2 passes after a hand
+approach. Seven joints
 leave the elbow free to swing about the line from the shoulder to the wrist with the hand still,
 and the joint limits split that swing into separate branches. On the way onto the path the arm
 keeps its elbow where its null-space target pulls it -- blended from where it started to the
@@ -137,9 +170,10 @@ same straight move the executor makes). On the Franka runs that matched where th
 straight point (joint 2 near 0: joints 1 and 3 then turn about one line, and the hand's pose
 does not fix the arm's posture), as the Inspire's top-down brick grasp tests do: there the
 planner's path and the arm ended on opposite sides of it (2026-10-06 17:18: joints 1 and 3 1.5
-rad apart; 19:05: joint 2 at -0.48 planned, +0.03 on the arm; step 2 refused both). Open. A rule
-that took the IK solution nearest the arm's joints instead (`start_branch`, 3dd8985) was
-reverted: it would have put Franka starts up to 1.44 rad off the arm.
+rad apart; 19:05: joint 2 at -0.48 planned, +0.03 on the arm; step 2 refused both) -- the
+reason the approach is now made in joints. A rule that took the IK solution nearest the arm's
+joints instead (`start_branch`, 3dd8985) was reverted: it would have put Franka starts up to
+1.44 rad off the arm.
 
 ## Following a learned plan, every 50 ms
 

@@ -144,8 +144,13 @@ Two facts that need several files to see, and that decide whether a change is fa
   hand is within 4 mm of the start of its path** (`start_on_path`, 2026-10-03): the joints are
   moved onto the posture the planner checked there with the joint controller, because a pull on
   the hand cannot bring a nearly straight arm the last way out (the 23:28 mug start was 1.8 mm
-  inside full stretch and the arm stopped 54 mm short of its command). Full account, with the
-  equations: `docs/hardware/HOW_EXECUTION_WORKS.md`.
+  inside full stretch and the arm stopped 54 mm short of its command). **Since 2026-10-06 the
+  whole move onto the path is made in joints** (the user; `approach_in_joints`): the joint
+  controller drives the arm through the postures the planner checked from its joints to the
+  start (`Plan.approach_postures`, checked at and between them), when the arm is still within
+  `plan_joint_tolerance` of where the plan was made from; otherwise the hand approach as before.
+  Commanding only the hand, the arm could settle in other postures than the planner's at a
+  straight shoulder (below). Full account, with the equations: `docs/hardware/HOW_EXECUTION_WORKS.md`.
   What the correction took *along* the path while the clock was held is **given back once the arm
   runs ahead** (`path_unwinding`, 2026-10-02): kept, it held the mug 24-31 mm ahead after a
   stick-slip and set it down ~10 labels early. On the robot (mug, top_left, 2026-10-01) it was needed: without it the hand missed the grasp
@@ -716,14 +721,17 @@ The planner's support height is: its `support_height` parameter, else the calibr
   flange-to-TCP stays the Franka Hand's (`fr3_hand_tcp`, what every tool commands). A re-weigh with
   it in Desk agreed within the method's +-0.04 kg / +-15 mm (the arm's own model error at joint 2,
   friction). `payload_measure` reads Desk's values from the robot at its start.
-- **The Inspire's grasp-test starts sit at the shoulder's straight point** (joint 2 ~0; open,
-  2026-10-06). The start posture is where the planner's own path from the arm's joints ends --
+- **The Inspire's grasp-test starts sit at the shoulder's straight point** (joint 2 ~0;
+  2026-10-06; answered by the approach in joints, cf243d7, not yet run on the robot). The start
+  posture is where the planner's own path from the arm's joints ends --
   the rule the Franka runs used, and it matched where their arm arrived to 0.06-0.51 rad
   (largest joint). The same brick grasp test puts the Franka's shoulder at +0.30, the Inspire's
   at 0 (its wrist at 3.6 rad, not 2.6; the flange 90 mm higher): there joints 1 and 3 turn about
   one line, the hand's pose does not fix the arm's, and the planner's path and the arm ended on
-  opposite sides (19:05: planner -0.48, arm +0.03; the executor refused, 0.76 rad). The
-  execution is not to change (the user: tested on the Franka). `start_branch` (nearest the
+  opposite sides (19:05: planner -0.48, arm +0.03; the executor refused, 0.76 rad): pulled
+  through hand-still motion with no limit, the arm could reach the planner's start on all 15
+  Franka runs and on 3 of the 5 brick tests (not 18:57, 19:05: two separate sets of postures).
+  The arm now takes the planner's postures in joints on the way there. `start_branch` (nearest the
   arm's joints; 3dd8985) was reverted in 0b0ba0b: it would have moved Franka starts up to
   1.44 rad off the arm (apple 10-03 22:18); the reverted planner reproduces all 29 Franka
   plans' starts of 10-02/10-03 exactly. (The earlier "Franka unchanged" check compared
