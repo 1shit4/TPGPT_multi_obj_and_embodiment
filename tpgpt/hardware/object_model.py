@@ -186,6 +186,21 @@ FIT_POINTS = 2000
 #: Headings scored per resting orientation, and how many of the best
 #: (orientation, heading) starts are refined -- per centring (:data:`FACING_CENTRING`).
 HEADINGS = 24
+#: Objects whose fit starts only from headings that agree with the camera's top face
+#: (:func:`top_face_axis`). The foam brick's camera cloud is 20-40 mm wider than the brick
+#: on every side (its edges smear), so a brick turned 90 deg explains it about as well:
+#: on the user's live capture of 2026-10-06 the fit put the long side front-back
+#: (explained 0.84, score 1.69) while the brick lay left-right (0.81, 1.73) -- the user saw
+#: it, and the camera's own top face ran at 100 deg against the fit's 1. Across the 29 table
+#: captures the camera's top face agreed with itself to 2 deg between consecutive frames
+#: of one placement, while the fit missed it by 15-55 deg on many and by >45 on 5.
+TOP_FACE_HEADING = ("foam_brick",)
+#: The top band: points within this of the highest one.
+TOP_BAND = 0.015
+#: The camera's top face must be at least this elongated (major/minor spread) to guide.
+TOP_FACE_MIN_RATIO = 1.15
+#: A start whose top face is further than this from the camera's is not tried.
+TOP_FACE_TOLERANCE_DEG = 30.0
 REFINE_STARTS = 6
 ICP_ITERATIONS = 30
 
@@ -402,6 +417,8 @@ class ObjectFit:
     full_cloud: np.ndarray | None = None
     #: Camera points refused as lying behind the fitted surface (:data:`OCCLUSION_TOLERANCE`).
     dropped_occluded: int = 0
+    #: The camera's top-face axis the starts were held to (:data:`TOP_FACE_HEADING`), or None.
+    top_face_hint_deg: float | None = None
 
     def summary(self) -> dict:
         return {"object": self.name, "accepted": self.accepted, "reason": self.reason,
@@ -412,7 +429,31 @@ class ObjectFit:
                 "dz_mm": round(self.dz_mm, 1),
                 "observed_points": self.observed_points,
                 "dropped_below_table": self.dropped_below_table,
-                "dropped_occluded": self.dropped_occluded}
+                "dropped_occluded": self.dropped_occluded,
+                "top_face_hint_deg": (None if self.top_face_hint_deg is None
+                                      else round(float(self.top_face_hint_deg), 1))}
+
+
+def top_face_axis(points: np.ndarray, band: float = TOP_BAND):
+    """The long axis of the top band of ``points`` (deg about z, in [0, 180)) and how
+    elongated it is (major/minor spread), or ``(None, 0.0)`` with too few points. The
+    outer 10 % (by distance from the median) is dropped: the smeared edges."""
+    P = np.atleast_2d(np.asarray(points, dtype=float))
+    if len(P) < 3:
+        return None, 0.0
+    Q = P[P[:, 2] > P[:, 2].max() - band][:, :2]
+    if len(Q) < 30:
+        return None, 0.0
+    d = np.linalg.norm(Q - np.median(Q, axis=0), axis=1)
+    Q = Q[d < np.percentile(d, 90)]
+    _, sv, axes = np.linalg.svd(Q - Q.mean(axis=0), full_matrices=False)
+    angle = float(np.degrees(np.arctan2(axes[0][1], axes[0][0])) % 180.0)
+    return angle, float(sv[0] / max(sv[1], 1e-12))
+
+
+def _axis_gap(a: float, b: float) -> float:
+    """Degrees between two undirected axes."""
+    return abs((a - b + 90.0) % 180.0 - 90.0)
 
 
 def fit_object(model: ObjectModel, observed: np.ndarray, support_height: float,
@@ -428,12 +469,21 @@ def fit_object(model: ObjectModel, observed: np.ndarray, support_height: float,
     ``dropped_occluded`` says how many were refused. Only the resting poses in
     ``model.allowed_rests`` are tried (:data:`PROTOCOL_RESTS`).
 
+    For the objects in :data:`TOP_FACE_HEADING`, the fit starts only from headings whose
+    top face lies along the camera's (:func:`top_face_axis`), when the camera's is clearly
+    elongated (:data:`TOP_FACE_MIN_RATIO`); ``top_face_hint_deg`` records it.
+
     ``camera`` is the camera's position (base frame), for the facing test.
     Returns the fit with ``full_cloud`` (:data:`FULL_CLOUD_POINTS` points on the
     scan, set down on ``support_height``) whether or not it was accepted, so the
     caller can show a refused fit.
     """
-    first = _fit_once(model, observed, support_height, camera, seed)
+    hint = None
+    if model.name in TOP_FACE_HEADING:
+        angle, ratio = top_face_axis(np.atleast_2d(np.asarray(observed, dtype=float)))
+        if angle is not None and ratio >= TOP_FACE_MIN_RATIO:
+            hint = angle
+    first = _fit_once(model, observed, support_height, camera, seed, heading_hint=hint)
     if model.name not in OPEN_VESSELS:
         return _check_height(model, np.atleast_2d(np.asarray(observed, dtype=float)), first)
     obs = np.atleast_2d(np.asarray(observed, dtype=float))
@@ -442,7 +492,7 @@ def fit_object(model: ObjectModel, observed: np.ndarray, support_height: float,
     behind = _occluded(placed_scan, obs, np.asarray(camera, dtype=float))
     if not behind.any() or behind.sum() > 0.5 * len(obs):
         return _check_height(model, obs, first)
-    second = _fit_once(model, obs[~behind], support_height, camera, seed)
+    second = _fit_once(model, obs[~behind], support_height, camera, seed, heading_hint=hint)
     second.dropped_occluded = int(behind.sum())
     return _check_height(model, obs, second)
 
@@ -502,10 +552,12 @@ def _occluded(model_world: np.ndarray, observed: np.ndarray, camera: np.ndarray,
 
 
 def _fit_once(model: ObjectModel, observed: np.ndarray, support_height: float,
-              camera, seed: int = 0) -> ObjectFit:
+              camera, seed: int = 0, heading_hint: float | None = None) -> ObjectFit:
     """One fit of ``model`` to ``observed`` (see :func:`fit_object`).
 
     ``camera`` is the camera's position (base frame), for the facing test.
+    ``heading_hint``: the camera's top-face axis (deg); only starts whose own top face lies
+    within :data:`TOP_FACE_TOLERANCE_DEG` of it are tried (all, if none does).
     Returns the fit with ``full_cloud`` (:data:`FULL_CLOUD_POINTS` points on the
     scan, set down on ``support_height``) whether or not it was accepted, so the
     caller can show a refused fit.
@@ -545,6 +597,11 @@ def _fit_once(model: ObjectModel, observed: np.ndarray, support_height: float,
             continue
         for heading in np.linspace(0.0, 2 * np.pi, HEADINGS, endpoint=False):
             body, nrm, _ = placed(rest, heading, None)
+            if heading_hint is not None:
+                angle, ratio = top_face_axis(body)
+                if (angle is not None and ratio >= TOP_FACE_MIN_RATIO
+                        and _axis_gap(angle, heading_hint) > TOP_FACE_TOLERANCE_DEG):
+                    continue
             t = centre_obs - np.median(body, axis=0)
             t[2] = support_height - body[:, 2].min()
             whole.append((score(body, nrm, t), k, heading, t))
@@ -554,6 +611,10 @@ def _fit_once(model: ObjectModel, observed: np.ndarray, support_height: float,
                 if seen_now.any():
                     tf[:2] += centre_obs[:2] - np.median((body + tf)[seen_now], axis=0)[:2]
             facing_starts.append((score(body, nrm, tf), k, heading, tf))
+
+    if heading_hint is not None and not whole:
+        # No start agrees with the camera's top face: the hint is ignored.
+        return _fit_once(model, observed, support_height, camera, seed, heading_hint=None)
 
     # ---- refine the best few of each with robust ICP in (x, y, z, heading) ----
     finalists = []
@@ -604,11 +665,13 @@ def _fit_once(model: ObjectModel, observed: np.ndarray, support_height: float,
         reason = (f"only {explained:.0%} of the camera points lie within "
                   f"{EXPLAINED_DISTANCE * 1000:.0f} mm of the scan (min {MIN_EXPLAINED:.0%})")
     full, _ = model.sample(FULL_CLOUD_POINTS, seed + 1)
-    return ObjectFit(name=model.name, accepted=reason is None, reason=reason, rotation=R,
+    fit = ObjectFit(name=model.name, accepted=reason is None, reason=reason, rotation=R,
                      position=position, rest_index=k,
                      heading_deg=float(np.degrees(heading) % 360.0), median_mm=median * 1000.0,
                      explained=explained, seen=seen, in_front=in_front, dz_mm=dz * 1000.0,
                      observed_points=int(len(obs)), dropped_below_table=int(below.sum()), full_cloud=full @ R.T + position)
+    fit.top_face_hint_deg = heading_hint
+    return fit
 
 
 def _refine(starts, model, obs, tree_obs, camera, placed, score):

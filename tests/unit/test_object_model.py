@@ -311,3 +311,37 @@ def test_the_apple_of_21_54_stands_upright():
     assert fit.accepted, fit.reason
     assert fit.explained > 0.85
     assert (fit.rotation @ [0.0, 0.0, 1.0])[2] > np.cos(np.radians(1.0))     # stem axis vertical
+
+
+def test_the_brick_of_17_18_lies_the_way_the_camera_saw_it():
+    """The capture of 2026-10-06 17:18 (foam brick, a grasp test). The camera's cloud is
+    20-40 mm wider than the brick all round, and the fit turned the brick 90 deg: long side
+    front-back (explained 0.84) where it lay left-right (0.81) -- the user saw it on the
+    overlay, the camera's own top face ran at 100 deg. Started only from headings along the
+    camera's top face (TOP_FACE_HEADING), the fit lies within 30 deg of it."""
+    from pathlib import Path
+
+    from tpgpt.hardware.object_model import top_face_axis, _axis_gap
+    rec = np.load(Path(__file__).resolve().parents[1] / "data" / "foam_brick_20261006_171840.npz")
+    obs = rec["observed"].astype(float)
+    brick = ObjectModel.load("foam_brick")
+    fit = fit_object(brick, obs, float(rec["table"]), rec["camera"])
+    assert fit.accepted, fit.reason
+    camera_axis, ratio = top_face_axis(obs)
+    assert ratio > 1.15 and 85.0 < camera_axis < 115.0          # left-right, as seen
+    assert fit.top_face_hint_deg == pytest.approx(camera_axis)
+    fit_axis, _ = top_face_axis(fit.full_cloud)
+    assert _axis_gap(fit_axis, camera_axis) < 30.0                # 18 deg; unguided 81
+    assert fit.explained > 0.80
+
+
+def test_the_top_face_axis_is_the_long_side_of_the_top():
+    from tpgpt.hardware.object_model import top_face_axis
+    rng = np.random.default_rng(3)
+    box = rng.uniform([-0.0375, -0.025, 0.0], [0.0375, 0.025, 0.05], size=(4000, 3))
+    a = np.radians(30.0)
+    box = box @ np.array([[np.cos(a), -np.sin(a), 0], [np.sin(a), np.cos(a), 0], [0, 0, 1]]).T
+    angle, ratio = top_face_axis(box)
+    assert angle == pytest.approx(30.0, abs=3.0) and ratio > 1.3
+    cube = rng.uniform(-0.025, 0.025, size=(4000, 3))
+    assert top_face_axis(cube)[1] < 1.15                          # a square top: no guide
