@@ -2111,7 +2111,7 @@ class TpgptExecutorNode(Node):
                                                is not None else np.full(7, np.nan), 5),
                              *np.round(q_cmd, 5)])
 
-        from tpgpt.hardware.executor import joint_route
+        from tpgpt.hardware.executor import joint_route, joint_route_lead
         if route is None:
             waypoints = [q_now, q_goal]
         else:
@@ -2123,8 +2123,16 @@ class TpgptExecutorNode(Node):
                      f'{float(np.sum(np.max(np.abs(np.diff(waypoints, axis=0)), axis=1))):.2f} rad of '
                      f"travel at {float(p('start_joint_speed')):.2f} rad/s ({name})")
         next_t = time.monotonic()
-        for q_cmd in joint_route(waypoints, float(p('start_joint_speed')), dt):
-            self._send_start_joints(q_cmd)
+        if route is None:
+            path = joint_route(waypoints, float(p('start_joint_speed')), dt)
+            sends = path
+        else:
+            # each joint's target led by its controller's delay (D/K) x its speed, so the joints
+            # are on the route, not behind it (2026-10-06 21:11: joint 7 0.30 rad behind)
+            path, sends = joint_route(waypoints, float(p('start_joint_speed')), dt,
+                                      lead=joint_route_lead())
+        for q_cmd, q_send in zip(path, sends):
+            self._send_start_joints(q_send)
             meas_p, _ = self.measured()
             if route is not None:
                 q = self.measured_joints()

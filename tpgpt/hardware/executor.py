@@ -768,7 +768,8 @@ class SafetyMonitor:
 # ---------------------------------------------------------------------------
 
 
-def joint_route(waypoints, speed: float, dt: float, min_duration: float = 1.0) -> np.ndarray:
+def joint_route(waypoints, speed: float, dt: float, min_duration: float = 1.0,
+                lead=None):
     """Joint commands at period ``dt`` that pass through ``waypoints`` (``(n, 7)`` rad), straight
     in joint space between them, along their whole length on one cosine profile: they start and
     stop at rest, and the joints' mean speed over the route is ``speed`` (rad/s, of the joint
@@ -781,6 +782,10 @@ def joint_route(waypoints, speed: float, dt: float, min_duration: float = 1.0) -
     that were checked. Commanding only the hand, the arm's posture can split from the planner's
     where the shoulder is straight (joint 2 near 0), and once split no posture target brings
     it back (``docs/hardware/HOW_EXECUTION_WORKS.md``).
+
+    With ``lead`` (s per joint, :func:`joint_route_lead`) it returns ``(route, targets)``: the
+    route's postures and the targets to send, each joint ahead of its route posture by its lead
+    times its speed there, so that a spring-damper joint following them is on the route.
     """
     Q = np.atleast_2d(np.asarray(waypoints, dtype=float))
     seg = np.max(np.abs(np.diff(Q, axis=0)), axis=1) if len(Q) > 1 else np.zeros(0)
@@ -798,7 +803,26 @@ def joint_route(waypoints, speed: float, dt: float, min_duration: float = 1.0) -
         f = 0.0 if seg[k] == 0 else (si - arc[k]) / seg[k]
         out[i] = Q[k] + np.clip(f, 0.0, 1.0) * (Q[k + 1] - Q[k])
     out[-1] = Q[-1]
-    return out
+    if lead is None:
+        return out
+    velocity = np.gradient(out, float(dt), axis=0) if len(out) > 1 else np.zeros_like(out)
+    velocity[-1] = 0.0
+    return out, out + velocity * np.asarray(lead, dtype=float)
+
+
+#: CRISP's joint controller (``joint_impedance_controller.yaml``): per-joint stiffness, N m/rad,
+#: with damping ``2 sqrt(K)`` on the joint's own speed. A joint moving at ``v`` therefore trails
+#: its target by ``(D / K) v = (2 / sqrt(K)) v``.
+JOINT_CONTROLLER_STIFFNESS = (40.0, 40.0, 40.0, 40.0, 20.0, 15.0, 8.0)
+
+
+def joint_route_lead(stiffness=JOINT_CONTROLLER_STIFFNESS) -> np.ndarray:
+    """How far ahead of a joint's route its target is put, per unit of its speed (s): the delay
+    of the joint controller's spring and damper, ``D / K = 2 / sqrt(K)`` (0.32 s for joints 1-4,
+    0.71 s for joint 7). Measured on the robot (2026-10-06 21:11, the first move in joints):
+    the joints trailed their targets by 0.5-0.9 s times their speed, joint 7 by 0.30 rad at
+    0.35 rad/s, which tripped ``route_max_lag``; led by this, they follow the route itself."""
+    return 2.0 / np.sqrt(np.asarray(stiffness, dtype=float))
 
 
 def approach_trajectory(

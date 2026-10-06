@@ -915,3 +915,44 @@ def test_a_joint_route_passes_its_postures_and_starts_and_stops_at_rest():
     assert np.linalg.norm(c - W[1], axis=1).min() < 1e-3            # through the middle posture
     assert np.abs(c[0] - W[0]).max() < 1e-3 and np.abs(c[-1] - c[-2]).max() < 1e-3   # at rest
     assert joint_route(W[:1], 0.25, 0.05)[-1] == pytest.approx(W[0])                 # no motion
+
+
+def test_a_led_joint_route_keeps_a_spring_damper_joint_on_the_route():
+    """The joint controller (K, D = 2 sqrt(K) on the joint's own speed) trails a moving target by
+    (D/K) x speed: joint 7 by 0.30 rad on the robot (2026-10-06 21:11). Led by D/K it does not."""
+    from tpgpt.hardware.executor import (JOINT_CONTROLLER_STIFFNESS, joint_route,
+                                         joint_route_lead)
+    W = np.array([[0.0] * 6 + [0.72], [0.1, 0.2, 0, -0.1, 0.3, 0.5, -1.77]])
+    K = np.asarray(JOINT_CONTROLLER_STIFFNESS)
+    D = 2.0 * np.sqrt(K)
+
+    def follow(targets, dt=0.05, inertia=0.02, sub=50):
+        q, v, worst = targets[0] * 0.0 + W[0], np.zeros(7), []
+        for target in targets:
+            for _ in range(sub):                    # the 1 kHz loop between 20 Hz targets
+                a = (K * (target - q) - D * v) / inertia
+                v = v + a * dt / sub
+                q = q + v * dt / sub
+            worst.append(q.copy())
+        return np.asarray(worst)
+
+    route, targets = joint_route(W, 0.25, 0.05, lead=joint_route_lead())
+    plain = follow(route)
+    led = follow(targets)
+    assert np.abs(plain - route).max() > 0.2                         # trails it, as on the robot
+    assert np.abs(led - route).max() < 0.03                          # on the route
+    assert targets[-1] == pytest.approx(route[-1])                   # ends on the last posture
+    assert joint_route_lead()[6] == pytest.approx(2 / np.sqrt(8.0))
+
+
+def test_the_route_lead_uses_the_joint_controllers_own_stiffness():
+    import yaml
+    from pathlib import Path
+
+    from tpgpt.hardware.executor import JOINT_CONTROLLER_STIFFNESS
+    cfg = yaml.safe_load(open(Path(__file__).resolve().parents[2] / "ycb_pointcloud_pipeline"
+                              / "config" / "joint_impedance_controller.yaml"))
+    ns = cfg["joint_impedance_controller"]["ros__parameters"]["nullspace"]
+    K = [ns["stiffness"] * ns["weights"][f"fr3_joint{k}"]["value"] for k in range(1, 8)]
+    assert K == pytest.approx(JOINT_CONTROLLER_STIFFNESS)
+    assert ns["damping"] < 0                       # D = 2 sqrt(K), which the lead assumes
