@@ -650,3 +650,45 @@ def test_a_retreat_that_comes_back_near_the_placed_object_is_refused_only_when_a
     assert pc.verdict(r10) is not None
     # with the clearance on, every retreat label is posed (stride 2 elsewhere)
     assert r10["tested"] == len(range(0, 30, 2)) + 30
+
+
+def test_the_move_onto_the_path_is_returned_as_postures_from_the_arm_to_the_start():
+    """The executor drives the joints through them (2026-10-06): they start at the arm's
+    joints, end at the posture the path is checked from at its first label, and follow on."""
+    positions, rotations = _path([0.45, 0.0, 0.45], [0.45, 0.1, 0.30])
+    r = _check(positions, rotations, ShelfWorld.build(None), start_q=HOME_Q)
+    route = r["approach_in"]["postures"]
+    assert route.shape[1] == 7 and len(route) >= 2
+    assert route[0] == pytest.approx(HOME_Q)
+    assert route[-1] == pytest.approx(r["postures"]["q"][0], abs=1e-9)
+    assert np.abs(np.diff(route, axis=0)).max() <= pc.MAX_JOINT_JUMP
+
+
+def test_joint_path_samples_every_joint_straight_and_no_coarser_than_its_step():
+    a, b = np.zeros(7), np.r_[0.4, 0.0, -0.13, 0.0, 0.0, 0.0, 0.0]
+    q = pc.joint_path([a, b, b])
+    assert q[0] == pytest.approx(a) and q[-1] == pytest.approx(b)
+    assert np.abs(np.diff(q, axis=0)).max() <= pc.JOINT_PATH_STEP + 1e-12
+    assert len(q) == 1 + 8 + 1                       # 0.4 / 0.05 = 8 steps, then the repeat
+
+
+def test_the_motion_between_the_postures_of_the_move_is_checked(monkeypatch):
+    """The executor moves straight in joint space from each posture of the move to the next, so
+    the arm is checked between them too, every JOINT_PATH_STEP, under its own label."""
+    real = pc._robot_faults
+    seen = []
+
+    def spy(pieces, world, label, *a, **k):
+        if label == "approach_in (between postures)":
+            seen.append(label)
+            return {f"{label}: flagged": 1}
+        return real(pieces, world, label, *a, **k)
+
+    monkeypatch.setattr(pc, "_robot_faults", spy)
+    positions, rotations = _path([0.45, 0.0, 0.45], [0.45, 0.1, 0.30])
+    r = _check(positions, rotations, ShelfWorld.build(None), start_q=HOME_Q,
+               approach_rejects=False)
+    route = r["approach_in"]["postures"]
+    between = sum(len(pc.joint_path([a, b])) - 2 for a, b in zip(route[:-1], route[1:]))
+    assert between > 0 and len(seen) == between
+    assert r["approach_in"]["faults"]["approach_in (between postures): flagged"] == between

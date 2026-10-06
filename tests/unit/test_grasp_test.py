@@ -271,3 +271,24 @@ def test_an_arm_held_by_static_friction_is_pushed_down_to_the_grasp(inspire):
     followed, lowest = _sticky_run(plan, inspire, follow=True)
     assert lowest < grasp + 0.005                                # down to the grasp
     assert followed.finished and not followed.blocked
+
+
+def test_the_plan_keeps_the_route_onto_its_path(inspire, tmp_path):
+    """The postures of the move from the arm's joints onto the path, checked by the planner, go
+    with the plan: the executor drives the joints through them (2026-10-06)."""
+    import json
+
+    from tpgpt.hardware.fr3 import HOME_Q
+    from tpgpt.hardware.grasp_test import constructed_grasp_test
+
+    sel = constructed_grasp_test(ball(), TABLE, SelectionSettings(),
+                                 PathContext(world=_world(), start_q=HOME_Q), inspire, "ball")
+    route = sel.plan.approach_postures
+    assert route is not None and route.shape[1] == 7
+    assert route[0] == pytest.approx(HOME_Q)
+    start = sel.plan.checked_postures["q"][int(np.argmin(sel.plan.checked_postures["labels"]))]
+    assert route[-1] == pytest.approx(start, abs=1e-9)
+    json.dumps(sel.chosen.path_check, default=str)          # the summary stays small and plain
+    assert "postures" not in (sel.chosen.path_check["approach_in"] or {})
+    sel.plan.save(tmp_path / "p")
+    assert Plan.load(tmp_path / "p").approach_postures == pytest.approx(route)

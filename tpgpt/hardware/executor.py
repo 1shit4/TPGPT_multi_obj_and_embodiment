@@ -768,6 +768,39 @@ class SafetyMonitor:
 # ---------------------------------------------------------------------------
 
 
+def joint_route(waypoints, speed: float, dt: float, min_duration: float = 1.0) -> np.ndarray:
+    """Joint commands at period ``dt`` that pass through ``waypoints`` (``(n, 7)`` rad), straight
+    in joint space between them, along their whole length on one cosine profile: they start and
+    stop at rest, and the joints' mean speed over the route is ``speed`` (rad/s, of the joint
+    that moves most on each segment; the peak is pi/2 times it), and the route takes at least
+    ``min_duration``. The last command is the last waypoint.
+
+    The move onto a path (2026-10-06): the planner checks the arm at the postures of its move
+    from the arm's joints to the path's start, and between them (``path_check.joint_path``); the
+    executor drives the joints through the same postures, so the arm passes through the joints
+    that were checked. Commanding only the hand, the arm's posture can split from the planner's
+    where the shoulder is straight (joint 2 near 0), and once split no posture target brings
+    it back (``docs/hardware/HOW_EXECUTION_WORKS.md``).
+    """
+    Q = np.atleast_2d(np.asarray(waypoints, dtype=float))
+    seg = np.max(np.abs(np.diff(Q, axis=0)), axis=1) if len(Q) > 1 else np.zeros(0)
+    arc = np.r_[0.0, np.cumsum(seg)]
+    total = float(arc[-1])
+    duration = max(total / max(float(speed), 1e-9), float(min_duration))
+    n = max(int(np.ceil(duration / float(dt))), 1)
+    s = (0.5 - 0.5 * np.cos(np.pi * np.arange(1, n + 1) / n)) * total
+    out = np.empty((n, Q.shape[1]))
+    for i, si in enumerate(s):
+        k = min(int(np.searchsorted(arc, si, side="right")) - 1, len(seg) - 1)
+        if k < 0 or total == 0.0:
+            out[i] = Q[-1]
+            continue
+        f = 0.0 if seg[k] == 0 else (si - arc[k]) / seg[k]
+        out[i] = Q[k] + np.clip(f, 0.0, 1.0) * (Q[k + 1] - Q[k])
+    out[-1] = Q[-1]
+    return out
+
+
 def approach_trajectory(
     start_position, start_rotation, goal_position, goal_rotation, dt: float,
     max_linear_speed: float = 0.05, max_angular_speed: float = 0.25,

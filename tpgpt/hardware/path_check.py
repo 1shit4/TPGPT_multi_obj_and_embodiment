@@ -96,6 +96,10 @@ STRIDE = 4
 MIN_REACHABLE_FRACTION = 0.60
 #: Spacing of the checked approach-in line, metres.
 APPROACH_IN_STEP = 0.02
+#: Between two postures of the move onto the path the arm is checked every this much of its
+#: largest joint's travel (rad): the executor drives the joints straight from one to the next
+#: (:func:`joint_path`).
+JOINT_PATH_STEP = 0.05
 #: How close a joint may come to its limit (rad) when ``joint_margin`` is on: CRISP's
 #: ``joint_limit_repulsion.safe_range`` (config/tpgpt_variable_stiffness_controller.yaml).
 #: Inside it the controller pushes the joint back (up to 5 N m), a torque the arm's joint
@@ -142,6 +146,18 @@ RETREAT_CLEARANCE = 0.010
 #: A posture this close to a joint limit is inside CRISP's joint-limit repulsion zone, rad
 #: (``joint_limit_repulsion.safe_range``); the constructed grasp test avoids starting there.
 LIMIT_ROOM = 0.1
+
+
+def joint_path(postures, step: float = JOINT_PATH_STEP) -> np.ndarray:
+    """The postures between consecutive ``postures``, straight in joint space, at most ``step``
+    of any joint apart (both ends included): what the arm passes through when the executor
+    drives its joints from each posture to the next (the move onto the path, 2026-10-06)."""
+    Q = np.atleast_2d(np.asarray(postures, dtype=float))
+    out = [Q[0]]
+    for a, b in zip(Q[:-1], Q[1:]):
+        n = max(int(np.ceil(float(np.max(np.abs(b - a))) / float(step))), 1)
+        out.extend(a + (b - a) * (i / n) for i in range(1, n + 1))
+    return np.asarray(out)
 
 
 def stretch_room(fr3: FR3, q) -> float:
@@ -658,6 +674,22 @@ def path_feasibility(
         from tpgpt.hardware.frames import slerp_rotation
 
         bad, unreached = {}, 0
+        # The postures of the move, from the arm's joints to the path's first (the label-0
+        # posture below is solved from the last one, for the same pose: the same answer). The
+        # executor drives the joints through them (the user, 2026-10-06), so the arm passes
+        # through these joints and not others; the motion between them is checked too.
+        chain = [seed.copy()]
+
+        def check_move(q, label):
+            pieces, T = robot_pieces(fr3, q, end_effector, open_state)
+            for key, count in _robot_faults(pieces, world, label, depth_tolerance,
+                                            check_self, gap[0], swing[0], grasp_point(T),
+                                            None if table_gap is None else table_gap[0]).items():
+                add(bad, key, count)
+            for piece in pieces:
+                if _touches(piece, held):
+                    add(bad, f"{label}: {piece.name} in the object to be picked")
+
         for s in np.linspace(0.0, 1.0, n + 1)[1:]:
             R_s = slerp_rotation(R_now, rotations[0], s)
             result = solve(p_now + s * (p_goal - p_now), R_s, seed, -1)
@@ -668,16 +700,13 @@ def path_feasibility(
                     continue
                 result = position_only
             seed = result.qpos
-            pieces, T = robot_pieces(fr3, seed, end_effector, open_state)
-            for key, count in _robot_faults(pieces, world, "approach_in", depth_tolerance,
-                                            check_self, gap[0], swing[0], grasp_point(T),
-                                            None if table_gap is None else table_gap[0]).items():
-                add(bad, key, count)
-            for piece in pieces:
-                if _touches(piece, held):
-                    add(bad, f"approach_in: {piece.name} in the object to be picked")
+            check_move(seed, "approach_in")
+            between = joint_path([chain[-1], seed])[1:-1]
+            for q in between:
+                check_move(q, "approach_in (between postures)")
+            chain.append(np.asarray(seed, dtype=float).copy())
         approach_in = {"steps": int(n), "unreachable": int(unreached), "faults": bad,
-                       "rejects": bool(approach_rejects)}
+                       "rejects": bool(approach_rejects), "postures": np.asarray(chain)}
         # With approach_rejects False the move onto the path is still checked and
         # reported, but it does not decide the path: where the arm happens to be
         # parked says nothing about the grasp, and the operator re-homes instead
@@ -1041,4 +1070,5 @@ __all__ = [
     "JOINT_MARGIN", "REACH_MARGIN", "stretch_room", "BASE_BAND", "penetration", "CLOUD_CONTACT_RADIUS", "CLOUD_CONTACT_SLACK",
            "MIN_CLOUD_CONTACT_POINTS", "CONTACT_DEPTH_TOLERANCE", "GRASP_CONTACT_WINDOW",
            "MIN_REACHABLE_FRACTION", "PLACE_WINDOW", "REACH_TOLERANCE", "STRIDE",
-           "check_plan", "path_feasibility", "robot_pieces", "verdict"]
+           "check_plan", "joint_path", "JOINT_PATH_STEP", "path_feasibility", "robot_pieces",
+           "verdict"]

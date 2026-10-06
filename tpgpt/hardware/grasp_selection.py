@@ -774,7 +774,8 @@ def _path_verdict(result: Plan, candidate: Candidate, s: SelectionSettings,
         "first_violation": check["first_violation"],
         "faults": dict(list(check["faults"].items())[:6]),
         "approach_in_checked": check["approach_in"] is not None,
-        "approach_in": check["approach_in"],
+        "approach_in": (None if check["approach_in"] is None else
+                        {k: v for k, v in check["approach_in"].items() if k != "postures"}),
         "decided_early": check["decided_early"],
         "seconds": time.perf_counter() - t0,
         "verdict": reason,
@@ -782,6 +783,8 @@ def _path_verdict(result: Plan, candidate: Candidate, s: SelectionSettings,
     result.metrics["path_check"] = candidate.path_check
     # kept on the plan, not in the summary (which goes to every candidate's JSON record)
     result.checked_postures = check.get("postures")
+    result.approach_postures = (None if check["approach_in"] is None
+                                else check["approach_in"].get("postures"))
     return reason, bool(reason) and not check["violations"]
 
 

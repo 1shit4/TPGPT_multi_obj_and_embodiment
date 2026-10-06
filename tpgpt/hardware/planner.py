@@ -163,6 +163,11 @@ class Plan:
     #: ``postures``). The executor sends it to CRISP as its posture target, so the elbow is
     #: where the check put it (2026-10-02).
     checked_postures: dict | None = None
+    #: The joint postures of the move onto the path the path check checked, from the arm's
+    #: joints when planning to the posture at the first label, ``(n, 7)`` rad
+    #: (``path_check`` ``approach_in["postures"]``). The executor drives the joints through
+    #: them (2026-10-06), when the arm is still where the plan was made from.
+    approach_postures: np.ndarray | None = None
 
     @property
     def dt(self) -> float:
@@ -182,6 +187,9 @@ class Plan:
         if self.marks is not None:
             np.savez(directory / "transported_marks.npz",
                      **{k: np.asarray(v, dtype=float) for k, v in self.marks.items()})
+        if self.approach_postures is not None and len(self.approach_postures):
+            np.save(directory / "approach_postures.npy",
+                    np.asarray(self.approach_postures, dtype=float))
         if self.checked_postures is not None and len(self.checked_postures["labels"]):
             np.savez(directory / "checked_postures.npz",
                      labels=np.asarray(self.checked_postures["labels"], dtype=int),
@@ -236,6 +244,8 @@ class Plan:
         if (directory / "transported_marks.npz").exists():
             with np.load(directory / "transported_marks.npz") as d:
                 plan.marks = {k: d[k] for k in d.files}
+        if (directory / "approach_postures.npy").exists():
+            plan.approach_postures = np.load(directory / "approach_postures.npy")
         if (directory / "checked_postures.npz").exists():
             with np.load(directory / "checked_postures.npz") as d:
                 plan.checked_postures = {"labels": d["labels"], "q": d["q"]}

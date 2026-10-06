@@ -902,3 +902,16 @@ class TestHandClearance:
                               footprint_radius=0.001) == pytest.approx(
             self.clearance([[*self.DEST[:2], 0.33]], destination_xy=self.DEST[:2],
                            footprint_radius=0.5), abs=1e-9)
+
+
+def test_a_joint_route_passes_its_postures_and_starts_and_stops_at_rest():
+    from tpgpt.hardware.executor import joint_route
+    W = np.array([[0.0] * 7, [0.5, 0, 0, 0, 0, 0, 0], [0.5, 1.0, 0, 0, 0, 0, 0.2]])
+    c = joint_route(W, speed=0.25, dt=0.05)
+    assert c[-1] == pytest.approx(W[-1])
+    assert len(c) == int(np.ceil(1.5 / 0.25 / 0.05))               # 1.5 rad at 0.25 rad/s
+    step = np.abs(np.diff(c, axis=0)).max()
+    assert step <= np.pi / 2 * 0.25 * 0.05 + 1e-9                  # the cosine profile's peak
+    assert np.linalg.norm(c - W[1], axis=1).min() < 1e-3            # through the middle posture
+    assert np.abs(c[0] - W[0]).max() < 1e-3 and np.abs(c[-1] - c[-2]).max() < 1e-3   # at rest
+    assert joint_route(W[:1], 0.25, 0.05)[-1] == pytest.approx(W[0])                 # no motion
