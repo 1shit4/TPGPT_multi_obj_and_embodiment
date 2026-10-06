@@ -345,3 +345,44 @@ def test_the_top_face_axis_is_the_long_side_of_the_top():
     assert angle == pytest.approx(30.0, abs=3.0) and ratio > 1.3
     cube = rng.uniform(-0.025, 0.025, size=(4000, 3))
     assert top_face_axis(cube)[1] < 1.15                          # a square top: no guide
+
+
+def test_the_brick_is_only_fitted_lying_on_a_long_face():
+    brick = ObjectModel.load("foam_brick")
+    pts, _ = brick.sample(4096, 1)
+    heights = {k: np.ptp((pts @ np.asarray(r).T)[:, 2]) for k, r in enumerate(brick.rests)}
+    for k in PROTOCOL_RESTS["foam_brick"]:              # 51-53 mm tall
+        assert heights[k] == pytest.approx(0.052, abs=0.002)
+    standing = [k for k, h in heights.items() if h > 0.07]
+    assert standing and not set(standing) & set(PROTOCOL_RESTS["foam_brick"])
+
+
+def test_the_brick_of_18_07_lies_on_its_long_face():
+    """The capture of 2026-10-06 18:07 (foam brick, a grasp test). The camera read part of its
+    top 55-80 mm up (the brick is 52 lying) and the fit stood it on its end; the fingers met
+    the real brick before closing. Lying only, along the camera's top face."""
+    from pathlib import Path
+
+    from tpgpt.hardware.object_model import _axis_gap, top_face_axis
+    rec = np.load(Path(__file__).resolve().parents[1] / "data" / "foam_brick_20261006_180740.npz")
+    obs = rec["observed"].astype(float)
+    brick = ObjectModel.load("foam_brick")
+    fit = fit_object(brick, obs, float(rec["table"]), rec["camera"])
+    assert fit.accepted, fit.reason
+    assert fit.rest_index in PROTOCOL_RESTS["foam_brick"]
+    assert np.ptp(fit.full_cloud[:, 2]) < 0.055                  # lying, not 78 mm tall
+    assert fit.explained > 0.80                                   # 0.85; standing 0.82
+    fit_axis, _ = top_face_axis(fit.full_cloud)
+    assert _axis_gap(fit_axis, fit.top_face_hint_deg) < 30.0
+
+
+def test_a_brick_stood_on_its_end_is_refused():
+    brick = ObjectModel.load("foam_brick")
+    pts = brick.sample(2000)[0]
+    on_end = next(k for k, r in enumerate(brick.rests) if np.ptp((pts @ np.asarray(r).T)[:, 2]) > 0.07)
+    R, t = _placed(brick, on_end, 0.8, (0.52, 0.18))
+    fit = fit_object(brick, _view(brick, R, t), TABLE, CAMERA)
+    assert not fit.accepted and "standing another way" in fit.reason
+    R, t = _placed(brick, PROTOCOL_RESTS["foam_brick"][0], 0.8, (0.52, 0.18))
+    fit = fit_object(brick, _view(brick, R, t), TABLE, CAMERA)
+    assert fit.accepted, fit.reason

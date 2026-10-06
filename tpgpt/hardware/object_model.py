@@ -110,10 +110,19 @@ MEASURED_EXTENTS = {"apple": (0.070, 0.070, 0.072)}
 #: fit (12 hull rests, plus the rest tilt) put its stem axis a median 75 deg from vertical
 #: -- on its side -- explaining a median 0.75, while upright and flat it explains 0.95,
 #: as much as any pose does (0.96). Upside down it is the same shape to within the dimples.
+#: The foam brick lies on one of its four long faces, 51-53 mm tall (rests 0, 1, 2 and 5;
+#: user, 2026-10-06), never on its 53 x 51 end (78 mm). Since 10-01 the camera reads part of
+#: its top high -- a patch over one side of it, 55-80 mm up, 30 % of the 18:07 cloud, none
+#: on 09-26 -- and its footprint 80 x 80 mm for 78 x 53: on 2026-10-06 18:07 that block of
+#: points (98 % below 69.5 mm) was fitted as the brick standing (0.82 explained, against
+#: 0.85-0.86 lying), the plan's model was 53 x 53 across, and the fingers met the real brick
+#: before closing and pushed it. Lying only, all 13 recorded brick captures are fitted
+#: and accepted.
 #: An object not listed may rest any way. Indices are into
 #: :meth:`ObjectModel._resting_orientations`, which is deterministic for a given scan;
 #: ``test_object_model`` pins them.
-PROTOCOL_RESTS = {"mug": (0,), "pudding_box": (1, 3), "banana": (0,), "apple": (0,)}
+PROTOCOL_RESTS = {"mug": (0,), "pudding_box": (1, 3), "banana": (0,), "apple": (0,),
+                  "foam_brick": (0, 1, 2, 5)}
 #: A protocol object whose camera cloud reaches this far above the fitted pose's top
 #: is refused: the fit may only use the protocol poses, so it cannot refuse the
 #: wrong one on its own, and a box stood on its end would be planned as a box on
@@ -134,7 +143,10 @@ MAX_HEIGHT_EXCESS = 0.020
 #: box look 90 mm tall, which the full-size scan on its side matched (89.7) and the
 #: measured box matched standing (86-87) -- the latter briefly the protocol here (10-03,
 #: 2a196a4), until the user's 18:14 run.
-HEIGHT_EXCESS = {"pudding_box": 0.038, "banana": 0.030}
+#: The foam brick's high patch reads +1.9 to +18.5 mm above the brick fitted lying (13
+#: captures, 09-26 to 10-06, growing: ~2 on 09-26, 5-9 on 10-01, 9-16 on 10-03, 5-18.5
+#: on 10-06); stood on its end it would read at least +25 (78 against 52 mm): 22.
+HEIGHT_EXCESS = {"pudding_box": 0.038, "banana": 0.030, "foam_brick": 0.022}
 
 #: Camera points further than this *behind* the fitted surface, along their own
 #: ray, are refused as impossible and the pose is fitted again without them. The
