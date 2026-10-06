@@ -289,6 +289,10 @@ ros2 run --prefix python3 ycb_pointcloud_pipeline tpgpt_pick_place --ros-args \
   hand acts. Plans made before 2026-10-06 18:00 have no arm path: the simulation's clamp then
   holds the command within ~6 mm of the arm, and on the first brick test the arm never left the
   pre-grasp (the static friction held it against a 2.4 N pull). Re-plan.
+- **At the transport's settings** (2026-10-06): the stiffness of a taught demonstration (350 N/m
+  along the motion, 600 across and when still) and the source bundle's execution settings, as
+  the Franka Hand's transport runs. Plans made before 2026-10-06 19:00 ran at 400 N/m with
+  offset compensation, and their arrival holds ran out of push (5.4-20.7 mm off the mark).
 - `-p grasp_test_library_index:=N -p grasp_test_depth_offset:=0.01`: the same library grasp,
   1 cm deeper. For the depth sweep (M6): 6 depths 10 mm apart, 3 tries each. Never in X6.
 - Dry runs (`dry_run` true, the default) simulate the motion. Offline, with no camera or robot,

@@ -51,6 +51,23 @@ below a 3 N pull, the gated run never leaves the pre-grasp. The followed one fin
 steps against 757 nominal and dips at most 4.3 mm past a mark (the lag, not the friction:
 4.3 mm with no friction too), which the arrival hold then corrects.
 
+**And at the transport's settings** (the user, 2026-10-06: as the Franka Hand's transport runs
+were executed). A grasp test's labels carry a taught demonstration's stiffness -- 350 N/m along
+the motion, 600 across it and in every direction while the hand is still -- and the plan carries
+its source bundle's execution settings (`speed_scale` 0.35, rotational 30 x1.0, the transported
+3x3 stiffness, no offset compensation), which the executor applies as it does a learned plan's.
+Before, it ran at 400 N/m in every direction with the default offset compensation, and on the
+18:07 and 18:27 brick tests all four arrival holds ran out their 4 s 5.4-20.7 mm from the mark,
+their push at its 30 mm cap (12 N at 400 N/m). The Franka runs' 56 holds (10-01 to 10-03), at
+600 N/m, never needed more than 22.6 mm (13.6 N); the same cap at 600 N/m is 18 N.
+
+One difference from a transport stays. A transport's command was learned by replaying it, so it
+already leads the arm by what the arm needs; a grasp test's lead is built by the correction while
+the hand moves, soft along the motion (350 N/m). When the hand stops at the grasp, the stiffness
+rises to 600 and the same lead pushes 70 % harder, carrying the hand on past the mark: on a model
+arm with 9 N of friction, 7 mm at the grasp and 12 at the set-down (about 4 mm at 400 N/m
+everywhere). The arrival hold then brings it back before the hand acts.
+
 Why the learned command: sent the taught path as its command, this arm strayed 17 mm RMS from it
 (10-15 mm sideways), because joint friction leaves it 6-9 N short of where the spring points and
 it lags about twice what the spring model predicts. Three replay passes, each correcting the
