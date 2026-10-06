@@ -291,8 +291,12 @@ ros2 run --prefix python3 ycb_pointcloud_pipeline tpgpt_pick_place --ros-args \
   pre-grasp (the static friction held it against a 2.4 N pull). Re-plan.
 - **At the transport's settings** (2026-10-06): the stiffness of a taught demonstration (350 N/m
   along the motion, 600 across and when still) and the source bundle's execution settings, as
-  the Franka Hand's transport runs. Plans made before 2026-10-06 19:00 ran at 400 N/m with
-  offset compensation, and their arrival holds ran out of push (5.4-20.7 mm off the mark).
+  the Franka Hand's transport runs. The settings come from the planner's source bundle, which
+  defaults to the learned one (`source_bundle_dir`); a bundle without them is refused. Plans
+  made before 2026-10-06 19:10 ran at 400 N/m with offset compensation: at 18:07 and 18:27 all
+  four arrival holds ran out of push (5.4-20.7 mm off the mark); at 18:57 (the planner's old
+  default bundle, so still 400 N/m) both reached 3.8 mm in 2.1 s, the push at 24-29 mm of its
+  30.
 - `-p grasp_test_library_index:=N -p grasp_test_depth_offset:=0.01`: the same library grasp,
   1 cm deeper. For the depth sweep (M6): 6 depths 10 mm apart, 3 tries each. Never in X6.
 - Dry runs (`dry_run` true, the default) simulate the motion. Offline, with no camera or robot,

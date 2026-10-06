@@ -160,7 +160,9 @@ Two facts that need several files to see, and that decide whether a change is fa
   demonstration's stiffness (350 along / 600 across and still) and the source bundle's
   `learned.execution` (0.35, rotational 30 x1.0, transported 3x3, no offset compensation). At
   400 N/m all four 18:07/18:27 holds hit their 30 mm cap (12 N) and ran out 5.4-20.7 mm off;
-  the Franka's 56 holds at 600 needed at most 22.6 mm.
+  the Franka's 56 holds at 600 needed at most 22.6 mm. The settings come from the planner's
+  source bundle, whose default is now the learned bundle (it was the sim's 09-13 export, which
+  the 18:57 test took, so it still ran at 400); a grasp test refuses a bundle without them.
 - **The elbow is held on the posture the path check verified** (2026-10-02, audit C8;
   executor `posture_target`). The check records the posture it posed the arm in at each tested
   label (`checked_postures.npz` in the plan) and the executor sends it as CRISP's `target_joint`
