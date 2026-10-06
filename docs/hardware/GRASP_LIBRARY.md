@@ -520,6 +520,45 @@ hand 27 mm narrower than GraspGen-X's), `INSPIRE_HAND.md` sections 4 and 7. File
    transported approach, which a thin jaw slid along, brushes the wider hand into the object.
 4. Single runs of 10 per slot: one or two grasps either way is noise.
 
+**Third coverage, the calibrated depth (2026-10-07).** The depth sweep's result is in:
+`calibrated_depth_m` -0.02, the hand 20 mm further back along its approach than GraspGen-X's pose
+(`INSPIRE_HAND.md`, the depth sweep). Scenes: one capture per object from the sweep, all at the
+same mark (brick 10-07 00:36, apple 01:45, mug 02:03, pudding box 02:14, banana 03:00); the 18:39
+learned bundle; top_left and top_right; **25 planned per slot, path checks run to the end**; the
+arm starting from home. The same run with the depth at 0 isolates its effect. Files
+`outputs/hardware/coverage_inspire_20261007/<object>.json` and `.../depth0/`; command
+`python -m tpgpt.hardware.coverage --hand inspire --capture <plan> --demo <bundle> --slots
+top_left,top_right --budget 25` (`--hand-config` a copy with the depth at 0 for the comparison).
+
+| object | after the hand stage (0 / -20 mm) | admissible of 25, top_left (0 / -20) | top_right (0 / -20) |
+|---|---|---|---|
+| foam brick | 66 / 296 | 1 / 2 (first at rank 16 / 3) | 4 / 2 (0 / 1) |
+| apple | 213 / 400 | 2 / **7** (3 / 2) | 1 / 2 (5 / 7) |
+| mug | 265 / 182 | **0 / 1** (- / 4) | **0 / 3** (- / 0) |
+| pudding box | 171 / 320 | 6 / 1 (4 / 18) | 0 / 0 |
+| banana | 0 / 52 | **0 / 3** (- / 2) | **0 / 2** (- / 1) |
+| **total** | | **11 / 14** | **5 / 9** |
+
+**With the hand 20 mm back, 9 of the 10 object-slot cells have an executable transport (5 at
+GraspGen-X's own depth), 23 admissible of the 250 planned against 14.** What it says:
+
+1. **More grasps pass the hand's own checks**, mostly because fewer meet the table (the brick
+   66 -> 296, the banana 0 -> 52). The mug is the exception (265 -> 182): further back, the
+   fingers reach less far over its rim.
+2. **Reach did not get worse** although the grasp point is 20 mm further from the flange: the
+   commonest fault stays "the wrist within 20 mm of full stretch" at both depths, about as often.
+   At GraspGen-X's depth the apple and the mug also lost grasps to the hand going into the object
+   on the way in or out ("the hand in the object", "the hand in the placed object"), which 20 mm
+   back avoids.
+3. **top_right is the arm in the shelf's right wall** (11-14 of 25 for apple, pudding box and
+   banana) at both depths; **pudding box -> top_right has none** in the first 25 of 100
+   survivors (10 died against the right wall, 10 of the arm meeting itself).
+4. **Planning is slow with this hand**: 25 whole-path checks took 460-1100 s, 20-45 s each. A
+   live plan stops at the first admissible grasp: rank 0-7 for most cells (under ~5 min), rank 18
+   for the pudding box into top_left (~10 min).
+5. One capture per object at one mark: one or two grasps either way is noise, and the other two
+   X6 marks will differ.
+
 ## Deviation from the simulation
 
 The simulation caches candidates per cloud (`tpgpt/grasp/cache.py`) and re-draws whenever the cloud

@@ -793,12 +793,12 @@ The planner's support height is: its `support_height` parameter, else the calibr
 - **Grasp-only tests come first**: `-p task:=grasp_test` (`tpgpt/hardware/grasp_test.py`), with
   `grasp_test_constructed`, `grasp_test_library_index` and `grasp_test_depth_offset` for the frame
   check and the depth sweep. Dry-run tested offline end to end (`scripts/fake_scene.py`).
-- **Coverage, first numbers** (estimated mount, shipped description, 10-03 captures): about half
-  of the Inspire grasps approach from below; the table kills most of the rest -- **every banana
-  grasp** (the open/closed hand reaches 15/26 mm below a top-down grasp point) and 838 of 930 for
-  the foam brick; reach kills the transport (10 planned per slot: apple 1/0, mug 0/3, the others
-  0/0, top_left/top_right). A lift refinement like the jaw's is the user's call, after the depth
-  sweep.
+- **Coverage with the measured hand and the calibrated depth (2026-10-07, `GRASP_LIBRARY.md`):**
+  9 of 10 object-slot cells have an executable transport, 23 admissible of 250 planned (25 per
+  slot, sweep captures, 18:39 learned bundle); at GraspGen-X's own depth 5 cells and 14. Only the
+  pudding box into top_right has none in its first 25. The commonest faults: the wrist within
+  20 mm of full stretch (top_left) and the arm in the shelf's right wall (top_right). A whole-path
+  check takes 20-45 s per Inspire grasp: a live plan at rank 0-7 takes up to ~5 min.
 - **Fixed in the Franka path too**: the executor read the object's name from `plan.metrics`, so the
   per-object grip force (8cfb576) would never have applied (no run used it yet).
 
