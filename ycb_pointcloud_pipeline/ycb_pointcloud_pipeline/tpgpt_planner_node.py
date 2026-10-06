@@ -98,9 +98,12 @@ class TpgptPlannerNode(Node):
         super().__init__('tpgpt_planner_node', **kwargs)
         d = self.declare_parameter
         d('calibration_yaml', default_calibration_yaml())
+        # The demonstration every robot run since 2026-10-01 used (54 Franka plans, passed by
+        # hand) and X6 uses. The default was the simulation's 09-13 export, from before the
+        # move; the Inspire grasp tests took it unseen, and from 2026-10-06 a grasp test reads
+        # its execution settings from the bundle (2026-10-06 18:57 ran at the old ones).
         d('source_bundle_dir', os.path.expanduser(
-            '~/thor_ws/src/ycb_point_cloud/TPGPT_multi_obj_and_embodiment/'
-            'outputs/hardware/source_bundle'))
+            '~/tpgpt_demos/banana_20260925_183904/source_bundle_learned'))
         d('object_name', 'mustard_bottle')
         d('cloud_topic', '')                      # '' -> /ycb_pointclouds/<object_name>
         d('n_frames', 3)                          # clouds fused per plan
@@ -610,6 +613,11 @@ class TpgptPlannerNode(Node):
                 # executed at the transport's settings: the source bundle's (the user,
                 # 2026-10-06: as the Franka Hand's transport runs were)
                 execution = (self.source.metadata.get('learned') or {}).get('execution')
+                if not execution:
+                    raise PlanningError(
+                        f"grasp_test: the source bundle {p('source_bundle_dir')} has no execution "
+                        "settings (learned.execution), and a grasp test runs at the transport's: "
+                        "pass source_bundle_dir:=<the learned bundle the transport runs use>")
                 if p('grasp_test_constructed'):
                     selection = gt.constructed_grasp_test(
                         points, support, settings, path_ctx, self.end_effector,
