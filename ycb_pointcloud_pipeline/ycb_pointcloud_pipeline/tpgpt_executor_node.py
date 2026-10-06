@@ -928,7 +928,9 @@ class TpgptExecutorNode(Node):
             on = [name for name, key in (('pacing', 'path_pacing'), ('correction', 'path_correction'),
                                          ('unwinding', 'path_unwinding'),
                                          ('hold at the marks', 'path_hold')) if p(key)]
-            log.info(f"Learned plan: following its arm path ({', '.join(on) or 'nothing added'}) "
+            what = ('Grasp test: following its own path' if plan.metadata.get('task') == 'grasp_test'
+                    else 'Learned plan: following its arm path')
+            log.info(f"{what} ({', '.join(on) or 'nothing added'}) "
                      "instead of the simulation's lag gate and clamp")
             if plan.marks is None and p('path_hold'):
                 log.warn('this plan predates the planner storing its marks (2026-10-01): no '
@@ -1015,7 +1017,7 @@ class TpgptExecutorNode(Node):
             f"(~{len(plan.labels) * dt / settings.speed_scale:.0f} s)\n"
             f"  grasp at        {np.round(where.positions[int(m['grasp_index'])], 3).tolist()}"
             f"  release at {np.round(where.positions[int(m['release_index'])], 3).tolist()}"
-            f"{' (the arm; the learned command leads it)' if plan.arm_path is not None else ''}\n"
+            f"{' (the arm; the learned command leads it)' if plan.arm_path is not None and plan.metadata.get('task') != 'grasp_test' else ''}\n"
             f"  hand            {hand.name}, gripper {mode if not self.dry else 'not sent'}\n"
         )
         print(summary)

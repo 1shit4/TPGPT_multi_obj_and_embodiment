@@ -187,3 +187,67 @@ def test_the_labels_carry_the_static_stiffness_the_gate_reads():
 def test_the_phase_advances_at_the_labels_pace():
     L = grasp_test_labels(TOP_DOWN)
     assert L.time_rate * 0.05 * (len(L) - 1) == pytest.approx(np.ones(len(L)))
+
+
+def test_the_plan_is_followed_against_its_own_path(inspire, tmp_path):
+    """No lead, no margin: the arm path is the labels, the marks the grasp and the set-down."""
+    plan = grasp_test_plan(TOP_DOWN, ball(), TABLE, inspire, "ball")
+    plan.save(tmp_path / "p")
+    loaded = Plan.load(tmp_path / "p")
+    gi, ri = loaded.metrics["grasp_index"], loaded.metrics["release_index"]
+    assert loaded.arm_path.positions == pytest.approx(loaded.labels.positions)
+    assert loaded.arm_path.orientations == pytest.approx(loaded.labels.orientations)
+    assert np.all(loaded.arm_margin == 0.0) and np.all(loaded.arm_table_margin == 0.0)
+    assert loaded.marks["positions"] == pytest.approx(loaded.labels.positions[[gi, ri]])
+    assert loaded.marks["orientations"] == pytest.approx(loaded.labels.orientations[[gi, ri]])
+    assert loaded.metadata["learned_execution"] is None          # not a learned plan
+    # and the path check judges the same path as before (zero clearance = none)
+    from tpgpt.hardware.path_check import check_plan, verdict
+    assert verdict(check_plan(loaded, _world(), inspire)) is None
+
+
+def _sticky_run(plan, hand, follow: bool, static_force=3.0, tau=0.3, n_steps=4000):
+    """The test run on an arm that does not move until the spring pulls harder than
+    ``static_force`` (N), then closes the rest at ``tau`` (s) -- the 2026-10-06 17:50 arm,
+    which a 2.4 N pull (6 mm at 400 N/m) did not move."""
+    from tpgpt.hardware.ilc import frozen_mask
+    from tpgpt.hardware.executor import ArmPathSettings
+    from tpgpt.hardware.replay import contact_windows
+
+    m = plan.metrics
+    arm = None
+    if follow:
+        arm = {"positions": plan.arm_path.positions, "margin": plan.arm_margin,
+               "contact": frozen_mask(len(plan.labels), contact_windows(int(m["grasp_index"]),
+                                                                        int(m["release_index"])))}
+    ex = HardwareExecutor(GPPolicy().fit(plan.labels), plan.dt,
+                          ExecutorSettings(speed_scale=0.35, lag_tolerance=0.045,
+                                           tool_offset=tuple(hand.tool_offset)),
+                          arm_path=arm, arm_settings=ArmPathSettings() if follow else None)
+    x, R = ex.start_pose
+    lowest = np.inf
+    for _ in range(n_steps):
+        cmd = ex.step(x, R)
+        gap = cmd.tcp_position - x
+        pull = 400.0 * float(np.linalg.norm(gap))
+        if pull > static_force:
+            x = x + gap * (1.0 - static_force / pull) * plan.dt / tau
+        lowest = min(lowest, float(hand.grasp_point(x, R)[0][2]))
+        if ex.finished:
+            break
+    return ex, lowest
+
+
+def test_an_arm_held_by_static_friction_is_pushed_down_to_the_grasp(inspire):
+    """The simulation's clamp keeps the command ~6 mm from the arm, which this arm does not
+    feel: under it the arm never leaves the pre-grasp. Followed, the held clock hands the gap
+    to the correction until the pull breaks the arm free, and it reaches the grasp."""
+    plan = grasp_test_plan(TOP_DOWN, ball(), TABLE, inspire, "ball")
+    top = float(plan.labels.positions[0][2])
+    grasp = float(plan.grasp.tcp[2])
+    gated, lowest = _sticky_run(plan, inspire, follow=False, n_steps=1500)
+    assert lowest > top - 0.005                                  # never left the pre-grasp
+    assert gated.stalled and gated.phase < 0.2                   # the watchdog, early on
+    followed, lowest = _sticky_run(plan, inspire, follow=True)
+    assert lowest < grasp + 0.005                                # down to the grasp
+    assert followed.finished and not followed.blocked

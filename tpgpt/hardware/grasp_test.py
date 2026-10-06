@@ -17,7 +17,10 @@ logs -- and that the whole-path check judges like any other:
 The orientation is the grasp's throughout. No transport: the keypoints are the grasp
 cube on both sides (the identity map), ``min det`` 1, and the object is set down where
 it stood. Labels are at ``dt`` (20 Hz) and the executor stretches them by its
-``speed_scale`` like every plan.
+``speed_scale`` like every plan. It follows them as it follows a learned plan, with the
+labels as their own arm path (no lead, no margin) and the grasp and set-down as the marks
+its arrival holds aim at -- not with the simulation's lag gate and clamp, under which an arm
+held by static friction never left the pre-grasp (:func:`grasp_test_plan`).
 
 :func:`select_grasp_test` picks the grasp the way selection does -- GraspGen-X's
 candidates screened (the hand's own hard stage, the funnel; no place zone), then the
@@ -51,7 +54,7 @@ DWELL = 1.0                   # s at the grasp, open and closed, and after the r
 HOLD_LIFTED = 2.0             # s held up
 #: The labels' stiffness, N/m, the same in every direction, critically damped
 #: (2 sqrt(K)): the static profile of a taught demonstration
-#: (``teach --stiffness-profile static``), which the executor's gate reads.
+#: (``teach --stiffness-profile static``).
 STIFFNESS = 400.0
 
 
@@ -179,7 +182,23 @@ def grasp_test_plan(grasp: GraspFrame, points: np.ndarray, support_height: float
         "path_min_height_above_support_m": float(labels.positions[:, 2].min() - support),
         "max_label_speed_mps": float(np.linalg.norm(labels.velocities, axis=1).max()),
         "checked_path": "labels",
+        "executed_as": "followed",
     }
+    # Followed, not gated: the plan's own path is the arm path, with no lead and no margin,
+    # so the executor follows it (ArmPathSettings) instead of the simulation's lag gate and
+    # clamp. The clamp holds the command within speed_limit_factor x the fastest label speed
+    # x compliance of the arm -- ~6 mm on this test's slow descent -- and a 400 N/m spring
+    # 6 mm out (2.4 N) is inside what this arm stops short by: on 2026-10-06 17:50 (the foam
+    # brick, the Inspire hand) the arm moved 1.1 mm off the pre-grasp and stayed there, 100 mm
+    # above the grasp, for 101 s, the command clamped 6 mm below it (the watchdog: stuck at
+    # phase 0.096). Followed, a stuck arm stops the clock and the correction takes the gap,
+    # up to its 50 mm cap (20 N at 400 N/m). The marks are the grasp and the set-down, where
+    # the arrival holds bring the hand before the hand acts.
+    arm_path = PolicyLabels(positions=labels.positions.copy(),
+                            orientations=labels.orientations.copy(),
+                            gripper=labels.gripper.copy())
+    marks = {"positions": labels.positions[[gi, ri]].copy(),
+             "orientations": labels.orientations[[gi, ri]].copy()}
     return Plan(
         labels=labels,
         source_keypoints=keypoints,
@@ -209,6 +228,10 @@ def grasp_test_plan(grasp: GraspFrame, points: np.ndarray, support_height: float
                            "lift_m": label_kwargs.get("lift", LIFT),
                            "speed_mps": label_kwargs.get("speed", SPEED)},
         },
+        arm_path=arm_path,
+        arm_margin=np.zeros(len(labels.positions)),
+        arm_table_margin=np.zeros(len(labels.positions)),
+        marks=marks,
     )
 
 
