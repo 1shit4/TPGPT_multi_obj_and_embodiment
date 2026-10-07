@@ -645,6 +645,11 @@ The planner's support height is: its `support_height` parameter, else the calibr
   `approach_blocked` plan is `preflight_failed` (not counted): re-home, re-run the same id.
   Grid: apple, mug, pudding box, foam brick x 3 marks x top_left/top_right = 24 per hand
   (`bottom_left` out since 2026-10-03, the user; a third destination, off the shelf, to come).
+  **A trial keeps everything in its own directory** (2026-10-07): the executor's logs in
+  `plan_dir/executions/` (they went to `~/.ros/x6_executor_csv/` before), the Inspire's fingers
+  in `trace.npz` (`hand_*`; its width topic is null) and its close reports in `record.json`.
+  **No X6 trial has been run with either hand yet**: the Franka's 10-01..10-03 runs are plain
+  `tpgpt_pick_place` plan directories (no settled capture, no operator outcome).
 - **`auto_plan:=true` re-plans every second** after a refusal (each cloud arrival starts a plan
   while `latest_plan` is unset). Old behaviour; `tpgpt_pick_place` calls the planner once.
 - **The planner and the executor refuse to run without fresh `/joint_states`**: robot container

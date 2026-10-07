@@ -264,11 +264,14 @@ What every trial records, for processing later (all under the trial's directory)
   fit, every candidate and why it was rejected (`grasp_candidates.json`, `candidates.json`), the
   transported labels, arm path and marks, the checked postures and the postures of the move onto
   the path, `plan.json` (settings, metrics, the hand, calibration), `plan_overlay.png`.
-- **The execution** (`plan_dir/executions/`): the 20 Hz log (phase, commanded and measured pose,
-  correction, stiffness, joints and their targets), the full-rate record (every pose ~250 Hz,
-  joint position/velocity/effort, the hand's positions and forces) and the hand's close
-  reports; and `trace.npz` (20 Hz, with the robot's wrench: the force the ROBOT applies, see
-  `record.json` `conventions`).
+- **The execution** (`plan_dir/executions/`, inside the trial since 2026-10-07): the 20 Hz log
+  (phase, commanded and measured pose, correction, stiffness, joints and their targets), the
+  full-rate record (every pose ~250 Hz, joint position/velocity/effort, the hand's positions and
+  forces) and the hand's close reports (`_hand.json`; also in `record.json` `execution.hand_reports`).
+  A dry run writes only the 20 Hz log. Beside it, the trial's own `trace.npz` (20 Hz, from the
+  start of the move to the end of the retreat): measured and commanded pose, joints, the robot's
+  wrench (the force the ROBOT applies, see `record.json` `conventions`) and, for the Inspire,
+  the fingers (`hand_names`, `hand_position` rad, `hand_effort` g).
 - **After the place**: the settled frames and cloud, the placement error against the plan's
   predicted placed cloud (centroids; the raw frames allow a scan fit later).
 - **`record.json`**: conditions, timing, outcome and your answers, the code version (git sha,

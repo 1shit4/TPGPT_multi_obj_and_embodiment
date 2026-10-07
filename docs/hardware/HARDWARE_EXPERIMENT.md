@@ -204,8 +204,9 @@ outputs/hardware/<run_id>/
 
 `step_index`, `ee_pose` (measured, 7), `attractor_pose` (commanded, 7),
 `joint_positions` (7), `gripper_command`, `gripper_width` (if readable),
-`wrench` (6, if an F/T sensor is present). **No wall-clock timestamps** — time is
-`step_index / rate`.
+`wrench` (6, if an F/T sensor is present). A hand with no jaw width (the Inspire) adds
+`hand_names`, `hand_position` (rad) and `hand_effort` (g) per step. **No wall-clock
+timestamps** — time is `step_index / rate`.
 
 ### `candidates.json`
 

@@ -59,7 +59,8 @@ writes. Scratch trials (id starting with `s`) go to `<root>/scratch/` instead of
       plan_dir/                 # the planner's own output (plan.json, transported_labels.npz, ...)
       plan_overlay.png          # camera image + planned path + grasp hand + release + destination
       trace.npz                 # per control step: step_index, ee_pose, attractor_pose,
-                                #   joint_positions, gripper_command, gripper_width, wrench
+                                #   joint_positions, gripper_command, gripper_width, wrench;
+                                #   a multi-finger hand: hand_names, hand_position, hand_effort
       settled_rgb.png settled_depth.npy settled_mask.png settled_cloud.npy
       operator.json             # placed, first_failure_stage, notes, abort/exclusion reason
     trial_0002/ ...
