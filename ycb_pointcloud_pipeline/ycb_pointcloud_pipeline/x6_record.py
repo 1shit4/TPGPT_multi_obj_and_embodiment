@@ -518,12 +518,13 @@ class TraceRecorder:
     def __init__(self, rate_hz):
         self.rate_hz = float(rate_hz)
         self.rows = {k: [] for k in self.FIELDS}
+        self.hand_rows = []
 
     def __len__(self):
         return len(self.rows['step_index'])
 
     def add(self, stage, ee_pose, commanded_pose, attractor, joints, gripper_command,
-            gripper_width, wrench, phase, gate):
+            gripper_width, wrench, phase, gate, hand=None):
         self.rows['step_index'].append(len(self))
         self.rows['stage'].append(stage)
         self.rows['ee_pose'].append(ee_pose)
@@ -535,6 +536,8 @@ class TraceRecorder:
         self.rows['wrench'].append(wrench)
         self.rows['phase'].append(phase)
         self.rows['gate'].append(gate)
+        # a multi-finger hand's (names, positions, efforts): kept beside the fixed fields
+        self.hand_rows.append(hand)
 
     def save(self, path):
         n = len(self)
@@ -562,8 +565,26 @@ class TraceRecorder:
             phase=arr('phase', 1).reshape(-1),
             gate=arr('gate', 1).reshape(-1),
             note=np.array('time = step_index / control_rate_hz; poses xyz + quat xyzw, base frame; '
-                          'attractor_pose = pose sent to the controller; NaN = not available'),
+                          'attractor_pose = pose sent to the controller; NaN = not available; '
+                          'hand_position (rad) / hand_effort (g) per hand_names, a multi-finger '
+                          'hand only'),
+            **self._hand_arrays(n),
         )
+
+    def _hand_arrays(self, n):
+        """The hand's joints and forces as (n, k) arrays, NaN where no state had arrived."""
+        first = next((h for h in self.hand_rows if h is not None), None)
+        if first is None:
+            return {}
+        names = list(first[0])
+        pos, eff = np.full((n, len(names)), np.nan), np.full((n, len(names)), np.nan)
+        for i, h in enumerate(self.hand_rows[:n]):
+            if h is None or list(h[0]) != names:
+                continue
+            pos[i] = h[1]
+            if h[2] is not None:
+                eff[i] = h[2]
+        return {'hand_names': np.array(names), 'hand_position': pos, 'hand_effort': eff}
 
     def policy_steps(self):
         return sum(1 for s in self.rows['stage'] if s == 'policy')

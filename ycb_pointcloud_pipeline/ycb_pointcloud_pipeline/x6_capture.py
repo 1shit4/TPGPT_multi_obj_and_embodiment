@@ -34,7 +34,7 @@ def stamp_ns(header):
 
 class X6CaptureNode(Node):
     def __init__(self, object_name, topics, robot_state_topic=None, gripper_state_topic=None,
-                 **kwargs):
+                 **kwargs, hand_state_topic=None):
         super().__init__('x6_capture_node', **kwargs)
         self.object_name = object_name
         self.topics = topics
@@ -68,6 +68,11 @@ class X6CaptureNode(Node):
             self._raw_types['gripper'] = JointState
             self.create_subscription(JointState, gripper_state_topic,
                                      lambda b: self._raw.__setitem__('gripper', b), 5, raw=True)
+        if hand_state_topic:
+            # a hand with no jaw width (the Inspire): its joints (rad) and forces (g), every step
+            self._raw_types['hand'] = JointState
+            self.create_subscription(JointState, hand_state_topic,
+                                     lambda b: self._raw.__setitem__('hand', b), 5, raw=True)
         self.robot_state_type = None
         if robot_state_topic:
             try:
@@ -130,6 +135,14 @@ class X6CaptureNode(Node):
             if fingers:
                 return float(sum(fingers))
         return None
+
+    def hand_state(self):
+        """(names, positions rad, efforts g) of a multi-finger hand, or None."""
+        msg = self._decode('hand')
+        if msg is None or len(msg.position) != len(msg.name):
+            return None
+        effort = list(msg.effort) if len(msg.effort) == len(msg.name) else None
+        return list(msg.name), [float(v) for v in msg.position], effort
 
     def robot_state(self):
         """(wrench [fx fy fz tx ty tz] in base, end-effector mass kg, F_T_EE xyz) or Nones."""

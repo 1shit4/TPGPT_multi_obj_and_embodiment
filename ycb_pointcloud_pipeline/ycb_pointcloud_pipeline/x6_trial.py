@@ -253,7 +253,9 @@ class Trial:
         topics = self.cfg.raw['experiment']['topics']
         self.capture = X6CaptureNode(self.object_name, topics,
                                      robot_state_topic=topics.get('robot_state'),
-                                     gripper_state_topic=self.hand['gripper'].get('width_topic'))
+                                     gripper_state_topic=self.hand['gripper'].get('width_topic'),
+                                     hand_state_topic=(None if self.hand['gripper'].get('width_topic')
+                                                       else self.hand['gripper'].get('state_topic')))
         cap_exec = SingleThreadedExecutor()
         cap_exec.add_node(self.capture)
         self._spin(cap_exec, always=True)
@@ -609,7 +611,8 @@ class Trial:
         self.trace.add(ex.stage, ee, pose7(position, rotation),
                        None if cmd is None else cmd.attractor, self.capture.joint_positions(),
                        gripper_cmd, self.capture.gripper_width(), wrench,
-                       None if cmd is None else cmd.phase, None if cmd is None else cmd.gate)
+                       None if cmd is None else cmd.phase, None if cmd is None else cmd.gate,
+                       hand=self.capture.hand_state())
         self.moved = True
         if len(self.trace) % 200 == 0:
             self.save_trace()
@@ -632,6 +635,8 @@ class Trial:
             'gripper_width_after_close_m': widths[-1] if widths else None,
             'gripper_width_min_while_closed_m': min(widths) if widths else None,
             'last_stage': None if ex is None else ex.stage,
+            # the Inspire's open/close reports (which fingers stopped on something, where, held)
+            'hand_reports': None if ex is None else list(getattr(ex, 'hand_reports', []) or []),
         }
         self.save_trace()
         self.save_record()

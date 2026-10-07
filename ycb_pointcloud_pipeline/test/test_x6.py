@@ -284,6 +284,26 @@ def test_trace_has_step_index_and_no_clock(tmp_path):
     assert not any('time' in k or 'stamp' in k for k in d.files)
     assert np.isnan(d['wrench']).all()
     assert tr.policy_steps() == 3
+    assert 'hand_position' not in d.files          # a jaw: no multi-finger state
+
+
+def test_trace_keeps_a_multi_finger_hands_state(tmp_path):
+    """The Inspire has no jaw width: its joints (rad) and forces (g) go in the trace instead,
+    NaN on a step whose state had not arrived."""
+    from ycb_pointcloud_pipeline import x6_record as xr
+    tr = xr.TraceRecorder(20)
+    names = ['little', 'ring', 'middle', 'index', 'thumb_bend', 'thumb_rot']
+    for k in range(3):
+        hand = None if k == 0 else (names, [0.1 * k] * 6, [100.0 * k] * 6)
+        tr.add('policy', [0, 0, 0, 0, 0, 0, 1], [0, 0, 0, 0, 0, 0, 1], [0, 0, 0], [0] * 7,
+               1.0, None, None, 0.1 * k, 1.0, hand=hand)
+    tr.save(tmp_path / 'trace.npz')
+    d = np.load(tmp_path / 'trace.npz')
+    assert list(d['hand_names']) == names
+    assert d['hand_position'].shape == (3, 6) and np.isnan(d['hand_position'][0]).all()
+    assert d['hand_position'][2] == pytest.approx([0.2] * 6)
+    assert d['hand_effort'][1] == pytest.approx([100.0] * 6)
+    assert np.isnan(d['gripper_width']).all()
 
 
 def test_map_block_recomputes_min_det_of_a_saved_plan():
