@@ -19,7 +19,20 @@ camera_calibration:
   #                                then camera_link_to_optical is not used).
   # Rotation: give ONE of rotation_quaternion_xyzw, rotation_rpy_deg,
   # rotation_rpy_rad (ROS fixed-axis roll-pitch-yaw).
-  # RECALIBRATED 2026-09-26: the whole setup was moved by someone else and the camera was
+  # RECALIBRATED 2026-10-07, after the camera was knocked and then re-aimed by the user (the
+  # new placement checks out: 84% workspace pixels, 44 deg pitch, 1.01 m, shelf fully framed).
+  # The old calibration still read the table +2.1 mm and the top board +0.2 mm -- a lateral move
+  # does not change the height of a horizontal surface -- but it was 34 mm out SIDEWAYS: the
+  # shelf fit wanted -34.4 mm and found 0 points on the shelf's front faces. The new one wants
+  # +3.7/+4.0 mm and 0.70 deg, with 3633 front-face points over a 606 mm span.
+  # 12 correspondences touched with the INSPIRE index fingertip (the Franka Hand is off the
+  # robot): probe_offset [-0.01507, -0.02846, 0.12135], the fingertip in the TCP frame at the
+  # pointing pose with the measured mount. That probe is noisier than the Franka's fingertip
+  # face -- the mount's taped ring rocks ~5 mm and its yaw is +-1.4 deg at a 121 mm lever -- so
+  # the correspondence RMS is 11.2 mm (9 of 12 kept; 3 dropped on the pairwise-distance check)
+  # against 7-8 mm with the Franka. Refit with the table and top-board planes; verified on fresh
+  # frames at table -1.6 mm, top board -0.3 mm.
+  # Superseded 2026-09-26: the whole setup was moved by someone else and the camera was
   # knocked ~46 mm / 2.9 deg. The old calibration read the table +24.6 mm and the top board
   # +44.6 mm out. 9 correspondences (all touched face-flat, fit RMS 7.1 mm) refit jointly with
   # two plane constraints (table -0.0132, top board +0.3211, both touched the same session).
@@ -60,8 +73,8 @@ camera_calibration:
   base_to_camera:
     parent_frame: base
     child_frame: camera_color_optical_frame
-    translation: [1.199143, 0.452138, 0.859710]                               # m
-    rotation_quaternion_xyzw: [-0.382130, -0.837698, 0.349104, 0.174255]
+    translation: [1.177384, 0.463198, 0.865572]                               # m
+    rotation_quaternion_xyzw: [-0.406543, -0.828382, 0.343094, 0.175476]
     is_placeholder: false
 
   # --------------------------------------------------------------------------

@@ -3,66 +3,51 @@
 Calibration of the RealSense D435 (`base` -> `camera_color_optical_frame`), and the scene geometry
 measured by touching. Referenced from `CLAUDE.md`.
 
-## Current calibration (2026-09-26)
-
-In `ycb_pointcloud_pipeline/config/camera_calibration.yaml` (rebuild after editing it):
+## Current calibration (2026-10-07)
 
 ```yaml
-translation: [1.199143, 0.452138, 0.859710]
-rotation_quaternion_xyzw: [-0.382130, -0.837698, 0.349104, 0.174255]
+translation: [1.177384, 0.463198, 0.865572]
+rotation_quaternion_xyzw: [-0.406543, -0.828382, 0.343094, 0.175476]
 expected_table_height: -0.0132
 ```
 
-The setup was moved by someone else and the camera knocked ~46 mm / 2.9 deg; the old calibration
-read the table +24.6 mm and the top board +44.6 mm out. 9 correspondences, all touched face-flat
-(fit RMS 7.1 mm), refit jointly with two plane constraints. **Verified: table +2.4 mm, top board
-+2.2 mm.** Backups `.bak` (09-11) `.bak2`/`.bak3` (09-21) `.bak4` (09-23) in `~/calib_tools/`.
+The camera was knocked, then re-aimed by the user. Verified: **table -3.5 mm, top board -0.2 mm**,
+and laterally the shelf fit wants only +3.7 / +4.0 mm and 0.70 deg. Backups `.bak`..`.bak5` in
+`~/calib_tools/`.
 
-**Calibrating from the arm's own geometry does NOT work** -- tried 2026-09-26 as a way to skip the
-stickers. Three sweeps of one unchanged setup returned camera positions **176 mm apart**, and after
-fitting the arm was still 12-17 mm from the model. `fr3.LinkHull` is the *convex hull* of a
-*non-convex* link, so "distance to the hull" is not "distance to the arm"; the camera also sees one
-side only. Scripts kept, marked broken at the top: `~/calib_tools/arm_sweep.py`,
-`check_against_arm.py`. **Use correspondences.**
+**A lateral camera move is invisible to the height check.** Before this recalibration the old
+extrinsics still read the table +2.1 mm and the top board +0.2 mm -- yet they were **34 mm out
+sideways**. A sideways shift or a yaw does not change the measured height of a horizontal surface.
+Always run the **shelf face fit** as well (`tpgpt.hardware.shelf.fit_to_cloud`): the giveaway was
+**0 points on the shelf's front faces** and a -34.4 mm correction, against 3633 points over a
+606 mm span and +3.7 mm after.
 
-What the arm *can* do is tell you the camera moved at all: the TCP overlay
-(`/tpgpt/verify/overlay`) is pure projection from the robot's own pose -- no depth, no hulls, so it
-is immune to warm-up and to the furniture moving. If the cross is off the fingertips, the camera
-moved. 46 mm at 1 m is about 29 px, which reads as "a little off".
+## Touching with the Inspire hand mounted
 
-## Measured geometry (touched, 2026-09-26)
+The Franka Hand's `probe_offset` of `[0, 0, 0.0095]` is meaningless with the Inspire mounted, and
+`rest_point.py` models Franka boxes. Use the Inspire's **index fingertip** instead: at the pointing
+pose it is a fixed point in the TCP frame, which is all `probe_offset` needs.
 
-Base frame. **z = 0 is the robot's base plane.** Repeatability about 1 mm.
+```bash
+ros2 service call /inspire_hand/point std_srvs/srv/Trigger          # inspire_hand_node running
+ros2 param set /calibration_check_node probe_offset "[-0.01507, -0.02846, 0.12135]"
+```
+Set it **after** `calib_setup.sh` (which writes the Franka value), and expect `calib_preflight.sh`
+to flag that one line as BAD -- it checks for `0.0095`. Every other line must still read OK.
 
-| what | x | y | z / surface height |
-|---|---|---|---|
-| table | | | **-0.0132** |
-| top shelf, left slot | 0.6884 | -0.2758 | **0.3211** |
-| top shelf, right slot | 0.4634 | -0.3505 | **0.3211** |
-| bottom shelf (both slots) | as above | | **0.0731** |
+Derivation, should the mount change: `grasp_from_ee(R) = R @ C` exactly, so the tip offset is
+`C @ tip_local + tool_offset` with `C = ee.grasp_from_ee(I)` and `tip_local` the
+`index_intermediate` mesh vertex furthest from its joint, at `registers_to_q([0,0,0,1000,1000,1000])`.
+**Build the end effector with the measured mount** -- `inspire_end_effector(**base)` alone silently
+uses the default 135 deg / 12.0 mm and the offset comes out 3.7 mm wrong; pass `_mount(params)` from
+`inspire_mount._base_from_config` too. Verified against `inspire_mount.touch_points` to 0.000 mm.
+The little finger's is `[-0.01426, +0.04029, +0.11505]`.
 
-In `config/shelf.yaml` under `shelf: anchors:`.
-
-**The shelf itself keeps coming back to the same place.** Across the 09-23 and 09-26 disturbances
-the slot marks returned within 1.6-3.9 mm in x/y and the table within 1.2 mm. What moves is the
-**top board**: +9.7 mm on 09-23, back down to 0.3211 on 09-26 (0.3213 originally). Check the board,
-not the shelf.
-
-**The bottom board cannot be touched from above** -- the top board is over it. Reach in
-horizontally and rest the finger **pads** on it (`~/calib_tools/rest_point.py`, read `PADS z`):
-three rests gave 0.0730/0.0731/0.0732, a **0.2 mm** spread, the best measurement of that board yet
-(the 09-23 value spread 2.7 mm and sat 1.6 mm higher). The tool's caution line reading "body
-+23 mm" is expected and correct -- it is the 31.6 - 8.75 mm the hand geometry predicts for a
-horizontal hand on a pad's side face, with the body hanging past the front edge in free air.
-The camera cannot settle this board: it sees it at a grazing angle, fitting 8-12 deg of spurious
-tilt and +12 mm.
-
-**Diagnosing what moved**, in order:
-1. `python3 ~/calib_tools/check_calibration.py` -- surfaces against the touched anchors.
-2. **Table error = the camera**, since the table cannot move relative to the robot... *unless the
-   table was moved too* (it was, slightly, on 09-26). When everything may have shifted, no cloud
-   surface is a reference: touch first, then compare the cloud against those fresh touches.
-3. Shelf height **relative to the table** cancels a global camera shift; a real shelf move does not.
+**It is a worse probe than the Franka's fingertip face.** The mount's taped ring rocks ~5 mm at the
+fingertips and its yaw is +-1.4 deg at a 121 mm lever, so correspondences come out ~11 mm RMS
+against 7-8 mm. **Vary the hand's orientation between touches**: held at one orientation the mount
+error becomes a single constant vector and is absorbed straight into the fitted camera position --
+a clean-looking fit that is systematically wrong.
 
 ## Let the camera warm up first (measured 2026-09-23)
 
