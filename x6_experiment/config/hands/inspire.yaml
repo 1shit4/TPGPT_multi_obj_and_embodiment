@@ -1,7 +1,8 @@
 # Inspire RH56DFX-2R (a RIGHT hand: user, 2026-10-04) on the FR3. The physical description of
-# the hand only. Reworked 2026-10-04 for GraspGen-X grasps; not yet run on the robot. Fields
-# marked TO_FILL are measured on the mounted hand (plan M1-M5) and copied here BEFORE this
-# hand's first trial, then never changed. The numbers the planner uses are the ones in
+# the hand only. Reworked 2026-10-04 for GraspGen-X grasps; measured 2026-10-05..07 (mount,
+# register map, payload, grasp depth) and first run on the robot 2026-10-06/07 (grasp tests, the
+# depth sweep, the first transport). The measured values below are copied from
+# end_effector_config before this hand's first trial, then never changed. The numbers the planner uses are the ones in
 # end_effector_config (inspire_hand.yaml); these record them for the paper.
 #
 # How this hand differs from the Franka Hand in the pipeline (docs/hardware/INSPIRE_HAND.md):
@@ -25,16 +26,18 @@ hand:
   tool_offset: [0.0, 0.0, 0.0]                  # executor correction ADDED to the plan's offset
 
   measured:                                     # caliper and robot touches, not datasheet
-    adapter_thickness_mm: TO_FILL               # flange face -> the hand's wrist face (M2/M3)
-    lateral_mm: TO_FILL                         # wrist face centre off the flange axis (M3)
-    mount_yaw_deg: TO_FILL                      # palm normal = Rz(yaw) fr3_link8 +X (M1/M3)
-    calibrated_depth_mm: TO_FILL                # grasp-depth correction (M6)
-    measured_by: TO_FILL
-    measured_on: TO_FILL
+    adapter_thickness_mm: 12.45                 # flange face -> the hand's wrist face (M3 fit, +-0.5)
+    lateral_mm: [0.0, 0.0]                      # held: the ring is concentric with the flange (the user)
+    mount_yaw_deg: 137.11                       # palm normal = Rz(yaw) fr3_link8 +X (M3, +-1.4)
+    finger_bend_deg_at_1000: 5.2                # the fingers' bend at register 1000 (M3, M4)
+    calibrated_depth_mm: -20.0                  # 20 mm back along the approach (M6, the depth sweep)
+    play_at_fingertips_mm: 5.0                  # the taped ring rocks across the palm (M2b; not modelled)
+    measured_by: Ishita (robot touches M3, ruler M2/M4, payload_measure M5, depth sweep M6)
+    measured_on: 2026-10-05 (mount, register map, payload); 2026-10-07 (grasp depth)
 
   desk:                                         # Franka Desk end-effector settings for THIS hand
-    mass_kg: TO_FILL                            # hand + adapter plate + screws, weighed
-    centre_of_mass_m: TO_FILL                   # in the flange frame, roughly [0, 0, 0.08]
+    mass_kg: 0.708                              # hand + mount + cable, weighed by the arm (M5, +-0.04)
+    centre_of_mass_m: [-0.0092, 0.0014, 0.0548] # in the flange frame (M5, +-0.015); set in Desk 2026-10-05
     F_T_EE_translation_m: [0.0, 0.0, 0.1034]    # keep = fr3_hand_tcp, so Desk and ROS agree
 
   gripper:

@@ -216,25 +216,63 @@ reuse this one. A Ctrl-C during the questions writes what was answered and marks
 
 ## Phase 4: re-mount and Inspire trials
 
-1. Mount the Inspire hand as `docs/hardware/INSPIRE_HAND.md` describes, measure
-   the `MEASURE` lengths into `ycb_pointcloud_pipeline/config/inspire_hand.yaml` and the
-   `TO_FILL` fields of `hands/inspire.yaml`, rebuild. Update Desk (end effector: the
-   Inspire hand's mass and centre of mass). Take **photo 5**.
-2. Start the hand driver in its own terminal (T6):
-   `ros2 run ycb_pointcloud_pipeline inspire_hand_node`. The T3 GraspGen-X server is not
-   needed for this hand.
-3. Re-verify the calibration manually if the camera was touched.
+The hand is mounted and measured (2026-10-05..07): the mount (yaw 137.1 deg, 12.45 mm), the
+register map, the payload (Desk: 0.708 kg at (-9, 1, 55) mm) and the grasp depth (20 mm back)
+are in `ycb_pointcloud_pipeline/config/inspire_hand.yaml` and copied into `hands/inspire.yaml`.
+The camera was recalibrated with this hand on 2026-10-07 (d18d450). Run guide for the hand:
+`docs/hardware/INSPIRE_HAND.md`.
+
+1. **Every boot**: the hand's serial driver (`insmod` answering "File exists" means it is
+   already loaded, which is fine):
+   ```bash
+   sudo modprobe usbserial && sudo insmod ~/ch341/ch341.ko
+   ls /dev/ttyUSB0
+   ```
+2. **T6, the hand** (one terminal for the session; `free_drive` and `joint_homing` open the
+   hand through it):
+   ```bash
+   ros2 launch ycb_pointcloud_pipeline inspire_hand.launch.py
+   ```
+3. **T2 with one caption per object** (in one shared caption the apple matched "red cup" as well
+   and was refused as ambiguous, 2026-10-07):
+   ```bash
+   ros2 launch ycb_pointcloud_pipeline ycb_pipeline.launch.py caption_mode:=per_object
+   ros2 param get /ycb_segmentation_node caption_mode      # must say per_object
+   ```
+   T3 (the GraspGen-X server) stays up: the libraries are cached, but a refused scan fit falls
+   back to a fresh draw.
 4. Run the instrument check again with `when:=after_remount`.
 5. `ros2 run ycb_pointcloud_pipeline x6_order_sheet --hand inspire`.
-6. Run trials `0025`–`0048` with `-p hand:=inspire`: same marks, same slots, same command
-   otherwise. The hand file switches the planner to the side grasp and the executor to
-   `gripper_mode: inspire`. **Only upright round objects** suit that grasp (of these, the
-   mug); the others are outside what it was built for, which is a finding to record, not
-   a setting to change. This phase is to be revisited before it runs: the hand has not
-   planned on the current setup, and the grippers' objects may change the grid.
-7. The one demonstration is a top-down Franka Hand grasp. Carried onto a side grasp the
-   map is poorly conditioned (min det(J) 0.007-0.40 on three synthetic scenes), so expect
-   `map_not_a_diffeomorphism` refusals. Record them as planning failures.
+6. Run trials `0025`-`0048` with `-p hand:=inspire`, same marks, same slots, same command
+   otherwise. Home the arm before each (`joint_homing`): the plan is made from the arm's joints
+   and the move onto its path is driven through them in joints, only while the arm is where the
+   plan was made from.
+
+What to expect (the first transport, 2026-10-07 19:05, and the offline coverage):
+- **Planning takes minutes**: 20-45 s per checked grasp with this hand; the first executable one
+  is at rank 0-7 for most object-slot cells (up to ~5 min), rank 18 for the pudding box into
+  top_left (~10 min). The pudding box into top_right had none in its first 25 of 100.
+- **The move onto the path is in joints** (~10 s, the joint controller), then the Cartesian run.
+- **The wrist may wobble during the carry** (~7 Hz) when the path passes the wrist's singular
+  posture (joint 6 at pi). It is recorded at full rate; leave it (the user, 2026-10-07).
+- With the arm at home, a grasp whose move onto its path is blocked is passed over; away from
+  home the plan stops with `approach_blocked` (re-home and re-run the same trial id).
+
+What every trial records, for processing later (all under the trial's directory):
+- **Before the pick**: the perception frames (RGB, depth, mask, per-frame cloud), `cloud.npy`.
+- **The plan** (`plan_dir/`): the camera's object cloud and obstacles (`clouds.npz`), the scan
+  fit, every candidate and why it was rejected (`grasp_candidates.json`, `candidates.json`), the
+  transported labels, arm path and marks, the checked postures and the postures of the move onto
+  the path, `plan.json` (settings, metrics, the hand, calibration), `plan_overlay.png`.
+- **The execution** (`plan_dir/executions/`): the 20 Hz log (phase, commanded and measured pose,
+  correction, stiffness, joints and their targets), the full-rate record (every pose ~250 Hz,
+  joint position/velocity/effort, the hand's positions and forces) and the hand's close
+  reports; and `trace.npz` (20 Hz, with the robot's wrench: the force the ROBOT applies, see
+  `record.json` `conventions`).
+- **After the place**: the settled frames and cloud, the placement error against the plan's
+  predicted placed cloud (centroids; the raw frames allow a scan fit later).
+- **`record.json`**: conditions, timing, outcome and your answers, the code version (git sha,
+  dirty state) and the config's digest.
 
 ## Phase 5: end
 

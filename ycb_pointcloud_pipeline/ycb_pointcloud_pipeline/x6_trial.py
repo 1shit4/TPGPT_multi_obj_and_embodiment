@@ -155,6 +155,17 @@ class Trial:
             'top_down_grasp': self.top_down_grasp,
             'conditions': {'hand': self.hand_name, 'object': self.object_name,
                            'destination': self.destination_name},
+            # How to read the recorded signals (for whoever processes them later).
+            'conventions': {
+                'wrench': ('robot_state external wrench (trace.npz) is the force the ROBOT applies '
+                           'to the environment, not the push on the hand: negate it for the force '
+                           'on the hand (push test 2026-10-05; tpgpt.hardware.payload.TAU_EXT_SIGN)'),
+                'time': 'step index / step_index_rate_hz in the trace; seconds since the run '
+                        'started in the executor logs (plan_dir/executions)',
+                'executor_logs': ('plan_dir/executions/robot_<time>.csv (20 Hz), _highrate.npz '
+                                  '(every pose ~250 Hz, joint state, effort, hand position and '
+                                  'force), _hand.json (the hand\'s close reports)'),
+            },
         }
         self.save_record()
         print(f'\nX6 trial {self.trial_id}: hand {self.hand_name}, object {self.object_name}, '
