@@ -385,6 +385,31 @@ ros2 run --prefix python3 ycb_pointcloud_pipeline tpgpt_pick_place --ros-args \
 
 ## 6. Transport
 
+**The first Inspire transport: apple -> top_left, 2026-10-07 19:05** (after the camera was
+knocked and recalibrated, d18d450; `~/tpgpt_plans/apple_20261007_190234`). Planned on the 11th
+grasp tried (132 s, min det 0.61); the scene clean under the new calibration (98 % of the
+camera's shelf points explained by the shelf model, 86 unexplained, 788 removed as the robot).
+The move onto the path in joints took 10 s; the apple was held (middle, index) and set down.
+Beside the arm path median 3.5 mm, at most 25.5 (correction up to 36 mm). The hand went 6.9 mm
+past the grasp mark before the hold (grasp tests 4-13, the Franka's transports at most 7: the
+learned command carries the lead); the grasp hold ran its 4 s, 15.4 -> 5.2 mm from the mark,
+the release hold 1.4 s to 3.8 mm.
+
+**The wrist vibrated during the carry** (the user felt it). In the 250 Hz pose log: the hand's
+8-60 Hz motion up to 0.47 mm RMS at the TCP (0.015 typical), around labels 300-337 with the
+apple in the hand (release at 393), strongest near 7 Hz; the hand turning 0.6-0.8 deg RMS (4-30
+Hz) against 0.004 when quiet; **joints 5 and 7 swinging 0.30 and 0.49 rad/s RMS** (4-15 Hz)
+against 0.004-0.005. There joint 6 was 3.11 rad: **the axes of joints 5 and 7 1.9 deg apart, the
+wrist's singular posture** (joint 6 = pi; the run passed within 0.0 deg). There, joints 5 and 7
+turning against each other barely move the hand, so the Cartesian controller holds that motion
+only through its weak null-space posture spring (2 N m/rad). **The singularity alone does not
+make it shake**: two of the Franka's 19 transports passed through it too (0.0 deg) and a third
+within 6, with joints 5+7 wobbling 0.002-0.007 rad/s near it. The difference is the hand's
+inertia on that weakly held motion -- 0.71 kg, off the flange axis and 168 mm out, on a taped
+mount that rocks -- against the Franka Hand's compact 0.73 kg at 30 mm. Left as is for now (small:
+sub-mm at the TCP); if it grows, the planner could keep the axes of joints 5 and 7 apart along
+the path, as it keeps the wrist inside full stretch (the user's call).
+
 Once grasps hold, the same command without `task` (`transport`, the default) and with
 `-p destination_name:=top_left` (or `top_right`) and the learned bundle
 (`-p source_bundle_dir:=$HOME/tpgpt_demos/banana_20260925_183904/source_bundle_learned`), as for

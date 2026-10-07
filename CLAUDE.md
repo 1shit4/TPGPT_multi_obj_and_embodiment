@@ -793,6 +793,14 @@ The planner's support height is: its `support_height` parameter, else the calibr
 - **Grasp-only tests come first**: `-p task:=grasp_test` (`tpgpt/hardware/grasp_test.py`), with
   `grasp_test_constructed`, `grasp_test_library_index` and `grasp_test_depth_offset` for the frame
   check and the depth sweep. Dry-run tested offline end to end (`scripts/fake_scene.py`).
+- **The first Inspire transport held and placed (apple -> top_left, 2026-10-07 19:05;
+  `INSPIRE_HAND.md` section 6)**, after the camera was knocked and recalibrated (d18d450: the old
+  extrinsics were 34 mm out sideways yet read the table and top board right). Overshoot past the
+  grasp mark 6.9 mm (the learned lead keeps it to the Franka's range). **The wrist vibrated during
+  the carry**: joints 5 and 7 swinging 0.3-0.5 rad/s RMS near 7 Hz as the path passed the wrist
+  singularity (joint 6 at pi, their axes aligned); the Franka passed through it calmly on 3 of its
+  19 runs, so it is the Inspire's inertia on a motion the controller holds only by its null-space
+  spring. Open.
 - **Coverage with the measured hand and the calibrated depth (2026-10-07, `GRASP_LIBRARY.md`):**
   9 of 10 object-slot cells have an executable transport, 23 admissible of 250 planned (25 per
   slot, sweep captures, 18:39 learned bundle); at GraspGen-X's own depth 5 cells and 14. Only the
