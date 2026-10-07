@@ -323,8 +323,10 @@ class Trial:
     def _executor_params(self, plan_dir):
         ex = self.m['execution']
         ints = {'progress_window', 'path_blocked_steps'}
-        params = {'plan_dir': plan_dir, 'dry_run': bool(self.dry_run),
-                  'log_dir': xc.expand(f'~/.ros/x6_executor_csv/{self.cfg.run_id}_{self.trial_id}')}
+        # The executor's logs (20 Hz, the full-rate record, the hand's close reports) go to its
+        # default, plan_dir/executions, inside the trial's directory with everything else: until
+        # 2026-10-07 they went to ~/.ros/x6_executor_csv/, apart from the trial's data.
+        params = {'plan_dir': plan_dir, 'dry_run': bool(self.dry_run)}
         for k, v in ex.items():
             if k == 'allow_replan':
                 continue
