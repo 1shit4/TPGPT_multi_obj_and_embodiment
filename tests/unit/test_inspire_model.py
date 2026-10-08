@@ -275,3 +275,33 @@ def test_the_open_hand_is_the_manual_s_217_8_mm_long(desc):
     assert lm["middle_length"] == pytest.approx(216.0, abs=1.0)
     half = im.landmarks(m, m.registers_to_q([500] * 5 + [0]))
     assert half["thumb_to_index"] < lm["thumb_to_index"] - 100.0
+
+
+def _slab(tilt_deg, half=0.02, span=0.05, step=0.003):
+    """Two parallel faces 40 mm apart, their normal tilted ``tilt_deg`` from the closing
+    axis (+x) about y, in the grasp frame."""
+    a = np.radians(tilt_deg)
+    n, u, v = np.array([np.cos(a), 0, np.sin(a)]), np.array([-np.sin(a), 0, np.cos(a)]), \
+        np.array([0.0, 1.0, 0.0])
+    g, gy = np.arange(-span, span, step), np.arange(-0.07, 0.04, step)
+    return np.array([s * half * n + a1 * u + a2 * v for s in (-1, 1) for a1 in g for a2 in gy])
+
+
+@pytest.mark.parametrize("tilt", [0.0, 20.0, 40.0])
+def test_the_grip_angle_is_the_tilt_of_the_faces_it_squeezes(desc, tilt):
+    """Faces square to the squeeze read 0; faces tilted by a read a, for every chain."""
+    m = im.InspireHandModel(desc)
+    pts = _slab(tilt)
+    state = m.closed_onto(pts)
+    angles = m.grip_angles(pts, state)
+    assert state.opposed and set(angles) == {c for c, v in state.contact.items() if v}
+    assert all(v == pytest.approx(tilt, abs=1.0) for v in angles.values())
+    assert im.grip_angle(angles) == pytest.approx(tilt, abs=1.0)
+
+
+def test_the_grip_angle_takes_the_thumb_and_the_best_finger():
+    assert im.grip_angle({"thumb": 10.0, "index": 50.0, "middle": 5.0}) == 10.0
+    assert im.grip_angle({"thumb": 40.0, "index": 50.0, "middle": 5.0}) == 40.0
+    assert im.grip_angle({"thumb": 10.0, "index": 50.0}) == 50.0
+    assert np.isnan(im.grip_angle({"index": 5.0}))
+    assert np.isnan(im.grip_angle({"thumb": 5.0}))

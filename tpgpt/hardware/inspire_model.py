@@ -102,6 +102,13 @@ DEFAULT_JOINT_MAP = {
 #: ``CLOUD_CONTACT_SLACK``), so a stray depth pixel does not stop a finger.
 CONTACT_POINTS = 3
 CONTACT_DEPTH = 0.002
+#: The grip angle (:meth:`InspireHandModel.grip_angles`): a chain is closed this much of its
+#: travel past its stop to find the points it presses on, and the object's surface there is
+#: fitted (its normal: the least-spread direction) to the points within this radius of them,
+#: at least this many.
+GRIP_PRESS = 0.05
+GRIP_NORMAL_RADIUS = 0.012
+GRIP_NORMAL_POINTS = 8
 #: The 26 face directions of a k-DOP, in the link's principal axes.
 _DOP_DIRECTIONS = np.array([d for d in np.ndindex(3, 3, 3) if d != (1, 1, 1)],
                            dtype=float) - 1.0
@@ -380,6 +387,18 @@ def _mesh_vertices(config_name: str, link: str) -> np.ndarray:
 
 
 # ------------------------------------------------------------------ joint map
+def grip_angle(angles: dict) -> float:
+    """One number for a grasp's :meth:`InspireHandModel.grip_angles`: the thumb's, or that of
+    the finger set best against it, whichever is worse. The thumb is the only digit opposing
+    the fingers, so if it slides the grasp goes; of the fingers one well-placed one is
+    enough (the bricks held with the ring finger at 54 deg on an edge and the middle at 1).
+    NaN when the thumb or every finger has no fitted surface."""
+    fingers = [v for k, v in angles.items() if k != "thumb"]
+    if "thumb" not in angles or not fingers:
+        return float("nan")
+    return float(max(angles["thumb"], min(fingers)))
+
+
 def joint_map_from_config(cfg: dict | None) -> dict:
     """``{dof: (q_at_0, q_at_1000, verified)}`` from ``inspire_hand.yaml``'s
     ``joint_map`` block (the hand node's :func:`joint_map_from_config`, same rule)."""
@@ -636,6 +655,46 @@ class InspireHandModel:
             contact[chain], fraction[chain] = hit is not None, float(s)
         q[5] = self.open_q[5]
         return ClosedState(q=q, contact=contact, fraction=fraction)
+
+    def grip_angles(self, points, closed: ClosedState) -> dict:
+        """``chain -> degrees`` between the hand's squeeze and the object's surface where that
+        chain touches it, for every chain :meth:`closed_onto` put in contact.
+
+        The squeeze is the grasp frame's closing axis (``G`` +x, thumb against fingers). A
+        surface takes a push square to it on its own; a push at angle ``a`` off its normal
+        needs friction ``tan(a)`` times the push -- 0.36 at 20 deg, 0.84 at 40, 1.0 at 45.
+        Where a chain touches: the object points it would hold closed :data:`GRIP_PRESS` of
+        its travel past its stop (a middle segment as well as a tip); the normal: the
+        least-spread direction of the points within :data:`GRIP_NORMAL_RADIUS` of those. A
+        chain whose patch has fewer than :data:`GRIP_NORMAL_POINTS` points is left out.
+        **Recorded, not a filter** (2026-10-08): over the 45 Inspire grasps run by 10-07 it
+        does not separate held from dropped -- the mug that slid out of the hand in the carry
+        scores 40 deg, two banana grasps that held 48, four bricks that held 36. Where a finger
+        lands on a curved object is known only to a few mm (the fit ~4-5 mm, the arm at the
+        grasp 4-7 mm), which on a 20-40 mm radius turns the normal 10-15 deg.
+        """
+        pts = np.atleast_2d(np.asarray(points, dtype=float))
+        out = {}
+        for k, dof in enumerate(DOF_NAMES[:5]):
+            chain = CHAIN_OF_DOF[dof]
+            if not closed.contact.get(chain) or not len(pts):
+                continue
+            q = np.asarray(closed.q, dtype=float).copy()
+            q[k] = min(max(q[k] + GRIP_PRESS * (self.close_q[k] - self.open_q[k]),
+                           min(self.open_q[k], self.close_q[k])),
+                       max(self.open_q[k], self.close_q[k]))
+            pressed = np.zeros(len(pts), dtype=bool)
+            for piece in self.pieces(q, chains=(chain,)):
+                pressed |= piece.contains(pts, 0.0)
+            if not pressed.any():
+                continue
+            centre = pts[pressed].mean(axis=0)
+            patch = pts[np.linalg.norm(pts - centre, axis=1) <= GRIP_NORMAL_RADIUS]
+            if len(patch) < GRIP_NORMAL_POINTS:
+                continue
+            normal = np.linalg.eigh(np.cov((patch - patch.mean(axis=0)).T))[1][:, 0]
+            out[chain] = float(np.degrees(np.arccos(min(1.0, abs(normal[0])))))
+        return out
 
 
 @lru_cache(maxsize=4)
