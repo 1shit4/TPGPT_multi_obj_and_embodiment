@@ -1063,14 +1063,18 @@ class TpgptPlannerNode(Node):
         table = self.calib.cal.expected_table_height
         if points is None or not len(points) or self.shelf_model is None or table is None:
             return table
+        from tpgpt.hardware.shelf import support_under
         low = float(np.percentile(np.asarray(points)[:, 2], 1.0))
+        xy = np.median(np.asarray(points)[:, :2], axis=0)
         match = float(self.get_parameter('support_match').value)
         best = table
         for box in self.shelf_model.boxes:
             if box.name not in self.shelf_model.supports:
                 continue
             top = float(box.position[2] + box.size[2])
-            if top > best and top <= low + match:
+            # only a surface the object is over: a plate's floor 7.7 mm above the table is
+            # within support_match of every object on the table (2026-10-08)
+            if top > best and top <= low + match and support_under(box, xy):
                 best = top
         if best != table:
             self.get_logger().info(f'the object stands on a shelf board at z {best:+.4f} m, not '

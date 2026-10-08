@@ -48,6 +48,7 @@ shelf:
     bottom_board_top: 0.0731         # rested (pads) 2026-09-26, mean of 3, 0.2 mm spread
     top_board_top: 0.3211            # touched 2026-09-26, mean of the two slot marks
     table: -0.0132                   # touched 2026-09-26, mean of 3
+    plate_centre: [0.3772, 0.4983]  # the plate's rim circle, 2026-10-08 (plate: below)
   tape_mm:                             # 2026-09-22
     slot_left_to_left_panel: 201       # M1  (hard to hold square)
     slot_right_to_right_panel: 142     # M2  (hard to hold square)
@@ -72,6 +73,27 @@ shelf:
     top_right:    {xy: right_slot, board: top_board}
     bottom_left:  {xy: left_slot,  board: bottom_board}
     bottom_right: {xy: right_slot, board: bottom_board}
+    plate:        {xy: plate_centre, board: plate_floor}
+
+  # ---- A plate on the table: a destination off the shelf (the user, 2026-10-08) -------------
+  # A round plate, 252 mm across (tape), taped to the table on the robot's left. Touched with the
+  # Inspire's pointing index (inspire_touch `m`; the finger's lowest point; 1.1 mm rms against
+  # the touched table on 10-05): ~/inspire_mount/touches_20261008_182341.json.
+  # - the rim's top, 6 touches around it: a circle of radius 123.8 mm, 0.5 mm rms, its centre the
+  #   anchor plate_centre; they lie on a plane tilted 1.3 deg, rising toward the robot's left
+  #   (the table rises there too: the camera reads it up to +10 mm at the far left since 09-26),
+  #   21.1 mm above the touched table at the centre;
+  # - the floor at the centre, 3 touches: -0.0055 (+7.7 mm), 2.1 mm from the circle's centre;
+  # - where the flat floor starts rising, 4 touches: 92-104 mm from the centre.
+  # Built as boxes by shelf.plate_boxes: the floor (a support, plate_floor) and the rim
+  # (plate_rim, 16 segments, two bands).
+  plate:
+    centre: [0.3772, 0.4983]
+    floor: -0.0055
+    flat_radius: 0.095
+    rim_radius: 0.124
+    outer_radius: 0.126
+    rim_plane: [0.00757, 0.02177, -0.00587]   # z = a x + b y + c through the rim's top
 
   # Anything else solid on or around the shelf, as boxes: lo/hi corners in the shelf frame
   # (frame: shelf) or the base frame (frame: base).

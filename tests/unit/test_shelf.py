@@ -1,5 +1,7 @@
 """The shelf world: the model built from touched dimensions, and the cloud cropped to it."""
 
+import os
+
 import numpy as np
 import pytest
 
@@ -342,3 +344,46 @@ def test_the_camera_points_on_the_table_and_shelf_are_removed(shelf):
     r = world.cloud_report
     assert r["removed_as_shelf"] == 4 and r["removed_as_table"] == 2
     assert len(world.cloud) == 3 and world.table_height == 0.0
+
+
+# --------------------------------------------------------------------- the plate (2026-10-08)
+PLATE = {"centre": [0.3772, 0.4983], "floor": -0.0055, "flat_radius": 0.095,
+         "rim_radius": 0.124, "outer_radius": 0.126, "rim_plane": [0.00757, 0.02177, -0.00587]}
+
+
+def test_a_plate_is_a_floor_to_set_things_on_inside_a_rim():
+    from tpgpt.hardware.shelf import plate_boxes
+    table = -0.0132
+    boxes = plate_boxes(PLATE, table)
+    floor = [b for b in boxes if b.name == "plate_floor"]
+    rim = [b for b in boxes if b.name == "plate_rim"]
+    assert len(floor) == 2 and len(rim) == 32
+    centre = np.array([0.3772, 0.4983])
+    def depth(p):
+        return max(float(b.penetration(np.atleast_2d(p))[0]) for b in boxes)
+    assert depth([*centre, -0.0045]) < 0 < depth([*centre, -0.0065])     # the floor's top
+    for k in range(12):                                                   # the rim, all round
+        u = np.array([np.cos(k * np.pi / 6), np.sin(k * np.pi / 6)])
+        lip = PLATE["rim_plane"][0] * (centre + 0.124 * u)[0] + \
+            PLATE["rim_plane"][1] * (centre + 0.124 * u)[1] + PLATE["rim_plane"][2]
+        assert depth([*(centre + 0.12 * u), lip - 0.002]) > 0
+        assert depth([*(centre + 0.12 * u), lip + 0.002]) < 0
+        assert depth([*(centre + 0.135 * u), table + 0.003]) < 0          # outside the edge
+        assert depth([*(centre + 0.07 * u), -0.0045]) < 0                 # over the flat floor
+
+
+def test_the_support_is_the_one_under_the_object_and_nearest_in_height():
+    """A plate's floor is 7.7 mm above the table: an object on the table elsewhere stands on the
+    table, one set down on the plate on the plate (the first match, the table, used to win)."""
+    from tpgpt.hardware.path_check import _support_at
+    from tpgpt.hardware.shelf import ShelfModel
+    import yaml
+    cfg = yaml.safe_load(open(os.path.join(os.path.dirname(__file__), "..", "..",
+                                           "ycb_pointcloud_pipeline", "config", "shelf.yaml")))
+    cfg["shelf"]["plate"] = PLATE
+    model = ShelfModel.from_config(cfg)
+    table = -0.0132
+    assert _support_at(model, table, -0.0055, [0.3772, 0.4983]) == "plate_floor"
+    assert _support_at(model, table, -0.0080, [0.50, 0.15]) == "table"     # not over the plate
+    assert _support_at(model, table, -0.0130, [0.3772, 0.4983]) == "table"  # nearer the table
+    assert _support_at(model, table, 0.3211, None) == "top_board"

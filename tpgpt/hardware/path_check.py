@@ -601,15 +601,18 @@ def path_feasibility(
     def grasp_point(T):
         return T[:3, 3] + T[:3, :3] @ offset
 
-    local = base = None
+    local = base = at_release = None
     if len(held):
         moved = held if held_shift is None else held + np.asarray(held_shift, dtype=float)
         local = (moved - positions[g]) @ rotations[g]
         at_release = positions[r] + local @ rotations[r].T
         base = at_release[:, 2] <= float(at_release[:, 2].min()) + BASE_BAND
     # Which surface the object is picked from, and which it is set down on.
-    pick_support = _support_at(model, table, float(held[:, 2].min()) if len(held) else None)
-    place_support = _support_at(model, table, destination_height)
+    pick_support = _support_at(model, table, float(held[:, 2].min()) if len(held) else None,
+                               np.median(held[:, :2], axis=0) if len(held) else None)
+    place_support = _support_at(model, table, destination_height,
+                                np.median(at_release[:, :2], axis=0) if at_release is not None
+                                else None)
 
     faults: dict = {}
     counts = {"relaxed": 0, "relaxed_windows": 0, "skipped": 0, "gap": 0, "unrefined": 0}
@@ -874,18 +877,25 @@ def path_feasibility(
                    postures=(posed_labels, posed_q), **counts)
 
 
-def _support_at(model, table, height):
-    """The support surface whose top is at ``height``: ``"table"``, a board's name, or None."""
+def _support_at(model, table, height, xy=None):
+    """The support surface whose top is at ``height``: ``"table"``, a board's name, or None.
+
+    Of the surfaces within :data:`SUPPORT_MATCH` of ``height`` -- and, given ``xy``, under it --
+    the nearest in height. (The first match used to win, the table first: a plate's floor
+    7.7 mm above the table, 2026-10-08, was taken for the table.)"""
     if height is None:
         return None
+    from tpgpt.hardware.shelf import support_under
+    found = []
     if table is not None and abs(float(height) - float(table)) <= SUPPORT_MATCH:
-        return "table"
+        found.append((abs(float(height) - float(table)), "table"))
     if model is not None:
         for box in model.boxes:
-            if box.name in model.supports and abs(
-                    float(box.position[2] + box.size[2]) - float(height)) <= SUPPORT_MATCH:
-                return box.name
-    return None
+            top = float(box.position[2] + box.size[2])
+            if (box.name in model.supports and abs(top - float(height)) <= SUPPORT_MATCH
+                    and (xy is None or support_under(box, xy))):
+                found.append((abs(top - float(height)), box.name))
+    return min(found)[1] if found else None
 
 
 def _object_contacts(obj, base, world, model, table, depth_tolerance, contact_radius,

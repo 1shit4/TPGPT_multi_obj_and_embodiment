@@ -226,6 +226,8 @@ def slots(config: dict) -> dict:
                "table": anchors.get("table")}
     for board in c.get("boards", []):
         heights.setdefault(str(board["name"]), float(board["top"]))
+    if c.get("plate"):
+        heights["plate_floor"] = float(c["plate"]["floor"])
     out = {}
     for name, spec in (c.get("slots") or {}).items():
         xy, board = anchors.get(spec["xy"]), heights.get(spec["board"])
@@ -337,6 +339,72 @@ def _box(name: str, lo, hi, R_base_shelf: np.ndarray, origin: np.ndarray):
                     rotation=R_base_shelf.copy(), size=(hi - lo) / 2.0)
 
 
+#: A plate's rim is built from this many segments around it (``plate:`` in shelf.yaml).
+PLATE_SEGMENTS = 16
+#: The inner band of the rim stands this much above a straight line from the flat floor's edge
+#: to the lip, so the model is not lower than the rim where it was not touched.
+PLATE_RIM_ALLOWANCE = 0.002
+
+
+def _rot_z(theta: float) -> np.ndarray:
+    c, s = np.cos(theta), np.sin(theta)
+    return np.array([[c, -s, 0.0], [s, c, 0.0], [0.0, 0.0, 1.0]])
+
+
+def plate_boxes(plate: dict, table: float) -> list:
+    """A round plate on the table as boxes (base frame): its flat floor -- a support, named
+    ``plate_floor`` -- and its rim, ``plate_rim``.
+
+    ``plate`` (shelf.yaml ``plate:``): ``centre`` (x, y), ``floor`` (the floor's height at the
+    centre), ``flat_radius`` (where the floor starts rising), ``rim_radius`` (the rim's top),
+    ``outer_radius`` (the edge), ``rim_plane`` ``[a, b, c]`` with the rim's top at
+    ``z = a x + b y + c`` (a plate on a table that is not level is tilted with it), and
+    optionally ``segments``. The floor is two squares turned 45 deg to each other, an octagon
+    inscribed in ``flat_radius``. The rim is ``segments`` boxes around the centre in two bands:
+    the outer, from midway out to the edge, as high as the lip above it; the inner, from the flat
+    floor's edge to midway, as high as a straight rise from the floor to the lip reaches at
+    midway, plus :data:`PLATE_RIM_ALLOWANCE`. Each box stands on the table.
+    """
+    from tpgpt.perception.obstacles import Obstacle
+
+    cx, cy = (float(v) for v in plate["centre"][:2])
+    floor = float(plate["floor"])
+    flat, rim, outer = (float(plate[k]) for k in ("flat_radius", "rim_radius", "outer_radius"))
+    a, b, c = (float(v) for v in plate["rim_plane"])
+    n = int(plate.get("segments", PLATE_SEGMENTS))
+    if not (0.0 < flat < rim <= outer) or floor <= table:
+        raise ValueError(f"plate: needs 0 < flat_radius < rim_radius <= outer_radius and the "
+                         f"floor above the table, not {plate}")
+    boxes = []
+    half_floor = flat * np.cos(np.pi / 8.0)
+    for k, turn in enumerate((0.0, np.pi / 4.0)):
+        boxes.append(Obstacle(name="plate_floor", kind="box",
+                              position=np.array([cx, cy, (table + floor) / 2.0]),
+                              rotation=_rot_z(turn),
+                              size=np.array([half_floor, half_floor, (floor - table) / 2.0])))
+    mid = (flat + rim) / 2.0
+    for k in range(n):
+        theta = 2.0 * np.pi * (k + 0.5) / n
+        u = np.array([np.cos(theta), np.sin(theta)])
+        lip_xy = np.array([cx, cy]) + rim * u
+        lip = a * lip_xy[0] + b * lip_xy[1] + c
+        inner_top = floor + (lip - floor) * (mid - flat) / (rim - flat) + PLATE_RIM_ALLOWANCE
+        for r0, r1, top in ((flat, mid, inner_top), (mid, outer, lip)):
+            half_t = r1 * np.tan(np.pi / n)
+            centre = np.array([cx, cy]) + (r0 + r1) / 2.0 * u
+            boxes.append(Obstacle(name="plate_rim", kind="box",
+                                  position=np.array([centre[0], centre[1], (table + top) / 2.0]),
+                                  rotation=_rot_z(theta),
+                                  size=np.array([(r1 - r0) / 2.0, half_t, (top - table) / 2.0])))
+    return boxes
+
+
+def support_under(box, xy, margin: float = 0.0) -> bool:
+    """Whether the point ``xy`` lies over ``box``'s top face (within ``margin``)."""
+    local = (np.array([float(xy[0]), float(xy[1]), float(box.position[2])]) - box.position) @ box.rotation
+    return bool(abs(local[0]) <= box.size[0] + margin and abs(local[1]) <= box.size[1] + margin)
+
+
 @dataclass
 class ShelfModel:
     """The shelf as boxes in the base frame.
@@ -433,6 +501,10 @@ class ShelfModel:
                 boxes.append(_box(str(extra["name"]), lo, hi, R, origin))
             if extra.get("support", False):
                 supports.append(str(extra["name"]))
+        if c.get("plate"):
+            table = float((c.get("anchors") or {}).get("table"))
+            boxes.extend(plate_boxes(c["plate"], table))
+            supports.append("plate_floor")
         return cls(boxes=boxes, supports=tuple(supports), R_base_shelf=R, origin=origin,
                    measured=bool(c.get("measured", False)), config=c, width=width)
 
