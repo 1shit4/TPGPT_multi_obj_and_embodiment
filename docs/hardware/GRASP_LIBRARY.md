@@ -567,3 +567,26 @@ the same cache would never hit; keying on the **scan in its canonical frame** is
 and it is available only because the planner already works on the scan. The grasps themselves, the
 selection rule and every filter are unchanged: the library changes *which draw* the selection sees,
 not how it chooses. Recorded in `FAITHFULNESS_AUDIT.md` as A13.
+
+**Fourth coverage, the finger lead (2026-10-08).** The third's scenes, demonstration and budget,
+with the camera calibration of 10-07 evening (d18d450), with and without
+`--max-finger-lead 0.3` (`FAITHFULNESS_AUDIT.md` D15). Files
+`outputs/hardware/coverage_inspire_20261008/{lead_off,lead_0.3}/<object>.json` (each planned
+candidate listed with its lead, grip angle and verdict), `run.sh`, `compare.py`.
+
+| object | hand stage (off / 0.3 s) | admissible of 25, top_left (first rank) | top_right |
+|---|---|---|---|
+| foam brick | 296 / 295 | 2 (3) | 2 (1) |
+| apple | 400 / 400 | **0** | 4 (0) |
+| mug | 182 / 141 | **0** | **0** |
+| pudding box | 320 / 320 | 1 (18) | 0 |
+| banana | 52 / 52 | 4 (2) | 2 (1) |
+
+The same with the lead check on: **15 admissible in 6 of 10 cells either way**; no admissible
+grasp led by more than 0.3 s. Against the third coverage (23 in 9 cells) the brick and the
+pudding box are identical; the apple, mug and banana are not, **only because the scan fit starts
+from the camera's position, which the recalibration moved by 23 mm**: the apple into top_left
+gives 7 admissible from rank 2 again with the old calibration file (the same failures as on
+10-07), 0 with the new. A few mm of the fitted object decide whether the Inspire's grasps reach
+the top slots (the wrist within 20 mm of full stretch, the arm against the right wall): expect
+cells to plan or refuse with small changes in where an object stands.

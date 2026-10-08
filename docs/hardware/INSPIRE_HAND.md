@@ -432,7 +432,25 @@ What set it apart, over the 45 Inspire grasps run by then (`FAITHFULNESS_AUDIT.m
   to meet the mug at 25-30 % of their travel and the thumb at 58 %: the fingers pushed it for
   ~0.45 s before the thumb arrived. No other grasp of 43 had the fingers ahead by more than 0.15.
   **A timed close** (`-p inspire_timed_close:=true` on the executor; off by default) slows each
-  finger so that all the plan expects on the object arrive with the thumb. Not yet run on an object.
+  finger so that all the plan expects on the object arrive with the thumb.
+
+**The same grasp on the table, 2026-10-08** (library #190 pinned, `task:=grasp_test`; the mug
+taped in place): at one speed 3 of 3 dropped on the lift, index and thumb pinching the rim lip
+after the mug was pushed ~20 mm; timed, 2 of 2 pushed away by the middle or ring finger before
+the thumb, which closed on air. The arm was at the planned grasp to 1-3 mm and 1 deg every time.
+The plan puts the ring and middle fingers on the handle, and the fit placed the handle anywhere
+from 167 to 235 deg for one taped mug, so the timing could not hit. Three more runs stopped
+before the close, all from the heading too (the pinned grasp turns with it): joint 7 at its limit
+before the start (270 deg), and twice (221, 235 deg) the arm stuck with joint 2 near 0 and joint
+6 near pi -- both straight -- drifting along the shoulder's hand-still motion until the Cartesian
+pull no longer moved it.
+
+**Every mug grasp that held was a rim grasp** (thumb 1-7 mm, fingers 2-15 mm below the top;
+five grasp tests and both top_left transports), so the rim is not the problem: a rim filter
+would remove all of them. What #190 has and they do not is the fingers ahead of the thumb:
+**the finger lead** (`inspire_model.finger_lead`, audit D15), 0.39 s against at most 0.21 for
+every grasp that held, of all objects. Recorded on every candidate; a selection stage at 0.3 s
+would cost nothing on the sweep captures (fourth coverage, `GRASP_LIBRARY.md`).
 
 Once grasps hold, the same command without `task` (`transport`, the default) and with
 `-p destination_name:=top_left` (or `top_right`) and the learned bundle
