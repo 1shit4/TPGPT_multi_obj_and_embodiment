@@ -399,6 +399,11 @@ def plate_boxes(plate: dict, table: float) -> list:
     return boxes
 
 
+def is_fixture(name: str) -> bool:
+    """A box of a fixture on the table apart from the shelf (the plate), not a shelf panel."""
+    return str(name).startswith("plate_")
+
+
 def support_under(box, xy, margin: float = 0.0) -> bool:
     """Whether the point ``xy`` lies over ``box``'s top face (within ``margin``)."""
     local = (np.array([float(xy[0]), float(xy[1]), float(box.position[2])]) - box.position) @ box.rotation
@@ -534,11 +539,13 @@ class ShelfModel:
         :data:`ROI_FLOOR_CLEARANCE` above the shelf's bottom so the table around
         the shelf's foot stays out.
         """
-        corners = np.vstack([self._corners(b) for b in self.boxes])
+        # the shelf's own panels: a fixture elsewhere on the table (the plate) has its own region
+        corners = np.vstack([self._corners(b) for b in self.boxes if not is_fixture(b.name)])
         local = (corners - self.origin) @ self.R_base_shelf
         lo, hi = local.min(axis=0) - margin, local.max(axis=0) + margin
         lo[2] = local[:, 2].min() + ROI_FLOOR_CLEARANCE
-        tops = [float(b.position[2] + b.size[2]) for b in self.boxes if b.name in self.supports]
+        tops = [float(b.position[2] + b.size[2]) for b in self.boxes
+                if b.name in self.supports and not is_fixture(b.name)]
         if tops:
             hi[2] = max(hi[2], max(tops) + above_support)
         return lo, hi
@@ -550,10 +557,19 @@ class ShelfModel:
         return np.all((local >= lo) & (local <= hi), axis=1)
 
     def near(self, points: np.ndarray, reach: float) -> bool:
-        """Whether any of ``points`` is within ``reach`` of the shelf's region."""
+        """Whether any of ``points`` is within ``reach`` of the shelf's region, or of a
+        fixture's (the plate's bounding box, base frame)."""
+        p = np.atleast_2d(points)
         lo, hi = self.roi_bounds(reach, above_support=0.0)
-        local = (np.atleast_2d(points) - self.origin) @ self.R_base_shelf
-        return bool(np.any(np.all((local >= lo) & (local <= hi), axis=1)))
+        local = (p - self.origin) @ self.R_base_shelf
+        if np.any(np.all((local >= lo) & (local <= hi), axis=1)):
+            return True
+        fixtures = [b for b in self.boxes if is_fixture(b.name)]
+        if fixtures:
+            corners = np.vstack([self._corners(b) for b in fixtures])
+            flo, fhi = corners.min(axis=0) - reach, corners.max(axis=0) + reach
+            return bool(np.any(np.all((p >= flo) & (p <= fhi), axis=1)))
+        return False
 
     def surface_points(self, spacing: float = SURFACE_SPACING) -> tuple[np.ndarray, np.ndarray]:
         """Points on every panel face, and the index of the panel each lies on."""

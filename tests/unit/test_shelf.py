@@ -387,3 +387,20 @@ def test_the_support_is_the_one_under_the_object_and_nearest_in_height():
     assert _support_at(model, table, -0.0080, [0.50, 0.15]) == "table"     # not over the plate
     assert _support_at(model, table, -0.0130, [0.3772, 0.4983]) == "table"  # nearer the table
     assert _support_at(model, table, 0.3211, None) == "top_board"
+
+
+def test_the_shelf_region_is_the_shelf_s_and_the_plate_is_still_near():
+    """The plate is on the table 0.8 m from the shelf: the shelf's region (the scene report,
+    shelf_fit) stays the shelf's, and the collision gate still sees the plate."""
+    from tpgpt.hardware.shelf import ShelfModel
+    import yaml
+    cfg = yaml.safe_load(open(os.path.join(os.path.dirname(__file__), "..", "..",
+                                           "ycb_pointcloud_pipeline", "config", "shelf.yaml")))
+    with_plate = ShelfModel.from_config(cfg)
+    cfg["shelf"].pop("plate", None)
+    without = ShelfModel.from_config(cfg)
+    for a, b in zip(with_plate.roi_bounds(), without.roi_bounds()):
+        assert a == pytest.approx(b)
+    over_plate = np.array([[0.3772, 0.4983, 0.02]])
+    assert with_plate.near(over_plate, 0.01) and not without.near(over_plate, 0.01)
+    assert not with_plate.near(np.array([[0.0, 0.0, 0.8]]), 0.01)
