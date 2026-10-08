@@ -427,12 +427,12 @@ What set it apart, over the 45 Inspire grasps run by then (`FAITHFULNESS_AUDIT.m
   at the predicted contacts is 40 deg for this mug, 48 for two banana grasps that held, 36 for
   four bricks that held: the predicted contact on a curved object is good to a few mm only. It is
   recorded on every candidate (`grip_angle_deg`), not used.
-- **The fingers leading the thumb.** Closing at one speed, a finger covers 1.0-1.2 of its travel
-  per second and the thumb 0.8 (the full-rate hand records); this grasp's fingers were predicted
+- **The fingers leading the thumb.** Closing at one speed, a finger covers 1.3 of its travel
+  per second and the thumb 1.0 (on air, 2026-10-08; the speed is proportional to the register); this grasp's fingers were predicted
   to meet the mug at 25-30 % of their travel and the thumb at 58 %: the fingers pushed it for
   ~0.45 s before the thumb arrived. No other grasp of 43 had the fingers ahead by more than 0.15.
   **A timed close** (`-p inspire_timed_close:=true` on the executor; off by default) slows each
-  finger so that all the plan expects on the object arrive with the thumb. Not yet run.
+  finger so that all the plan expects on the object arrive with the thumb. Not yet run on an object.
 
 Once grasps hold, the same command without `task` (`transport`, the default) and with
 `-p destination_name:=top_left` (or `top_right`) and the learned bundle

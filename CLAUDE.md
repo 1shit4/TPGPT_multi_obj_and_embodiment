@@ -808,10 +808,10 @@ The planner's support height is: its `support_height` parameter, else the calibr
   spring. Open.
 - **A mug dropped in the carry (top_right, 2026-10-07 21:29; `INSPIRE_HAND.md` section 6):**
   its fingers were predicted to meet it at 25-30 % of their travel, the thumb at 58 %, and at one
-  closing speed (fingers 1.0-1.2 travel/s, the thumb 0.8) they pushed it ~0.45 s before the
+  closing speed (fingers 1.3 travel/s, the thumb 1.0) they pushed it ~0.45 s before the
   thumb came; only index and thumb ended on it. The only grasp of 43 with the fingers that far
   ahead. **`inspire_timed_close`** (executor, off) slows each finger to arrive with the thumb,
-  from the plan's `hand_contact_fraction` (audit D14); untested on the robot. The grip angle
+  from the plan's `hand_contact_fraction` (audit D14); the speed register is proportional (on air, 10-08: fingers 1.31-1.37 travel/s at 500, thumb 1.01); not yet run on an object. The grip angle
   (squeeze vs surface) is recorded per candidate but does not separate held from dropped (D13).
 - **Coverage with the measured hand and the calibrated depth (2026-10-07, `GRASP_LIBRARY.md`):**
   9 of 10 object-slot cells have an executable transport, 23 admissible of 250 planned (25 per

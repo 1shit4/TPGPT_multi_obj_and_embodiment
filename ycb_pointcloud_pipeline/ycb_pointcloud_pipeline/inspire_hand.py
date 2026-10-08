@@ -142,17 +142,18 @@ BAUDS = (115200, 57600, 19200)  # REDU_RATIO 0, 1, 2
 
 DEFAULT_PORT = "/dev/ttyUSB0"
 DEFAULT_ID = 1          # this lab's hand since 2026-10-05 (it answered at 2 on 09-15); factory default
-DEFAULT_SPEED = 500     # 0-1000, 1000 = 0.8 s full stroke
+DEFAULT_SPEED = 500     # 0-1000, proportional; at 500 a finger's whole travel takes 0.75 s, the thumb's 1.0 s
 DEFAULT_FORCE = 400     # grams per finger before it stops
 DEFAULT_CLOSE_MODE = "simultaneous"   # the user, 2026-10-05: sequential pushes the object
 #: How fast each bending DOF closes at speed 500, as a fraction of its open->close travel
-#: per second (little, ring, middle, index, thumb_bend): medians over the 41 closes with a
-#: full-rate hand record, 2026-10-06/07 (a finger on air: 0.82 s for its whole travel). The
-#: thumb is the slowest: closing all at one speed, fingers that meet the object at 25 % of
-#: their travel touch it ~0.45 s before a thumb that meets it at 58 % -- the mug of 10-07
-#: 21:29, pushed 11 mm by its fingers before the thumb came, held by index and thumb only,
-#: dropped in the carry.
-CLOSE_RATE_AT_500 = (1.21, 1.06, 1.02, 1.15, 0.80)
+#: per second (little, ring, middle, index, thumb_bend): measured on air, 2026-10-08
+#: (`~/tpgpt_bags/inspire_speed_check`, a straight line through each DOF's 10-85 % of travel,
+#: 1 % rms off it): the fingers 1.31-1.37, the thumb 1.01. At speed 250 every DOF ran at
+#: 0.50-0.52 of these: the speed is proportional to the register. The thumb is the slowest:
+#: closing all at one speed, fingers that meet the object at 25 % of their travel touch it
+#: ~0.4 s before a thumb that meets it at 58 % -- the mug of 10-07 21:29, pushed 11 mm by its
+#: fingers before the thumb came, held by index and thumb only, dropped in the carry.
+CLOSE_RATE_AT_500 = (1.32, 1.31, 1.32, 1.37, 1.01)
 #: A timed close never runs a DOF slower than this (0-1000).
 MIN_TIMED_SPEED = 100
 
@@ -295,8 +296,8 @@ def timed_speeds(fraction, contact, speed: int = DEFAULT_SPEED, rates=CLOSE_RATE
     ``fraction``/``contact``: per chain (``pinky``, ``ring``, ``middle``, ``index``,
     ``thumb``), how far it closes before it meets the object (0 open .. 1 closed) and whether
     it does -- the plan's ``hand_contact_fraction`` / ``hand_contacts_predicted``. At
-    ``speed`` a DOF covers ``rates[k] * speed / 500`` of its travel per second (assumed
-    proportional to the register: to be checked on the hand), so it arrives after
+    ``speed`` a DOF covers ``rates[k] * speed / 500`` of its travel per second (proportional
+    to the register: measured 2026-10-08, :data:`CLOSE_RATE_AT_500`), so it arrives after
     ``f_k / (rates[k] * speed / 500)``. The latest of those, ``T``, stays as it is; every
     other touching DOF is slowed to arrive at ``T`` too, never below ``floor``; a DOF
     predicted to close on air reaches its end at ``T`` or later; the thumb rotation keeps
@@ -756,7 +757,7 @@ def main(argv=None) -> int:
                     help=f"HAND_ID (factory 1; this lab's hand answers on {DEFAULT_ID}, see `scan`)")
     ap.add_argument("--baud", type=int, default=115200)
     ap.add_argument("--max-id", type=int, default=254, help="scan: highest ID tried")
-    ap.add_argument("--speed", type=int, default=DEFAULT_SPEED, help="0-1000, 1000 = 0.8 s stroke")
+    ap.add_argument("--speed", type=int, default=DEFAULT_SPEED, help="0-1000, 500 = 0.75 s finger stroke")
     ap.add_argument("--force", type=int, default=DEFAULT_FORCE,
                     help="per-finger stop threshold in grams, 0-1000")
     ap.add_argument("--close-mode", choices=CLOSE_MODES, default=DEFAULT_CLOSE_MODE)

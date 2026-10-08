@@ -33,7 +33,7 @@ inspire_hand:
     hand_id: 1                  # `inspire_hand scan`: 2 on 2026-09-15, 1 (the factory default) on 2026-10-05
 
   grasp:                        # open/close (inspire_hand.py docstring)
-    speed: 500                  # 0-1000; 1000 = 0.8 s full stroke
+    speed: 500                  # 0-1000, proportional; 500: a finger's whole travel 0.75 s, the thumb's 1.0 s
     force_g: 400                # per-finger stop threshold, grams (0-1000); per object:
                                 # config/grasp_forces.yaml inspire_grasp (set at each close)
     close_mode: simultaneous    # simultaneous (all together) | sequential (fingers, then the thumb).
