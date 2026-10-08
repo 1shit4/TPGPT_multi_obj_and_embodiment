@@ -530,12 +530,24 @@ class InspireHandClient:
     def set_force(self, grams, timeout=3.0):
         """Set the hand's per-finger force threshold (grams, 0-1000) for the next close.
         Returns ``(ok, reason)``."""
-        from rcl_interfaces.msg import Parameter, ParameterType, ParameterValue
+        from rcl_interfaces.msg import ParameterType, ParameterValue
+        return self._set('force_g', ParameterValue(type=ParameterType.PARAMETER_INTEGER,
+                                                   integer_value=int(grams)), timeout)
+
+    def set_close_speeds(self, speeds, timeout=3.0):
+        """Six per-DOF speeds (0-1000) for the next close; all zero = the node's one speed.
+        Returns ``(ok, reason)``."""
+        from rcl_interfaces.msg import ParameterType, ParameterValue
+        return self._set('close_speeds', ParameterValue(
+            type=ParameterType.PARAMETER_INTEGER_ARRAY,
+            integer_array_value=[int(v) for v in speeds]), timeout)
+
+    def _set(self, name, value, timeout):
+        from rcl_interfaces.msg import Parameter
         if not self.params.wait_for_service(timeout_sec=timeout):
             return False, f'{self.params.srv_name} not available'
         request = self.SetParameters.Request()
-        request.parameters = [Parameter(name='force_g', value=ParameterValue(
-            type=ParameterType.PARAMETER_INTEGER, integer_value=int(grams)))]
+        request.parameters = [Parameter(name=name, value=value)]
         future = self.params.call_async(request)
         deadline = time.monotonic() + timeout
         while not future.done():

@@ -145,6 +145,16 @@ DEFAULT_ID = 1          # this lab's hand since 2026-10-05 (it answered at 2 on 
 DEFAULT_SPEED = 500     # 0-1000, 1000 = 0.8 s full stroke
 DEFAULT_FORCE = 400     # grams per finger before it stops
 DEFAULT_CLOSE_MODE = "simultaneous"   # the user, 2026-10-05: sequential pushes the object
+#: How fast each bending DOF closes at speed 500, as a fraction of its open->close travel
+#: per second (little, ring, middle, index, thumb_bend): medians over the 41 closes with a
+#: full-rate hand record, 2026-10-06/07 (a finger on air: 0.82 s for its whole travel). The
+#: thumb is the slowest: closing all at one speed, fingers that meet the object at 25 % of
+#: their travel touch it ~0.45 s before a thumb that meets it at 58 % -- the mug of 10-07
+#: 21:29, pushed 11 mm by its fingers before the thumb came, held by index and thumb only,
+#: dropped in the carry.
+CLOSE_RATE_AT_500 = (1.21, 1.06, 1.02, 1.15, 0.80)
+#: A timed close never runs a DOF slower than this (0-1000).
+MIN_TIMED_SPEED = 100
 
 # --- the fixed grasp ------------------------------------------------------------
 # Thumb rotation (manual 2.4.11, top view): 1000 = beta 165 deg, thumb swung out
@@ -224,7 +234,7 @@ class CloseReport:
     forces_g: list = field(default_factory=list)   # FORCE_ACT after the close
     status: list = field(default_factory=list)     # STATUS per DOF, from its own step
     force_set_g: list = field(default_factory=list)
-    speed: int = DEFAULT_SPEED
+    speed: object = DEFAULT_SPEED                  # one value, or six (a timed close)
 
     @property
     def fingers_in_contact(self) -> list:
@@ -276,6 +286,35 @@ class CloseReport:
 
 
 # --- protocol ------------------------------------------------------------------
+
+def timed_speeds(fraction, contact, speed: int = DEFAULT_SPEED, rates=CLOSE_RATE_AT_500,
+                 floor: int = MIN_TIMED_SPEED) -> list[int]:
+    """Six speeds (0-1000, DOF order) that bring every DOF predicted to touch the object onto
+    it at the same moment, where one speed brings the fastest ones first.
+
+    ``fraction``/``contact``: per chain (``pinky``, ``ring``, ``middle``, ``index``,
+    ``thumb``), how far it closes before it meets the object (0 open .. 1 closed) and whether
+    it does -- the plan's ``hand_contact_fraction`` / ``hand_contacts_predicted``. At
+    ``speed`` a DOF covers ``rates[k] * speed / 500`` of its travel per second (assumed
+    proportional to the register: to be checked on the hand), so it arrives after
+    ``f_k / (rates[k] * speed / 500)``. The latest of those, ``T``, stays as it is; every
+    other touching DOF is slowed to arrive at ``T`` too, never below ``floor``; a DOF
+    predicted to close on air reaches its end at ``T`` or later; the thumb rotation keeps
+    ``speed``. With nothing predicted to touch, every DOF gets ``speed``.
+    """
+    chains = ("pinky", "ring", "middle", "index", "thumb")
+    touching = [k for k, c in enumerate(chains) if contact.get(c) and fraction.get(c) is not None
+                and float(fraction[c]) > 0.0]
+    out = [int(speed)] * 6
+    if not touching:
+        return out
+    full = [float(fraction[chains[k]]) / rates[k] if k in touching else 1.0 / rates[k]
+            for k in range(5)]                            # seconds at speed 500
+    T = max(full[k] for k in touching)
+    for k in range(5):
+        out[k] = int(round(min(float(speed), max(float(floor), float(speed) * full[k] / T))))
+    return out
+
 def checksum(body: bytes) -> int:
     return sum(body) & 0xFF
 
@@ -345,8 +384,12 @@ class InspireHand:
         return list(struct.unpack("<6h", self.read(address, 12)))
 
     # mid level
-    def set_speed(self, speed: int):
-        self.write(SPEED_SET, shorts([speed] * 6))
+    def set_speed(self, speed):
+        """One speed (0-1000) for every DOF, or six, in DOF order."""
+        values = list(speed) if isinstance(speed, (list, tuple)) else [int(speed)] * 6
+        if len(values) != 6:
+            raise ValueError(f"speed: one value or six, not {len(values)}")
+        self.write(SPEED_SET, shorts([int(v) for v in values]))
 
     def set_force(self, grams):
         """One threshold (grams) for every DOF, or six, in DOF order."""
@@ -498,7 +541,9 @@ class InspireHand:
         self.set_speed(speed)
         self.set_force(force)
         forces = list(force) if isinstance(force, (list, tuple)) else [int(force)] * 6
-        report = CloseReport(mode=mode, force_set_g=[int(f) for f in forces], speed=int(speed))
+        report = CloseReport(mode=mode, force_set_g=[int(f) for f in forces],
+                             speed=[int(v) for v in speed] if isinstance(speed, (list, tuple))
+                             else int(speed))
         if self.dry_run:
             self.move("thumb rotation opposed", [HOLD] * 5 + [THUMB_OPPOSED], timeout, verbose)
             if mode == "sequential":

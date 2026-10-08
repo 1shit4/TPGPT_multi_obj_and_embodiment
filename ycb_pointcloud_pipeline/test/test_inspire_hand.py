@@ -47,6 +47,7 @@ class FakeHand:
         self.obstruct_together = obstruct_together
         self.angle_sets = []
         self.force_sets = []
+        self.speed_sets = []
         self._stop = False
         threading.Thread(target=self._serve, daemon=True).start()
 
@@ -109,6 +110,8 @@ class FakeHand:
                     elif address == ih.FORCE_SET:
                         self.force_set = list(struct.unpack("<6h", data))
                         self.force_sets.append(self.force_set)
+                    elif address == ih.SPEED_SET:
+                        self.speed_sets.append(list(struct.unpack("<6h", data)))
                     self._ack(address)
                 else:
                     n = frame[7]
@@ -554,3 +557,77 @@ def test_the_cli_set_goes_through_the_ordered_pose(fake):
     assert fake.angle_sets == [[-1, -1, -1, -1, -1, 300], [500, 500, 500, 500, -1, 300],
                                [-1, -1, -1, -1, 500, 300], [500, 500, 500, 500, 500, 300]]
     assert ih.main(["--port", fake.port, "set", "500", "500"]) == 2
+
+
+def test_speed_is_one_value_or_six(fake):
+    hand = _hand(fake)
+    try:
+        hand.set_speed(300)
+        assert fake.speed_sets[-1] == [300] * 6
+        hand.set_speed([100, 200, 300, 400, 500, 600])
+        assert fake.speed_sets[-1] == [100, 200, 300, 400, 500, 600]
+        with pytest.raises(ValueError):
+            hand.set_speed([100, 200])
+        report = hand.close("simultaneous", [150, 200, 290, 500, 500, 500], 400, timeout=2.0,
+                            verbose=False)
+        assert fake.speed_sets[-1] == [150, 200, 290, 500, 500, 500]
+        assert report.speed == [150, 200, 290, 500, 500, 500]
+    finally:
+        hand.close_port()
+
+
+def test_a_timed_close_brings_every_predicted_contact_on_together():
+    """The mug of 2026-10-07 21:29: its fingers met it at 25-45 % of their travel, the thumb
+    at 58 %; at one speed they pushed it ~0.45 s before the thumb arrived. Timed, the thumb
+    keeps the speed and every touching finger is slowed to arrive with it."""
+    fraction = {"pinky": 1.0, "ring": 0.446, "middle": 0.298, "index": 0.25, "thumb": 0.576}
+    contact = {"pinky": False, "ring": True, "middle": True, "index": True, "thumb": True}
+    speeds = ih.timed_speeds(fraction, contact, 500)
+    assert speeds[4] == 500 and speeds[5] == 500          # the latest (thumb), its rotation
+    arrive = [fraction[c] / (ih.CLOSE_RATE_AT_500[k] * speeds[k] / 500)
+              for k, c in enumerate(("ring", "middle", "index", "thumb"), start=1)]
+    assert max(arrive) - min(arrive) < 0.01                # together, to 10 ms
+    assert speeds[3] < speeds[2] < speeds[1] < 500        # the earliest slowed the most
+    assert speeds[0] == 500                                # on air: never sped up
+
+
+def test_a_timed_close_keeps_its_floor_and_its_speed_with_nothing_predicted():
+    contact = {"pinky": False, "ring": False, "middle": False, "index": True, "thumb": True}
+    speeds = ih.timed_speeds({"index": 0.02, "thumb": 0.9}, contact, 500)
+    assert speeds[3] == ih.MIN_TIMED_SPEED
+    assert ih.timed_speeds({}, {}, 400) == [400] * 6
+
+
+def test_node_close_speeds_validation():
+    from types import SimpleNamespace
+    from ycb_pointcloud_pipeline import inspire_hand_node as node
+    fake = SimpleNamespace(get_parameter=lambda n: SimpleNamespace(
+        value={"force_g": 400, "force_g_per_dof": [0] * 6}[n]),
+        _per_dof=node.InspireHandNode._per_dof)
+    check = lambda v: node.InspireHandNode._on_parameters(  # noqa: E731
+        fake, [SimpleNamespace(name="close_speeds", value=v)]).successful
+    assert check([150, 200, 290, 500, 500, 500]) and check([0] * 6)
+    assert not check([100, 200]) and not check([100, 200, 300, 400, 500, 1200])
+
+
+def test_the_executor_sends_timed_speeds_only_when_asked():
+    """inspire_timed_close: the plan's predicted stops become six speeds on the hand node;
+    off (the default), zeros, which clear an earlier timed close."""
+    from types import SimpleNamespace
+    from ycb_pointcloud_pipeline.tpgpt_executor_node import TpgptExecutorNode
+    sent = []
+    client = SimpleNamespace(set_close_speeds=lambda v: (sent.append(list(v)), (True, ''))[1])
+    log = SimpleNamespace(info=lambda *_: None, warning=lambda *_: None)
+    stops = ({"pinky": 1.0, "ring": 0.446, "middle": 0.298, "index": 0.25, "thumb": 0.576},
+             {"pinky": False, "ring": True, "middle": True, "index": True, "thumb": True})
+    for timed in (False, True):
+        node = SimpleNamespace(get_logger=lambda: log, run_hand_stops=stops,
+                               p=lambda n, t=timed: {'inspire_timed_close': t}[n])
+        TpgptExecutorNode._set_close_speeds(node, client)
+    base = int((ih.load_config().get('grasp') or {}).get('speed', ih.DEFAULT_SPEED))
+    assert sent == [[0] * 6, ih.timed_speeds(*stops, base)]
+    # a plan from before 2026-10-08 has no predicted stops: one speed, not an abort
+    node = SimpleNamespace(get_logger=lambda: log, run_hand_stops=(None, None),
+                           p=lambda n: {'inspire_timed_close': True}[n])
+    TpgptExecutorNode._set_close_speeds(node, client)
+    assert sent[-1] == [0] * 6

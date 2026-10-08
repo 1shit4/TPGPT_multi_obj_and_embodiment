@@ -91,6 +91,9 @@ class InspireHandNode(Node):
         d('force_g', -1)              # -1 -> config grasp.force_g
         d('force_g_per_dof', [0, 0, 0, 0, 0, 0])   # all zero -> force_g for every DOF
         d('close_mode', '')           # '' -> config grasp.close_mode
+        # Per-DOF speeds for the next close (a timed close, set by the executor before each);
+        # all zero -> `speed` for every DOF.
+        d('close_speeds', [0, 0, 0, 0, 0, 0])
         d('dry_run', False)
         p = lambda n: self.get_parameter(n).value  # noqa: E731
 
@@ -166,8 +169,17 @@ class InspireHandNode(Node):
             elif prm.name == 'close_mode' and prm.value not in ih.CLOSE_MODES:
                 return SetParametersResult(
                     successful=False, reason=f'close_mode must be one of {ih.CLOSE_MODES}')
+            elif prm.name == 'close_speeds':
+                values = [int(v) for v in (prm.value or [])]
+                if len(values) != 6 or any(v < 0 or v > 1000 for v in values):
+                    return SetParametersResult(
+                        successful=False, reason='close_speeds: six values, 0-1000 (all 0 = speed)')
         bad = check_force(force, per)
         return SetParametersResult(successful=bad is None, reason=bad or '')
+
+    def _close_speed(self):
+        values = [int(v) for v in (self.get_parameter('close_speeds').value or [])]
+        return values if any(values) else self.speed
 
     def _force(self):
         per = self._per_dof(self.get_parameter('force_g_per_dof').value)
@@ -221,7 +233,8 @@ class InspireHandNode(Node):
         mode = str(self.get_parameter('close_mode').value)
         with self.lock:
             try:
-                report = self.hand.close(mode, self.speed, self._force(), self.step_timeout,
+                report = self.hand.close(mode, self._close_speed(), self._force(),
+                                         self.step_timeout,
                                          verbose=False, on_status=self._publish)
             except IOError as exc:
                 response.success, response.message = False, f'close failed: {exc}'

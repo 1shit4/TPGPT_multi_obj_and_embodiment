@@ -485,6 +485,9 @@ def plan(
         # touch it, and whether the thumb opposes a finger
         "hand_closed_q": None if closed is None else closed.q.tolist(),
         "hand_contacts_predicted": None if closed is None else closed.contact,
+        # how far each chain closes before it meets the object (0 open .. 1 closed): what a
+        # timed close (inspire_hand.timed_speeds) makes them reach together
+        "hand_contact_fraction": None if closed is None else dict(closed.fraction),
         "hand_opposed_predicted": None if closed is None else bool(closed.opposed),
         "path_min_xyz": path.min(axis=0).tolist(),
         "path_max_xyz": path.max(axis=0).tolist(),

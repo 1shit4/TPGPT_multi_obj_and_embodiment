@@ -176,6 +176,9 @@ def grasp_test_plan(grasp: GraspFrame, points: np.ndarray, support_height: float
         "hand_clearance_place_m": float(place),
         "hand_closed_q": None if closed is None else closed.q.tolist(),
         "hand_contacts_predicted": None if closed is None else closed.contact,
+        # how far each chain closes before it meets the object (0 open .. 1 closed): what a
+        # timed close (inspire_hand.timed_speeds) makes them reach together
+        "hand_contact_fraction": None if closed is None else dict(closed.fraction),
         "hand_opposed_predicted": None if closed is None else bool(closed.opposed),
         "object_height_m": float(points[:, 2].max() - support),
         "support_height_m": support,

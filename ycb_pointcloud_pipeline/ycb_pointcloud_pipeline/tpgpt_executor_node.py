@@ -376,6 +376,11 @@ class TpgptExecutorNode(Node):
         d('grasp_forces_yaml', '')                  # '' -> the installed config/grasp_forces.yaml
         # The Inspire hand: grams per finger, > 0 overrides grasp_forces.yaml inspire_grasp.
         d('inspire_force_g', 0)
+        # The Inspire hand: close every finger the plan expects on the object so that all arrive
+        # together (inspire_hand.timed_speeds; one speed brings fingers that meet it early onto
+        # it before the thumb, and they push it: the mug of 2026-10-07 21:29). Off: the
+        # simultaneous close at one speed, as every run so far. Under test (2026-10-08).
+        d('inspire_timed_close', False)
         # The Inspire hand closed without its thumb and a finger on the object: abort (holding).
         d('abort_on_empty_close', False)
         d('hand_state_topic', '/inspire_hand/joint_states')   # kept in the full-rate record
@@ -709,6 +714,32 @@ class TpgptExecutorNode(Node):
                 json.dump(self.hand_reports, f, indent=1)
         return report
 
+    def _set_close_speeds(self, client):
+        """Before an Inspire close: per-finger speeds for a timed close, else the node's one
+        speed (zeros clear what an earlier timed close left)."""
+        from ycb_pointcloud_pipeline import inspire_hand as ih
+        log = self.get_logger()
+        speeds = [0] * 6
+        if self.p('inspire_timed_close'):
+            fraction, contact = getattr(self, 'run_hand_stops', (None, None))
+            if not fraction or not contact:
+                log.warning('inspire_timed_close: the plan has no predicted stops '
+                            '(hand_contact_fraction; plans before 2026-10-08): closing '
+                            'all fingers at one speed')
+            else:
+                base = int((ih.load_config().get('grasp') or {}).get('speed', ih.DEFAULT_SPEED))
+                speeds = ih.timed_speeds(fraction, contact, base)
+                log.info('Inspire timed close: speeds ' + ', '.join(
+                    f'{n} {v}' for n, v in zip(ih.DOF_NAMES, speeds)) + ' (predicted stops '
+                    + ', '.join(f'{c} {float(f):.2f}' for c, f in fraction.items()
+                                if contact.get(c)) + ')')
+        ok, why = client.set_close_speeds(speeds)
+        if not ok and any(speeds):
+            raise AbortRun(f'could not set the Inspire hand close speeds {speeds}: {why}')
+        if not ok:
+            log.warning(f'could not clear the Inspire hand close speeds ({why}); a hand node '
+                        'from before 2026-10-08 has none')
+
     def grip_force(self) -> float:
         """This run's grip force (:func:`grip_force`), logged the first time it is used."""
         force, source = grip_force(float(self.p('grasp_force')), getattr(self, 'run_object', None),
@@ -734,6 +765,7 @@ class TpgptExecutorNode(Node):
                 if not ok:
                     raise AbortRun(f'could not set the Inspire hand force to {grams} g: {why}')
                 self.get_logger().info(f'Inspire hand force {grams} g per finger ({source})')
+                self._set_close_speeds(client)
             future = client.send(close)
             self.get_logger().info(f'gripper {label} sent (Inspire hand)')
             if wait:
@@ -973,6 +1005,7 @@ class TpgptExecutorNode(Node):
         # The planner writes the object's name into the plan's metadata (not its metrics):
         # read from metrics, every run took the grip-force table's default.
         self.run_object = plan.metadata.get('object_name') or m.get('object_name')
+        self.run_hand_stops = (m.get('hand_contact_fraction'), m.get('hand_contacts_predicted'))
 
         # --- where the arm is -------------------------------------------------
         if not self.dry:

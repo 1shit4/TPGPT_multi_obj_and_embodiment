@@ -249,6 +249,10 @@ class TestInspirePlan:
         assert len(q) == 6
         assert set(hand.metrics["hand_contacts_predicted"]) == {"pinky", "ring", "middle",
                                                                 "index", "thumb"}
+        # where each chain meets the object, for a timed close (inspire_hand.timed_speeds)
+        fraction = hand.metrics["hand_contact_fraction"]
+        assert set(fraction) == set(hand.metrics["hand_contacts_predicted"])
+        assert all(0.0 <= f <= 1.0 for f in fraction.values())
         assert hand.metrics["jaw_verdict"] == "not_applicable"
         assert all(is_rotation(R, atol=1e-6) for R in hand.labels.orientations)
 
