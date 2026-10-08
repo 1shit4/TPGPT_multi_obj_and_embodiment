@@ -11,6 +11,9 @@ touched is read from the hand's registers. At each touch, type a command and pre
     t [label]        the fingertip rests on the TABLE (its touched height, shelf.yaml)
     p <slot>         the fingertip is on a touched SLOT MARK (top_left, top_right, ...)
     x <x> <y> <z>    the fingertip is on a known point, base frame, m
+    m <label>        MEASURE an unknown point (a plate, a box): the finger pointing down onto
+                     it, its lowest point, base frame, with the current mount -- printed and
+                     saved under "measures" (not used by the mount fit)
     u                undo the last touch
     f                fit the mount to the touches so far and print it
     s                save
@@ -85,6 +88,7 @@ class TouchRecorder(Node):
         self.params = [self.start[k] for k in im.PARAMS]
         self.pose = self.registers = None
         self.touches = []
+        self.measures = []
         if p('resume'):
             self.touches = im.load_touches(p('resume'))
             print(f"resumed {len(self.touches)} touches from {p('resume')} "
@@ -131,19 +135,48 @@ class TouchRecorder(Node):
         print(f'  touch {len(self.touches)} ({kind} {label}, {finger} finger): the current '
               f'estimate is off by {np.round(r, 1).tolist()} mm')
 
-    def status(self):
-        state, why = self.current()
-        if state is None:
-            return why
-        T, regs = state
-        finger = self.im.pointing_finger(regs) or 'index'
+    def finger_points(self, T, regs, finger):
+        """The pointing finger's surface points (base frame) and its tip index, with the
+        current mount estimate."""
         link = self.im.TOUCH_LINKS[finger]
         probe = self.im.Touch('point', [0.0, 0.0, 0.0], T[:3, 3].tolist(), T[:3, :3].tolist(),
                               regs, link=link)
         W = self.im.touch_points(probe, self.params, self.base)
         from tpgpt.hardware.end_effector import inspire_end_effector
         model = inspire_end_effector(**{**self.base, **self.im._mount(self.params)}).model
-        tip = W[self.im._tip_index(model, link)]
+        return W, self.im._tip_index(model, link)
+
+    def measure(self, label):
+        """Record where the pointing finger touches an unknown surface from above: its lowest
+        point (and its tip, for reference), base frame."""
+        state, why = self.current()
+        if state is None:
+            print(f'  NOT recorded: {why}')
+            return
+        T, regs = state
+        finger = self.im.pointing_finger(regs)
+        if finger is None:
+            print(f'  NOT recorded: the hand is in neither pointing pose (registers {regs})')
+            return
+        W, tip = self.finger_points(T, regs, finger)
+        low = W[np.argmin(W[:, 2])]
+        tilt = float(np.degrees(np.arccos(np.clip(-T[2, 2], -1.0, 1.0))))
+        self.measures.append({'label': label, 'finger': finger, 'lowest': low.tolist(),
+                              'tip': W[tip].tolist(), 'tcp_position': T[:3, 3].tolist(),
+                              'tcp_rotation': T[:3, :3].tolist(), 'registers': regs,
+                              'tcp_z_from_down_deg': tilt})
+        print(f'  measure {len(self.measures)} {label} ({finger}): lowest point '
+              f'[{low[0]:.4f}, {low[1]:.4f}, {low[2]:.4f}] m, {(low[2] - self.table) * 1000:+.1f} '
+              f'mm above the table; tip {np.round(W[tip], 4).tolist()}')
+
+    def status(self):
+        state, why = self.current()
+        if state is None:
+            return why
+        T, regs = state
+        finger = self.im.pointing_finger(regs) or 'index'
+        W, tip_index = self.finger_points(T, regs, finger)
+        tip = W[tip_index]
         name, mark = min(self.slots.items(), key=lambda kv: np.linalg.norm(kv[1] - tip))
         return (f'{finger} lowest point {(W[:, 2].min() - self.table) * 1000:+6.1f} mm above '
                 f'the table; tip {np.linalg.norm(mark - tip) * 1000:6.1f} mm from {name}')
@@ -164,8 +197,10 @@ class TouchRecorder(Node):
         with open(self.path, 'w') as f:
             json.dump({'table': self.table, 'hand_config': self.hand_config,
                        'mount_estimate': self.start,
-                       'touches': [t.as_dict() for t in self.touches]}, f, indent=1)
-        print(f'  saved {len(self.touches)} touches to {self.path}')
+                       'touches': [t.as_dict() for t in self.touches],
+                       'measures': self.measures}, f, indent=1)
+        print(f'  saved {len(self.touches)} touches and {len(self.measures)} measures to '
+              f'{self.path}')
 
 
 def prompt_loop(node):
@@ -189,6 +224,8 @@ def prompt_loop(node):
             elif cmd == 'x':
                 node.touch('point', [float(v) for v in args[:3]],
                            args[3] if len(args) > 3 else 'x')
+            elif cmd == 'm':
+                node.measure(args[0] if args else f'm{len(node.measures) + 1}')
             elif cmd == 'u':
                 if node.touches:
                     print(f'  removed {node.touches.pop().label}')
@@ -200,7 +237,7 @@ def prompt_loop(node):
                 node.save()
                 break
             else:
-                print('  t [label] | p <slot> | x x y z [label] | u | f | s | q')
+                print('  t [label] | p <slot> | x x y z [label] | m <label> | u | f | s | q')
         except (ValueError, IndexError) as exc:
             print(f'  {exc}')
 
