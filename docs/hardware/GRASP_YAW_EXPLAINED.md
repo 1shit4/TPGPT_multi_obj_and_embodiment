@@ -16,6 +16,15 @@ roles swapped); the twin points the opposite way, so 135 deg becomes -45 deg and
 
 ## The grasps and the twin rule
 
+**What the twin is: a renumbering, nothing moves.** The cube is centred on the grasp point; built from
+the opposite arrow, its corners land on each other's places, so the points stay put and only the
+numbers -- the pairing with the demonstration's corners -- change. The robot executes the same
+physical grasp either way.
+
+![](figures/grasp_yaw/twin_a.png)
+
+![](figures/grasp_yaw/twin_b.png)
+
 ![](figures/grasp_yaw/01_demo_grasp.png)
 
 ![](figures/grasp_yaw/02_test_grasps.png)
