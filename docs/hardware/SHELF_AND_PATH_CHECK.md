@@ -201,6 +201,40 @@ points within 15 mm of the model's surface. With an empty shelf it should be clo
 value means the shelf has moved or the model is wrong. `unexplained_points` counts the rest: objects
 on the shelf, or model error.
 
+## The plate: a destination on the table (2026-10-08)
+
+A round plate, 252 mm across, taped to the table on the robot's left, is the third destination
+(the user's; slot `plate`). It is part of the same scene model (`shelf.yaml`, `plate:`), so every
+plan sees it, whatever its destination.
+
+**Measured by touch**, not by tape or camera: the camera reads it as table (it stands under the
+25 mm table band) and cannot see its rim's inside. The Inspire's index, pointing straight down,
+touched it 13 times (`inspire_touch`, command `m`: the finger's lowest point in the base frame,
+with the measured mount; on the 11 table touches of 10-05 it reads the table to -0.6 mm median,
+1.1 mm rms). File `~/inspire_mount/touches_20261008_182341.json`.
+
+| what | touches | result |
+|---|---|---|
+| the rim's top | 6, spread around | a circle of radius 123.8 mm (0.5 mm rms), its centre (0.3772, 0.4983) the anchor `plate_centre`; on a plane tilted 1.3 deg, rising toward the robot's left, 21.1 mm above the table at the centre |
+| the floor at the centre | 3 | -0.0055 m, 7.7 mm above the table; 2.1 mm from the circle's centre |
+| where the flat floor starts rising | 4 | 92-104 mm from the centre (`flat_radius` 0.095) |
+
+The plane's tilt is the table's: the camera has read the table up to 10 mm high at its far left
+since the 09-26 move.
+
+**The model** (`shelf.plate_boxes`): the floor is two squares turned 45 deg to each other (an
+octagon inside the flat radius), standing on the table, its top the support `plate_floor`; the
+rim is 16 segments around the centre in two bands: the outer, from midway to the edge, as high
+as the lip above it; the inner, from the flat floor's edge to midway, as high as a straight rise
+from the floor to the lip reaches there, plus 2 mm. 34 boxes, 40 in the scene.
+
+**What it changed elsewhere: a support is the one under the object, nearest in height.** Both
+the planner's inference of what an object stands on and the path check's (`_support_at`) went by
+height alone, the first within reach winning. The plate's floor is 7.7 mm above the table, so
+every object on the table would have been standing on the plate, and an object set down on the
+plate on the table. Now a support counts only if the object's middle is over it, and the nearest
+in height wins. Nothing changes for the shelf's boards, 86 mm and more above the table.
+
 ## How a path is checked for collisions (plain account)
 
 The plan is a path of a few hundred hand poses (waypoints). The check walks it, testing every 4th

@@ -524,8 +524,13 @@ The planner's support height is: its `support_height` parameter, else the calibr
   explained; upright 0.95), and none of the apple's runs had executed a good grasp. Where the pads
   touch, the surface now slopes 9-12 deg from the closing direction on the 21:54 capture's chosen
   grasps; the 20:24 cap grasp sloped 41-42 deg, past what the rubber holds.
-- **Destinations have names**: `destination_name:=top_left|top_right|bottom_left|bottom_right`,
+- **Destinations have names**: `destination_name:=top_left|top_right|bottom_left|bottom_right|plate`,
   resolved from the touched slot marks (`config/shelf.yaml`, `slots:`, `shelf.slots()`).
+  **`plate`** (2026-10-08): a 252 mm plate taped to the table on the robot's left, touched with
+  the Inspire's pointing index (`inspire_touch` `m`), modelled as a floor (support `plate_floor`,
+  +7.7 mm) and a 16-segment rim (+15..24 mm); in every plan's scene. A support is now the one
+  under the object and nearest in height (the plate's floor would otherwise have been every
+  table object's support). `SHELF_AND_PATH_CHECK.md`, "The plate".
 - **`bottom_right` is abandoned** (user, 2026-09-25). Measured: every object scored 0 admissible of
   25 there on every capture, the carried object meeting 73 seen points standing in the slot
   (`GRASP_LIBRARY.md`). The user's reason is the reach -- it is the corner furthest from the base,
