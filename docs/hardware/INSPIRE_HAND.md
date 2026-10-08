@@ -410,6 +410,30 @@ mount that rocks -- against the Franka Hand's compact 0.73 kg at 30 mm. Left as 
 sub-mm at the TCP); if it grows, the planner could keep the axes of joints 5 and 7 apart along
 the path, as it keeps the wrist inside full stretch (the user's call).
 
+**The mug dropped in the carry: mug -> top_right, 2026-10-07 21:29**
+(`~/tpgpt_plans/mug_20261007_212936`; the user: "while grasping the other fingers pushed and
+displaced the mug"). The plan took the 22nd grasp (the 21 before it failed the path check into
+top_right), tilted 54 deg: the thumb on the outside wall 72 mm up, the index pushing up from
+36 mm on the far side, a squeeze 44 deg off horizontal against a vertical wall. The two mug runs
+into top_left that night (19:54, 21:33) took a grasp tilted 12 deg, squeezing 10 deg off
+horizontal. The plan expected ring, middle, index and thumb on the mug; the close report had
+index and thumb only (the middle closed through where the mug had been, the ring on air). The
+arm was pushed 11 mm sideways in the 1.7 s after the close command. The run was killed in the
+carry: its log ends mid-line and the full-rate record was never written (stop a run with one
+Ctrl-C and wait for "Full-rate record ...").
+
+What set it apart, over the 45 Inspire grasps run by then (`FAITHFULNESS_AUDIT.md` D13, D14):
+- **Not the grip angle as the plan can know it.** The angle between the squeeze and the surface
+  at the predicted contacts is 40 deg for this mug, 48 for two banana grasps that held, 36 for
+  four bricks that held: the predicted contact on a curved object is good to a few mm only. It is
+  recorded on every candidate (`grip_angle_deg`), not used.
+- **The fingers leading the thumb.** Closing at one speed, a finger covers 1.0-1.2 of its travel
+  per second and the thumb 0.8 (the full-rate hand records); this grasp's fingers were predicted
+  to meet the mug at 25-30 % of their travel and the thumb at 58 %: the fingers pushed it for
+  ~0.45 s before the thumb arrived. No other grasp of 43 had the fingers ahead by more than 0.15.
+  **A timed close** (`-p inspire_timed_close:=true` on the executor; off by default) slows each
+  finger so that all the plan expects on the object arrive with the thumb. Not yet run.
+
 Once grasps hold, the same command without `task` (`transport`, the default) and with
 `-p destination_name:=top_left` (or `top_right`) and the learned bundle
 (`-p source_bundle_dir:=$HOME/tpgpt_demos/banana_20260925_183904/source_bundle_learned`), as for
