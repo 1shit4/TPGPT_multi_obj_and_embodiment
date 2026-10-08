@@ -73,6 +73,7 @@ PLANNER_METHOD_PARAMETERS = {
     ('selection', 'approach_rejects_grasp'): 'approach_rejects_grasp',
     ('selection', 'reach_margin_m'): 'grasp_reach_margin',
     ('selection', 'retreat_clearance_m'): 'grasp_retreat_clearance',
+    ('selection', 'max_finger_lead_s'): 'max_finger_lead',
     ('map', 'min_determinant'): 'min_determinant',
 }
 

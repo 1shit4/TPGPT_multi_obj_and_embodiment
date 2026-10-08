@@ -292,9 +292,21 @@ def main(argv=None):
     cal = yaml.safe_load(open(os.path.join(a.config_dir, "camera_calibration.yaml")))
     table = float(cfg["shelf"]["anchors"]["table"])
     slots = shelf_mod.slots(cfg)
-    camera = np.array(cal["camera_calibration"]["base_to_camera"]["translation"], dtype=float)
 
     capture = os.path.expanduser(a.capture)
+    # Where the camera stood when the capture was taken -- its points were measured along rays
+    # from there, and the scan fit tests along them. The calibration file's camera is today's:
+    # after a recalibration (10-07 evening: 23 mm) it misjudged old captures, and the fitted
+    # object moved by a few mm (the apple into top_left: 7 admissible -> 0).
+    camera, camera_from = None, "the capture's plan.json"
+    plan_json = os.path.join(capture, "plan.json")
+    if os.path.isfile(plan_json):
+        T = (json.load(open(plan_json)).get("metadata") or {}).get("T_base_camera")
+        if T is not None:
+            camera = np.asarray(T, dtype=float)[:3, 3]
+    if camera is None:
+        camera = np.array(cal["camera_calibration"]["base_to_camera"]["translation"], dtype=float)
+        camera_from = "camera_calibration.yaml (the capture has no T_base_camera)"
     clouds = np.load(os.path.join(capture, "clouds.npz"))
     observed, obstacles = clouds["observed"], clouds["obstacles"]
     name = a.object or os.path.basename(capture.rstrip("/")).rsplit("_2026", 1)[0]
@@ -331,7 +343,7 @@ def main(argv=None):
               + ", ".join(f"{s} {np.round(slots[s], 3).tolist()}" for s in want))
     print(f"{name}: {how}")
     print(f"  scene {os.path.basename(capture)}: {len(obstacles)} obstacle points, "
-          f"table {table:+.4f}")
+          f"table {table:+.4f}, camera at {np.round(camera, 3).tolist()} ({camera_from})")
     print(f"  hand {hand.name} (GraspGen-X {hand.graspgen}, tool offset "
           f"{np.round(hand.tool_offset * 1000, 1).tolist()} mm)")
     print(f"  demo {a.demo}, library {a.size}, plan budget {a.budget}, clearance "

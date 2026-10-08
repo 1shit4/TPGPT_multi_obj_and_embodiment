@@ -217,6 +217,7 @@ method:
                                       # in a trial that is preflight_failed, not counted
     reach_margin_m: 0.02              # the wrist kept 20 mm inside full stretch (2026-10-03)
     retreat_clearance_m: 0.01         # the hand kept 10 mm from the placed object in the retreat (2026-10-03)
+    max_finger_lead_s: 0.3            # Inspire: no finger on the object > 0.3 s before the thumb (audit D15, 2026-10-08)
     never_force_rank_in_main_grid: true
 
   execution:                          # tpgpt_executor_node parameters, at its defaults
