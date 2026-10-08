@@ -569,24 +569,30 @@ selection rule and every filter are unchanged: the library changes *which draw* 
 not how it chooses. Recorded in `FAITHFULNESS_AUDIT.md` as A13.
 
 **Fourth coverage, the finger lead (2026-10-08).** The third's scenes, demonstration and budget,
-with the camera calibration of 10-07 evening (d18d450), with and without
-`--max-finger-lead 0.3` (`FAITHFULNESS_AUDIT.md` D15). Files
-`outputs/hardware/coverage_inspire_20261008/{lead_off,lead_0.3}/<object>.json` (each planned
-candidate listed with its lead, grip angle and verdict), `run.sh`, `compare.py`.
+with and without `--max-finger-lead 0.3` (`FAITHFULNESS_AUDIT.md` D15; on in the planner since).
+Files `outputs/hardware/coverage_inspire_20261008/{lead_off,lead_0.3}/<object>.json` (each
+planned candidate listed with its lead, grip angle and verdict), `run.sh`, `compare.py`.
 
-| object | hand stage (off / 0.3 s) | admissible of 25, top_left (first rank) | top_right |
+| object | hand stage (off / 0.3 s) | admissible of 25, top_left (off / 0.3 s) | top_right |
 |---|---|---|---|
-| foam brick | 296 / 295 | 2 (3) | 2 (1) |
-| apple | 400 / 400 | **0** | 4 (0) |
-| mug | 182 / 141 | **0** | **0** |
-| pudding box | 320 / 320 | 1 (18) | 0 |
-| banana | 52 / 52 | 4 (2) | 2 (1) |
+| foam brick | 296 / 295 | 2 / 2 (rank 3) | 2 / 2 (1) |
+| apple | 400 / 400 | 7 / 7 (2) | 2 / 2 (7) |
+| mug | 182 / 141 | 1 / **2** (4) | 3 / 3 (0) |
+| pudding box | 320 / 320 | 1 / 1 (18) | 0 / 0 |
+| banana | 52 / 52 | 3 / 3 (2) | 2 / 2 (1) |
 
-The same with the lead check on: **15 admissible in 6 of 10 cells either way**; no admissible
-grasp led by more than 0.3 s. Against the third coverage (23 in 9 cells) the brick and the
-pudding box are identical; the apple, mug and banana are not, **only because the scan fit starts
-from the camera's position, which the recalibration moved by 23 mm**: the apple into top_left
-gives 7 admissible from rank 2 again with the old calibration file (the same failures as on
-10-07), 0 with the new. A few mm of the fitted object decide whether the Inspire's grasps reach
-the top slots (the wrist within 20 mm of full stretch, the arm against the right wall): expect
-cells to plan or refuse with small changes in where an object stands.
+**23 -> 24 admissible, 9 -> 9 cells; no admissible grasp led by more than 0.3 s** (the longest
+0.22). The check takes 23 % of the mug's grasps at the hand stage and 0-1 of the others'; with
+those out of the first 25 one more mug grasp (#331, lead 0.13 s) is planned and admissible.
+
+**A trap in the tool, fixed (05b0cb2): the coverage of an old capture must fit with that
+capture's camera.** The scan fit tests along the camera's rays (the model may not stand where
+the camera saw empty space; only its camera-facing side is compared). `coverage` took the camera
+from today's calibration file; after the 10-07 evening recalibration that was 23 mm from where
+the camera stood for these captures, and the apple, mug and banana were fitted a few mm away:
+15 admissible in 6 cells instead of 23 in 9 (the apple into top_left 7 -> 0). It now reads the
+capture's own `T_base_camera` from its `plan.json` and reproduces the third coverage exactly.
+The planner was never affected (each live capture is fitted with the calibration it was taken
+with). **What the slip showed stays true: a few mm of the fitted object decide whether the
+Inspire's grasps reach the top slots** (the wrist within 20 mm of full stretch, the arm against
+the right wall): expect a cell to plan or refuse with small changes in where an object stands.

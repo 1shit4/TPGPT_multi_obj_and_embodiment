@@ -814,10 +814,14 @@ The planner's support height is: its `support_height` parameter, else the calibr
   from the plan's `hand_contact_fraction` (audit D14); the speed register is proportional (on air, 10-08: fingers 1.31-1.37 travel/s at 500, thumb 1.01). **On that grasp (#190, 10-08) it
   made things worse** (its ring and middle land on the handle, whose fitted heading wanders
   167-235 deg): off. **The finger lead** (`inspire_model.finger_lead`, D15: seconds the first
-  finger is on before the thumb) separates it: every held grasp <= 0.21 s, #190 0.39; recorded
-  per candidate, `max_finger_lead_s` off; at 0.3 s it costs nothing on the sweep captures.
-  Every mug grasp that held was a rim grasp. Coverage moves with a few mm of the scan fit (the
-  apple into top_left: 7 admissible with the old calibration's fit start, 0 with the new). The grip angle
+  finger is on before the thumb) separates it: every held grasp <= 0.21 s, #190 0.39. **The
+  planner refuses a lead over 0.3 s** (`max_finger_lead`, the user, 2026-10-08; X6 synced; the
+  Franka Hand never reaches that stage): on the sweep captures 23 -> 24 admissible, 9 -> 9 cells.
+  Every mug grasp that held was a rim grasp. **Offline coverage fits a capture with that
+  capture's own camera** (`plan.json` `T_base_camera`; 05b0cb2): with today's calibration file
+  the fit moved the apple, mug and banana a few mm (23 -> 15 admissible, the apple into top_left
+  7 -> 0) -- a trap of the tool, not the planner, but it shows how close to the edge of reach the
+  Inspire's grasps into the top slots are. The grip angle
   (squeeze vs surface) is recorded per candidate but does not separate held from dropped (D13).
 - **Coverage with the measured hand and the calibrated depth (2026-10-07, `GRASP_LIBRARY.md`):**
   9 of 10 object-slot cells have an executable transport, 23 admissible of 250 planned (25 per

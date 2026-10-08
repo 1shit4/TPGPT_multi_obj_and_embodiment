@@ -449,8 +449,10 @@ pull no longer moved it.
 five grasp tests and both top_left transports), so the rim is not the problem: a rim filter
 would remove all of them. What #190 has and they do not is the fingers ahead of the thumb:
 **the finger lead** (`inspire_model.finger_lead`, audit D15), 0.39 s against at most 0.21 for
-every grasp that held, of all objects. Recorded on every candidate; a selection stage at 0.3 s
-would cost nothing on the sweep captures (fourth coverage, `GRASP_LIBRARY.md`).
+every grasp that held, of all objects. **The planner refuses a lead over 0.3 s** (`-p
+max_finger_lead`, 0 = off; the user, 2026-10-08): on the sweep captures it loses no admissible
+grasp (fourth coverage, `GRASP_LIBRARY.md`). It stops the push; whether a grasp then slips is
+for the runs to show (the X6 trace keeps the fingers through the carry).
 
 Once grasps hold, the same command without `task` (`transport`, the default) and with
 `-p destination_name:=top_left` (or `top_right`) and the learned bundle
