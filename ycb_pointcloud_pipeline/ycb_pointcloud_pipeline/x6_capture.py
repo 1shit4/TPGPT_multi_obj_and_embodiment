@@ -34,7 +34,7 @@ def stamp_ns(header):
 
 class X6CaptureNode(Node):
     def __init__(self, object_name, topics, robot_state_topic=None, gripper_state_topic=None,
-                 **kwargs, hand_state_topic=None):
+                 hand_state_topic=None, **kwargs):
         super().__init__('x6_capture_node', **kwargs)
         self.object_name = object_name
         self.topics = topics
