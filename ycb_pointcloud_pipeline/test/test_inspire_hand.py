@@ -631,3 +631,11 @@ def test_the_executor_sends_timed_speeds_only_when_asked():
                            p=lambda n: {'inspire_timed_close': True}[n])
     TpgptExecutorNode._set_close_speeds(node, client)
     assert sent[-1] == [0] * 6
+
+
+def test_the_hand_model_uses_the_driver_s_closing_speeds():
+    """The planner's finger lead (tpgpt.hardware.inspire_model) and the hand's timed close
+    (this driver) must time the same hand."""
+    from tpgpt.hardware import inspire_model as im
+    chains = ("pinky", "ring", "middle", "index", "thumb")
+    assert tuple(im.CLOSE_RATE_AT_500[c] for c in chains) == ih.CLOSE_RATE_AT_500

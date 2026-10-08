@@ -97,6 +97,7 @@ def coverage(object_name, object_pose, world, source, destination, destination_h
                         support_height=float(support_height))
     path = PathContext(world=world, end_effector=end_effector, start_q=start_q)
     planned, admissible, first_rank, unrefined, first_grasp = 0, 0, None, 0, None
+    planned_list = []                         # per planned candidate, for later thresholds
     reasons, faults, detail = collections.Counter(), collections.Counter(), collections.Counter()
     for rank, candidate in enumerate(survivors[:int(plan_budget)]):
         planned += 1
@@ -104,8 +105,14 @@ def coverage(object_name, object_pose, world, source, destination, destination_h
         # one `select_and_plan` would have taken -- the transport map, its
         # determinant, the aim at the grasp, the workspace box and the clearances.
         result = _try_plan(source, scene, candidate, s, {"end_effector": end_effector})
+        hand_record = getattr(candidate, "hand", None) or {}
+        entry = {"rank": rank, "index": int(candidate.index), "score": float(candidate.score),
+                 "finger_lead_s": hand_record.get("finger_lead_s"),
+                 "grip_angle_deg": hand_record.get("grip_angle_deg"), "verdict": None}
+        planned_list.append(entry)
         if result is None:
             reasons[str(candidate.rejected).split(":")[0]] += 1
+            entry["verdict"] = str(candidate.rejected).split(":")[0]
             continue
         report = path_check.check_plan(result, path.world, path.end_effector,
                                        start_q=path.start_q, criterion=s.kinematic_criterion,
@@ -116,6 +123,7 @@ def coverage(object_name, object_pose, world, source, destination, destination_h
                                        stop_early=stop_early)
         unrefined += int(report.get("unrefined", 0))
         verdict = path_check.verdict(report)
+        entry["verdict"] = "admissible" if verdict is None else verdict.split("(")[0].split(":")[0].strip()
         if verdict is None:
             admissible += 1
             if first_rank is None:              # what the planner would execute
@@ -146,6 +154,10 @@ def coverage(object_name, object_pose, world, source, destination, destination_h
         "faults_detail": dict(detail),
         "screen_rejections": dict(collections.Counter(
             (c.rejected or "").split(":")[0] for c in screened if c.rejected)),
+        "planned_list": planned_list,
+        # a modelled hand: the finger lead of every grasp its hand stage judged to the end
+        "finger_lead_s": [float(c.hand["finger_lead_s"]) for c in screened
+                          if (getattr(c, "hand", None) or {}).get("finger_lead_s") is not None],
     }
 
 
@@ -258,6 +270,9 @@ def main(argv=None):
     ap.add_argument("--stop-early", action="store_true",
                     help="end each path check at its first fault (the planner's way): the same "
                          "verdicts, faster, only the first fault counted")
+    ap.add_argument("--max-finger-lead", type=float, default=None,
+                    help="a modelled hand: refuse grasps whose first finger reaches the object "
+                         "this many s before the thumb (SelectionSettings.max_finger_lead_s)")
     ap.add_argument("--json", default=None, help="write the full reports here")
     a = ap.parse_args(argv)
 
@@ -303,7 +318,8 @@ def main(argv=None):
     settings = SelectionSettings(max_tilt_deg=90.0, check_centred=False, check_visibility=False,
                                  grasp_offset=(0.0, 0.0, 0.0), kinematic_criterion="strict",
                                  joint_margin=a.joint_margin, reach_margin=a.reach_margin or None,
-                                 retreat_clearance=a.retreat_clearance or None)
+                                 retreat_clearance=a.retreat_clearance or None,
+                                 max_finger_lead_s=a.max_finger_lead)
     want = list(slots) if a.slots == "all" else a.slots.split(",")
     if a.slot_depth is not None:
         shelf_model = world.model
@@ -319,7 +335,9 @@ def main(argv=None):
     print(f"  hand {hand.name} (GraspGen-X {hand.graspgen}, tool offset "
           f"{np.round(hand.tool_offset * 1000, 1).tolist()} mm)")
     print(f"  demo {a.demo}, library {a.size}, plan budget {a.budget}, clearance "
-          f"{'none' if a.clearance is None else f'{a.clearance * 1000:.0f} mm'}", flush=True)
+          f"{'none' if a.clearance is None else f'{a.clearance * 1000:.0f} mm'}"
+          + ("" if a.max_finger_lead is None else f", finger lead at most {a.max_finger_lead:.2f} s"),
+          flush=True)
     out = {}
     for slot in want:
         xyz = slots[slot]

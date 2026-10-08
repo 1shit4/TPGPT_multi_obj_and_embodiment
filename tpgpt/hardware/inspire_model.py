@@ -109,6 +109,11 @@ CONTACT_DEPTH = 0.002
 GRIP_PRESS = 0.05
 GRIP_NORMAL_RADIUS = 0.012
 GRIP_NORMAL_POINTS = 8
+#: How fast each bending chain closes at the hand's speed 500, fraction of its open->close
+#: travel per second: measured on air, 2026-10-08 (constant speed, proportional to the speed
+#: register; ``ycb_pointcloud_pipeline/inspire_hand.CLOSE_RATE_AT_500``, which the hand's
+#: timed close uses -- a test keeps the two equal).
+CLOSE_RATE_AT_500 = {"pinky": 1.32, "ring": 1.31, "middle": 1.32, "index": 1.37, "thumb": 1.01}
 #: The 26 face directions of a k-DOP, in the link's principal axes.
 _DOP_DIRECTIONS = np.array([d for d in np.ndindex(3, 3, 3) if d != (1, 1, 1)],
                            dtype=float) - 1.0
@@ -387,6 +392,24 @@ def _mesh_vertices(config_name: str, link: str) -> np.ndarray:
 
 
 # ------------------------------------------------------------------ joint map
+def finger_lead(closed: "ClosedState", rates: dict = CLOSE_RATE_AT_500) -> float:
+    """Seconds the first finger is on the object before the thumb, all closing at one speed
+    (the hand's 500): ``f_thumb / r_thumb - min(f_finger / r_finger)`` over the chains
+    :meth:`InspireHandModel.closed_onto` puts in contact. Negative: the thumb first. NaN
+    without the thumb and a finger.
+
+    Until the thumb comes, a finger on the object pushes it. Measured (2026-10-08): the mug
+    grasp that failed 6 times of 6 (10-07 21:29 and five grasp tests on 10-08) led by 0.39 s
+    -- index on at 0.18 s, thumb at 0.57 -- and was pushed ~20 mm before the pinch closed;
+    every grasp that held, of 43 Inspire runs, led by at most ~0.2 s.
+    """
+    fingers = [float(closed.fraction[c]) / rates[c] for c in ("pinky", "ring", "middle", "index")
+               if closed.contact.get(c)]
+    if not closed.contact.get("thumb") or not fingers:
+        return float("nan")
+    return float(closed.fraction["thumb"]) / rates["thumb"] - min(fingers)
+
+
 def grip_angle(angles: dict) -> float:
     """One number for a grasp's :meth:`InspireHandModel.grip_angles`: the thumb's, or that of
     the finger set best against it, whichever is worse. The thumb is the only digit opposing

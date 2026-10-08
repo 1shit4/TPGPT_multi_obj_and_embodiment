@@ -305,3 +305,19 @@ def test_the_grip_angle_takes_the_thumb_and_the_best_finger():
     assert im.grip_angle({"thumb": 10.0, "index": 50.0}) == 50.0
     assert np.isnan(im.grip_angle({"index": 5.0}))
     assert np.isnan(im.grip_angle({"thumb": 5.0}))
+
+
+def test_the_finger_lead_is_the_time_the_first_finger_waits_for_the_thumb():
+    """The mug of 2026-10-07 21:29: index on at 0.25 of its travel, thumb at 0.58 -- the index
+    on the mug 0.39 s before the thumb at one speed; the thumb first reads negative."""
+    state = im.ClosedState(q=np.zeros(6), contact={"pinky": False, "ring": True, "middle": True,
+                                                   "index": True, "thumb": True},
+                           fraction={"pinky": 1.0, "ring": 0.446, "middle": 0.298,
+                                     "index": 0.25, "thumb": 0.576})
+    r = im.CLOSE_RATE_AT_500
+    assert im.finger_lead(state) == pytest.approx(0.576 / r["thumb"] - 0.25 / r["index"])
+    assert im.finger_lead(state) == pytest.approx(0.39, abs=0.01)
+    state.fraction["thumb"] = 0.1
+    assert im.finger_lead(state) < 0
+    state.contact["thumb"] = False
+    assert np.isnan(im.finger_lead(state))

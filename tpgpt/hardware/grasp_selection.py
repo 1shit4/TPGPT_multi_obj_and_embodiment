@@ -112,6 +112,10 @@ class SelectionSettings:
     #: more than this off the object's surface (:func:`judge_hand`, ``grip_angle``). None =
     #: off, the angle only recorded: it does not separate held from dropped (2026-10-08).
     max_grip_angle_deg: float | None = None
+    #: A modelled hand: refuse a grasp whose first finger reaches the object this many seconds
+    #: before the thumb, closing at one speed (:func:`judge_hand`, ``finger_lead``). None =
+    #: off, recorded only -- under measurement (2026-10-08).
+    max_finger_lead_s: float | None = None
     #: Try :func:`default_grasp` when no generated candidate passes. Off: the
     #: simulation has no scripted fallback, and the X6 brief forbids overriding
     #: the generator's choice.
@@ -443,7 +447,8 @@ def funnel_pair(ee=FRANKA_HAND):
 
 def judge_hand(points: np.ndarray, grasp: GraspFrame, support_height: float, ee,
                min_support_clearance: float = 0.003,
-               max_grip_angle: float | None = None) -> tuple[str | None, dict]:
+               max_grip_angle: float | None = None,
+               max_finger_lead: float | None = None) -> tuple[str | None, dict]:
     """A modelled hand's physical verdict on one grasp, cheapest test first.
 
     * ``hits_support`` -- the open hand, or the hand at any point of its close
@@ -462,10 +467,14 @@ def judge_hand(points: np.ndarray, grasp: GraspFrame, support_height: float, ee,
       (:func:`~tpgpt.hardware.inspire_model.grip_angle`), so the grip rests on friction.
       Recorded either way; off in the planner: it does not separate held from dropped
       (the 10-07 mug drop 40 deg, banana grasps that held 48).
+    * ``finger_lead`` -- only with ``max_finger_lead`` (s): closing at one speed, a finger is
+      on the object that long before the thumb, pushing it
+      (:func:`~tpgpt.hardware.inspire_model.finger_lead`). Recorded either way.
 
     Returns ``(reason or None, record)``.
     """
-    from tpgpt.hardware.inspire_model import CONTACT_DEPTH, CONTACT_POINTS, grip_angle
+    from tpgpt.hardware.inspire_model import (CONTACT_DEPTH, CONTACT_POINTS, finger_lead,
+                                              grip_angle)
 
     model = ee.model
     R, t = grasp.rotation, grasp.tcp
@@ -504,6 +513,10 @@ def judge_hand(points: np.ndarray, grasp: GraspFrame, support_height: float, ee,
     angles = model.grip_angles(local, closed)
     record["grip_angles_deg"] = angles
     record["grip_angle_deg"] = grip_angle(angles)
+    record["finger_lead_s"] = finger_lead(closed)
+    if max_finger_lead is not None and record["finger_lead_s"] > float(max_finger_lead):
+        return (f"finger_lead: a finger on the object {record['finger_lead_s']:.2f} s before "
+                f"the thumb (max {float(max_finger_lead):.2f})"), record
     if max_grip_angle is not None and record["grip_angle_deg"] > float(max_grip_angle):
         worst = ", ".join(f"{k} {v:.0f}" for k, v in angles.items())
         return (f"grip_angle: {record['grip_angle_deg']:.0f} deg off the surface "
@@ -626,7 +639,8 @@ def screen_candidates(
         entered, passed = len(alive), []
         for c in alive:
             c.rejected, c.hand = judge_hand(points, c.grasp, support_height, ee,
-                                            s.min_support_clearance, s.max_grip_angle_deg)
+                                            s.min_support_clearance, s.max_grip_angle_deg,
+                                            s.max_finger_lead_s)
             c.support_clearance = float(c.hand.get("closing_clearance_m",
                                                    c.hand.get("open_clearance_m", np.nan)))
             if c.rejected is None:
