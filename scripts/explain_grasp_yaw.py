@@ -3,14 +3,11 @@
 transport map folds (2026-10-08). Companion to explain_plate_yaw.py, same drawing.
 
 Four test grasps on the apple: the demonstration's own grasp (tilted 26 deg, as it held the
-banana), moved to the apple and turned about the vertical by 0, 90, 180 and 270 deg. Each goes
-through four cases:
-
-  shelf       top_left, as the planner does it
-  plate       the plate on the robot's left, as the planner does it
-  plate+yaw   the plate's placed yaw turned with the carry direction
-  plate+roll  that, and the grasp's half-turned twin chosen against the demonstration turned the
-              same way (the planner chooses it against the demonstration as it is)
+banana), moved to the apple and turned about the vertical by 0, 90, 180 and 270 deg, through seven
+cases: the shelf and the plate as now, each with no twin rule and with the planner's; and the plate
+with its placed yaw turned, with no twin rule, the planner's, and the rule applied against the
+demonstration turned the same way. The twin rule: a grasp more than a quarter turn from the
+demonstration's is replaced by its half-turned twin (the same grip, the fingers' roles swapped).
 
     ~/venvs/tpgpt/bin/python scripts/explain_grasp_yaw.py
 
@@ -37,11 +34,17 @@ from tpgpt.sim.keypoints import GRASP_CUBE_HALF_EXTENT, GraspFrame, ObjectPlacem
 from tpgpt.transport.maps import TransportMap                      # noqa: E402
 
 YAWS = (0, 90, 180, 270)
+# key: (label, destination, placed yaw turned, twin rule) -- the twin rule is "off" (the grasp as it
+# is), "planner" (the planner's: twin if its closing is more than a quarter turn from the
+# demonstration's) or "turned" (the same, against the demonstration turned by the carry turn)
 CASES = {
-    "shelf": ("Shelf", False, False),
-    "plate": ("Plate as now", False, False),
-    "plate_yaw": ("Plate, placed yaw turned", True, False),
-    "plate_roll": ("Plate, placed yaw turned and twin chosen against the turned demonstration", True, True),
+    "shelf_off": ("Shelf, no twin rule", "shelf", False, "off"),
+    "shelf_planner": ("Shelf, the planner's twin rule", "shelf", False, "planner"),
+    "plate_off": ("Plate as now, no twin rule", "plate", False, "off"),
+    "plate_planner": ("Plate as now, the planner's twin rule", "plate", False, "planner"),
+    "plateyaw_off": ("Plate, placed yaw turned, no twin rule", "plate", True, "off"),
+    "plateyaw_planner": ("Plate, placed yaw turned, the planner's twin rule", "plate", True, "planner"),
+    "plateyaw_turned": ("Plate, placed yaw turned, twin rule against the turned demonstration", "plate", True, "turned"),
 }
 DET_MIN = 0.1
 
@@ -58,7 +61,7 @@ def carry_turn(env, dest):
     return float(np.arctan2(d_t[1], d_t[0]) - np.arctan2(d_s[1], d_s[0]))
 
 
-def run(env, dest, yaw_deg, turn_place, roll_vs_turned):
+def run(env, dest, yaw_deg, turn_place, twin):
     """The planner's keypoints and map for the demonstration's grasp turned by ``yaw_deg``."""
     src = env["source"]
     g0 = src.placement.grasp
@@ -68,10 +71,14 @@ def run(env, dest, yaw_deg, turn_place, roll_vs_turned):
     target = ObjectPlacement(points=env["cloud"], grasp=grasp, support_height=env["table"],
                              destination=np.asarray(dest, float), destination_height=float(dest[2]))
     turn = carry_turn(env, dest)
-    flip = False
-    if roll_vs_turned:
+    # scene_keypoints applies the planner's rule itself; flip_target cancels or redirects it
+    now = float(np.asarray(grasp.closing) @ np.asarray(g0.closing)) < 0.0
+    if twin == "planner":
+        flip = False
+    elif twin == "off":
+        flip = now
+    else:
         want = float(np.asarray(grasp.closing) @ (Rz(turn) @ np.asarray(g0.closing))) < 0.0
-        now = float(np.asarray(grasp.closing) @ np.asarray(g0.closing)) < 0.0
         flip = want != now
     original = kp.placement_rotation
     if turn_place:
@@ -163,21 +170,54 @@ def main():
              "apple exactly the way the banana was gripped; 180 deg grips it from the opposite side.",
              out("02_test_grasps.png"), (c[0] - 0.12, c[0] + 0.12), (c[1] - 0.12, c[1] + 0.12))
 
+    # ---- 3. the planner's twin rule
+    fig, ax = E.new_fig()
+    th = np.linspace(0, 2 * np.pi, 400)
+    ax.plot(np.cos(th), np.sin(th), "-", color=E.MUTED, lw=1)
+    for deg in range(0, 360, 15):
+        t = np.radians(deg)
+        tip = np.array([np.cos(t), np.sin(t)])
+        swapped = np.cos(t) < -1e-9
+        colour = E.FOLD if swapped else E.TARGET
+        ax.annotate("", xy=tip, xytext=(0, 0), arrowprops=dict(arrowstyle="-|>", color=colour, lw=1.6, alpha=0.9))
+        if deg in (120, 180, 240):          # three examples of where a swapped grasp goes
+            ax.annotate("", xy=-tip * 0.9, xytext=tip * 0.9,
+                        arrowprops=dict(arrowstyle="-|>", color=E.FOLD, lw=1.6, ls=":",
+                                        connectionstyle="arc3,rad=0.35"))
+        ax.text(*(tip * 1.13), f"{deg}°", ha="center", va="center", fontsize=8.5, color=E.INK2)
+    ax.axvline(0, color=E.INK2, lw=1, ls="--")
+    ax.text(0.04, 1.32, "quarter turn", color=E.INK2, fontsize=9)
+    ax.text(0.55, -1.42, "kept as they are\n(within a quarter turn of the\ndemonstration's direction, 0°)",
+            color=E.TARGET, fontsize=10, ha="center")
+    ax.text(-0.55, -1.42, "swapped for their twin, which\npoints the opposite way\n(dotted: where three of them go)",
+            color=E.FOLD, fontsize=10, ha="center")
+    ax.plot([], [], "-", color=E.TARGET, lw=1.6, label="a grasp's closing direction, kept")
+    ax.plot([], [], "-", color=E.FOLD, lw=1.6, label="a grasp's closing direction, swapped for its twin")
+    ax.legend(loc="upper left", fontsize=9, frameon=True, facecolor=E.SURFACE, edgecolor=E.MUTED)
+    ax.set_axis_off()
+    E.finish(ax, fig, "3. The planner's twin rule, in yaw",
+             "Each arrow is a grasp's closing direction, measured from the demonstration's (0°). A grasp is the same "
+             "grip as its half-turned twin (the fingers' roles swapped), and the twin points the opposite way. Any grasp "
+             "more than a quarter turn from the demonstration's is replaced by its twin: 135° becomes -45°, 180° becomes "
+             "0°. So in yaw no grasp is left more than a quarter turn off. (A grasp tilted very differently can still "
+             "leave its cube further off.)", out("03_twin_rule.png"), (-1.7, 1.7), (-1.75, 1.6))
+
     # ---- the grid of cases
     results = {}
-    n = 3
-    for key, (label, turn_place, roll) in CASES.items():
-        dest = dests["shelf" if key == "shelf" else "plate"]
+    n = 4
+    for key, (label, where, turn_place, twin_rule) in CASES.items():
+        dest = dests[where]
         for yaw in YAWS:
-            case = run(env, dest, yaw, turn_place, roll)
+            case = run(env, dest, yaw, turn_place, twin_rule)
             results[(key, yaw)] = case
-            twin = (" The planner counts this grasp as its half-turned twin (the same grip with the fingers' "
-                    "roles swapped), so its pick cube is built turned half a turn." if case["rolled"] else "")
+            twin = (" Here the grasp is replaced by its half-turned twin (the same grip with the fingers' roles "
+                    "swapped), so its green pick cube is the twin's." if case["rolled"] else
+                    " The grasp is used as it is (no twin).")
             v = verdict(case)
             why = (f"The map folds near {where_it_folds(case)}." if v == "folds" else "Nothing has to cross; the map only bends.")
             # cause
             fig, ax = E.new_fig()
-            E.scene_extras(ax, env, plate=key != "shelf")
+            E.scene_extras(ax, env, plate=where == "plate")
             E.draw_cubes(ax, case["T"], E.TARGET, label="where the cubes must go")
             E.draw_cubes(ax, case["step1"], E.STEP1, style="--", label="the demonstration's cubes after the first step")
             arrows(ax, case)
@@ -191,7 +231,7 @@ def main():
             n += 1
             # effect
             fig, ax = E.new_fig()
-            E.scene_extras(ax, env, plate=key != "shelf")
+            E.scene_extras(ax, env, plate=where == "plate")
             z = float(np.median(case["X"][:, 2]))
             xs, ys = E.view_of(case["X"], case["S"], margin=0.08)
             M = E.graph_paper(ax, case, xs, ys, z)
@@ -210,10 +250,10 @@ def main():
                      "space turned inside out. Thick orange path: the hand moving through it (the plan would be refused).",
                      out(f"{n:02d}_{key}_{yaw:03d}_space.png"), xl, yl)
             n += 1
-            print(f"{key:<11} {yaw:3d} deg: {v:<15} min det {case['det'].min():+.2f}  twin {case['rolled']}", flush=True)
+            print(f"{key:<17} {yaw:3d} deg: {v:<15} min det {case['det'].min():+.2f}  twin {case['rolled']}", flush=True)
 
     # ---- the summary
-    fig, ax = plt.subplots(figsize=(11, 5.4), facecolor=E.SURFACE)
+    fig, ax = plt.subplots(figsize=(13, 8.2), facecolor=E.SURFACE)
     ax.set_axis_off()
     labels = [CASES[k][0] for k in CASES]
     for i, key in enumerate(CASES):
@@ -229,12 +269,14 @@ def main():
     for j, yaw in enumerate(YAWS):
         ax.text(j + 0.48, 1.15, f"grasp turned {yaw}°", ha="center", fontsize=11, color=E.INK)
     for i, lab in enumerate(labels):
-        ax.text(-0.08, -i + 0.45, lab.replace(" and ", "\nand "), ha="right", va="center", fontsize=10.5, color=E.INK)
-    ax.set_xlim(-2.6, 4.05); ax.set_ylim(-3.2, 1.5)
+        ax.text(-0.08, -i + 0.45, lab.replace(", twin rule against", ",\ntwin rule against").replace(", the planner", ",\nthe planner").replace(", no twin", ",\nno twin"),
+                ha="right", va="center", fontsize=10.5, color=E.INK)
+    ax.set_xlim(-3.0, 4.05); ax.set_ylim(-len(CASES) + 0.8, 1.5)
     fig.suptitle(f"{n}. Summary: which grasp works with which destination", x=0.02, ha="left", fontsize=15, color=E.INK)
-    fig.text(0.02, 0.86, "A grasp works if, after the map's first step, both of its cubes are turned less than about a "
-             "quarter turn from where they must go.", fontsize=10.5, color=E.INK2)
-    fig.subplots_adjust(top=0.8, bottom=0.03, left=0.02, right=0.98)
+    fig.text(0.02, 0.92, "A grasp works if, after the map's first step, both of its cubes are turned less than about a "
+             "quarter turn from where they must go.\n90 and 270 deg sit exactly on the twin rule's boundary (a quarter turn).",
+             fontsize=10.5, color=E.INK2)
+    fig.subplots_adjust(top=0.85, bottom=0.03, left=0.02, right=0.98)
     fig.savefig(out(f"{n:02d}_summary.png"), dpi=130, facecolor=E.SURFACE)
     plt.close(fig)
     print("figures in", a.out)
